@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Typecheck + unit tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # Dependency installs are the most common transient failure (registry
+      # blips). Retry them, never the deterministic checks below.
+      - name: Install dependencies (retried)
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then exit 0; fi
+            echo "::warning::bun install failed (attempt $attempt); retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Vitest
+        run: bun run test
+      - name: Build
+        run: bun run build
+
+  onboarding-e2e-db:
+    name: Onboarding registration DB E2E (Deno)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.x
+      - name: Skip if secrets missing
+        if: ${{ env.VITE_SUPABASE_URL == '' || env.SUPABASE_SERVICE_ROLE_KEY == '' }}
+        run: echo "::warning::Skipping onboarding DB E2E — required secrets not set."
+      - name: Registration + onboarding E2E
+        if: ${{ env.VITE_SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' }}
+        run: |
+          deno test -A \
+            supabase/tests/registration-onboarding-e2e.test.ts \
+            supabase/tests/onboarding-fanout-payload.test.ts \
+            supabase/tests/onboarding-trigger-failure-recovery.test.ts
+
+  playwright-e2e:
+    name: Playwright browser E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies (retried)
+        run: |
+          for attempt in 1 2 3; do
+            if bun install --frozen-lockfile; then exit 0; fi
+            echo "::warning::bun install failed (attempt $attempt); retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
+      - name: Install Playwright browsers (retried)
+        run: |
+          for attempt in 1 2 3; do
+            if bunx playwright install --with-deps chromium; then exit 0; fi
+            echo "::warning::playwright install failed (attempt $attempt); retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
+      - name: Start dev server
+        run: bun run dev &
+        env:
+          NODE_ENV: test
+      - name: Wait for dev server
+        run: |
+          for i in {1..60}; do
+            if curl -sf http://localhost:8080 >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "dev server never became ready" >&2
+          exit 1
+      - name: Run Playwright
+        run: bunx playwright test
+        env:
+          E2E_BASE_URL: http://localhost:8080
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore

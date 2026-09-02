@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<vxml version="2.1" xmlns="http://www.w3.org/2001/vxml">
+
+  <!-- Main Menu -->
+  <form id="welcome">
+    <block>
+      <prompt bargein="false">
+        Welcome to Rentmaikar. 
+        <break time="500ms"/>
+        For English, press 1.
+        <break time="300ms"/>
+        Para español, oprima el 2.
+      </prompt>
+    </block>
+    
+    <field name="language" type="digits">
+      <prompt>
+        Please select your language.
+      </prompt>
+      <filled>
+        <if cond="language == 1">
+          <goto next="#english_menu"/>
+        <elseif cond="language == 2"/>
+          <goto next="#spanish_menu"/>
+        <else/>
+          <prompt>Invalid selection.</prompt>
+          <clear/>
+        </if>
+      </filled>
+    </field>
+  </form>
+
+  <!-- English Menu -->
+  <form id="english_menu">
+    <block>
+      <prompt>
+        <break time="300ms"/>
+        If you are a driver, press 1.
+        <break time="300ms"/>
+        If you are a vehicle owner, press 2.
+        <break time="300ms"/>
+        For new registration, press 3.
+        <break time="300ms"/>
+        For emergencies, press 4.
+        <break time="300ms"/>
+        To speak with an operator, press 0.
+      </prompt>
+    </block>
+
+    <field name="choice" type="digits">
+      <filled>
+        <if cond="choice == 1">
+          <goto next="#driver_auth"/>
+        <elseif cond="choice == 2"/>
+          <goto next="#owner_auth"/>
+        <elseif cond="choice == 3"/>
+          <goto next="#registration"/>
+        <elseif cond="choice == 4"/>
+          <goto next="#emergency"/>
+        <elseif cond="choice == 0"/>
+          <goto next="#operator"/>
+        <else/>
+          <prompt>Invalid selection. Please try again.</prompt>
+          <clear/>
+        </if>
+      </filled>
+    </field>
+  </form>
+
+  <!-- Driver Authentication -->
+  <form id="driver_auth">
+    <field name="phone" type="digits">
+      <prompt>
+        Please enter your 10-digit phone number.
+      </prompt>
+      <filled>
+        <submit next="/api/auth/driver" method="post" namelist="phone"/>
+      </filled>
+    </field>
+  </form>
+
+  <!-- Emergency Handler -->
+  <form id="emergency">
+    <block>
+      <prompt>
+        <emphasis level="strong">You have reached the Rentmaikar emergency line.</emphasis>
+        <break time="500ms"/>
+        If this is a life-threatening emergency, hang up and dial 911 immediately.
+        <break time="1s"/>
+        For vehicle accidents, press 1.
+        For breakdown assistance, press 2.
+        For security concerns, press 3.
+        For medical emergencies, press 4.
+        To speak with emergency operator, press 0.
+      </prompt>
+    </block>
+    
+    <field name="emergency_type" type="digits">
+      <filled>
+        <submit next="/api/emergency" method="post" namelist="emergency_type"/>
+      </filled>
+    </field>
+  </form>
+
+  <!-- Post-Call Survey -->
+  <form id="survey">
+    <field name="rating" type="digits">
+      <prompt>
+        Please rate your call experience from 1 to 5, with 5 being excellent.
+      </prompt>
+      <filled>
+        <submit next="/api/survey" method="post" namelist="rating"/>
+        <prompt>Thank you for your feedback. Goodbye.</prompt>
+      </filled>
+    </field>
+  </form>
+
+</vxml>

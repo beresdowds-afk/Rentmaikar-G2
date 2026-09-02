@@ -1,0 +1,45 @@
+/* Theme overrides for react-phone-number-input to match shadcn design tokens. */
+.phone-number-input .PhoneInputCountry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2.5rem;
+  padding: 0 0.625rem;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid hsl(var(--input));
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  cursor: pointer;
+}
+.phone-number-input .PhoneInputCountrySelect {
+  color: inherit;
+}
+.phone-number-input .PhoneInputCountrySelectArrow {
+  color: hsl(var(--muted-foreground));
+  opacity: 1;
+  margin-left: 0.25rem;
+}
+.phone-number-input .PhoneInputCountryIcon--border {
+  box-shadow: none;
+  background: transparent;
+}
+.phone-number-input:focus-within .PhoneInputCountry {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.phone-number-input .PhoneInputInput {
+  min-width: 0;
+}
+
+/* Neutral (no country selected) state: show a visible globe placeholder so the
+   picker never looks empty and never implies a default country. */
+.phone-number-input .PhoneInputCountryIconImg,
+.phone-number-input .PhoneInputCountryIcon {
+  width: 1.25rem;
+  height: 0.9rem;
+}
+.phone-number-input .PhoneInputCountryIcon--international svg,
+.phone-number-input .PhoneInputCountryIcon--international {
+  color: hsl(var(--muted-foreground));
+  opacity: 1;
+}

@@ -1,0 +1,76 @@
+name: Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install --legacy-peer-deps
+
+      - name: Run Linter
+        run: npm run lint
+
+      - name: Build Test
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+
+  deploy:
+    name: Build & Deploy to Google Cloud Run
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+
+      - name: Authorize Docker with GCP
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        run: gcloud auth configure-docker --quiet
+
+      - name: Build and Push Docker Image
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        run: |
+          docker build \
+            --build-arg VITE_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
+            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" \
+            -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:${{ github.sha }} \
+            -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:latest .
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:${{ github.sha }}
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:latest
+
+      - name: Deploy to Cloud Run
+        if: ${{ secrets.GCP_SA_KEY != '' }}
+        run: |
+          gcloud run deploy rentmaikar \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:${{ github.sha }} \
+            --region europe-west2 \
+            --port 80 \
+            --allow-unauthenticated

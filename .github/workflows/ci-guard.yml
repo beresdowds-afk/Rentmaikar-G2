@@ -1,0 +1,109 @@
+name: CI Guard
+
+# Watchdog worker: whenever CI finishes on main, this workflow records the
+# outcome and — for failures — files/updates a single tracking issue with the
+# failing jobs and a link to the logs, so no broken push goes unnoticed.
+# It deliberately does NOT rerun failed runs in a loop; only one automatic
+# rerun is attempted, and only when every failed job failed before running any
+# project command (i.e. infrastructure/setup failures).
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect run and report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+            core.info(`CI run ${run.id} on ${run.head_branch} -> ${run.conclusion}`);
+
+            if (run.conclusion === 'success') {
+              core.info('CI succeeded; nothing to do.');
+              return;
+            }
+            if (['cancelled', 'skipped'].includes(run.conclusion)) {
+              core.info(`CI ${run.conclusion}; ignoring.`);
+              return;
+            }
+
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner, repo, run_id: run.id, per_page: 100 },
+            );
+            const failed = jobs.filter((j) => j.conclusion === 'failure');
+            const summary = failed
+              .map((j) => {
+                const step = (j.steps || []).find((s) => s.conclusion === 'failure');
+                return `- **${j.name}** — failed at step \`${step ? step.name : 'unknown'}\``;
+              })
+              .join('\n') || '- (no job-level detail available)';
+
+            // Only setup/infrastructure failures are retried, exactly once.
+            const SETUP_STEPS = [
+              'Set up job',
+              'Install dependencies (retried)',
+              'Install Playwright browsers (retried)',
+            ];
+            const onlySetupFailures =
+              failed.length > 0 &&
+              failed.every((j) => {
+                const step = (j.steps || []).find((s) => s.conclusion === 'failure');
+                return step && SETUP_STEPS.includes(step.name);
+              });
+
+            let retried = false;
+            if (onlySetupFailures && run.run_attempt < 2) {
+              try {
+                await github.rest.actions.reRunWorkflowFailedJobs({
+                  owner, repo, run_id: run.id,
+                });
+                retried = true;
+                core.info('Re-ran failed jobs once (infrastructure failure).');
+              } catch (e) {
+                core.warning(`Re-run request failed: ${e.message}`);
+              }
+            }
+
+            if (retried) return;
+
+            const title = `CI failing on ${run.head_branch}`;
+            const body = [
+              `CI run [\`${run.id}\`](${run.html_url}) concluded **${run.conclusion}**.`,
+              '',
+              `Commit: ${run.head_sha}`,
+              `Branch: \`${run.head_branch}\``,
+              `Attempt: ${run.run_attempt}`,
+              '',
+              '### Failing jobs',
+              summary,
+              '',
+              '_Filed automatically by the CI Guard workflow._',
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'ci-failure', per_page: 100,
+            });
+            const match = existing.data.find((i) => i.title === title);
+
+            if (match) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: match.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner, repo, title, body, labels: ['ci-failure'],
+              });
+            }
