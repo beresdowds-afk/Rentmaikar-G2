@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { History, RefreshCw, Phone, Users, PhoneIncoming, PhoneOutgoing, Loader2, Play, Volume2, FileText } from 'lucide-react';
+import { History, RefreshCw, Phone, Users, PhoneIncoming, PhoneOutgoing, Loader2, Play, Volume2, FileText, PhoneOff } from 'lucide-react';
 import { useState } from 'react';
 import { format } from 'date-fns';
 import type { VoIPCall, CallRegion } from '@/types/voip';
@@ -11,11 +11,11 @@ import { formatPhoneForDisplay } from '@/types/voip';
 import { RecordingPlaybackModal } from './RecordingPlaybackModal';
 import { CallTranscriptDialog } from './CallTranscriptDialog';
 
-
 interface CallHistoryProps {
   calls: VoIPCall[];
   onRefresh: () => void;
   isLoading: boolean;
+  onEndCall?: (callId: string) => Promise<void> | void;
 }
 
 const statusColors: Record<string, string> = {
@@ -115,12 +115,13 @@ export const CallHistory = ({ calls, onRefresh, isLoading }: CallHistoryProps) =
                 <TableHead>Duration</TableHead>
                 <TableHead>Recording</TableHead>
                 <TableHead>Date/Time</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredCalls.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     No calls found
                   </TableCell>
                 </TableRow>
@@ -207,6 +208,22 @@ export const CallHistory = ({ calls, onRefresh, isLoading }: CallHistoryProps) =
                           {format(new Date(call.created_at), 'h:mm a')}
                         </span>
                       </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {['pending', 'ringing', 'in-progress'].includes(call.status) ? (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => onEndCall?.(call.id)}
+                          className="h-7 px-2.5 text-xs bg-red-600 hover:bg-red-700 text-white font-medium"
+                          title="Terminate active call"
+                        >
+                          <PhoneOff className="h-3 w-3 mr-1" />
+                          End Call
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Ended</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

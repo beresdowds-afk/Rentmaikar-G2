@@ -1,37 +1,66 @@
 /**
- * Centralized Email Configuration
- * All sender and contact email addresses for the platform
+ * Centralized Email and Domain Configuration
+ *
+ * Domain Re-assignment:
+ * - Frontend domain: rentmaikar.com (remains frontend)
+ * - Backend domain: staging.rentmaikar.com (API server)
+ * - Incoming mail domain: backend.rentmaikar.com (incoming mailboxes & webhooks)
+ * - Outgoing mail domain: notify.rentmaikar.com (outgoing transactional/notification mail)
  */
 
-export const EMAIL_CONFIG = {
-  // Support emails - unified for all regions
-  support: "support@rentmaikar.com",
-  
-  // Transactional/automated notifications
-  noreply: "noreply@rentmaikar.com",
-  
-  // Administrative alerts
-  admin: "admin@rentmaikar.com",
-  
-  // Legal/Privacy inquiries
-  privacy: "privacy@rentmaikar.com",
-  
-  // Data Protection Officer
-  dpo: "dpo@rentmaikar.com",
-  
-  // Payment inquiries
-  payments: "payments@rentmaikar.com",
-
-  // Document submissions
-  documents: "documents@rentmaikar.com",
-
-  // Legal inquiries
-  legal: "legal@rentmaikar.com",
-
-  // Regional inboxes
-  nigeria: "nigeria@rentmaikar.com",
-  usa: "usa@rentmaikar.com",
+export const DOMAINS = {
+  frontend: "rentmaikar.com",
+  frontendOrigin: "https://rentmaikar.com",
+  backend: "staging.rentmaikar.com",
+  backendOrigin: "https://staging.rentmaikar.com",
+  incomingMail: "backend.rentmaikar.com",
+  outgoingMail: "notify.rentmaikar.com",
 } as const;
+
+/**
+ * Outgoing Email Addresses (Sending domain: notify.rentmaikar.com)
+ * Used by Resend, transaction notification jobs, and outbound dispatchers
+ */
+export const OUTGOING_EMAIL_CONFIG = {
+  support: `support@${DOMAINS.outgoingMail}`,
+  noreply: `noreply@${DOMAINS.outgoingMail}`,
+  admin: `admin@${DOMAINS.outgoingMail}`,
+  privacy: `privacy@${DOMAINS.outgoingMail}`,
+  dpo: `dpo@${DOMAINS.outgoingMail}`,
+  payments: `payments@${DOMAINS.outgoingMail}`,
+  documents: `documents@${DOMAINS.outgoingMail}`,
+  legal: `legal@${DOMAINS.outgoingMail}`,
+  nigeria: `nigeria@${DOMAINS.outgoingMail}`,
+  usa: `usa@${DOMAINS.outgoingMail}`,
+  notifications: `notifications@${DOMAINS.outgoingMail}`,
+  verify: `verify@${DOMAINS.outgoingMail}`,
+  negotiations: `negotiations@${DOMAINS.outgoingMail}`,
+} as const;
+
+/**
+ * Incoming Email Addresses (Receiving domain: backend.rentmaikar.com)
+ * Used for receiving emails, inbound support inboxes, reply-to routing, and webhook classification
+ */
+export const INCOMING_EMAIL_CONFIG = {
+  support: `support@${DOMAINS.incomingMail}`,
+  noreply: `noreply@${DOMAINS.incomingMail}`,
+  admin: `admin@${DOMAINS.incomingMail}`,
+  privacy: `privacy@${DOMAINS.incomingMail}`,
+  dpo: `dpo@${DOMAINS.incomingMail}`,
+  payments: `payments@${DOMAINS.incomingMail}`,
+  documents: `documents@${DOMAINS.incomingMail}`,
+  legal: `legal@${DOMAINS.incomingMail}`,
+  nigeria: `nigeria@${DOMAINS.incomingMail}`,
+  usa: `usa@${DOMAINS.incomingMail}`,
+  notifications: `notifications@${DOMAINS.incomingMail}`,
+  verify: `verify@${DOMAINS.incomingMail}`,
+  negotiations: `negotiations@${DOMAINS.incomingMail}`,
+} as const;
+
+/**
+ * Default EMAIL_CONFIG for senders (uses notify.rentmaikar.com for outbound dispatch)
+ */
+export const EMAIL_CONFIG = OUTGOING_EMAIL_CONFIG;
 
 /**
  * Email display names for sender formatting
@@ -41,10 +70,12 @@ export const EMAIL_SENDER_NAMES = {
   noreply: "Rentmaikar",
   admin: "Rentmaikar Admin",
   notifications: "Rentmaikar Notifications",
+  verify: "Rentmaikar Verification",
+  negotiations: "Rentmaikar Pricing",
 } as const;
 
 /**
- * Company / Contact Information by Region
+ * Company / Contact Information by Region (receives mail at incoming domain: backend.rentmaikar.com)
  */
 export const COMPANY_INFO = {
   USA: {
@@ -57,7 +88,7 @@ export const COMPANY_INFO = {
     fullAddress: "2002 East Marlboro Avenue, Apt 203, Hyattsville, Maryland, United States 20785",
     phone: "+1 (608) 384-3932",
     phoneRaw: "+16083843932",
-    email: EMAIL_CONFIG.support,
+    email: INCOMING_EMAIL_CONFIG.support,
   },
   NIGERIA: {
     companyName: "Rentmaikar Nigeria",
@@ -69,13 +100,13 @@ export const COMPANY_INFO = {
     fullAddress: "Lagos, Nigeria",
     phone: "+234 706 4916 791",
     phoneRaw: "+2347064916791",
-    email: EMAIL_CONFIG.support,
+    email: INCOMING_EMAIL_CONFIG.support,
   },
 } as const;
 
 /**
  * Format email with display name for Resend API
- * @example formatSenderEmail('support') => "Rentmaikar Support <support@rentmaikar.com>"
+ * @example formatSenderEmail('support') => "Rentmaikar Support <support@notify.rentmaikar.com>"
  */
 export const formatSenderEmail = (type: keyof typeof EMAIL_CONFIG): string => {
   const email = EMAIL_CONFIG[type];

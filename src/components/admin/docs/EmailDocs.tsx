@@ -352,6 +352,57 @@ export const EmailDocs = () => {
           </div>
         </div>
 
+        {/* Platform Domain Routing Assignments */}
+        <div className="mb-8 p-4 rounded-lg border border-border bg-card">
+          <h3 className="font-semibold mb-2 flex items-center gap-2 text-foreground">
+            <Globe className="h-4 w-4 text-primary" /> Platform Domain Assignments
+          </h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            Production routing separation across inbound/outbound mail, web client, and API gateway services.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+            <div className="p-3 rounded-md bg-muted/60 border border-border/50">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
+                📥 Incoming Mails
+              </span>
+              <p className="font-mono font-medium text-xs text-foreground">backend.rentmaikar.com</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Inbound MX, support, verification & ticketing inboxes.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-md bg-muted/60 border border-border/50">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
+                📤 Outgoing Mails
+              </span>
+              <p className="font-mono font-medium text-xs text-foreground">notify.rentmaikar.com</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Resend sending domain (SPF, DKIM, DMARC verified).
+              </p>
+            </div>
+
+            <div className="p-3 rounded-md bg-muted/60 border border-border/50">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
+                ⚙️ Backend Domain
+              </span>
+              <p className="font-mono font-medium text-xs text-foreground">staging.rentmaikar.com</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Express API Gateway, webhook receivers & services.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-md bg-muted/60 border border-border/50">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
+                🌐 Frontend Domain
+              </span>
+              <p className="font-mono font-medium text-xs text-foreground">rentmaikar.com</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Primary web app, user dashboards & booking interface.
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Tracking Infrastructure */}
         <div className="mb-8">
           <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">

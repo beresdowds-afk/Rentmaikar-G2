@@ -1,16 +1,22 @@
 /**
- * RentMaikar API and domain configuration.
- *
- * Frontend domains (unchanged):
- *  - https://rentmaikar.com (canonical)
- *  - https://www.rentmaikar.com
- *
- * Backend/API domain:
- *  - https://staging.rentmaikar.com (canonical backend base URL)
+ * RentMaikar Platform Domain Configuration:
+ * - Frontend domain: rentmaikar.com (production web client)
+ * - Backend domain: staging.rentmaikar.com (API gateway & server services)
+ * - Incoming mail domain: backend.rentmaikar.com (inbound mailboxes & webhooks)
+ * - Outgoing mail domain: notify.rentmaikar.com (outbound transactional dispatch)
  */
 
+export const DOMAIN_CONFIG = {
+  frontend: "rentmaikar.com",
+  frontendOrigin: "https://rentmaikar.com",
+  backend: "staging.rentmaikar.com",
+  backendOrigin: "https://staging.rentmaikar.com",
+  incomingMailDomain: "backend.rentmaikar.com",
+  outgoingMailDomain: "notify.rentmaikar.com",
+} as const;
+
 /** Canonical production frontend origin */
-export const FRONTEND_ORIGIN = "https://rentmaikar.com";
+export const FRONTEND_ORIGIN = DOMAIN_CONFIG.frontendOrigin;
 
 /** Supported frontend origins for CORS and redirections */
 export const ALLOWED_FRONTEND_ORIGINS = [
@@ -19,7 +25,7 @@ export const ALLOWED_FRONTEND_ORIGINS = [
 ] as const;
 
 /** Canonical production backend API base URL */
-export const DEFAULT_BACKEND_URL = "https://staging.rentmaikar.com";
+export const DEFAULT_BACKEND_URL = DOMAIN_CONFIG.backendOrigin;
 
 /**
  * Resolves the active backend API base URL from the environment,

@@ -16,6 +16,12 @@ healthRouter.get("/", (req: Request, res: Response) => {
 healthRouter.get("/diagnostics", (req: Request, res: Response) => {
   const publicBackendUrl = process.env.PUBLIC_BACKEND_URL || "https://staging.rentmaikar.com";
   res.json({
+    domains: {
+      frontend: "rentmaikar.com",
+      backend: "staging.rentmaikar.com",
+      incoming_mail: "backend.rentmaikar.com",
+      outgoing_mail: "notify.rentmaikar.com",
+    },
     cpaas_gateway: {
       sent_dm: Boolean(process.env.SENT_API_KEY),
       sent_webhook_url: process.env.SENT_WEBHOOK_URL || `${publicBackendUrl}/api/webhooks/sent`,

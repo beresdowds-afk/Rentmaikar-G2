@@ -4,6 +4,32 @@ export type CallDirection = 'inbound' | 'outbound';
 export type ParticipantStatus = 'pending' | 'ringing' | 'connected' | 'disconnected' | 'failed';
 export type CallRegion = 'USA' | 'Nigeria' | (string & {});
 
+export type CallQueueSource = 'inbound_voip' | 'voice_request' | 'callback_request';
+
+export interface CallQueueItem {
+  id: string;
+  source: CallQueueSource;
+  rawId: string;
+  callerName: string;
+  callerPhone?: string;
+  callerRole: 'driver' | 'owner' | 'customer' | 'passenger' | 'admin' | string;
+  region: CallRegion;
+  reason?: string;
+  priority: 'urgent' | 'high' | 'normal' | 'low';
+  status: 'waiting' | 'ringing' | 'escalated' | 'connecting';
+  createdAt: string;
+  targetRole?: string;
+}
+
+export interface CallQueueStats {
+  totalWaiting: number;
+  urgentCount: number;
+  averageWaitSeconds: number;
+  longestWaitSeconds: number;
+  usaCount: number;
+  nigeriaCount: number;
+}
+
 export interface VoIPCall {
   id: string;
   call_sid?: string;

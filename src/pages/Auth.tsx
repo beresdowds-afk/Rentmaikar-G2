@@ -247,14 +247,16 @@ const Auth = () => {
     // Check 2FA status
     if (userId) {
       const status = await check2FAStatus(userId);
-      if (status && (status.requires_2fa || status.is_setup) && status.has_phone && status.phone) {
-        // Show 2FA challenge
-        setTwoFAUserId(userId);
-        setTwoFAPhone(status.phone);
-        setTwoFAChannel(status.preferred_channel);
-        setShow2FA(true);
-        setIsSubmitting(false);
-        return;
+      if (status && (status.requires_2fa || status.is_setup)) {
+        if (status.preferred_channel === 'authenticator' || (status.has_phone && status.phone)) {
+          // Show 2FA challenge
+          setTwoFAUserId(userId);
+          setTwoFAPhone(status.phone);
+          setTwoFAChannel(status.preferred_channel);
+          setShow2FA(true);
+          setIsSubmitting(false);
+          return;
+        }
       }
     }
 

@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { EMAIL_CONFIG, formatSenderEmail } from "../_shared/email-config.ts";
+import { EMAIL_CONFIG, INCOMING_EMAIL_CONFIG, formatSenderEmail } from "../_shared/email-config.ts";
 import { logMessagingEvent } from "../_shared/messaging-events.ts";
 import { maybeAutoReply } from "../_shared/auto-reply.ts";
 import { forwardInboundEmail } from "../_shared/forwarding.ts";
@@ -35,7 +35,23 @@ const ATTACHMENT_CONFIG = {
 };
 
 // ─── Email Queue Routing ───
+// Incoming mail domain is backend.rentmaikar.com
 const EMAIL_QUEUES: Record<string, { queue: string; priority: string; category: string }> = {
+  // Primary incoming mail domain (backend.rentmaikar.com)
+  "support@backend.rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
+  "payments@backend.rentmaikar.com":      { queue: "payments",     priority: "high",    category: "payment_query" },
+  "documents@backend.rentmaikar.com":     { queue: "documents",    priority: "normal",  category: "document_upload" },
+  "admin@backend.rentmaikar.com":         { queue: "admin",        priority: "high",    category: "admin_inquiry" },
+  "legal@backend.rentmaikar.com":         { queue: "legal",        priority: "high",    category: "legal" },
+  "privacy@backend.rentmaikar.com":       { queue: "legal",        priority: "high",    category: "legal" },
+  "dpo@backend.rentmaikar.com":           { queue: "legal",        priority: "high",    category: "legal" },
+  "nigeria@backend.rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
+  "usa@backend.rentmaikar.com":           { queue: "support",      priority: "normal",  category: "support_request" },
+  "negotiations@backend.rentmaikar.com":  { queue: "negotiations", priority: "high",    category: "negotiation" },
+  "pricing@backend.rentmaikar.com":       { queue: "negotiations", priority: "high",    category: "negotiation" },
+  "noreply@backend.rentmaikar.com":       { queue: "automated",    priority: "low",     category: "auto_reply" },
+
+  // Backward-compatible fallback aliases
   "support@rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
   "payments@rentmaikar.com":      { queue: "payments",     priority: "high",    category: "payment_query" },
   "documents@rentmaikar.com":     { queue: "documents",    priority: "normal",  category: "document_upload" },
@@ -49,6 +65,18 @@ const EMAIL_QUEUES: Record<string, { queue: string; priority: string; category: 
   "pricing@rentmaikar.com":       { queue: "negotiations", priority: "high",    category: "negotiation" },
   "noreply@rentmaikar.com":       { queue: "automated",    priority: "low",     category: "auto_reply" },
 };
+
+/** Resolve incoming mail queue by matching exact address or mapping to backend.rentmaikar.com */
+function resolveQueueInfo(email: string): { queue: string; priority: string; category: string } {
+  const normalized = (email || "").toLowerCase().trim();
+  if (EMAIL_QUEUES[normalized]) return EMAIL_QUEUES[normalized];
+  const [localPart] = normalized.split("@");
+  if (localPart) {
+    const backendKey = `${localPart}@backend.rentmaikar.com`;
+    if (EMAIL_QUEUES[backendKey]) return EMAIL_QUEUES[backendKey];
+  }
+  return { queue: "support", priority: "normal", category: "support_request" };
+}
 
 // ─── Weighted Classification Engine ───
 interface ClassificationResult {
@@ -396,7 +424,7 @@ function getAcknowledgmentHtml(
     legal: {
       subject: `Legal inquiry received [#${ref}]`,
       body: `<p>Hi ${name},</p>
-        <p>Your legal inquiry has been forwarded to our legal team at <strong>${EMAIL_CONFIG.legal}</strong>. We will respond within <strong>${responseTime}</strong>.</p>
+        <p>Your legal inquiry has been forwarded to our legal team at <strong>${INCOMING_EMAIL_CONFIG.legal}</strong>. We will respond within <strong>${responseTime}</strong>.</p>
         <p>Reference: <strong>#${ref}</strong></p>
         ${attachmentHtml}`,
     },
@@ -454,7 +482,7 @@ function getAcknowledgmentHtml(
       </div>
       <div style="background: #f8fafc; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8; border-radius: 0 0 12px 12px;">
         <p>© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
-        <p>Email: ${EMAIL_CONFIG.support}</p>
+        <p>Email: ${INCOMING_EMAIL_CONFIG.support}</p>
       </div>
     </div>`;
 
@@ -525,7 +553,7 @@ serve(async (req) => {
     }
 
     // ─── Queue routing by recipient ───
-    const queueInfo = EMAIL_QUEUES[recipientEmail] || { queue: "support", priority: "normal", category: "support_request" };
+    const queueInfo = resolveQueueInfo(recipientEmail);
 
     if (queueInfo.category === "auto_reply") {
       console.log("Ignoring noreply bounce from:", senderAddress);
@@ -537,7 +565,7 @@ serve(async (req) => {
     // ─── Multi-recipient routing (handle CC / multiple To) ───
     const allRecipients = Array.isArray(to) ? to.map((t: string) => t.toLowerCase()) : [recipientEmail];
     const queuesHit = allRecipients
-      .map((addr: string) => EMAIL_QUEUES[addr])
+      .map((addr: string) => resolveQueueInfo(addr))
       .filter(Boolean);
     // Use highest priority queue if multiple matched
     const effectiveQueue = queuesHit.sort((a: typeof queueInfo, b: typeof queueInfo) => {

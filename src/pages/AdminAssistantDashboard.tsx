@@ -1,16 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAssistantPermissions } from "@/hooks/useAssistantPermissions";
 import { assistantExcludedTabs, warnTabPermissionDrift } from "@/lib/admin-tab-registry";
+import { usePersistedTab } from "@/hooks/usePersistedTab";
 
 import { Lock } from "lucide-react";
 import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones } from "lucide-react";
 import { CallCenterPage } from "@/components/admin/voip/CallCenterPage";
 import { HardwareManagement } from "@/components/admin/HardwareManagement";
 import { IoTMonitoringHub } from "@/components/admin/IoTMonitoringHub";
+import { IoTProvisioningPanel } from "@/components/admin/IoTProvisioningPanel";
+import { HologramDashboard } from "@/components/admin/HologramDashboard";
+import { TraccarDashboard } from "@/components/admin/TraccarDashboard";
+import { SyncScheduleSettings } from "@/components/admin/SyncScheduleSettings";
+import ProviderBillingDashboard from '@/components/admin/ProviderBillingDashboard';
+import BillingReconciliationPage from "@/pages/admin/BillingReconciliationPage";
+import TourStepConfigPage from "@/pages/admin/TourStepConfigPage";
+import TwilioTemplateManager from "@/components/admin/TwilioTemplateManager";
 import { AssetsRegistry } from "@/components/admin/AssetsRegistry";
 import { VehicleAuthorizationLogManagement } from "@/components/admin/VehicleAuthorizationLogManagement";
+import AdminVehicleCataloguePage from "@/pages/admin/AdminVehicleCataloguePage";
+import UserUuidAssignmentsPage from "@/pages/admin/UserUuidAssignmentsPage";
 import { CategoryPricing } from "@/components/admin/CategoryPricing";
+import { VehicleCategoryYearSpecs } from "@/components/admin/VehicleCategoryYearSpecs";
+
 import { SecretsManagement } from "@/components/admin/SecretsManagement";
+import { TechStackDocButton } from "@/components/admin/TechStackDocButton";
+import { CPaaSProviderSettings } from "@/components/admin/CPaaSProviderSettings";
+import { SentTestSendPanel } from "@/components/admin/SentTestSendPanel";
+import { TwilioTestSendPanel } from "@/components/admin/TwilioTestSendPanel";
+import { ElevenLabsTestPanel } from "@/components/admin/ElevenLabsTestPanel";
+import { PSPConfigChecklist } from "@/components/admin/PSPConfigChecklist";
 import { ApiKeyManagement } from "@/components/admin/ApiKeyManagement";
 import { WebhookManagement } from "@/components/admin/WebhookManagement";
 import { ApiEndpointManagement } from "@/components/admin/ApiEndpointManagement";
@@ -20,11 +39,13 @@ import { ExpiryNotificationsWidget } from "@/components/admin/ExpiryNotification
 import { NigeriaDriverVerification } from "@/components/admin/NigeriaDriverVerification";
 import { PoliceReportVerification } from "@/components/admin/PoliceReportVerification";
 import { SocialMediaManagement } from "@/components/admin/SocialMediaManagement";
+import SocialChannelIntegrations from "@/components/admin/SocialChannelIntegrations";
 import { IoTDeviceOrders } from "@/components/admin/IoTDeviceOrders";
 import { DeviceOrderRevenue } from "@/components/admin/DeviceOrderRevenue";
 import { UserAccountsView } from "@/components/admin/UserAccountsView";
 import { UserDeletionPortal } from "@/components/admin/UserDeletionPortal";
 import { DriversOwnersManagement } from "@/components/admin/DriversOwnersManagement";
+import { UserOversightPanel } from "@/components/admin/UserOversightPanel";
 import { RoleManagement } from "@/components/admin/RoleManagement";
 import { DailyPlanManagement } from "@/components/admin/DailyPlanManagement";
 import { AdminIncidentManagement } from "@/components/admin/AdminIncidentManagement";
@@ -38,6 +59,7 @@ import LegalAgreementsManagement from "@/components/admin/LegalAgreementsManagem
 import { RentToOwnManagement } from "@/components/admin/RentToOwnManagement";
 import { FAQManagement } from "@/components/admin/FAQManagement";
 import { PolicyManagement } from "@/components/admin/PolicyManagement";
+import { LegalAgreementTemplateManagement } from "@/components/admin/LegalAgreementTemplateManagement";
 import { MessagingCenter } from "@/components/admin/MessagingCenter";
 import { AdminContactSettings } from "@/components/admin/AdminContactSettings";
 import { AdminSupportTaskManagement } from "@/components/admin/AdminSupportTaskManagement";
@@ -45,11 +67,17 @@ import { AdminTaskPortal } from "@/components/admin/portal/AdminTaskPortal";
 import { VehiclePickupManagement } from "@/components/admin/VehiclePickupManagement";
 import { ApplicationManagement } from "@/components/admin/ApplicationManagement";
 import { AdminAssistantManagement } from "@/components/admin/AdminAssistantManagement";
+import { PhoneOtpProviderSettings } from "@/components/admin/PhoneOtpProviderSettings";
+import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
+import { RefereeRequirementSettings } from "@/components/admin/RefereeRequirementSettings";
+
 import { PortalNavigation, type PortalType } from "@/components/admin/PortalNavigation";
 import { AdminNotificationsBell } from "@/components/admin/AdminNotificationsBell";
 
 import { TrainingModuleManagement } from "@/components/admin/TrainingModuleManagement";
 import { SubscriptionManagement } from "@/components/admin/SubscriptionManagement";
+import { BillingDashboard } from "@/components/admin/BillingDashboard";
+import { ProxyBillingPortal } from "@/components/admin/ProxyBillingPortal";
 import { RoadsidePartnerManagement } from "@/components/admin/RoadsidePartnerManagement";
 import { PortalAnalyticsCards } from "@/components/admin/PortalAnalyticsCards";
 import { GlobalSearch } from "@/components/admin/GlobalSearch";
@@ -100,8 +128,10 @@ const AdminAssistantDashboard = () => {
   const { paymentDefaults } = usePaymentDefaults();
   const { approvals: pendingItems, refresh: refreshApprovals } = usePendingApprovals();
   const [approvingId, setApprovingId] = useState<string | null>(null);
-  const [portalView, setPortalView] = useState<PortalType>('support');
-  const [activeTab, setActiveTab] = useState<string>('inbox');
+  const [portalViewRaw, setPortalViewRaw] = usePersistedTab('support', 'portal');
+  const portalView = portalViewRaw as PortalType;
+  const setPortalView = setPortalViewRaw as (v: PortalType) => void;
+  const [activeTab, setActiveTab] = usePersistedTab('inbox');
 
   // Base admin-only tabs assistants may never see. Derived from the shared
   // registry (ADMIN_ONLY_TABS + anything unmapped in TAB_PERMISSION_MAP) so
@@ -144,7 +174,7 @@ const AdminAssistantDashboard = () => {
       setActiveTab(fallback);
       setPortalView('support');
     }
-  }, [activeTab, canAccessTab, permsLoading]);
+  }, [activeTab, canAccessTab, permsLoading, setActiveTab, setPortalView]);
 
   const activeTabAllowed = permsLoading || canAccessTab(activeTab);
   const { isOpen: isTourOpen, completeTour, resetTour } = useAdminOnboardingTour();
@@ -429,6 +459,51 @@ const AdminAssistantDashboard = () => {
             <AdminDailyTodoList />
           </div>
 
+          {/* Admin Tools quick links */}
+          <Card className="p-4 mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Shield className="w-4 h-4 text-primary" />
+                Admin Tools
+              </h3>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/audit-log">Security audit log</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/payments">Payments viewer</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/reconciliation">Reconciliation logs</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/settlement-reconciliation">Settlement reconciliation</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/export-audit">Document export audit</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/document-failures">Document failures</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/m/call-in">Mobile call-in</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/tour-config">Tour step config</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/tour-analytics">Tour analytics</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/authorizations">Rental authorizations log</a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <a href="/admin/vehicle-queue">Vehicle submission queue</a>
+              </Button>
+            </div>
+          </Card>
+
           {/* Portal Navigation */}
           <div className="flex flex-col gap-4 mb-6">
             <div className="flex flex-wrap items-center gap-2">
@@ -526,10 +601,24 @@ const AdminAssistantDashboard = () => {
               {activeTab === 'applications' && <ApplicationManagement />}
               {activeTab === 'attestation-review' && <NegativeAttestationReviewPanel />}
               {activeTab === 'accounts' && <UserAccountsView />}
+              {activeTab === 'user-oversight' && <UserOversightPanel />}
               {activeTab === 'user-deletion' && <UserDeletionPortal />}
-              {activeTab === 'drivers-owners' && <DriversOwnersManagement />}
+              {activeTab === 'user-uuid-assignments' && <UserUuidAssignmentsPage />}
+              {activeTab === 'drivers-owners' && (
+                <div className="space-y-6">
+                  <UserOversightPanel />
+                  <DriversOwnersManagement />
+                </div>
+              )}
               {activeTab === 'roles' && <RoleManagement />}
-              {activeTab === 'admin-assistants' && <AdminAssistantManagement />}
+              {activeTab === 'admin-assistants' && (
+                <div className="space-y-6">
+                  <AdminAssistantManagement />
+                  <PersonaVerificationSettings />
+                  <RefereeRequirementSettings />
+                  <PhoneOtpProviderSettings />
+                </div>
+              )}
               {activeTab === 'negotiations' && <AdminPriceNegotiation />}
               {activeTab === 'approvals' && (
                 <Card className="p-6">
@@ -620,12 +709,18 @@ const AdminAssistantDashboard = () => {
                 </div>
               )}
               {activeTab === 'legal-agreements' && <LegalAgreementsManagement />}
+              {activeTab === 'legal-agreement-templates' && <LegalAgreementTemplateManagement />}
               {activeTab === 'rent-to-own' && <RentToOwnManagement />}
+              {activeTab === 'billing' && <BillingDashboard />}
+              {activeTab === 'proxy-billing' && <ProxyBillingPortal />}
               {activeTab === 'content' && (
                 <Tabs defaultValue="faq" className="space-y-4">
                   <TabsList>
                     <TabsTrigger value="faq">FAQ Management</TabsTrigger>
                     <TabsTrigger value="policies">Policy Versions</TabsTrigger>
+                    <TabsTrigger value="legal-templates">Legal Agreements</TabsTrigger>
+                    <TabsTrigger value="tour-guides">Tour Guides</TabsTrigger>
+                    <TabsTrigger value="message-templates">Message Templates</TabsTrigger>
                   </TabsList>
                   <TabsContent value="faq">
                     <FAQManagement />
@@ -633,9 +728,19 @@ const AdminAssistantDashboard = () => {
                   <TabsContent value="policies">
                     <PolicyManagement />
                   </TabsContent>
+                  <TabsContent value="legal-templates">
+                    <LegalAgreementTemplateManagement />
+                  </TabsContent>
+                  <TabsContent value="tour-guides">
+                    <TourStepConfigPage />
+                  </TabsContent>
+                  <TabsContent value="message-templates">
+                    <TwilioTemplateManager />
+                  </TabsContent>
                 </Tabs>
               )}
               {activeTab === 'subscriptions' && <SubscriptionManagement />}
+              {activeTab === 'tour-step-config' && <TourStepConfigPage />}
               {activeTab === 'training' && <TrainingModuleManagement />}
               {activeTab === 'roadside-partners' && <RoadsidePartnerManagement />}
             </div>
@@ -656,14 +761,22 @@ const AdminAssistantDashboard = () => {
               )}
               {activeTab === 'assets' && <AssetsRegistry />}
               {activeTab === 'authorizations' && <VehicleAuthorizationLogManagement />}
+              {activeTab === 'catalogue' && <AdminVehicleCataloguePage embedded />}
               {activeTab === 'pickup-locations' && <VehiclePickupManagement />}
               {activeTab === 'iot-monitoring' && <IoTMonitoringHub />}
+              {activeTab === 'iot-provisioning' && <IoTProvisioningPanel />}
+              {activeTab === 'hologram' && <HologramDashboard />}
+              {activeTab === 'traccar' && <TraccarDashboard />}
+              {activeTab === 'sync-schedule' && <SyncScheduleSettings />}
+              {activeTab === 'reconciliation' && <BillingReconciliationPage />}
+              {activeTab === 'provider-billing' && <ProviderBillingDashboard />}
               {activeTab === 'hardware' && <HardwareManagement />}
               {activeTab === 'mqtt-credentials' && <VehicleMqttCredentials readOnly={false} />}
               {activeTab === 'driver-behavior' && <DriverBehaviorLogs />}
               {activeTab === 'device-orders' && <IoTDeviceOrders />}
               {activeTab === 'device-revenue' && <DeviceOrderRevenue />}
               {activeTab === 'pricing' && <CategoryPricing />}
+              {activeTab === 'category-year-specs' && <VehicleCategoryYearSpecs />}
               {activeTab === 'incidents' && <AdminIncidentManagement />}
               {activeTab === 'recalls' && (
                 <div className="space-y-6">
@@ -738,12 +851,25 @@ const AdminAssistantDashboard = () => {
                   </div>
                 </Card>
               )}
-              {activeTab === 'secrets' && <SecretsManagement />}
+              {activeTab === 'secrets' && (
+                <div className="space-y-6">
+                  <div className="flex justify-end">
+                    <TechStackDocButton />
+                  </div>
+                  <PSPConfigChecklist />
+                  <CPaaSProviderSettings />
+                  <SentTestSendPanel />
+                  <TwilioTestSendPanel />
+                  <ElevenLabsTestPanel />
+                  <SecretsManagement />
+                </div>
+              )}
               {activeTab === 'api-keys' && <ApiKeyManagement />}
               {activeTab === 'webhooks' && <WebhookManagement />}
               {activeTab === 'api-endpoints' && <ApiEndpointManagement />}
               {activeTab === 'security' && <AdminSecurityDashboard />}
               {activeTab === 'cron-jobs' && <CronJobManagement />}
+              {activeTab === 'uuid-assignments' && <UserUuidAssignmentsPage />}
               {activeTab === 'tax' && <TaxManagement />}
               {activeTab === 'settings' && <RegionalOperationsManagement />}
               {activeTab === 'region-autobuild' && <RegionAutoBuildWorker />}
@@ -754,10 +880,12 @@ const AdminAssistantDashboard = () => {
           {activeTabAllowed && portalView === 'marketing' && (
             <div className="space-y-6">
               {activeTab === 'campaigns' && <SocialMediaManagement />}
-              {activeTab === 'facebook' && <SocialMediaManagement />}
-              {activeTab === 'instagram' && <SocialMediaManagement />}
-              {activeTab === 'linkedin' && <SocialMediaManagement />}
-              {activeTab === 'google' && <SocialMediaManagement />}
+              {['facebook', 'instagram', 'linkedin', 'google'].includes(activeTab) && (
+                <>
+                  <SocialChannelIntegrations />
+                  <SocialMediaManagement />
+                </>
+              )}
             </div>
           )}
 

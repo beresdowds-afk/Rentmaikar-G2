@@ -247,11 +247,23 @@ export default function AdminEmailDeliveryPage() {
       />
 
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Email delivery monitor</h1>
-        <p className="text-sm text-muted-foreground">
-          Live outcomes for every app email — queued, sent, failed, bounced, complained, and
-          unsubscribed. Updates in real time.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Email delivery monitor</h1>
+            <p className="text-sm text-muted-foreground">
+              Live outcomes for every app email — queued, sent, failed, bounced, complained, and
+              unsubscribed. Updates in real time.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="outline" className="font-mono bg-muted/40">
+              <span className="text-muted-foreground mr-1">Outbound:</span> notify.rentmaikar.com
+            </Badge>
+            <Badge variant="outline" className="font-mono bg-muted/40">
+              <span className="text-muted-foreground mr-1">Inbound:</span> backend.rentmaikar.com
+            </Badge>
+          </div>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

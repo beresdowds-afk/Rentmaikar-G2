@@ -15,6 +15,22 @@ const PORT = process.env.PORT || 5000;
 /** Canonical public backend base URL (API host). */
 const PUBLIC_BACKEND_URL = process.env.PUBLIC_BACKEND_URL || "https://staging.rentmaikar.com";
 
+/**
+ * Platform Domain Mapping:
+ * - Frontend domain: rentmaikar.com
+ * - Backend domain: staging.rentmaikar.com
+ * - Incoming mail domain: backend.rentmaikar.com
+ * - Outgoing mail domain: notify.rentmaikar.com
+ */
+export const DOMAIN_MAPPING = {
+  frontendDomain: "rentmaikar.com",
+  frontendOrigin: "https://rentmaikar.com",
+  backendDomain: "staging.rentmaikar.com",
+  backendUrl: PUBLIC_BACKEND_URL,
+  incomingMailDomain: "backend.rentmaikar.com",
+  outgoingMailDomain: "notify.rentmaikar.com",
+} as const;
+
 /** Production frontend origins allowed to call this API. */
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://rentmaikar.com",
@@ -39,6 +55,12 @@ app.use(express.json());
 
 app.use("/api/health", healthRouter);
 app.use("/api/cpaas", cpaasRouter);
+app.get("/api/domains", (req, res) => {
+  res.json({
+    status: "ok",
+    domains: DOMAIN_MAPPING,
+  });
+});
 
 // Global 404 Handler
 app.use((req, res) => {

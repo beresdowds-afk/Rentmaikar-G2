@@ -122,6 +122,7 @@ const AdminPersonaReviewPage = lazy(() => import("./pages/admin/AdminPersonaRevi
 const AdminPersonaTemplatesPage = lazy(() => import("./pages/admin/AdminPersonaTemplatesPage"));
 const AdminTrainingReviewPage = lazy(() => import("./pages/admin/AdminTrainingReviewPage"));
 const OrchestratorPage = lazy(() => import("./pages/admin/OrchestratorPage"));
+const AdminTodoListEmbedPage = lazy(() => import("./pages/admin/AdminTodoListEmbedPage"));
 
 const SubscriptionsPage = lazy(() => import("./pages/SubscriptionsPage"));
 const BillingHistoryPage = lazy(() => import("./pages/BillingHistoryPage"));
@@ -702,6 +703,22 @@ const App = () => (
                     element={
                       <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
                         <AdminImpersonateDashboardPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/embed/todo-list"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
+                        <AdminTodoListEmbedPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/todo-list-frame"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
+                        <AdminTodoListEmbedPage />
                       </ProtectedRoute>
                     }
                   />

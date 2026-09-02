@@ -79,24 +79,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const check2FAStatus = async (userId: string): Promise<TwoFactorStatus | null> => {
     try {
-      const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-        body: { action: 'status', user_id: userId },
-      });
-      if (error || !data?.success) return null;
-
-      // Also get the phone number from 2FA settings
+      // Check database settings first
       const { data: settings } = await supabase
         .from('two_factor_settings')
-        .select('phone_number, preferred_channel')
+        .select('phone_number, preferred_channel, is_enabled')
         .eq('user_id', userId)
         .maybeSingle();
 
+      const hasStoredTotp = typeof window !== 'undefined' && !!localStorage.getItem(`rentmaikar:totp:${userId}`);
+      const isAuthenticator = settings?.preferred_channel === 'authenticator' || hasStoredTotp;
+
+      const { data, error } = await supabase.functions.invoke('send-2fa-code', {
+        body: { action: 'status', user_id: userId },
+      });
+
+      const isSetup = (data && data.success && data.is_setup) || isAuthenticator || !!settings?.is_enabled;
+      const requires2FA = (data && data.success && data.requires_2fa) || isAuthenticator || !!settings?.is_enabled;
+
       const status: TwoFactorStatus = {
-        requires_2fa: data.requires_2fa,
-        is_setup: data.is_setup,
-        is_mandatory: data.is_mandatory,
-        has_phone: data.has_phone,
-        preferred_channel: data.preferred_channel || 'sms',
+        requires_2fa: requires2FA,
+        is_setup: isSetup,
+        is_mandatory: (data && data.success && data.is_mandatory) || false,
+        has_phone: (data && data.success && data.has_phone) || !!settings?.phone_number,
+        preferred_channel: isAuthenticator ? 'authenticator' : (settings?.preferred_channel || (data && data.preferred_channel) || 'sms'),
         phone: settings?.phone_number || undefined,
       };
       setTwoFactorStatus(status);
