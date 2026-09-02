@@ -29,6 +29,7 @@ import { usePersonaEnabled } from "@/hooks/usePersonaEnabled";
 import { refereeDetailsRequired } from "@/lib/referee-requirements";
 import { useRefereeRequirement } from "@/hooks/useRefereeRequirement";
 import { useRegionSamples } from "@/hooks/useRegionSamples";
+import { useSecurityDeposit } from "@/hooks/useSecurityDeposit";
 
 import {
   ADDRESS_MIN,
@@ -254,6 +255,7 @@ const DriverRegistration = () => {
 
   const selectedCountry = watch("country");
   const cities = selectedCountry === "usa" ? usaCities : nigeriaCities;
+  const { formatted: depositFormatted } = useSecurityDeposit(selectedCountry);
 
   // ---- Live home-address validation ---------------------------------------
   // Rules live in `@/lib/address-validation` so web and the Capacitor
@@ -806,7 +808,7 @@ const DriverRegistration = () => {
                       <p className="text-sm text-muted-foreground mt-1">
                         I understand that a refundable security deposit of{" "}
                         <strong className="text-foreground">
-                          {selectedCountry === "usa" ? "$200 USD" : "₦100,000 NGN"}
+                          {depositFormatted || (selectedCountry === "usa" ? "$200 USD" : "₦100,000 NGN")}
                         </strong>{" "}
                         is required before vehicle pickup.
                       </p>

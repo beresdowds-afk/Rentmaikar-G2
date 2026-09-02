@@ -106,6 +106,7 @@ const AdminEmailDeliveryPage = lazy(() => import("./pages/admin/AdminEmailDelive
 const MessagingCenterPage = lazy(() => import("./pages/admin/MessagingCenterPage"));
 const AdminSmsDeliveryPage = lazy(() => import("./pages/admin/AdminSmsDeliveryPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
+const AdminVehicleTelemetryPage = lazy(() => import("./pages/admin/AdminVehicleTelemetryPage"));
 
 const AdminVehicleQueuePage = lazy(() => import("./pages/admin/AdminVehicleQueuePage"));
 const AdminProximityMatchingPage = lazy(() => import("./pages/admin/AdminProximityMatchingPage"));
@@ -515,6 +516,16 @@ const App = () => (
                     element={
                       <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
                         <AdminDriverMatchingPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/vehicle-telemetry"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant', 'iot_support']}>
+                        <AdminProfiler id="AdminVehicleTelemetryPage">
+                          <AdminVehicleTelemetryPage />
+                        </AdminProfiler>
                       </ProtectedRoute>
                     }
                   />

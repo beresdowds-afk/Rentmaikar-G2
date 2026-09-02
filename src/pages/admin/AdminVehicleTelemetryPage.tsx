@@ -156,14 +156,16 @@ export default function AdminVehicleTelemetryPage() {
       return;
     }
     setSaving(true);
-    const { error: cErr } = await supabase.from('vehicle_geofences').insert({
-      vehicle_id: newFence.vehicle_id,
-      name: newFence.name || 'Operating area',
-      center_lat: Number(newFence.lat),
-      center_lng: Number(newFence.lng),
-      radius_m: Number(newFence.radius || 500),
-      active: true,
-    });
+    const { error: cErr } = await supabase.from('vehicle_geofences').insert([
+      {
+        vehicle_id: newFence.vehicle_id,
+        name: newFence.name || 'Operating area',
+        center_lat: Number(newFence.lat),
+        center_lng: Number(newFence.lng),
+        radius_m: Number(newFence.radius || 500),
+        active: true,
+      },
+    ]);
     setSaving(false);
     if (cErr) {
       toast({ title: 'Could not create geofence', description: cErr.message, variant: 'destructive' });
@@ -193,6 +195,7 @@ export default function AdminVehicleTelemetryPage() {
       <Seo
         title="Vehicle Telemetry & Mileage | RentMaikar Admin"
         description="Live vehicle tracking, editable geofences, telemetry monitoring and exportable daily/monthly mileage logs per vehicle and driver."
+        path="/admin/vehicle-telemetry"
       />
       <Header />
       <main className="flex-1 container mx-auto px-4 py-8 space-y-6">

@@ -10168,7 +10168,7 @@ export type Database = {
         Row: {
           active: boolean
           breached_at: string | null
-          call_in_id: string
+          call_in_id: string | null
           center_lat: number
           center_lng: number
           created_at: string
@@ -10185,7 +10185,7 @@ export type Database = {
         Insert: {
           active?: boolean
           breached_at?: string | null
-          call_in_id: string
+          call_in_id?: string | null
           center_lat: number
           center_lng: number
           created_at?: string
@@ -10202,7 +10202,7 @@ export type Database = {
         Update: {
           active?: boolean
           breached_at?: string | null
-          call_in_id?: string
+          call_in_id?: string | null
           center_lat?: number
           center_lng?: number
           created_at?: string

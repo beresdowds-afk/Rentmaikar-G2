@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import OwnerActivityPanel from '@/components/owner/OwnerActivityPanel';
+import OwnerVehicleStatusPanel from '@/components/owner/OwnerVehicleStatusPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -411,6 +412,7 @@ export default function OwnerDashboard() {
                 <MapPin className="h-4 w-4" />
                 Pickup Locations
               </TabsTrigger>
+              <TabsTrigger value="vehicle-status" data-tour="owner-vehicle-status">Vehicle Status</TabsTrigger>
               <TabsTrigger value="iot-device" data-tour="owner-iot">Vehicle Tracking</TabsTrigger>
               <TabsTrigger value="inspections" className="flex items-center gap-1" data-tour="owner-inspections">
                 <ImageIcon className="h-4 w-4" />
@@ -467,6 +469,13 @@ export default function OwnerDashboard() {
               </PortalGate>
             </TabsContent>
 
+
+            {/* Vehicle Status Tab */}
+            <TabsContent value="vehicle-status">
+              <PortalGate portal="Vehicle Status" require="verification">
+                <OwnerVehicleStatusPanel />
+              </PortalGate>
+            </TabsContent>
 
             {/* IoT Device Tab */}
             <TabsContent value="iot-device">

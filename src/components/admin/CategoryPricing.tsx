@@ -95,21 +95,33 @@ export function CategoryPricing() {
 
   const updateDepositMutation = useMutation({
     mutationFn: async ({ id, amount }: { id: string; amount: number }) => {
-      const { error } = await supabase
+      const { data: userData } = await supabase.auth.getUser();
+      const { data, error } = await supabase
         .from("security_deposit_settings")
-        .update({ amount })
-        .eq("id", id);
+        .update({
+          amount,
+          updated_at: new Date().toISOString(),
+          updated_by: userData?.user?.id ?? null,
+        })
+        .eq("id", id)
+        .select("id");
 
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Update was blocked — admin permissions are required.");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["security-deposits"] });
-      toast.success("Security deposit updated successfully");
+      queryClient.invalidateQueries({ queryKey: ["security-deposit-settings"] });
+      toast.success("Security deposit updated — changes are live");
     },
-    onError: (error) => {
-      toast.error(`Failed to update deposit: ${error.message}`);
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      toast.error(`Failed to update deposit: ${message}`);
     },
   });
+
 
   const handlePriceChange = (id: string, type: "min" | "max", value: string) => {
     const numValue = parseFloat(value) || 0;
