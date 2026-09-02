@@ -1,0 +1,133 @@
+project_id = "bwvocmhcledbwqlpcswp"
+
+[functions]
+  [functions.accident-emergency-dispatch]
+    verify_jwt = false
+  [functions.auth-email-hook]
+    verify_jwt = false
+  [functions.billing-portal]
+    verify_jwt = false
+  [functions.check-repeat-call-ins]
+    verify_jwt = false
+  [functions.elevenlabs-tts]
+    verify_jwt = false
+  [functions.elevenlabs-tts-stream]
+    verify_jwt = false
+  [functions.elevenlabs-voices]
+    verify_jwt = false
+  [functions.email-tracking]
+    verify_jwt = false
+  [functions.email-webhook]
+    verify_jwt = false
+  [functions.resend-events]
+    verify_jwt = false
+  [functions.emqx-monitoring]
+    verify_jwt = false
+  [functions.enforce-call-in-geofence]
+    verify_jwt = false
+  [functions.expire-call-ins]
+    verify_jwt = false
+  [functions.expiry-notification-ivr]
+    verify_jwt = false
+  [functions.generate-api-key]
+    verify_jwt = false
+  [functions.generate-daily-tasks]
+    verify_jwt = false
+  [functions.generate-vehicle-mqtt-token]
+    verify_jwt = false
+  [functions.get-recording-url]
+    verify_jwt = false
+  [functions.hologram-sync]
+    verify_jwt = false
+  [functions.iot-accident-detection]
+    verify_jwt = false
+  [functions.iot-scheduled-sync]
+    verify_jwt = false
+  [functions.manychat-webhook]
+    verify_jwt = false
+  [functions.payment-default-ivr]
+    verify_jwt = false
+  [functions.paypal-webhook]
+    verify_jwt = false
+  [functions.phone-otp-custom]
+    verify_jwt = false
+  [functions.process-agreement-renewals]
+    verify_jwt = false
+  [functions.process-call-recording]
+    verify_jwt = false
+  [functions.process-daily-debits]
+    verify_jwt = false
+  [functions.process-email-queue]
+    verify_jwt = false
+  [functions.process-expiry-notifications]
+    verify_jwt = false
+  [functions.process-inspection-reminders]
+    verify_jwt = false
+  [functions.process-owner-payouts]
+    verify_jwt = false
+  [functions.process-payment-defaults]
+    verify_jwt = false
+  [functions.process-payment-unlock]
+    verify_jwt = false
+  [functions.process-predue-reminders]
+    verify_jwt = false
+  [functions.provider-health-alerts]
+    verify_jwt = false
+
+  [functions.recording-status-callback]
+    verify_jwt = false
+  [functions.referee-attestation]
+    verify_jwt = false
+  [functions.send-2fa-code]
+    verify_jwt = false
+  [functions.send-meta-capi]
+    verify_jwt = false
+  [functions.send-outbound-email]
+    verify_jwt = false
+  [functions.shutdown-warning-ivr]
+    verify_jwt = false
+  [functions.sms-commands]
+    verify_jwt = false
+  [functions.telemetry-health-monitor]
+    verify_jwt = false
+  [functions.termii-webhook]
+    verify_jwt = false
+  [functions.twilio-webhook]
+    verify_jwt = false
+  [functions.vehicle-return-ivr]
+    verify_jwt = false
+  [functions.vehicle-return-reminder]
+    verify_jwt = false
+  [functions.vehicle-shutdown-warning]
+    verify_jwt = false
+  [functions.verify-phone]
+    verify_jwt = false
+  [functions.voice-call-request]
+    verify_jwt = false
+  [functions.voip-status-callback]
+    verify_jwt = false
+  [functions.whatchimp-webhook]
+    verify_jwt = false
+  [functions.whatsapp-commands]
+    verify_jwt = false
+
+  [functions.sync-approved-vehicles]
+    verify_jwt = false
+
+[functions.send-transactional-email]
+verify_jwt = true
+
+[functions.preview-transactional-email]
+verify_jwt = false
+
+[functions.handle-email-unsubscribe]
+verify_jwt = false
+
+[functions.handle-email-suppression]
+verify_jwt = false
+
+[functions.booking-email-trigger]
+verify_jwt = false
+
+[functions.send-booking-reminders]
+verify_jwt = false

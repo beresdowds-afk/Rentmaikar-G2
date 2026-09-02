@@ -1,0 +1,1 @@
+UPDATE public.communication_providers SET whatsapp_provider = 'whatchimp' WHERE whatsapp_provider = 'wachimp';

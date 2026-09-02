@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.trg_booking_accepted_email() FROM public, anon, authenticated;
