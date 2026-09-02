@@ -1,0 +1,29 @@
+# Rentmaikar
+
+> Rideshare vehicle rental marketplace serving the USA and Nigeria. Drivers rent
+> Uber/Lyft/Bolt-ready vehicles; vehicle owners list their cars for managed,
+> passive income. All rentals, payments and communication are mediated by
+> Rentmaikar.
+
+Rentmaikar matches rideshare drivers with verified, platform-approved vehicles.
+Rentals include maintenance, telematics-backed vehicle tracking, driver training
+and insurance subscriptions, with region-aware pricing in USD (USA) and NGN
+(Nigeria). Owners earn from their vehicles while Rentmaikar handles driver
+vetting, payments and support.
+
+## Pages
+
+- [Home](/): What Rentmaikar is, how rentals work, and who it's for.
+- [How It Works](/how-it-works): Step-by-step process for drivers and vehicle owners.
+- [FAQ](/faq): Common questions on renting, listing, payments and verification.
+- [Renting vs. Owning for Rideshare](/guides/renting-vs-owning-for-rideshare): Cost, maintenance, insurance and downtime comparison for rideshare drivers.
+- [Budget Vehicles](/catalogue/budget): Lower-cost rideshare-ready rentals.
+- [Standard Vehicles](/catalogue/standard): Mid-tier rideshare rentals.
+- [Premium Vehicles](/catalogue/premium): Premium and comfort-tier rentals.
+- [Driver Registration](/driver/register): Apply to rent a vehicle for rideshare driving.
+- [Owner Registration](/owner/register): List a vehicle for managed rental income.
+
+## Optional
+
+- [Terms of Use](/terms): Platform terms and rental conditions.
+- [Privacy Policy](/privacy): How personal and vehicle data is handled.

@@ -1,0 +1,6 @@
+{
+  "name": "RentMaikar",
+  "description": "Peer-to-peer and fleet vehicle leasing platform with verified driver onboarding, owner management, and live IoT telemetry.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

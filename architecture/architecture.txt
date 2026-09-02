@@ -1,0 +1,39 @@
+RentMaikar/
+├── docker-compose.yml           # Multi-container orchestrator (Frontend:3000, Backend:5000)
+├── .env.example                 # Root environment template (CPaaS, Payments, Identity, IoT)
+│
+├── frontend/
+│   ├── Dockerfile               # Multi-stage build (Node 20 build -> Nginx 1.25 Alpine SPA serve)
+│   ├── nginx.conf               # Custom Nginx config (SPA fallback, gzip, API proxying to backend)
+│   ├── package.json             # React/Vite dependencies
+│   ├── vite.config.ts           # Vite bundler configuration
+│   ├── index.html               # SPA entry point
+│   ├── public/                  # Static assets & icons
+│   └── src/                     # UI components, pages, hooks, contexts, CPaaS test suite
+│
+└── backend/
+    ├── Dockerfile               # Production Node.js 20 Alpine container runtime
+    ├── package.json             # Server dependencies (Express, Helmet, Cors, Supabase SDK)
+    ├── tsconfig.json            # Backend TypeScript configuration
+    └── src/
+        ├── index.ts             # Express server entry point & middleware orchestrator
+        ├── routes/
+        │   ├── health.ts        # Health & CPaaS/Payment service diagnostics
+        │   ├── cpaas.ts         # Universal CPaaS dispatcher (Sent.dm v3, Twilio, Termii)
+        │   └── webhooks.ts      # Inbound callback receivers (Sent.dm, Twilio, Termii)
+        └── services/
+            └── sentClient.ts    # Server-side Sent.dm OpenAPI v3 gateway client
+
+Canonical responsibility split:
+
+Cellular Network -> Hologram -> { Traccar (or alternative), EMQX } -> RentMaikar Core
+RentMaikar Core -> Driver App | Owner Portal | Admin Portal -> APIs & Services
+                -> Notifications (Sent.dm / Twilio / Termii), Analytics, Billing, Marketplace
+
+- RentMaikar Frontend : Single-page application (React 18, Vite, Tailwind CSS, Lucide icons, Motion)
+- RentMaikar Backend  : API Gateway, CPaaS orchestration, Webhook ingestion, Secrets proxying
+- Hologram            : Cellular connectivity, eSIM provisioning, SIM lifecycle, carrier selection
+- Traccar (alt)       : GPS tracking, trips, routes, historical playback, geofencing, telemetry
+- EMQX                : MQTT messaging, device authentication, real-time telemetry, command delivery
+- Persona             : Identity verification & KYC
+- Sent.dm             : Universal OpenAPI v3 CPaaS for SMS, WhatsApp & RCS messaging
