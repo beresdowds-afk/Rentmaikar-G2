@@ -81,9 +81,11 @@ BEGIN
     'public.get_support_staff_city(uuid, public.support_task_type)'
   ]
   LOOP
-    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', fn);
-    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon', fn);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', fn);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
+    IF to_regprocedure(fn) IS NOT NULL THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', fn);
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon', fn);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', fn);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
+    END IF;
   END LOOP;
 END $$;
