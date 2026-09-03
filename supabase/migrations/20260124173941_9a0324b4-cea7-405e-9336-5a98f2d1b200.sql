@@ -13,12 +13,13 @@ COMMENT ON COLUMN public.vehicles.pickup_instructions IS 'Special instructions f
 
 -- Insert FAQ item about driver onboarding and pickup details
 INSERT INTO public.faq_items (category_id, question, answer, display_order, region, is_active, is_public)
-VALUES (
-  '5111e83d-80d8-45a0-a1a2-1a69a509bef0',
+SELECT
+  c.id,
   'What happens after I sign the rental agreement?',
   'After all parties (driver, owner, and RentMaiKar admin witness) have signed the agreement, you will receive a confirmation email containing: (1) The vehicle pickup location and address, (2) Owner contact details including phone number, (3) Any special pickup instructions from the owner, and (4) A link to your dashboard where you can view all agreement details. You should coordinate directly with the owner to arrange a convenient pickup time. Make sure to complete the initial vehicle inspection report upon receiving the vehicle.',
   10,
   'all',
   true,
   true
-);
+FROM public.faq_categories c
+WHERE c.slug = 'drivers';
