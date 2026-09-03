@@ -3,7 +3,7 @@ SELECT cron.schedule(
   '* * * * *',
   $$
   SELECT net.http_post(
-    url := 'https://bwvocmhcledbwqlpcswp.supabase.co/functions/v1/sarekon-location-worker',
+    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/sarekon-location-worker',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1)

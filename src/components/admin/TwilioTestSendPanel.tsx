@@ -49,7 +49,7 @@ export const TwilioTestSendPanel = () => {
     const { data: sess } = await supabase.auth.getSession();
     const token = sess.session?.access_token;
     if (!token) throw new Error("Not signed in");
-    const base = `https://bwvocmhcledbwqlpcswp.functions.supabase.co/twilio-test-send`;
+    const base = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-test-send`;
     const url = sid ? `${base}?sid=${encodeURIComponent(sid)}` : base;
     const res = await fetch(url, {
       method,
@@ -74,7 +74,7 @@ export const TwilioTestSendPanel = () => {
       const token = sess.session?.access_token;
       if (!token) throw new Error("Not signed in");
       const res = await fetch(
-        `https://bwvocmhcledbwqlpcswp.functions.supabase.co/twilio-test-send?diagnostics=1`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-test-send?diagnostics=1`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       const json = await res.json().catch(() => ({}));
@@ -325,7 +325,7 @@ const NumberWebhookAudit = ({
       const token = sess.session?.access_token;
       if (!token) throw new Error("Not signed in");
       const res = await fetch(
-        `https://bwvocmhcledbwqlpcswp.functions.supabase.co/twilio-test-send`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-test-send`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },

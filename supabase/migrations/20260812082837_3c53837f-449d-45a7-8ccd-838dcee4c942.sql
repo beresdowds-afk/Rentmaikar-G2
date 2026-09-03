@@ -241,7 +241,7 @@ SELECT cron.schedule(
   '*/2 * * * *',
   $$
   select net.http_post(
-    url:='https://bwvocmhcledbwqlpcswp.supabase.co/functions/v1/dispatch-event-notifications',
+    url:='https://jrsydiofzceoeddjogov.supabase.co/functions/v1/dispatch-event-notifications',
     headers:=jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='CRON_SECRET' limit 1)),
     body:=jsonb_build_object('scheduled_at', now())
   );

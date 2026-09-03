@@ -21,7 +21,7 @@ import { useElevenLabsTTS } from "@/hooks/useElevenLabsTTS";
 import { useConversation } from "@elevenlabs/react";
 
 const DEFAULT_TTS = "Hello from Rentmaikar. This is an ElevenLabs test message confirming end-to-end audio delivery.";
-const FUNCTIONS_BASE = "https://bwvocmhcledbwqlpcswp.functions.supabase.co";
+const FUNCTIONS_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
 // ---------------- TTS TAB ----------------
 function TTSTest({ onLogged }: { onLogged: () => void }) {

@@ -1,0 +1,2 @@
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS preferred_country text CHECK (preferred_country IN ('USA','Nigeria'));
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS region_mode text CHECK (region_mode IN ('auto','manual'));

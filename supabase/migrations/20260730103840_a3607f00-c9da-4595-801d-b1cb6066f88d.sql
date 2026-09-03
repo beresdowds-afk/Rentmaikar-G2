@@ -6,7 +6,7 @@ SELECT cron.schedule(
   '*/15 * * * *',
   $$
   SELECT net.http_post(
-    url := 'https://bwvocmhcledbwqlpcswp.supabase.co/functions/v1/persona-reconcile',
+    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/persona-reconcile',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'x-correlation-id', 'cron-persona-reconcile-' || to_char(now(), 'YYYYMMDDHH24MI'),

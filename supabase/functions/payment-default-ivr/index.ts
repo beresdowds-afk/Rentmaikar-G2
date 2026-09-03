@@ -63,8 +63,7 @@ const handler = async (req: Request): Promise<Response> => {
 
         if (paymentDefault) {
           const sym = paymentDefault.currency === 'NGN' ? '₦' : '$';
-          const baseUrl = supabaseUrl.replace('.supabase.co', '.lovable.app').replace('https://bwvocmhcledbwqlpcswp', 'https://rentmaikar');
-          const paymentLink = `${baseUrl}/driver/dashboard?tab=payments`;
+          const paymentLink = `https://rentmaikar.com/driver/dashboard?tab=payments`;
 
           // Send payment link SMS
           await fetch(`${supabaseUrl}/functions/v1/send-sms-notification`, {

@@ -69,7 +69,7 @@ export function UnifiedBillingPanel({ userId, role, country }: Props) {
 
   const viewDoc = async (kind: "invoice" | "receipt", id: string) => {
     const { data: { session } } = await supabase.auth.getSession();
-    const url = `https://bwvocmhcledbwqlpcswp.functions.supabase.co/billing-portal`;
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/billing-portal`;
     try {
       const res = await fetch(url, {
         method: "POST",

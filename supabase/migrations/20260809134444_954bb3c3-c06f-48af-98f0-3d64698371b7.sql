@@ -78,7 +78,7 @@ SELECT cron.schedule(
   '* * * * *',
   $$
   SELECT net.http_post(
-    url := 'https://bwvocmhcledbwqlpcswp.supabase.co/functions/v1/mqtt-ingestion-worker',
+    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/mqtt-ingestion-worker',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'SERVICE_ROLE_KEY' LIMIT 1)

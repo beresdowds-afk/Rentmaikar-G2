@@ -1,0 +1,1 @@
+GRANT EXECUTE ON FUNCTION public.get_support_staff_city(uuid, support_task_type) TO anon;

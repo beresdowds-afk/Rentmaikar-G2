@@ -42,7 +42,7 @@ export function useElevenLabsTTS() {
       if (!token) throw new Error("Not signed in");
 
       const fnName = opts.stream ? "elevenlabs-tts-stream" : "elevenlabs-tts";
-      const url = `https://bwvocmhcledbwqlpcswp.functions.supabase.co/${fnName}`;
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${fnName}`;
 
       const res = await fetch(url, {
         method: "POST",

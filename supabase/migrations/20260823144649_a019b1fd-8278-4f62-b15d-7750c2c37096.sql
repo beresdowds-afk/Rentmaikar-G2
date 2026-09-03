@@ -14,7 +14,7 @@ BEGIN
       WHERE name = 'CRON_SECRET'
       LIMIT 1;
     PERFORM net.http_post(
-      url := 'https://bwvocmhcledbwqlpcswp.supabase.co/functions/v1/booking-email-trigger',
+      url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/booking-email-trigger',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'x-cron-secret', coalesce(v_secret, '')
@@ -43,7 +43,7 @@ SELECT cron.schedule(
   '15 * * * *',
   $cron$
   SELECT net.http_post(
-    url := 'https://bwvocmhcledbwqlpcswp.supabase.co/functions/v1/send-booking-reminders',
+    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/send-booking-reminders',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1)
