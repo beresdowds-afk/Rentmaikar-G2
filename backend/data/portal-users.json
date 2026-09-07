@@ -1,0 +1,13 @@
+[
+  {
+    "id": "usr-admin-root",
+    "email": "admin@rentmaikar.com",
+    "name": "Platform Administrator",
+    "role": "admin",
+    "passwordHash": "c1d93dae4d4d87a91de81d29b1129c0ee5d6030587003091dce815e5caa46d6d006a574e17cea9e411a2a45298793906d8f792b2a669148fda232d1001af45a6",
+    "passwordSalt": "c63569458dd84a9f03b0f47179635755",
+    "createdAt": "2026-09-05T16:31:51.808Z",
+    "isActive": true,
+    "lastLoginAt": "2026-09-05T16:31:51.824Z"
+  }
+]

@@ -5,7 +5,9 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BatteryCharging, RefreshCw } from "lucide-react";
+import { BatteryCharging, Cpu, CheckCircle2, RefreshCw } from "lucide-react";
+import { pwaWorkerManager } from "@/pwa/pwa-worker-manager";
+import { toast } from "sonner";
 import {
   DEFAULT_LIVE_SYNC_SETTINGS,
   LIVE_SYNC_LIMITS,
@@ -156,6 +158,41 @@ export default function LiveSyncSettingsPanel() {
             Data Saver is active — checks are currently running 3× less often.
           </p>
         )}
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Cpu className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 font-medium">
+                <span>Dedicated Web Worker</span>
+                <Badge variant="outline" className="gap-1 border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                  Active
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Runs background sync on an isolated thread without service worker cache pollution.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() => {
+              pwaWorkerManager.triggerImmediateSync();
+              toast.success("Background sync triggered", {
+                description: "Dedicated worker dispatched immediate refresh tick.",
+              });
+            }}
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Sync Now
+          </Button>
+        </div>
 
         <Button
           type="button"

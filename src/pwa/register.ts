@@ -1,20 +1,16 @@
 // src/pwa/register.ts
 //
-// Cache decommissioning.
+// PWA Worker Architecture:
+// The PWA operates background sync via a Dedicated Web Worker (src/workers/live-sync.worker.ts)
+// instead of a Service Worker fetch interceptor. This avoids stale cached HTML shells,
+// prevents deployment synchronization lag, and eliminates background interval throttling.
 //
-// Older deployments shipped a Workbox/vite-plugin-pwa app-shell service worker
-// that precached index.html. Those workers keep serving a stale landing page
-// long after a new deploy — including inside the Lovable preview, where the
-// origin can still be controlled by a worker registered by an earlier build.
-//
-// This module therefore runs in EVERY environment (dev, preview, production):
-//   1. Unregister any service worker that is not the push worker.
-//   2. Delete every non-push/non-firebase cache bucket.
-//   3. Reload exactly once per browsing session if the page was being
-//      controlled by one of those obsolete workers (so the user immediately
-//      gets the fresh HTML instead of the cached shell).
+// Service workers (other than Web Push) are actively decommissioned and uninstalled.
 
-const CLEANUP_SW = "/sw.js";
+import { pwaWorkerManager } from "./pwa-worker-manager";
+
+export { pwaWorkerManager };
+
 const RELOAD_FLAG = "rentmaikar_stale_sw_reloaded";
 
 const isPushWorker = (scriptURL: string) =>
@@ -48,56 +44,59 @@ function reloadOnce() {
   window.location.reload();
 }
 
+/**
+ * Bootstraps the PWA Worker architecture:
+ * 1. Unregisters any obsolete service worker cache layers.
+ * 2. Purges stale cache buckets.
+ * 3. Confirms Dedicated Web Worker readiness for background live-sync.
+ */
 export async function registerPWA(): Promise<void> {
   if (typeof window === "undefined") return;
-  if (!("serviceWorker" in navigator)) return;
 
-  try {
-    const registrations = await navigator.serviceWorker.getRegistrations();
+  // 1. Ensure any legacy/stale Service Worker caching layer is completely dismantled
+  if ("serviceWorker" in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
 
-    const obsolete = registrations.filter((registration) => {
-      const script =
-        registration.active?.scriptURL ||
-        registration.waiting?.scriptURL ||
-        registration.installing?.scriptURL ||
-        "";
-      return script !== "" && !isPushWorker(script);
-    });
-
-    const controlledByObsolete =
-      !!navigator.serviceWorker.controller &&
-      !isPushWorker(navigator.serviceWorker.controller.scriptURL);
-
-    await Promise.allSettled(obsolete.map((r) => r.unregister()));
-
-    const purged = await purgeCaches();
-
-    if (obsolete.length || purged.length) {
-      console.info(
-        `[PWA] Decommissioned ${obsolete.length} worker(s), purged ${purged.length} cache bucket(s).`,
-      );
-    }
-
-    if (controlledByObsolete) {
-      console.info("[PWA] Stale worker was controlling this page — reloading once.");
-      reloadOnce();
-      return;
-    }
-
-    // Production only: register the self-terminating cleanup worker so returning
-    // visitors whose browsers still hold an old worker get scrubbed as well.
-    if (import.meta.env.PROD) {
-      await navigator.serviceWorker.register(CLEANUP_SW, { updateViaCache: "none" });
-
-      navigator.serviceWorker.addEventListener("message", (event) => {
-        if (event.data?.type === "CACHE_CLEANUP_COMPLETE") {
-          console.info("[PWA] Cache cleanup complete.");
-        } else if (event.data?.type === "CACHE_CLEANUP_FAILED") {
-          console.error("[PWA] Cache cleanup failed.", event.data.error);
-        }
+      const obsolete = registrations.filter((registration) => {
+        const script =
+          registration.active?.scriptURL ||
+          registration.waiting?.scriptURL ||
+          registration.installing?.scriptURL ||
+          "";
+        return script !== "" && !isPushWorker(script);
       });
+
+      const controlledByObsolete =
+        !!navigator.serviceWorker.controller &&
+        !isPushWorker(navigator.serviceWorker.controller.scriptURL);
+
+      await Promise.allSettled(obsolete.map((r) => r.unregister()));
+
+      const purged = await purgeCaches();
+
+      if (obsolete.length || purged.length) {
+        console.info(
+          `[PWA] Decommissioned ${obsolete.length} legacy service worker(s), purged ${purged.length} cache bucket(s).`,
+        );
+      }
+
+      if (controlledByObsolete) {
+        console.info("[PWA] Stale service worker was controlling this page — reloading once.");
+        reloadOnce();
+        return;
+      }
+    } catch (err) {
+      console.error("[PWA] Service worker decommission check failed:", err);
     }
+  }
+
+  // 2. Initialize the Dedicated Web Worker for PWA sync
+  try {
+    const state = pwaWorkerManager.getState();
+    console.info(`[PWA] Active background engine: ${state.workerType}`);
   } catch (err) {
-    console.error("[PWA] Cache decommission failed.", err);
+    console.warn("[PWA] Dedicated web worker initialization warning:", err);
   }
 }
+

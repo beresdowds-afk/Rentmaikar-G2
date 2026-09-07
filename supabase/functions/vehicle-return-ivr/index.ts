@@ -25,6 +25,7 @@ const handler = async (req: Request): Promise<Response> => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const voiceBaseUrl = Deno.env.get("VOICE_SUPABASE_URL") || supabaseUrl;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -138,7 +139,7 @@ const handler = async (req: Request): Promise<Response> => {
           </Response>`;
         } else {
           twiml = `<Response>
-            <Gather numDigits="1" action="${supabaseUrl}/functions/v1/vehicle-return-ivr?rentalId=${rentalId}&vehicleId=${vehicleId}&driverId=${driverId}" method="POST" timeout="8">
+            <Gather numDigits="1" action="${voiceBaseUrl}/functions/v1/vehicle-return-ivr?rentalId=${rentalId}&vehicleId=${vehicleId}&driverId=${driverId}" method="POST" timeout="8">
               <Say voice="alice">
                 Unfortunately, the vehicle is not available for extension as it has been reserved for another driver.
                 Press 4 to speak with a support agent about alternative arrangements.
@@ -165,7 +166,7 @@ const handler = async (req: Request): Promise<Response> => {
             Your issue has been logged and a support team member will contact you within 2 hours.
             If this is an emergency, please press 4 now to speak with an agent immediately.
           </Say>
-          <Gather numDigits="1" action="${supabaseUrl}/functions/v1/vehicle-return-ivr?rentalId=${rentalId}&vehicleId=${vehicleId}&driverId=${driverId}" method="POST" timeout="5">
+          <Gather numDigits="1" action="${voiceBaseUrl}/functions/v1/vehicle-return-ivr?rentalId=${rentalId}&vehicleId=${vehicleId}&driverId=${driverId}" method="POST" timeout="5">
             <Say voice="alice">Press 4 for an agent, or hang up to end this call.</Say>
           </Gather>
           <Say voice="alice">Thank you. A support agent will reach out to you shortly. Goodbye.</Say>

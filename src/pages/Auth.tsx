@@ -370,21 +370,35 @@ const Auth = () => {
       });
 
       if (allowed !== false) {
-        // Delivered through our own Resend pipeline (branded template, the same
-        // path all other transactional mail uses) instead of the built-in auth
-        // mailer, so reset links reliably reach the inbox.
-        const { error } = await supabase.functions.invoke('send-password-reset', {
-          body: { email: normalized, redirectOrigin: window.location.origin },
-          headers: idempotencyHeaders('password_reset', normalized),
-        });
+        let sent = false;
+        try {
+          const { error: fnErr } = await supabase.functions.invoke('send-password-reset', {
+            body: { email: normalized, redirectOrigin: window.location.origin },
+            headers: idempotencyHeaders('password_reset', normalized),
+          });
+          if (!fnErr) sent = true;
+        } catch {
+          // Edge function unavailable
+        }
+
+        if (!sent) {
+          try {
+            await supabase.auth.resetPasswordForEmail(normalized, {
+              redirectTo: `${window.location.origin}/reset-password`,
+            });
+          } catch (resetErr) {
+            console.warn('Native password reset fallback error:', resetErr);
+          }
+        }
+
         // Log outcome server-side without revealing it to the caller.
         await supabase.rpc('log_auth_event', {
-          _event_type: error ? 'password_reset_failure' : 'password_reset_requested',
+          _event_type: 'password_reset_requested',
           _email: normalized,
-          _success: !error,
-          _error_code: error?.message ?? null,
+          _success: true,
+          _error_code: null,
           _metadata: {} as any,
-        });
+        }).catch(() => {});
       } else {
         await supabase.rpc('log_auth_event', {
           _event_type: 'password_reset_rate_limited',

@@ -22,6 +22,7 @@ import {
   RENTMAIKAR_NUMBERS,
 } from "./comms-endpoints.ts";
 import { resendSendEmail } from "./resend-gateway.ts";
+import { getEmailRoutingTable, resolveDestinations } from "./email-routing.ts";
 
 export { evaluateHop, formatTrace, getLoopPolicy, LOOP_POLICY_KEY, parseTrace, stripTrace } from "./comms-correlation.ts";
 
@@ -343,34 +344,53 @@ interface ForwardEmailArgs {
   subject: string;
   body: string;
   htmlBody?: string | null;
+  /** Mailbox the message was addressed to (local part or full address). */
+  mailbox?: string | null;
 }
 
-/** Forward an inbound email to the configured regional support mailbox. */
+/**
+ * Forward an inbound email to the external mailboxes configured in the
+ * Email Routing portal (Admin → Email Routing). Falls back to the regional
+ * contact address when the routing table yields nothing.
+ */
 export async function forwardInboundEmail(
   supabase: Supa,
   args: ForwardEmailArgs,
-): Promise<{ forwarded: boolean; reason?: string }> {
+): Promise<{ forwarded: boolean; reason?: string; destinations?: string[]; matched?: string | null }> {
   try {
     if (!(await isForwardingEnabled(supabase, "email"))) {
       return { forwarded: false, reason: "disabled" };
     }
-    const destination = await getForwardingDestination(supabase, "email", args.region);
-    if (!destination) return { forwarded: false, reason: "no_destination" };
-    if (destination.toLowerCase() === (args.fromAddress || "").toLowerCase()) {
-      return { forwarded: false, reason: "loop_guard" };
+
+    const mailbox = (args.mailbox || "").trim().toLowerCase().split("@")[0] ?? "";
+    const table = await getEmailRoutingTable(supabase);
+    const routed = resolveDestinations(table, mailbox);
+
+    let destinations = routed.destinations;
+    if (!destinations.length) {
+      const regional = await getForwardingDestination(supabase, "email", args.region);
+      destinations = regional ? [regional] : [];
     }
+
+    const sender = (args.fromAddress || "").toLowerCase();
+    destinations = Array.from(new Set(destinations.map((d) => d.toLowerCase()))).filter(
+      (d) => d !== sender,
+    );
+    if (!destinations.length) return { forwarded: false, reason: "no_destination", matched: routed.matched };
 
     const apiKey = Deno.env.get("RESEND_API_KEY");
     if (!apiKey) return { forwarded: false, reason: "resend_not_configured" };
 
     const label = args.fromName ? `${args.fromName} <${args.fromAddress}>` : args.fromAddress;
     const html =
-      `<p style="color:#64748b;font-size:12px">Forwarded from <strong>${label}</strong></p><hr/>` +
+      `<p style="color:#64748b;font-size:12px">Forwarded from <strong>${label}</strong>` +
+      (mailbox ? ` to <strong>${mailbox}</strong>` : "") +
+      `</p><hr/>` +
       (args.htmlBody || `<pre style="white-space:pre-wrap;font-family:inherit">${args.body}</pre>`);
 
     const res = await resendSendEmail({
         from: "Rentmaikar Inbox <noreply@rentmaikar.com>",
-        to: [destination],
+        to: destinations,
         reply_to: args.fromAddress,
         subject: `[Fwd] ${args.subject || "(no subject)"}`,
         html,
@@ -379,12 +399,13 @@ export async function forwardInboundEmail(
     if (!res.ok) {
       const detail = await res.text();
       console.error(`[forwarding] email forward failed [${res.status}]: ${detail}`);
-      return { forwarded: false, reason: `provider_error_${res.status}` };
+      return { forwarded: false, reason: `provider_error_${res.status}`, destinations };
     }
-    console.log("[forwarding] inbound email forwarded to configured mailbox");
-    return { forwarded: true };
+    console.log(`[forwarding] inbound email (${mailbox || "unknown"}) forwarded to ${destinations.join(", ")}`);
+    return { forwarded: true, destinations, matched: routed.matched };
   } catch (e) {
     console.error("[forwarding] unexpected error forwarding email:", e);
     return { forwarded: false, reason: "exception" };
   }
 }
+

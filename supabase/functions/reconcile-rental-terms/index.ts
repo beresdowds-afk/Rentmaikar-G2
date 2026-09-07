@@ -8,6 +8,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
 
 interface Discrepancy {
   rental_id: string;
@@ -23,22 +24,13 @@ interface Discrepancy {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const supabaseUser = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
-  const { data: userData } = await supabaseUser.auth.getUser();
-  const uid = userData?.user?.id;
-  if (!uid) return new Response("unauthorized", { status: 401 });
+  const cronDenied = await requireCronSecretAsync(req);
+  if (cronDenied) return cronDenied;
 
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const { data: isAdmin } = await admin.rpc("has_role", { _user_id: uid, _role: "admin" });
-  if (!isAdmin) return new Response("forbidden", { status: 403 });
 
   let body: any = {};
   try { body = await req.json(); } catch { body = {}; }

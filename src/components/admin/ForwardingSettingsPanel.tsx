@@ -278,7 +278,6 @@ export const ForwardingSettingsPanel = () => {
                 </div>
                 <Switch
                   checked={!!config.link_outbound}
-                  disabled={savingKey === 'link'}
                   onCheckedChange={toggleLink}
                 />
               </div>
@@ -301,7 +300,6 @@ export const ForwardingSettingsPanel = () => {
                   </div>
                   <Switch
                     checked={config[key]}
-                    disabled={savingKey === `in-${key}`}
                     onCheckedChange={(v) => toggleInbound(key, v)}
                   />
                 </div>
@@ -352,7 +350,6 @@ export const ForwardingSettingsPanel = () => {
                           </div>
                           <Switch
                             checked={on}
-                            disabled={savingKey === `out-${region}-${key}` || savingKey === `out-${region}-all`}
                             onCheckedChange={(v) => toggleOutbound(region, key, v)}
                           />
                         </div>
@@ -411,7 +408,6 @@ export const ForwardingSettingsPanel = () => {
                   </div>
                   <Switch
                     checked={loopPolicy.enabled}
-                    disabled={savingKey === 'loop'}
                     onCheckedChange={(v) => saveLoopPolicy({ ...loopPolicy, enabled: v })}
                   />
                 </div>

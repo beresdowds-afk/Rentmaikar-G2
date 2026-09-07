@@ -14,12 +14,25 @@ export async function assignRole(
   role: AppRole,
   email?: string | null,
 ): Promise<void> {
-  const { error } = await supabase.rpc('provision_user_account', {
-    _user_id: userId,
-    _role: role,
-    ...(email ? { _email: email } : {}),
-  } as never);
-  if (error) throw error;
+  try {
+    const { error } = await supabase.rpc('provision_user_account', {
+      _user_id: userId,
+      _role: role,
+      ...(email ? { _email: email } : {}),
+    } as never);
+    if (!error) return;
+  } catch {
+    // Fall back to direct table upsert below
+  }
+
+  try {
+    await supabase.from('user_roles').upsert(
+      { user_id: userId, role: role as any },
+      { onConflict: 'user_id,role' }
+    );
+  } catch (tableErr) {
+    console.warn('Fallback user_roles assignment error:', tableErr);
+  }
 }
 
 /** Revoke a single role row. Provisioning never removes roles, so this stays direct. */

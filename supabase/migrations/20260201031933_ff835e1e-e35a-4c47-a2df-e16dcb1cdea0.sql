@@ -1,5 +1,6 @@
--- Drop the old INSERT policy that requires authentication
+-- Drop the old INSERT policies
 DROP POLICY IF EXISTS "Authenticated users can submit applications" ON public.applications;
+DROP POLICY IF EXISTS "Anyone can submit applications" ON public.applications;
 
 -- Create a new policy that allows anyone to submit applications
 -- This is necessary because the registration forms are public-facing

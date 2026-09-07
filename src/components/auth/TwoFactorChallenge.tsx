@@ -6,8 +6,8 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Shield, Loader2, AlertCircle, ArrowLeft, Smartphone, PhoneCall, Clock } from 'lucide-react';
 import { toast } from 'sonner';
-import rentmaikarLogo from '@/assets/rentmaikar-logo.png';
-import { ResendButton } from '@/components/common/ResendButton';
+import rentmaikarLogo from '@/assets/rentmaikar-logo.jpg';
+import { ResendButton } from '@/components/auth/ResendButton';
 import { verifyTotpCode, getStoredTotpSecret, getTotpSecondsRemaining } from '@/lib/totp';
 
 interface TwoFactorChallengeProps {

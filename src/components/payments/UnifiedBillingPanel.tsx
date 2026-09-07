@@ -205,7 +205,7 @@ export function UnifiedBillingPanel({ userId, role, country }: Props) {
           </DialogHeader>
           {payTarget && (
             <PaymentPreflightGate
-              operation={role === "driver" ? "driver_payment" : "owner_payout"}
+              operation={role === "driver" ? "driver_payment" : "invoice_payment"}
               amount={Number(Number(payTarget.total_amount).toFixed(2))}
               currency={payTarget.currency ?? undefined}
               context={{ invoice_id: payTarget.id, invoice_type: payTarget.invoice_type }}
@@ -215,7 +215,7 @@ export function UnifiedBillingPanel({ userId, role, country }: Props) {
                 amount={Number(Number(payTarget.total_amount).toFixed(2))}
                 rentalId={payTarget.rental_id ?? undefined}
                 vehicleId={payTarget.vehicle_id ?? undefined}
-                driverId={role === "driver" ? userId : payTarget.driver_id ?? undefined}
+                driverId={role === "driver" ? userId : (payTarget.driver_id ?? userId)}
                 description={`Invoice ${payTarget.invoice_number} · ${labelFor(payTarget.invoice_type)}`}
                 onSuccess={() => {
                   toast.success("Payment received. Receipt will arrive shortly.");

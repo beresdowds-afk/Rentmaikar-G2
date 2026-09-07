@@ -7,6 +7,16 @@ import { Copy, Check, RefreshCw, Loader2, AlertTriangle, CheckCircle2, Wrench } 
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+interface TwilioNumber {
+  sid: string;
+  phoneNumber: string;
+  friendlyName: string;
+  voiceUrl: string;
+  voiceMethod: string;
+  matches: boolean;
+  role?: 'inbound' | 'outbound';
+}
+
 interface TwiMLConfigResponse {
   expected: {
     voiceUrl: string;
@@ -14,6 +24,7 @@ interface TwiMLConfigResponse {
     statusCallbackUrl: string;
     recordingCallbackUrl: string;
     accessTokenUrl: string;
+    incomingCallUrl: string;
   };
   secrets: Record<string, boolean>;
   twimlApp: {
@@ -25,6 +36,11 @@ interface TwiMLConfigResponse {
     statusCallbackMethod: string | null;
   } | null;
   matches: boolean;
+  incomingNumber: TwilioNumber | null;
+  incomingNumberError?: string;
+  outgoingNumber?: TwilioNumber | null;
+  outgoingNumberError?: string;
+  callerId?: string;
   error?: string;
   applied?: boolean;
 }
@@ -56,8 +72,8 @@ export const TwiMLAppConfigPanel = () => {
   const [isApplying, setIsApplying] = useState(false);
   const { toast } = useToast();
 
-  const load = useCallback(async (action: 'verify' | 'apply' = 'verify') => {
-    action === 'apply' ? setIsApplying(true) : setIsLoading(true);
+  const load = useCallback(async (action: 'verify' | 'apply' | 'apply-number' = 'verify') => {
+    action === 'verify' ? setIsLoading(true) : setIsApplying(true);
     try {
       const { data: res, error } = await supabase.functions.invoke('voice-twiml-config', {
         body: { action },
@@ -66,6 +82,9 @@ export const TwiMLAppConfigPanel = () => {
       setData(res as TwiMLConfigResponse);
       if (action === 'apply') {
         toast({ title: 'TwiML App updated', description: 'Voice Request URL now points at voice-twiml-dial.' });
+      }
+      if (action === 'apply-number') {
+        toast({ title: 'Phone number updated', description: 'Incoming calls now route to the call centre.' });
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to load TwiML App configuration';
@@ -104,6 +123,7 @@ export const TwiMLAppConfigPanel = () => {
               <UrlRow label="Call status callback" value={data.expected.statusCallbackUrl} />
               <UrlRow label="Recording status callback" value={data.expected.recordingCallbackUrl} />
               <UrlRow label="Access token endpoint" value={data.expected.accessTokenUrl} />
+              <UrlRow label="Incoming call webhook (POST)" value={data.expected.incomingCallUrl} />
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -164,6 +184,80 @@ export const TwiMLAppConfigPanel = () => {
               )}
             </>
           )}
+
+          {(data?.incomingNumber || data?.incomingNumberError) && (
+            <div className="space-y-3 rounded-md border p-3">
+              <p className="text-sm font-medium">Customer line (incoming calls)</p>
+              {data.incomingNumberError && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Inbound number not verified</AlertTitle>
+                  <AlertDescription>{data.incomingNumberError}</AlertDescription>
+                </Alert>
+              )}
+              {data.incomingNumber && (
+                <Alert variant={data.incomingNumber.matches ? 'default' : 'destructive'}>
+                  {data.incomingNumber.matches ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4" />
+                  )}
+                  <AlertTitle>
+                    {data.incomingNumber.matches
+                      ? 'Incoming calls reach the call centre'
+                      : 'Incoming call webhook is not pointed at the platform'}
+                  </AlertTitle>
+                  <AlertDescription>
+                    {data.incomingNumber.phoneNumber} currently calls{' '}
+                    <code className="break-all">{data.incomingNumber.voiceUrl || '— not set —'}</code>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+
+          {(data?.outgoingNumber || data?.outgoingNumberError) && (
+            <div className="space-y-3 rounded-md border p-3">
+              <p className="text-sm font-medium">Staff line (outgoing calls)</p>
+              {data.outgoingNumberError && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Outbound number not verified</AlertTitle>
+                  <AlertDescription>{data.outgoingNumberError}</AlertDescription>
+                </Alert>
+              )}
+              {data.outgoingNumber && (
+                <Alert variant={data.outgoingNumber.matches ? 'default' : 'destructive'}>
+                  {data.outgoingNumber.matches ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4" />
+                  )}
+                  <AlertTitle>
+                    {data.outgoingNumber.matches
+                      ? 'Outgoing calls show this number, and return calls come back to the call centre'
+                      : 'Return calls to this number are not handled yet'}
+                  </AlertTitle>
+                  <AlertDescription>
+                    {data.outgoingNumber.phoneNumber} currently calls{' '}
+                    <code className="break-all">{data.outgoingNumber.voiceUrl || '— not set —'}</code>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+
+          {(data?.incomingNumber?.matches === false || data?.outgoingNumber?.matches === false) && (
+            <Button onClick={() => load('apply-number')} disabled={isApplying}>
+              {isApplying ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wrench className="mr-2 h-4 w-4" />
+              )}
+              Point both numbers at the call centre
+            </Button>
+          )}
+
 
           {data?.secrets && (
             <div className="flex flex-wrap gap-2 pt-2">

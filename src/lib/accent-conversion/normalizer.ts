@@ -1,261 +1,127 @@
 /**
- * Real-time Speech Accent and Idiom Normalizer
+ * Idiom / phrasing normaliser.
  *
- * Converts regional Nigerian / West African and Commonwealth speech expressions
- * into standard, natural, conversational American English idioms and vocabulary.
+ * Converts Nigerian, West African and Commonwealth English colloquialisms and
+ * spellings into natural American English before the text is handed to the
+ * voice engine. Purely presentational — it never changes meaning-critical
+ * business terms (amounts, names, vehicle identifiers).
  */
 
-interface IdiomReplacement {
-  pattern: RegExp;
-  replacement: string;
-  originalLabel: string;
-  americanLabel: string;
+export interface NormalizationResult {
+  text: string;
+  replacements: string[];
 }
 
-const IDIOM_RULES: IdiomReplacement[] = [
-  // Common conversational idioms
-  {
-    pattern: /\b(?:i\s+am|i'm)\s+coming\b/gi,
-    replacement: "I'll be right with you",
-    originalLabel: "I am coming",
-    americanLabel: "I'll be right with you",
-  },
-  {
-    pattern: /\b(?:flash|flash\s+my|flash\s+me)\s*(?:phone|line|number)?\b/gi,
-    replacement: "give me a quick call",
-    originalLabel: "flash me",
-    americanLabel: "give me a quick call",
-  },
-  {
-    pattern: /\bput\s+off\s+(?:the\s+)?(?:engine|car|motor|vehicle)\b/gi,
-    replacement: "turn off the engine",
-    originalLabel: "put off the engine",
-    americanLabel: "turn off the engine",
-  },
-  {
-    pattern: /\bput\s+on\s+(?:the\s+)?(?:engine|car|motor|vehicle|ac|a\/c)\b/gi,
-    replacement: "turn on the engine",
-    originalLabel: "put on the engine",
-    americanLabel: "turn on the engine",
-  },
-  {
-    pattern: /\bhold\s*up\s+is\s+heavy\b/gi,
-    replacement: "there is heavy traffic",
-    originalLabel: "hold up is heavy",
-    americanLabel: "there is heavy traffic",
-  },
-  {
-    pattern: /\b(?:go-slow|go\s+slow)\b/gi,
-    replacement: "traffic delay",
-    originalLabel: "go-slow",
-    americanLabel: "traffic delay",
-  },
-  {
-    pattern: /\b(?:borrow\s+me)\b/gi,
-    replacement: "lend me",
-    originalLabel: "borrow me",
-    americanLabel: "lend me",
-  },
-  {
-    pattern: /\brevert\s+back\b/gi,
-    replacement: "get back to you",
-    originalLabel: "revert back",
-    americanLabel: "get back to you",
-  },
-  {
-    pattern: /\bcan\s+you\s+hear\s+me\s+well\??\b/gi,
-    replacement: "can you hear me clearly?",
-    originalLabel: "can you hear me well?",
-    americanLabel: "can you hear me clearly?",
-  },
-  {
-    pattern: /\bdrop\s+me\s+at\s+the\s+junction\b/gi,
-    replacement: "drop me off at the intersection",
-    originalLabel: "drop me at the junction",
-    americanLabel: "drop me off at the intersection",
-  },
-  {
-    pattern: /\bthe\s+junction\b/gi,
-    replacement: "the intersection",
-    originalLabel: "the junction",
-    americanLabel: "the intersection",
-  },
-  {
-    pattern: /\byour\s+particulars\b/gi,
-    replacement: "your vehicle registration documents",
-    originalLabel: "your particulars",
-    americanLabel: "your vehicle registration documents",
-  },
-  {
-    pattern: /\btear-rubber\s+car\b/gi,
-    replacement: "brand new vehicle",
-    originalLabel: "tear-rubber car",
-    americanLabel: "brand new vehicle",
-  },
-  {
-    pattern: /\b(?:enter\s+the\s+motor|board\s+the\s+motor)\b/gi,
-    replacement: "get in the vehicle",
-    originalLabel: "enter the motor",
-    americanLabel: "get in the vehicle",
-  },
-  {
-    pattern: /\b(?:driver\s+is\s+on\s+ground)\b/gi,
-    replacement: "driver is on site",
-    originalLabel: "driver is on ground",
-    americanLabel: "driver is on site",
-  },
-  {
-    pattern: /\b(?:i\s+am\s+on\s+ground)\b/gi,
-    replacement: "I am already on site",
-    originalLabel: "I am on ground",
-    americanLabel: "I am already on site",
-  },
-  {
-    pattern: /\b(?:send\s+me\s+airtime)\b/gi,
-    replacement: "top up my phone credit",
-    originalLabel: "send me airtime",
-    americanLabel: "top up my phone credit",
-  },
-  {
-    pattern: /\b(?:light\s+has\s+come)\b/gi,
-    replacement: "power is restored",
-    originalLabel: "light has come",
-    americanLabel: "power is restored",
-  },
-  {
-    pattern: /\b(?:chanced)\b/gi,
-    replacement: "have time",
-    originalLabel: "chanced",
-    americanLabel: "have time",
-  },
-  {
-    pattern: /\b(?:round\s+up)\b/gi,
-    replacement: "wrap up",
-    originalLabel: "round up",
-    americanLabel: "wrap up",
-  },
-  {
-    pattern: /\b(?:rub\s+minds)\b/gi,
-    replacement: "brainstorm together",
-    originalLabel: "rub minds",
-    americanLabel: "brainstorm together",
-  },
-  {
-    pattern: /\b(?:safe\s+journey)\b/gi,
-    replacement: "safe travels",
-    originalLabel: "safe journey",
-    americanLabel: "safe travels",
-  },
-  // Automotive & transport terms
-  {
-    pattern: /\bbonnet\b/gi,
-    replacement: "hood",
-    originalLabel: "bonnet",
-    americanLabel: "hood",
-  },
-  {
-    pattern: /\bboot\b/gi,
-    replacement: "trunk",
-    originalLabel: "boot",
-    americanLabel: "trunk",
-  },
-  {
-    pattern: /\bwindscreen\b/gi,
-    replacement: "windshield",
-    originalLabel: "windscreen",
-    americanLabel: "windshield",
-  },
-  {
-    pattern: /\btyre\b/gi,
-    replacement: "tire",
-    originalLabel: "tyre",
-    americanLabel: "tire",
-  },
-  {
-    pattern: /\bpetrol\b/gi,
-    replacement: "gas",
-    originalLabel: "petrol",
-    americanLabel: "gas",
-  },
-  {
-    pattern: /\blorry\b/gi,
-    replacement: "truck",
-    originalLabel: "lorry",
-    americanLabel: "truck",
-  },
-  {
-    pattern: /\bparking\s+lot\b/gi,
-    replacement: "parking lot",
-    originalLabel: "car park",
-    americanLabel: "parking lot",
-  },
-  {
-    pattern: /\bcar\s+park\b/gi,
-    replacement: "parking lot",
-    originalLabel: "car park",
-    americanLabel: "parking lot",
-  },
-  {
-    pattern: /\bmotorway\b/gi,
-    replacement: "freeway",
-    originalLabel: "motorway",
-    americanLabel: "freeway",
-  },
-  {
-    pattern: /\bdual\s+carriageway\b/gi,
-    replacement: "divided highway",
-    originalLabel: "dual carriageway",
-    americanLabel: "divided highway",
-  },
-  {
-    pattern: /\broundabout\b/gi,
-    replacement: "traffic circle",
-    originalLabel: "roundabout",
-    americanLabel: "traffic circle",
-  },
+interface Rule {
+  pattern: RegExp;
+  replacement: string;
+}
+
+const PHRASE_RULES: Rule[] = [
+  { pattern: /\bi am coming\b/gi, replacement: "I'll be right with you" },
+  { pattern: /\bi'?m coming\b/gi, replacement: "I'll be right with you" },
+  { pattern: /\bflash (my|your|his|her|the) line\b/gi, replacement: 'give me a call' },
+  { pattern: /\bflash me\b/gi, replacement: 'give me a quick call' },
+  { pattern: /\bhold ?-?up is heavy\b/gi, replacement: "there's heavy traffic" },
+  { pattern: /\bthere is hold ?-?up\b/gi, replacement: "there's traffic" },
+  { pattern: /\bgo-?slow\b/gi, replacement: 'traffic' },
+  { pattern: /\bparticulars\b/gi, replacement: 'vehicle registration documents' },
+  { pattern: /\bdo the needful\b/gi, replacement: 'take care of it' },
+  { pattern: /\brevert back to me\b/gi, replacement: 'get back to me' },
+  { pattern: /\brevert to me\b/gi, replacement: 'get back to me' },
+  { pattern: /\bkindly\b/gi, replacement: 'please' },
+  { pattern: /\bplease find attached\b/gi, replacement: "I've attached" },
+  { pattern: /\bi will branch\b/gi, replacement: "I'll stop by" },
+  { pattern: /\bhow far\b/gi, replacement: 'how are you doing' },
+  { pattern: /\bwell done\b/gi, replacement: 'good to hear from you' },
+  { pattern: /\bnow now\b/gi, replacement: 'right away' },
+  { pattern: /\bjust now\b/gi, replacement: 'a moment ago' },
+  { pattern: /\bsorry o\b/gi, replacement: "I'm sorry about that" },
+  { pattern: /\bno wahala\b/gi, replacement: 'no problem' },
+  { pattern: /\bwahala\b/gi, replacement: 'trouble' },
+  { pattern: /\bna so\b/gi, replacement: "that's right" },
+  { pattern: /\bmake i\b/gi, replacement: 'let me' },
+  { pattern: /\babeg\b/gi, replacement: 'please' },
+  { pattern: /\bi dey come\b/gi, replacement: "I'll be right back" },
+  { pattern: /\bpick (the )?call\b/gi, replacement: 'answer the call' },
+  { pattern: /\bdrop me\b/gi, replacement: 'drop me off' },
+  { pattern: /\bcarry passengers?\b/gi, replacement: 'pick up passengers' },
+  { pattern: /\bfuel scarcity\b/gi, replacement: 'a gas shortage' },
+  { pattern: /\bpetrol\b/gi, replacement: 'gas' },
+  { pattern: /\bboot of the car\b/gi, replacement: 'trunk' },
+  { pattern: /\bbonnet\b/gi, replacement: 'hood' },
+  { pattern: /\bwind ?screen\b/gi, replacement: 'windshield' },
+  { pattern: /\bindicator\b/gi, replacement: 'turn signal' },
+  { pattern: /\bnumber plate\b/gi, replacement: 'license plate' },
+  { pattern: /\bmotor park\b/gi, replacement: 'parking lot' },
+  { pattern: /\bmechanic workshop\b/gi, replacement: 'repair shop' },
+  { pattern: /\bcurrent\b(?= is (off|out|back))/gi, replacement: 'power' },
+  { pattern: /\bnetwork is bad\b/gi, replacement: "the connection is poor" },
+  { pattern: /\bon (a )?seat\b/gi, replacement: 'seated' },
+  { pattern: /\bsomehow\b/gi, replacement: 'a little unusual' },
+  { pattern: /\bmobile (phone )?number\b/gi, replacement: 'cell number' },
+  { pattern: /\bpost ?code\b/gi, replacement: 'zip code' },
+  { pattern: /\bqueue up\b/gi, replacement: 'line up' },
+  { pattern: /\bin the queue\b/gi, replacement: 'in line' },
+  { pattern: /\bcheque\b/gi, replacement: 'check' },
+  { pattern: /\bhire purchase\b/gi, replacement: 'financing plan' },
+  { pattern: /\bschedule an appointment for\b/gi, replacement: 'set up an appointment for' },
 ];
 
-export interface TransformResult {
-  americanText: string;
-  adapted: boolean;
-  replacements: { original: string; american: string }[];
+const SPELLING_RULES: Rule[] = [
+  { pattern: /\bcancelled\b/gi, replacement: 'canceled' },
+  { pattern: /\bcentre\b/gi, replacement: 'center' },
+  { pattern: /\bcolour\b/gi, replacement: 'color' },
+  { pattern: /\bfavourite\b/gi, replacement: 'favorite' },
+  { pattern: /\bfavour\b/gi, replacement: 'favor' },
+  { pattern: /\blicence\b/gi, replacement: 'license' },
+  { pattern: /\bapologise\b/gi, replacement: 'apologize' },
+  { pattern: /\borganise\b/gi, replacement: 'organize' },
+  { pattern: /\bauthorised\b/gi, replacement: 'authorized' },
+  { pattern: /\btravelling\b/gi, replacement: 'traveling' },
+  { pattern: /\benquire\b/gi, replacement: 'inquire' },
+  { pattern: /\benquiry\b/gi, replacement: 'inquiry' },
+  { pattern: /\btyre\b/gi, replacement: 'tire' },
+  { pattern: /\bkilometres?\b/gi, replacement: 'miles' },
+  { pattern: /\bmobile phone\b/gi, replacement: 'cell phone' },
+];
+
+const ALL_RULES: Rule[] = [...PHRASE_RULES, ...SPELLING_RULES];
+
+/** Preserve capitalisation of the original match where reasonable. */
+function matchCase(source: string, replacement: string): string {
+  if (!source) return replacement;
+  const firstChar = source[0];
+  if (firstChar === firstChar.toUpperCase() && firstChar !== firstChar.toLowerCase()) {
+    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+  return replacement;
 }
 
 /**
- * Normalizes input text into standard American English phrasing and vocabulary.
+ * Normalise a spoken utterance into American English phrasing.
  */
-export function normalizeToAmericanAccent(
-  text: string,
-  enableIdiomAdaptation = true
-): TransformResult {
-  if (!text || !text.trim()) {
-    return { americanText: "", adapted: false, replacements: [] };
+export function normalizeToAmerican(input: string): NormalizationResult {
+  let text = input;
+  const replacements: string[] = [];
+
+  for (const rule of ALL_RULES) {
+    text = text.replace(rule.pattern, (match) => {
+      replacements.push(`${match.trim()} → ${rule.replacement}`);
+      return matchCase(match, rule.replacement);
+    });
   }
 
-  let result = text.trim();
-  const matchedReplacements: { original: string; american: string }[] = [];
+  // Tidy whitespace and duplicated punctuation left behind by substitutions.
+  text = text.replace(/\s{2,}/g, ' ').replace(/\s+([,.!?])/g, '$1').trim();
 
-  if (enableIdiomAdaptation) {
-    for (const rule of IDIOM_RULES) {
-      if (rule.pattern.test(result)) {
-        result = result.replace(rule.pattern, rule.replacement);
-        matchedReplacements.push({
-          original: rule.originalLabel,
-          american: rule.americanLabel,
-        });
-      }
-    }
-  }
+  return { text, replacements };
+}
 
-  // Capitalize first character and ensure punctuation
-  result = result.charAt(0).toUpperCase() + result.slice(1);
-  if (!/[.!?]$/.test(result)) {
-    result += ".";
-  }
-
-  return {
-    americanText: result,
-    adapted: matchedReplacements.length > 0,
-    replacements: matchedReplacements,
-  };
+/** True when the utterance looks like a complete clause worth speaking. */
+export function isSpeakableClause(text: string, clauseStreaming: boolean): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 3) return false;
+  if (!clauseStreaming) return /[.!?]$/.test(trimmed) || trimmed.split(/\s+/).length >= 8;
+  return trimmed.split(/\s+/).length >= 3 || /[,.;!?]$/.test(trimmed);
 }

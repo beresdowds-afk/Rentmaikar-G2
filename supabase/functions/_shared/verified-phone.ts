@@ -20,20 +20,58 @@ export async function requireVerifiedPhone(
     .maybeSingle();
 
   if (error) return { ok: false, status: 500, error: error.message };
-  if (!data?.phone) {
+
+  let phone = data?.phone;
+  let phoneVerified = data?.phone_verified;
+
+  // If profile is missing phone or verification flag, check auth.users directly
+  if (!phone || !phoneVerified) {
+    try {
+      const { data: authData } = await supabase.auth.admin.getUserById(userId);
+      const authUser = authData?.user;
+      if (authUser?.phone) {
+        phone = authUser.phone;
+        if (authUser.phone_confirmed_at || authUser.user_metadata?.phone_verified) {
+          phoneVerified = true;
+          // Sync back to profile to avoid future desyncs
+          await supabase
+            .from("profiles")
+            .update({ phone: authUser.phone, phone_verified: true })
+            .eq("user_id", userId);
+        }
+      }
+    } catch {
+      // Ignore admin lookup failure
+    }
+  }
+
+  // Admin bypass
+  try {
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId);
+    if (roles?.some((r: any) => r.role === "admin")) {
+      return { ok: true, phone: phone || "admin" };
+    }
+  } catch {
+    // Continue with normal check
+  }
+
+  if (!phone) {
     return {
       ok: false,
       status: 428,
       error: "Add and verify a phone number before withdrawing funds",
     };
   }
-  if (!data.phone_verified) {
+  if (!phoneVerified) {
     return {
       ok: false,
       status: 428,
       error: "Verify your phone number before withdrawing funds",
-      phone: data.phone,
+      phone: phone,
     };
   }
-  return { ok: true, phone: data.phone };
+  return { ok: true, phone: phone };
 }

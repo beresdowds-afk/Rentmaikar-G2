@@ -155,8 +155,7 @@ const CookieConsent = () => {
                       </div>
                     </div>
                     <Switch
-                      checked={cat.required ? true : draft[cat.key]}
-                      disabled={cat.required}
+                      checked={cat.required ? true : (draft[cat.key] ?? true)}
                       onCheckedChange={val => setDraft(d => ({ ...d, [cat.key]: val }))}
                     />
                   </div>

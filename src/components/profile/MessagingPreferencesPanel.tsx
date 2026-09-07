@@ -164,7 +164,6 @@ export function MessagingPreferencesPanel() {
                   <Switch
                     id={`channel-${key}`}
                     checked={!optedOut[key]}
-                    disabled={saving !== null}
                     onCheckedChange={(checked) => toggle(key, checked)}
                     aria-label={`Receive ${label}`}
                   />

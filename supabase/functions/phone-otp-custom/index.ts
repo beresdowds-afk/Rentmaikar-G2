@@ -219,6 +219,17 @@ Deno.serve(async (req) => {
     }
 
     if (action === "send" || action === "link_send") {
+      // Cooldown: at least 60 seconds between consecutive requests for the same phone.
+      const cooldownSince = new Date(Date.now() - 60_000).toISOString();
+      const { data: recentCodes } = await admin
+        .from("phone_otp_codes")
+        .select("id")
+        .eq("phone", phone)
+        .gte("created_at", cooldownSince)
+        .limit(1);
+      if (recentCodes && recentCodes.length > 0) {
+        return jsonRes({ error: "Please wait at least 60 seconds before requesting a new code." }, 429);
+      }
 
       // Rate limit: max 3 in the last 10 minutes per phone.
       const since = new Date(Date.now() - 10 * 60_000).toISOString();
@@ -231,7 +242,9 @@ Deno.serve(async (req) => {
         return jsonRes({ error: "Too many code requests. Please wait a few minutes." }, 429);
       }
 
-      const otp = String(Math.floor(100000 + Math.random() * 900000));
+      const otpBuf = new Uint32Array(1);
+      crypto.getRandomValues(otpBuf);
+      const otp = String(100000 + (otpBuf[0] % 900000));
       const code_hash = await sha256(otp);
       const expires_at = new Date(Date.now() + 5 * 60_000).toISOString();
 

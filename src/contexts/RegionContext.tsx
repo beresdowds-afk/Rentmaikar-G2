@@ -202,9 +202,11 @@ export const RegionProvider = ({ children }: { children: ReactNode }) => {
   setCountryState(resolved.value);
   persistCountry(resolved.value);
 
-  void supabase.rpc("set_my_region", {
-    _country: resolved.value,
-  });
+  if (typeof supabase.rpc === "function") {
+    void supabase.rpc("set_my_region", {
+      _country: resolved.value,
+    });
+  }
 };
 
 

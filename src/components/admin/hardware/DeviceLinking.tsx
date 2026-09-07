@@ -68,19 +68,42 @@ export const DeviceLinking = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [devRes, simRes, vehRes] = await Promise.all([
+      const [devRes, simRes, vehRes] = await Promise.allSettled([
         supabase.functions.invoke('iot-admin', { body: { action: 'list_devices' } }),
         supabase.functions.invoke('iot-admin', { body: { action: 'list_available_sims' } }),
         supabase.from('vehicles').select('id, license_plate, make, model, year, owner_id').order('created_at', { ascending: false }),
       ]);
-      if (devRes.error) throw devRes.error;
-      if (simRes.error) throw simRes.error;
-      if (vehRes.error) throw vehRes.error;
-      setDevices((devRes.data as any).devices || []);
-      setSims((simRes.data as any).sims || []);
-      setVehicles((vehRes.data as Vehicle[]) || []);
+
+      let loadedDevices: Device[] = [];
+      let loadedSims: Sim[] = [];
+      let loadedVehicles: Vehicle[] = [];
+
+      if (devRes.status === 'fulfilled' && !devRes.value.error && (devRes.value.data as any)?.devices) {
+        loadedDevices = (devRes.value.data as any).devices;
+      } else {
+        const { data: dbDevs } = await supabase.from('iot_devices').select('*').order('created_at', { ascending: false });
+        if (dbDevs) loadedDevices = dbDevs as any;
+      }
+
+      if (simRes.status === 'fulfilled' && !simRes.value.error && (simRes.value.data as any)?.sims) {
+        loadedSims = (simRes.value.data as any).sims;
+      } else {
+        const { data: dbSims } = await supabase.from('iot_sim_cards').select('*').order('created_at', { ascending: false });
+        if (dbSims) loadedSims = dbSims as any;
+      }
+
+      if (vehRes.status === 'fulfilled' && !vehRes.value.error && vehRes.value.data) {
+        loadedVehicles = vehRes.value.data as Vehicle[];
+      } else {
+        const { data: dbVehs } = await supabase.from('vehicles').select('id, license_plate, make, model, year, owner_id').order('created_at', { ascending: false });
+        if (dbVehs) loadedVehicles = dbVehs as any;
+      }
+
+      setDevices(loadedDevices);
+      setSims(loadedSims);
+      setVehicles(loadedVehicles);
     } catch (err: any) {
-      toast.error('Failed to load', { description: err.message });
+      console.warn('Device linking query fallback', err);
     } finally { setLoading(false); }
   };
 

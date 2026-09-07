@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { requireCronSecret } from "../_shared/cron-auth.ts";
+import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -97,7 +97,7 @@ const generateCallTwiml = (
   paymentDefault: PaymentDefault,
   notificationNumber: number,
   driverName: string,
-  supabaseUrl: string
+  voiceBaseUrl: string
 ): string => {
   const config = CONFIG[paymentDefault.payment_frequency];
   const hoursRemaining = config.lockdownAfterHours - paymentDefault.hours_overdue;
@@ -106,7 +106,7 @@ const generateCallTwiml = (
   const isDaily = paymentDefault.payment_frequency === 'daily';
 
   // IVR action URL for keypress handling
-  const actionUrl = `${supabaseUrl}/functions/v1/payment-default-ivr?defaultId=${paymentDefault.id}&stage=${notificationNumber}`;
+  const actionUrl = `${voiceBaseUrl}/functions/v1/payment-default-ivr?defaultId=${paymentDefault.id}&stage=${notificationNumber}`;
 
   const stageMessages: Record<number, string> = {
     1: `Hello ${driverName}. This is Rentmaikar regarding your payment. Your payment of ${amount} is now overdue. You have ${hoursRemaining} hours before vehicle lockdown. Press 1 to make a payment now, or press 2 to speak with support.`,
@@ -198,7 +198,8 @@ const initiateDefaultCall = async (
 
   try {
     const driverName = profile.full_name || 'Driver';
-    const twiml = generateCallTwiml(paymentDefault, notificationNumber, driverName, supabaseUrl);
+    const voiceBaseUrl = Deno.env.get('VOICE_SUPABASE_URL') || supabaseUrl;
+    const twiml = generateCallTwiml(paymentDefault, notificationNumber, driverName, voiceBaseUrl);
 
     // Create call record
     const { data: callRecord, error: callErr } = await supabase
@@ -228,7 +229,7 @@ const initiateDefaultCall = async (
       To: profile.phone,
       From: twilioPhone,
       Twiml: twiml,
-      StatusCallback: `${supabaseUrl}/functions/v1/voip-status-callback`,
+      StatusCallback: `${voiceBaseUrl}/functions/v1/voip-status-callback`,
       StatusCallbackEvent: 'initiated ringing answered completed',
       MachineDetection: 'DetectMessageEnd',
       MachineDetectionTimeout: '10',
@@ -237,7 +238,7 @@ const initiateDefaultCall = async (
     // Set fallback voicemail TwiML URL for answering machines
     const voicemailTwiml = generateVoicemailTwiml(paymentDefault, notificationNumber, driverName);
     formData.append('AsyncAmd', 'true');
-    formData.append('AsyncAmdStatusCallback', `${supabaseUrl}/functions/v1/voip-status-callback`);
+    formData.append('AsyncAmdStatusCallback', `${voiceBaseUrl}/functions/v1/voip-status-callback`);
 
     const callResponse = await fetch(twilioUrl, {
       method: 'POST',
@@ -361,7 +362,7 @@ const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
-  const cronDenied = requireCronSecret(req);
+  const cronDenied = await requireCronSecretAsync(req);
   if (cronDenied) return cronDenied;
 
   try {

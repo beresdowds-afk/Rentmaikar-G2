@@ -5,7 +5,9 @@ CREATE INDEX IF NOT EXISTS idx_auth_event_log_type ON public.auth_event_log(even
 GRANT SELECT ON public.auth_event_log TO authenticated;
 GRANT ALL ON public.auth_event_log TO service_role;
 ALTER TABLE public.auth_event_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admins read all auth events" ON public.auth_event_log;
 CREATE POLICY "Admins read all auth events" ON public.auth_event_log FOR SELECT TO authenticated USING (public.is_admin());
+DROP POLICY IF EXISTS "Users read own auth events" ON public.auth_event_log;
 CREATE POLICY "Users read own auth events" ON public.auth_event_log FOR SELECT TO authenticated USING (user_id = auth.uid());
 
 CREATE OR REPLACE FUNCTION public.log_auth_event(_event_type text, _email text DEFAULT NULL, _provider text DEFAULT NULL, _success boolean DEFAULT true, _error_code text DEFAULT NULL, _metadata jsonb DEFAULT '{}'::jsonb)

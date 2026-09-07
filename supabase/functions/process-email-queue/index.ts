@@ -10,6 +10,7 @@ async function getSendLovableEmail() {
 }
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { resendSendEmail } from '../_shared/resend-gateway.ts'
+import { requireCronSecretAsync } from '../_shared/cron-auth.ts'
 
 
 const MAX_RETRIES = 5
@@ -209,24 +210,9 @@ async function handleRequest(req: Request): Promise<Response> {
     )
   }
 
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized' }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
-
-  // Defense in depth: verify_jwt=true already requires a valid JWT at the
-  // gateway layer. This adds an explicit role check so only service-role
-  // callers can trigger queue processing.
-  const token = authHeader.slice('Bearer '.length).trim()
-  const claims = parseJwtClaims(token)
-  if (claims?.role !== 'service_role') {
-    return new Response(
-      JSON.stringify({ error: 'Forbidden' }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } }
-    )
+  const authDenied = await requireCronSecretAsync(req)
+  if (authDenied) {
+    return authDenied
   }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)

@@ -3,8 +3,20 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { brokeredPreviewStorage } from './previewAuthStorage';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const rawUrl = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = (rawUrl && !rawUrl.includes("bwvocmhcledbwqlpcswp"))
+  ? rawUrl
+  : "https://jrsydiofzceoeddjogov.supabase.co";
+
+// Key selection: If connecting to jrsydiofzceoeddjogov, ensure we do not send the legacy project JWT
+const rawPublishable = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const rawAnon = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const isLegacyKey = (k?: string) => Boolean(k && k.includes("bwvocmhcledbwqlpcswp"));
+
+const SUPABASE_PUBLISHABLE_KEY = 
+  (!isLegacyKey(rawPublishable) && rawPublishable)
+    ? rawPublishable
+    : (rawAnon || rawPublishable || "");
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";

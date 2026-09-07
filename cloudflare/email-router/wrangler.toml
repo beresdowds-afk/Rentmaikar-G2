@@ -1,0 +1,9 @@
+name = "rentmaikar-email-router"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set with `wrangler secret put <NAME>`):
+#   EMAIL_WEBHOOK_URL
+#   EMAIL_WEBHOOK_SECRET   (same value as RESEND_WEBHOOK_SECRET in the backend)
+#   FALLBACK_FORWARD_TO    (optional mailbox used when the webhook POST fails)

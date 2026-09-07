@@ -383,8 +383,12 @@ export function CreateAgreementDialog({
 
             {/* Step 3: Admin Signature */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">3. Administrator Witness Signature</label>
-              <SignaturePad onSignatureChange={setAdminSignature} />
+              <SignaturePad
+                onSignatureChange={setAdminSignature}
+                label="3. Administrator Witness Signature"
+                signerRole="Admin Witness"
+                signerName="RentMaiKar Staff Witness"
+              />
             </div>
 
 

@@ -1,26 +1,43 @@
 import { Router, Request, Response } from "express";
+import { bridgeManager } from "../services/bridgeManager";
 
 export const healthRouter = Router();
 
 healthRouter.get("/", (req: Request, res: Response) => {
+  const bridge = bridgeManager.getConfig();
   res.json({
-    status: "healthy",
+    status: bridge.enabled ? "healthy" : "degraded",
     service: "rentmaikar-backend",
     version: "1.0.0",
     uptime_seconds: process.uptime(),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
+    direct_connection_bridge: {
+      enabled: bridge.enabled,
+      mode: bridge.mode,
+      frontend: bridge.frontendDomain,
+      backend: bridge.backendDomain,
+      listening_to_frontend: bridge.enabled,
+    },
   });
 });
 
 healthRouter.get("/diagnostics", (req: Request, res: Response) => {
   const publicBackendUrl = process.env.PUBLIC_BACKEND_URL || "https://staging.rentmaikar.com";
+  const bridge = bridgeManager.getConfig();
   res.json({
     domains: {
       frontend: "rentmaikar.com",
       backend: "staging.rentmaikar.com",
       incoming_mail: "backend.rentmaikar.com",
       outgoing_mail: "notify.rentmaikar.com",
+    },
+    direct_connection_bridge: {
+      enabled: bridge.enabled,
+      mode: bridge.mode,
+      allowed_origins: bridge.allowedOrigins,
+      last_toggled_at: bridge.lastToggledAt,
+      last_toggled_by: bridge.lastToggledBy,
     },
     cpaas_gateway: {
       sent_dm: Boolean(process.env.SENT_API_KEY),

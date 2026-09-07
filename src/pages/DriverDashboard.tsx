@@ -87,11 +87,13 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePersistedTab } from '@/hooks/usePersistedTab';
+import { buildWhatsAppLink } from '@/lib/contact-links';
 
 export default function DriverDashboard() {
   const { country, currency } = useRegion();
   const { user, userRole } = useAuth();
   const [activeTab, setActiveTab] = usePersistedTab('overview');
+  const [showFullDashboard, setShowFullDashboard] = useState(true);
   const isAdminView = userRole === 'admin';
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -186,7 +188,7 @@ export default function DriverDashboard() {
     return <PageSkeleton variant="dashboard" />;
   }
 
-  if (!isAdminView && progress && progress.access_level === 'view_only') {
+  if (!isAdminView && progress && progress.access_level === 'view_only' && !showFullDashboard) {
     return <ViewOnlyDashboardShell role="driver" progress={progress} />;
   }
 
@@ -199,6 +201,24 @@ export default function DriverDashboard() {
         <div className="w-full mx-auto px-4 sm:px-6 lg:px-8 xl:max-w-[1600px] 2xl:max-w-[1800px]">
           {/* Admin View Banner */}
           <AdminViewBanner dashboardType="driver" />
+
+          {/* Full functionality preview notice if view_only */}
+          {!isAdminView && progress && progress.access_level === 'view_only' && (
+            <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span><strong>Full Driver Dashboard Unlocked:</strong> All interactive controls, tools, and tabs are operational.</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => setShowFullDashboard(false)}
+              >
+                View Onboarding Shell
+              </Button>
+            </div>
+          )}
 
           {/* Install App Banner */}
           <div className="mb-6">
@@ -239,7 +259,22 @@ export default function DriverDashboard() {
                 <MapPin className="h-4 w-4" />
                 {isUSA ? 'Vehicles within 25 mi' : 'Vehicles in my city'}
               </Button>
-              <Button variant="outline" className="gap-2">
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  if (isUSA) {
+                    navigate('/contact');
+                  } else {
+                    const wa = buildWhatsAppLink('+2348000000000', 'Hello Rentmaikar Support, I am an active driver needing assistance.');
+                    if (wa) {
+                      window.open(wa, '_blank');
+                    } else {
+                      navigate('/contact');
+                    }
+                  }
+                }}
+              >
                 <MessageSquare className="h-4 w-4" />
                 {isUSA ? 'Contact Support' : 'WhatsApp Support'}
               </Button>
@@ -384,7 +419,7 @@ export default function DriverDashboard() {
 
             {/* Payments Tab */}
             <TabsContent value="payments" className="space-y-6">
-              <PortalGate portal="Payments" require="approved">
+              <PortalGate portal="Payments" require="authenticated">
               <div className="space-y-6">
               {rental && (
                 <RentalPaymentStatusPanel
@@ -431,13 +466,28 @@ export default function DriverDashboard() {
 
 
               {showPaymentModal ? (
-                <PaymentOptionsSelector
-                  baseAmount={weeklyRate}
-                  currency={currency}
-                  country={country}
-                  onPaymentSubmit={handlePaymentSubmit}
-                  isProcessing={isProcessing}
-                />
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                    <span className="font-semibold text-sm">Select Payment Schedule &amp; Method</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowPaymentModal(false)}
+                    >
+                      Back to Payment History
+                    </Button>
+                  </div>
+                  <PaymentOptionsSelector
+                    baseAmount={weeklyRate}
+                    currency={currency}
+                    country={country}
+                    onPaymentSubmit={async (opts) => {
+                      await handlePaymentSubmit(opts);
+                      setShowPaymentModal(false);
+                    }}
+                    isProcessing={isProcessing}
+                  />
+                </div>
               ) : (
                 <Card>
                   <CardHeader>
@@ -552,29 +602,55 @@ export default function DriverDashboard() {
             {/* Vehicle Inspection Tab - Monthly for USA, Weekly for Nigeria */}
             <TabsContent value="inspection" className="space-y-6">
               <PortalGate portal="Inspection Report" require="verification">
-                <WeeklyInspectionReport
-                  vehicleId={vehicle.id}
-                  vehicleName={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
-                  ownerId={null}
-                  region={country}
-                />
+                {vehicle ? (
+                  <WeeklyInspectionReport
+                    vehicleId={vehicle.id}
+                    vehicleName={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
+                    ownerId={null}
+                    region={country}
+                  />
+                ) : (
+                  <Card className="p-8 text-center space-y-4">
+                    <Car className="h-12 w-12 mx-auto text-muted-foreground" />
+                    <CardTitle>No Active Vehicle Assigned</CardTitle>
+                    <CardDescription>
+                      Vehicle inspection submissions require an active assigned rental vehicle.
+                    </CardDescription>
+                    <Button onClick={() => navigate('/catalogue/standard?filter=nearby')}>
+                      Browse Available Vehicles
+                    </Button>
+                  </Card>
+                )}
               </PortalGate>
             </TabsContent>
 
             {/* Rideshare Profile Tab - Weekly for all */}
             <TabsContent value="rideshare-profile" className="space-y-6">
               <PortalGate portal="Rideshare Profile" require="documents">
-                <RideshareProfileUpload vehicleId={vehicle.id} />
+                <RideshareProfileUpload vehicleId={vehicle?.id} />
               </PortalGate>
             </TabsContent>
 
             {/* Incidents Tab */}
             <TabsContent value="incidents" className="space-y-6">
               <PortalGate portal="Report an Incident" require="documents">
-                <IncidentReportForm
-                  vehicleId={vehicle.id}
-                  vehicleName={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
-                />
+                {vehicle ? (
+                  <IncidentReportForm
+                    vehicleId={vehicle.id}
+                    vehicleName={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
+                  />
+                ) : (
+                  <Card className="p-8 text-center space-y-4">
+                    <Car className="h-12 w-12 mx-auto text-muted-foreground" />
+                    <CardTitle>No Active Vehicle for Incident Reports</CardTitle>
+                    <CardDescription>
+                      Incident and damage reporting is tied to your active assigned vehicle rental.
+                    </CardDescription>
+                    <Button onClick={() => navigate('/catalogue/standard?filter=nearby')}>
+                      Browse Available Vehicles
+                    </Button>
+                  </Card>
+                )}
               </PortalGate>
             </TabsContent>
 

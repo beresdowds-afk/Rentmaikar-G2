@@ -120,7 +120,6 @@ export function EmailPreferencesPanel() {
                   id={`email-pref-${item.key}`}
                   checked={prefs[item.key]}
                   onCheckedChange={(v) => update(item.key, v)}
-                  disabled={!user || savingKey !== null}
                 />
               </div>
             </div>

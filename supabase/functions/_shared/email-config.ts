@@ -105,6 +105,19 @@ export const formatSenderEmail = (type: keyof typeof EMAIL_CONFIG): string => {
   return `${name} <${email}>`;
 };
 
+export type IncomingEmailType = keyof typeof INCOMING_EMAIL_CONFIG;
+
+/** Reply-to address for outbound mail so responses reach the inbound domain. */
+export const replyToFor = (type: IncomingEmailType = "support"): string =>
+  INCOMING_EMAIL_CONFIG[type] || INCOMING_EMAIL_CONFIG.support;
+
+/**
+ * Normalizes any RentMaikar recipient address to its local part so inbound
+ * routing works for backend.rentmaikar.com, rentmaikar.com, and legacy aliases.
+ */
+export const inboundLocalPart = (address: string): string =>
+  (address || "").trim().toLowerCase().split("@")[0] ?? "";
+
 /**
  * Resolve incoming mailbox for recipient queries or reply-to
  */

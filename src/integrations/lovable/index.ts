@@ -25,6 +25,18 @@ export const lovable = {
         }
 
         if (data?.url) {
+          const isIframe = window.self !== window.top;
+          if (isIframe) {
+            try {
+              if (window.top) {
+                window.top.location.href = data.url;
+                return { redirected: true };
+              }
+            } catch {
+              window.open(data.url, '_top');
+              return { redirected: true };
+            }
+          }
           window.location.href = data.url;
           return { redirected: true };
         }

@@ -115,3 +115,9 @@ export const formatSenderEmail = (type: keyof typeof EMAIL_CONFIG): string => {
 };
 
 export type EmailType = keyof typeof EMAIL_CONFIG;
+
+export type IncomingEmailType = keyof typeof INCOMING_EMAIL_CONFIG;
+
+/** Reply-to address for outbound mail so responses reach the inbound domain. */
+export const replyToFor = (type: IncomingEmailType = "support"): string =>
+  INCOMING_EMAIL_CONFIG[type] || INCOMING_EMAIL_CONFIG.support;

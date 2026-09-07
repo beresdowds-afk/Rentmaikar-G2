@@ -33,7 +33,11 @@ const statusSchema = z.object({
   user_id: z.string().uuid().optional(),
 });
 
-const generateCode = (): string => Math.floor(100000 + Math.random() * 900000).toString();
+const generateCode = (): string => {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return (100000 + (buf[0] % 900000)).toString();
+};
 
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {

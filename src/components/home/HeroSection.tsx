@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { MessageCircle, Phone, Menu, X, LayoutDashboard, LogOut, LogIn, Shield } from "lucide-react";
+import { MessageCircle, Phone, Mail, Menu, X, LayoutDashboard, LogOut, LogIn, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRegion } from "@/contexts/RegionContext";
@@ -239,12 +239,12 @@ const HeroSection = () => {
               <TooltipTrigger asChild>
                 <a
                   href={`mailto:${supportEmail}`}
-                  className="shrink-0 hidden sm:inline-flex"
+                  className="shrink-0 inline-flex"
                   aria-label={`Email Rentmaikar support at ${supportEmail}`}
                   title={`Email ${supportEmail}`}
                 >
-                  <Button variant="outline" size="sm" className="w-auto gap-1.5 px-3 py-1.5 text-xs min-h-[36px]">
-                    <Phone className="w-3 h-3" aria-hidden="true" />
+                  <Button variant="outline" size="sm" className="w-auto gap-1.5 px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs min-h-[36px]">
+                    <Mail className="w-3 h-3" aria-hidden="true" />
                     Email us
                   </Button>
                 </a>

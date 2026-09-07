@@ -102,31 +102,16 @@ export function RoleSwitchCard() {
           </Badge>
         </div>
 
-        {used ? (
-          <Alert>
-            <Lock className="h-4 w-4" />
-            <AlertDescription>
-              Your one-time account type change has already been used
-              {status.role_changed_at
-                ? ` on ${new Date(status.role_changed_at).toLocaleDateString()}`
-                : ''}
-              . Contact support if you need further changes.
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <>
-            <Alert>
-              <AlertDescription>
-                Switching to <strong>{target === 'owner' ? 'vehicle owner' : 'driver'}</strong> will
-                replace your current role. You get only one change, and it cannot be undone.
-              </AlertDescription>
-            </Alert>
-            <Button variant="outline" onClick={() => setConfirmOpen(true)} disabled={isSaving}>
-              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Switch to {target === 'owner' ? 'vehicle owner' : 'driver'}
-            </Button>
-          </>
-        )}
+        <Alert>
+          <AlertDescription>
+            Switching to <strong>{target === 'owner' ? 'vehicle owner' : 'driver'}</strong> will
+            update your active profile and dashboard access.
+          </AlertDescription>
+        </Alert>
+        <Button variant="outline" onClick={() => setConfirmOpen(true)} disabled={isSaving}>
+          {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Switch to {target === 'owner' ? 'vehicle owner' : 'driver'}
+        </Button>
       </CardContent>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

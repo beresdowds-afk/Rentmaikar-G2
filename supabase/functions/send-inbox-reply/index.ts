@@ -30,7 +30,16 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { conversationId, messageContent, channel, recipientPhone, attachments } = await req.json();
+    const {
+      conversationId,
+      messageContent,
+      channel,
+      recipientPhone,
+      attachments,
+      whatsappTemplateId,
+      whatsappTemplateLanguage,
+      whatsappTemplateParams,
+    } = await req.json();
 
     interface OutboundAttachment {
       filename: string;
@@ -170,6 +179,14 @@ serve(async (req) => {
         to: recipientPhone,
         channel: sentChannel,
         text: outboundText,
+        template:
+          sentChannel === "whatsapp" && whatsappTemplateId
+            ? {
+                id: whatsappTemplateId,
+                language: whatsappTemplateLanguage,
+                parameters: whatsappTemplateParams,
+              }
+            : undefined,
         mediaUrls: mediaUrls,
         senderId: forwardingFrom || undefined,
         metadata: { conversation_id: conversationId, region: conversation?.region ?? null },

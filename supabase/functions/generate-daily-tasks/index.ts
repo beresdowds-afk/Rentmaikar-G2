@@ -14,12 +14,34 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Allow: (1) cron via x-cron-secret or service-role bearer, OR (2) authenticated admin user.
+  // Allow: (1) cron via x-cron-secret or service-role bearer, OR (2) an admin,
+  // OR (3) an admin assistant granted support-task access.
   const cronDenied = await requireCronSecretAsync(req);
   if (cronDenied) {
     const isAdmin = await isCallerAdmin(req);
-    if (!isAdmin) return cronDenied;
+    if (!isAdmin) {
+      const authHeader = req.headers.get("Authorization") || "";
+      let allowed = false;
+      if (authHeader.startsWith("Bearer ")) {
+        const token = authHeader.slice(7);
+        const userClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_ANON_KEY")!,
+          { global: { headers: { Authorization: `Bearer ${token}` } } },
+        );
+        const { data: userData } = await userClient.auth.getUser(token);
+        if (userData?.user) {
+          const { data: priv } = await userClient.rpc("has_admin_privilege", {
+            _user_id: userData.user.id,
+            _permission: "can_view_support_tasks",
+          });
+          allowed = priv === true;
+        }
+      }
+      if (!allowed) return cronDenied;
+    }
   }
+
 
 
 

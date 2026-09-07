@@ -181,6 +181,7 @@ export interface SendComposedInput {
   phone?: string;
   subject?: string;
   body: string;
+  whatsappTemplateId?: string;
 }
 
 export interface BulkRecipient {
@@ -371,6 +372,7 @@ export const useSendComposedMessage = () => {
                 messageContent: body,
                 channel: input.channel,
                 recipientPhone: phone,
+                whatsappTemplateId: input.channel === 'whatsapp' ? input.whatsappTemplateId : undefined,
               },
             });
 

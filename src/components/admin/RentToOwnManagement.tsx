@@ -660,8 +660,12 @@ export function RentToOwnManagement() {
             </div>
 
             <div className="space-y-2">
-              <Label>Admin Witness Signature</Label>
-              <SignaturePad onSignatureChange={setAdminSignature} />
+              <SignaturePad
+                onSignatureChange={setAdminSignature}
+                label="Admin Witness Signature"
+                signerRole="Admin Witness"
+                signerName="RentMaiKar Administrator"
+              />
             </div>
 
             <Button

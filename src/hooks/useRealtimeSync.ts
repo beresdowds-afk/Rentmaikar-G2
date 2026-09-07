@@ -5,7 +5,8 @@ import { useRegion } from "@/contexts/RegionContext";
 import { useRealtimeSound, shouldChime } from "@/hooks/useRealtimeSound";
 import { toast } from "sonner";
 import { isNewBuildAvailable, primeBuildId } from "@/lib/app-version";
-import type { LiveSyncCommand, LiveSyncTick } from "@/workers/live-sync.worker";
+import type { LiveSyncTick } from "@/workers/live-sync.worker";
+import { pwaWorkerManager } from "@/pwa/pwa-worker-manager";
 import {
   isDataSaverActive,
   loadLiveSyncSettings,
@@ -131,12 +132,9 @@ export function useRealtimeSync(enabled: boolean = true) {
       };
     }
 
-    // 4. Scheduler worker — off-main-thread timers that survive background
+    // 4. Dedicated Web Worker scheduler — off-main-thread timers that survive background
     //    throttling in installed PWAs. Intervals come from the user's live-sync
-    //    settings and adapt to data-saver / low-battery conditions. Falls back
-    //    to setInterval when the environment has no module-worker support.
-    let worker: Worker | null = null;
-    let fallbackTimer: number | null = null;
+    //    settings and adapt to data-saver / low-battery conditions.
     let updateNotified = false;
 
     let settings = loadLiveSyncSettings();
@@ -165,53 +163,31 @@ export function useRealtimeSync(enabled: boolean = true) {
 
     void primeBuildId();
 
-    const postToWorker = (cmd: LiveSyncCommand) => worker?.postMessage(cmd);
-
-    /** Recomputes intervals and pushes them to the worker (or fallback timer). */
+    /** Recomputes intervals and pushes them to the dedicated worker. */
     const applySchedule = () => {
       effective = resolveEffectiveIntervals(settings, {
         dataSaver: isDataSaverActive(),
         lowBattery,
       });
       const hidden = settings.pauseWhenHidden && document.visibilityState !== "visible";
-      if (worker) {
-        postToWorker({
-          type: "configure",
-          heartbeatMs: effective.heartbeatMs,
-          versionCheckMs: effective.versionCheckMs,
-        });
-        postToWorker({ type: hidden ? "pause" : "resume" });
-      } else if (fallbackTimer !== null) {
-        window.clearInterval(fallbackTimer);
-        fallbackTimer = hidden
-          ? null
-          : window.setInterval(() => {
-              onHeartbeat();
-              void onVersionCheck();
-            }, effective.heartbeatMs);
-      }
-    };
-
-    try {
-      worker = new Worker(new URL("../workers/live-sync.worker.ts", import.meta.url), {
-        type: "module",
-      });
-      worker.onmessage = (event: MessageEvent<LiveSyncTick>) => {
-        if (event.data?.type === "heartbeat") onHeartbeat();
-        else if (event.data?.type === "version-check") void onVersionCheck();
-      };
-      postToWorker({
-        type: "start",
+      pwaWorkerManager.sendCommand({
+        type: "configure",
         heartbeatMs: effective.heartbeatMs,
         versionCheckMs: effective.versionCheckMs,
       });
-    } catch {
-      worker = null;
-      fallbackTimer = window.setInterval(() => {
-        onHeartbeat();
-        void onVersionCheck();
-      }, effective.heartbeatMs);
-    }
+      pwaWorkerManager.sendCommand({ type: hidden ? "pause" : "resume" });
+    };
+
+    const unsubscribeWorker = pwaWorkerManager.subscribe((tick: LiveSyncTick) => {
+      if (tick.type === "heartbeat") onHeartbeat();
+      else if (tick.type === "version-check") void onVersionCheck();
+    });
+
+    pwaWorkerManager.sendCommand({
+      type: "start",
+      heartbeatMs: effective.heartbeatMs,
+      versionCheckMs: effective.versionCheckMs,
+    });
 
     // Pause/resume with visibility, and react to setting or condition changes.
     const onVisibilityForSchedule = () => applySchedule();
@@ -240,11 +216,8 @@ export function useRealtimeSync(enabled: boolean = true) {
       connection?.removeEventListener?.("change", onConnectionChange);
       unsubscribeSettings();
       unwatchBattery();
-      if (fallbackTimer !== null) window.clearInterval(fallbackTimer);
-      if (worker) {
-        worker.postMessage({ type: "stop" } as LiveSyncCommand);
-        worker.terminate();
-      }
+      unsubscribeWorker();
+      pwaWorkerManager.sendCommand({ type: "pause" });
       bc?.close();
       bc = null;
     };
@@ -254,6 +227,7 @@ export function useRealtimeSync(enabled: boolean = true) {
 
 /** Ask every other open window/tab (and installed PWA instance) to refresh. */
 export function broadcastLiveSync() {
+  pwaWorkerManager.triggerImmediateSync();
   if (typeof BroadcastChannel === "undefined") return;
   try {
     const bc = new BroadcastChannel(SYNC_BROADCAST);

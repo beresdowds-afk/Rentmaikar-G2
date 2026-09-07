@@ -70,20 +70,27 @@ FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 ALTER PUBLICATION supabase_realtime ADD TABLE public.vehicle_telemetry_state;
 
-SELECT cron.unschedule('mqtt-ingestion-worker-1min')
-WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'mqtt-ingestion-worker-1min');
+DO $$
+BEGIN
+  PERFORM cron.unschedule('mqtt-ingestion-worker-1min');
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
-SELECT cron.schedule(
-  'mqtt-ingestion-worker-1min',
-  '* * * * *',
-  $$
-  SELECT net.http_post(
-    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/mqtt-ingestion-worker',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'SERVICE_ROLE_KEY' LIMIT 1)
-    ),
-    body := jsonb_build_object('scheduled_at', now())
+DO $$
+BEGIN
+  PERFORM cron.schedule(
+    'mqtt-ingestion-worker-1min',
+    '* * * * *',
+    $cron$
+    SELECT net.http_post(
+      url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/mqtt-ingestion-worker',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'SERVICE_ROLE_KEY' LIMIT 1)
+      ),
+      body := jsonb_build_object('scheduled_at', now())
+    );
+    $cron$
   );
-  $$
-);
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;

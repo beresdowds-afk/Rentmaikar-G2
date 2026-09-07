@@ -141,7 +141,6 @@ export const SocialChannelIntegrations = () => {
                     </div>
                     <Switch
                       checked={row.is_enabled}
-                      disabled={savingId === row.id}
                       onCheckedChange={(checked) =>
                         save(row, { is_enabled: checked, api_status: checked ? "connected" : "disabled" })
                       }

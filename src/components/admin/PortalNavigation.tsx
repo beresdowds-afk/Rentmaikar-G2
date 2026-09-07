@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Building2, UsersRound, Users, Headphones, LayoutGrid, Phone, MessageSquare, UserCircle, HandshakeIcon, ClipboardList, Home, Car, MapPin, Cpu, Package, BarChart3, Tag, Wrench, WifiOff, Ban, Camera, Wallet, KeyRound, Settings, HelpCircle, FileText, UserPlus, Shield, ShieldCheck, Share2, Facebook, Instagram, Linkedin, Chrome, CreditCard, TrendingUp, Webhook, Code, Bell, Flag, GraduationCap, Truck, BookOpen, Mail, Wifi, Activity, Clock, Radio, Globe, Star, Calendar, Satellite, Signal, UserX } from "lucide-react";
+import { ChevronDown, Building2, UsersRound, Users, Headphones, LayoutGrid, Phone, MessageSquare, UserCircle, HandshakeIcon, ClipboardList, Home, Car, MapPin, Cpu, Package, BarChart3, Tag, Wrench, WifiOff, Ban, Camera, Wallet, KeyRound, Settings, HelpCircle, FileText, UserPlus, Shield, ShieldCheck, Share2, Facebook, Instagram, Linkedin, Chrome, CreditCard, TrendingUp, Webhook, Code, Bell, Flag, GraduationCap, Truck, BookOpen, Mail, Wifi, Activity, Clock, Radio, Globe, Star, Calendar, Satellite, Signal, UserX, Inbox, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,11 +24,15 @@ export interface PortalTab {
 
 export const crmTabs: PortalTab[] = [
   { value: "applications", label: "Applications", icon: <UserPlus className="h-4 w-4" />, dataTour: "admin-applications" },
+  { value: "attestation-review", label: "Referee Reviews", icon: <AlertTriangle className="h-4 w-4" /> },
   { value: "accounts", label: "User Accounts", icon: <UserCircle className="h-4 w-4" />, dataTour: "admin-accounts" },
   { value: "drivers-owners", label: "Drivers & Owners", icon: <Users className="h-4 w-4" /> },
   { value: "roles", label: "Role Management", icon: <Shield className="h-4 w-4" />, dataTour: "admin-roles" },
   { value: "user-deletion", label: "Account Removal", icon: <UserX className="h-4 w-4" /> },
   { value: "admin-assistants", label: "Admin Assistants", icon: <ShieldCheck className="h-4 w-4" /> },
+  { value: "phone-otp-providers", label: "Phone OTP Providers", icon: <Phone className="h-4 w-4" /> },
+  { value: "persona-settings", label: "Persona Verification", icon: <Shield className="h-4 w-4" /> },
+  { value: "referee-settings", label: "Referee Settings", icon: <Users className="h-4 w-4" /> },
   { value: "negotiations", label: "Negotiations", icon: <HandshakeIcon className="h-4 w-4" />, dataTour: "admin-negotiations" },
   { value: "approvals", label: "Pending Approvals", icon: <ClipboardList className="h-4 w-4" /> },
   { value: "defaults", label: "Payment Defaults", icon: <Wallet className="h-4 w-4" /> },
@@ -74,6 +78,7 @@ export const erpTabs: PortalTab[] = [
   { value: "webhooks", label: "Webhooks", icon: <Webhook className="h-4 w-4" /> },
   { value: "api-endpoints", label: "API Endpoints", icon: <Code className="h-4 w-4" /> },
   { value: "security", label: "Security", icon: <Shield className="h-4 w-4" /> },
+  { value: "email-delivery", label: "Email Delivery Monitor", icon: <Mail className="h-4 w-4" /> },
   { value: "cron-jobs", label: "Cron Jobs", icon: <Clock className="h-4 w-4" /> },
   { value: "uuid-assignments", label: "UUID Assignments", icon: <KeyRound className="h-4 w-4" /> },
   { value: "settings", label: "Regional Operations", icon: <Settings className="h-4 w-4" /> },
@@ -82,7 +87,10 @@ export const erpTabs: PortalTab[] = [
 
 export const supportTabs: PortalTab[] = [
   { value: "task-portal", label: "Task Portal", icon: <LayoutGrid className="h-4 w-4" />, dataTour: "admin-portal" },
+  { value: "inbox", label: "Unified Inbox", icon: <Inbox className="h-4 w-4" /> },
+  { value: "call-center", label: "Call Center", icon: <Phone className="h-4 w-4" /> },
   { value: "contacts", label: "Contact Settings", icon: <MessageSquare className="h-4 w-4" />, dataTour: "admin-contacts" },
+  { value: "support-tasks", label: "Support Tasks", icon: <Headphones className="h-4 w-4" /> },
   { value: "insurance", label: "Insurance Support", icon: <Shield className="h-4 w-4" /> },
   { value: "nigeria-verification", label: "🇳🇬 Nigeria Verification", icon: <Flag className="h-4 w-4" /> },
   { value: "police-reports", label: "🇳🇬 Police Reports", icon: <FileText className="h-4 w-4" /> },
@@ -310,6 +318,23 @@ export const PortalNavigation = ({
             </DropdownMenu>
           );
         })}
+
+        {/* Content Editor Portal Direct Launcher */}
+        <Button
+          variant={activePortal === 'crm' && activeTab === 'content' ? 'default' : 'outline'}
+          className={cn(
+            "gap-2 min-w-[120px] min-h-11 border-primary/30",
+            activePortal === 'crm' && activeTab === 'content' && "ring-2 ring-primary/20 bg-primary text-primary-foreground font-medium"
+          )}
+          onClick={() => {
+            onPortalChange('crm');
+            onTabChange('content');
+          }}
+          aria-label="Open Content Editor Portal"
+        >
+          <HelpCircle className="h-4 w-4" />
+          Content Editor
+        </Button>
       </nav>
 
       {/* Current Selection Indicator */}

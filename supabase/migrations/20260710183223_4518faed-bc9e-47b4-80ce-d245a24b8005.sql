@@ -28,9 +28,6 @@ WITH CHECK (
 DO $$
 DECLARE
   fn text;
-  fn_schema text;
-  fn_name text;
-  fn_args text;
 BEGIN
   FOREACH fn IN ARRAY ARRAY[
     'public.handle_new_user()',
@@ -47,23 +44,10 @@ BEGIN
     'public.log_admin_action(text, text, text, jsonb)'
   ]
   LOOP
-    fn_schema := split_part(fn, '.', 1);
-    fn_name := split_part(split_part(fn, '.', 2), '(', 1);
-    fn_args := split_part(split_part(fn, '(', 2), ')', 1);
-
-    IF EXISTS (
-      SELECT 1
-      FROM pg_proc p
-      JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = fn_schema
-        AND p.proname = fn_name
-        AND pg_get_function_identity_arguments(p.oid) = fn_args
-    ) THEN
-      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', fn);
-      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon', fn);
-      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM authenticated', fn);
-      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
-    END IF;
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', fn);
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon', fn);
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM authenticated', fn);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
   END LOOP;
 END $$;
 
@@ -81,11 +65,9 @@ BEGIN
     'public.get_support_staff_city(uuid, public.support_task_type)'
   ]
   LOOP
-    IF to_regprocedure(fn) IS NOT NULL THEN
-      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', fn);
-      EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon', fn);
-      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', fn);
-      EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
-    END IF;
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', fn);
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM anon', fn);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', fn);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
   END LOOP;
 END $$;

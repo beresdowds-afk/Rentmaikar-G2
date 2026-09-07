@@ -38,6 +38,7 @@ export interface SavedDraft {
   content: string;
   smsCountry?: string;
   smsOptOut?: boolean;
+  smsTemplateId?: string | null;
   whatsappTemplateId?: string | null;
   updatedAt: string;
   createdAt: string;
@@ -56,6 +57,7 @@ export interface OutboundMessagePayload {
   region?: string;
   attachments?: File[];
   smsOptOut?: boolean;
+  smsTemplateId?: string | null;
   whatsappTemplateId?: string | null;
 }
 

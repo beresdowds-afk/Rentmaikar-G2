@@ -50,6 +50,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  PenTool,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -517,8 +518,12 @@ const LegalAgreementsManagement: React.FC = () => {
                 })()}
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Administrator Witness Signature</label>
-                  <SignaturePad onSignatureChange={setAdminSignature} />
+                  <SignaturePad
+                    onSignatureChange={setAdminSignature}
+                    label="Administrator Witness Signature"
+                    signerRole="Admin Witness"
+                    signerName="RentMaiKar Administrator"
+                  />
                 </div>
 
 
@@ -678,7 +683,20 @@ const LegalAgreementsManagement: React.FC = () => {
                       </TableCell>
                       <TableCell>{getStatusBadge(agreement.status, agreement)}</TableCell>
                       <TableCell>{format(new Date(agreement.created_at), 'MMM dd, yyyy')}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right space-x-1.5 whitespace-nowrap">
+                        {!agreement.admin_witness_signature && (
+                          <Button
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => {
+                              setViewAgreement(agreement);
+                              setWitnessSignature(null);
+                            }}
+                          >
+                            <PenTool className="h-3.5 w-3.5" />
+                            Witness
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -920,6 +938,21 @@ const LegalAgreementsManagement: React.FC = () => {
                             : 'Not yet witnessed'}
                         </p>
                       </div>
+                      {!selectedAgreement.admin_witness_signature && (
+                        <div className="col-span-2 pt-2 border-t mt-1">
+                          <Button
+                            size="sm"
+                            className="w-full gap-1.5"
+                            onClick={() => {
+                              setViewAgreement(selectedAgreement);
+                              setWitnessSignature(null);
+                            }}
+                          >
+                            <PenTool className="h-4 w-4" />
+                            Witness / Sign Agreement
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1073,19 +1106,27 @@ const LegalAgreementsManagement: React.FC = () => {
                   />
                 </ScrollArea>
 
-                {/* Admin can witness if not yet witnessed but both parties have signed */}
-                {!viewAgreement.admin_witness_signature && 
-                 viewAgreement.driver_signature && 
-                 viewAgreement.owner_signature && (
+                {/* Admin can witness if not yet witnessed */}
+                {!viewAgreement.admin_witness_signature && (
                   <div className="border-t pt-4 mt-4 space-y-4">
                     <div>
-                      <h3 className="font-medium mb-2">Add Your Witness Signature</h3>
-                      <SignaturePad onSignatureChange={setWitnessSignature} />
+                      <SignaturePad
+                        onSignatureChange={setWitnessSignature}
+                        label="Administrator Witness Signature"
+                        signerRole="Admin Witness"
+                        signerName="RentMaiKar Administrator"
+                      />
                     </div>
-                    <div className="flex justify-end gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">
+                        {viewAgreement.driver_signature && viewAgreement.owner_signature
+                          ? 'Both driver and owner have signed. Adding your witness signature will finalize the agreement.'
+                          : 'You can witness this agreement now. It will become fully active once both driver and owner have signed.'}
+                      </p>
                       <Button
                         onClick={() => handleWitnessAgreement(viewAgreement.id)}
                         disabled={!witnessSignature || isWitnessing}
+                        className="shrink-0"
                       >
                         {isWitnessing ? (
                           <>
@@ -1095,7 +1136,9 @@ const LegalAgreementsManagement: React.FC = () => {
                         ) : (
                           <>
                             <CheckCircle className="h-4 w-4 mr-2" />
-                            Witness & Complete
+                            {viewAgreement.driver_signature && viewAgreement.owner_signature
+                              ? 'Witness & Complete'
+                              : 'Witness Agreement'}
                           </>
                         )}
                       </Button>

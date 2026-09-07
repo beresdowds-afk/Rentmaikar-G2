@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, FileText, Download, Eye, PenTool, CheckCircle, CalendarClock } from 'lucide-react';
 
 const renewalDaysLeft = (expiresAt: string) =>
@@ -282,8 +283,10 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
     const hasSigned = userType === 'driver' 
       ? agreement.driver_signature 
       : agreement.owner_signature;
-    return !hasSigned && agreement.status !== 'completed';
+    return !hasSigned && agreement.status !== 'completed' && agreement.status !== 'superseded' && agreement.status !== 'cancelled';
   };
+
+  const [legalConsent, setLegalConsent] = useState(false);
 
   if (loading) {
     return (
@@ -295,6 +298,8 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
     );
   }
 
+  const pendingCount = agreements.filter(canSign).length;
+
   return (
     <>
       <Card>
@@ -304,10 +309,26 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
             Legal Agreements
           </CardTitle>
           <CardDescription>
-            View and sign your rental agreements
+            {userType === 'owner' 
+              ? 'Review and digitally sign legal rental agreements for your vehicles'
+              : 'Review and digitally sign legal rental agreements for matched vehicles'}
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {pendingCount > 0 && (
+            <Alert className="mb-4 border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+              <PenTool className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="font-semibold text-sm">
+                  Action Required: {pendingCount} Agreement{pendingCount > 1 ? 's' : ''} Pending Your {userType === 'owner' ? 'Owner' : 'Driver'} Signature
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Please review the contract terms and affix your signature using the digital signature pad below to activate your rental contract.
+                </p>
+              </div>
+            </Alert>
+          )}
+
           {agreements.length === 0 ? (
             <Alert>
               <FileText className="h-4 w-4" />
@@ -369,11 +390,14 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                         size="sm"
                         onClick={() => {
                           setSelectedAgreement(agreement);
+                          setLegalConsent(false);
+                          setSignature(null);
                           setSignDialogOpen(true);
                         }}
+                        className="gap-1 bg-primary text-primary-foreground font-medium"
                       >
                         <PenTool className="h-4 w-4 mr-1" />
-                        Sign
+                        Sign Agreement
                       </Button>
                     )}
 
@@ -428,6 +452,25 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
               />
             )}
           </ScrollArea>
+          {selectedAgreement && canSign(selectedAgreement) && (
+            <div className="border-t pt-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                This agreement is awaiting your {userType === 'owner' ? 'vehicle owner' : 'driver'} signature.
+              </p>
+              <Button
+                onClick={() => {
+                  setViewDialogOpen(false);
+                  setLegalConsent(false);
+                  setSignature(null);
+                  setSignDialogOpen(true);
+                }}
+                className="gap-1.5"
+              >
+                <PenTool className="h-4 w-4" />
+                Proceed to Sign Agreement
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -437,7 +480,7 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <PenTool className="h-5 w-5" />
-              Sign Agreement
+              Sign Vehicle Rental Agreement
             </DialogTitle>
           </DialogHeader>
           
@@ -448,17 +491,30 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                 <AlertDescription>
                   By signing, you agree to the terms outlined in the Vehicle Rental Agreement for the{' '}
                   <strong>
-                    {selectedAgreement.vehicle_year} {selectedAgreement.vehicle_make} {selectedAgreement.vehicle_model}
+                    {selectedAgreement.vehicle_year} {selectedAgreement.vehicle_make} {selectedAgreement.vehicle_model} ({selectedAgreement.vehicle_plate})
                   </strong>.
                 </AlertDescription>
               </Alert>
 
               <div>
-                <p className="text-sm font-medium mb-2">Your Signature</p>
                 <SignaturePad
                   onSignatureChange={setSignature}
                   disabled={signing}
+                  signerName={userType === 'owner' ? selectedAgreement.owner_name : selectedAgreement.driver_name}
+                  signerRole={userType === 'owner' ? 'Vehicle Owner' : 'Driver'}
+                  label={userType === 'owner' ? 'Your Signature (Vehicle Owner)' : 'Your Signature (Driver)'}
                 />
+              </div>
+
+              <div className="flex items-start gap-2.5 rounded-lg border p-3 bg-muted/30">
+                <Checkbox
+                  id="user-agreement-consent"
+                  checked={legalConsent}
+                  onCheckedChange={(c) => setLegalConsent(c === true)}
+                />
+                <label htmlFor="user-agreement-consent" className="text-xs leading-relaxed text-muted-foreground cursor-pointer">
+                  I, <strong className="text-foreground">{userType === 'owner' ? selectedAgreement.owner_name : selectedAgreement.driver_name}</strong>, confirm that I have reviewed the agreement and hereby affix my digital signature with binding legal effect.
+                </label>
               </div>
 
               <div className="flex gap-2 justify-end">
@@ -467,6 +523,7 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                   onClick={() => {
                     setSignDialogOpen(false);
                     setSignature(null);
+                    setLegalConsent(false);
                   }}
                   disabled={signing}
                 >
@@ -474,7 +531,7 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                 </Button>
                 <Button
                   onClick={handleSign}
-                  disabled={!signature || signing}
+                  disabled={!signature || !legalConsent || signing}
                 >
                   {signing ? (
                     <>
@@ -496,3 +553,5 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
     </>
   );
 }
+
+export { UserAgreementsList };

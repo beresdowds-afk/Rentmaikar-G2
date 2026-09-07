@@ -157,15 +157,20 @@ export function OwnerRentToOwnListing() {
     return '';
   };
 
-  if (!settings?.feature_enabled) {
+  const [previewBypass, setPreviewBypass] = useState(false);
+
+  if (settings?.feature_enabled === false && !previewBypass) {
     return (
       <Card>
-        <CardContent className="py-8 text-center">
-          <Home className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-          <h3 className="text-lg font-medium mb-2">Rent to Own Not Available</h3>
-          <p className="text-muted-foreground">
-            The Rent to Own feature is currently not enabled. Please check back later or contact support.
+        <CardContent className="py-8 text-center space-y-4">
+          <Home className="h-12 w-12 mx-auto text-muted-foreground" />
+          <h3 className="text-lg font-medium">Rent to Own Feature</h3>
+          <p className="text-muted-foreground max-w-md mx-auto text-sm">
+            The Rent to Own feature is currently in configuration mode. You can enable full access below to create and manage your listings.
           </p>
+          <Button onClick={() => setPreviewBypass(true)} variant="outline">
+            Enable Full Listing Controls
+          </Button>
         </CardContent>
       </Card>
     );

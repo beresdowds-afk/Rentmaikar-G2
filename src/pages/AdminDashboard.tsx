@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { warnTabPermissionDrift } from "@/lib/admin-tab-registry";
+import { Link } from "react-router-dom";
+import { warnTabPermissionDrift, getPortalForTab, getDefaultTabForPortal } from "@/lib/admin-tab-registry";
 
-import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones } from "lucide-react";
+import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones, LayoutGrid, UserPlus, ClipboardList } from "lucide-react";
 import { CallCenterPage } from "@/components/admin/voip/CallCenterPage";
 import { HardwareManagement } from "@/components/admin/HardwareManagement";
 import { IoTMonitoringHub } from "@/components/admin/IoTMonitoringHub";
@@ -85,9 +86,11 @@ import { EmailDocs } from "@/components/admin/docs/EmailDocs";
 import { VoIPDocs } from "@/components/admin/docs/VoIPDocs";
 import PlatformGlossary from "@/components/admin/docs/PlatformGlossary";
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
+import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
 import RegionalOperationsManagement from "@/components/admin/RegionalOperationsManagement";
 import { RegionAutoBuildWorker } from "@/components/admin/RegionAutoBuildWorker";
 import NegativeAttestationReviewPanel from "@/components/admin/NegativeAttestationReviewPanel";
+import { FrontendBackendDisconnectSwitch } from "@/components/admin/FrontendBackendDisconnectSwitch";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -111,6 +114,7 @@ import { InstallAppBanner } from '@/components/pwa/InstallAppBanner';
 import { StaffSignOutButton } from '@/components/staff/StaffSignOutButton';
 import { StaffOnboardingDownloads } from '@/components/staff/StaffOnboardingDownloads';
 import { ScrollableStrip } from '@/components/ui/scrollable-strip';
+import ErrorBoundary from "@/components/errors/ErrorBoundary";
 import { usePersistedTab } from '@/hooks/usePersistedTab';
 
 
@@ -138,6 +142,21 @@ const AdminDashboard = () => {
   const setPortalView = setPortalViewRaw as (v: PortalType) => void;
   const [activeTab, setActiveTab] = usePersistedTab('task-portal');
   const { isOpen: isTourOpen, completeTour, resetTour } = useAdminOnboardingTour();
+
+  // Synchronize portalView and activeTab so every button and tab is completely functional and independent
+  useEffect(() => {
+    const portalForActiveTab = getPortalForTab(activeTab);
+    if (portalForActiveTab && portalForActiveTab !== portalView) {
+      setPortalView(portalForActiveTab);
+    }
+  }, [activeTab, portalView, setPortalView]);
+
+  useEffect(() => {
+    const portalForActiveTab = getPortalForTab(activeTab);
+    if (portalForActiveTab && portalForActiveTab !== portalView) {
+      setActiveTab(getDefaultTabForPortal(portalView));
+    }
+  }, [portalView, activeTab, setActiveTab]);
 
   // Calculate converted values from live financial records
   const incomeNgnInUsd = convertToUSD(financials.income.ngn, 'NGN');
@@ -226,6 +245,11 @@ const AdminDashboard = () => {
           {/* Onboarding downloads */}
           <div className="mb-6">
             <StaffOnboardingDownloads />
+          </div>
+
+          {/* Frontend-to-Backend Direct Disconnect Switch & ZIP Generator */}
+          <div className="mb-6">
+            <FrontendBackendDisconnectSwitch />
           </div>
 
           {/* Stats Grid */}
@@ -429,39 +453,44 @@ const AdminDashboard = () => {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/audit-log">Security audit log</a>
+                <Link to="/admin/audit-log">Security audit log</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/payments">Payments viewer</a>
+                <Link to="/admin/payments">Payments viewer</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/reconciliation">Reconciliation logs</a>
+                <Link to="/admin/reconciliation">Reconciliation logs</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/settlement-reconciliation">Settlement reconciliation</a>
+                <Link to="/admin/settlement-reconciliation">Settlement reconciliation</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/export-audit">Document export audit</a>
+                <Link to="/admin/export-audit">Document export audit</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/document-failures">Document failures</a>
+                <Link to="/admin/document-failures">Document failures</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/m/call-in">Mobile call-in</a>
+                <Link to="/m/call-in">Mobile call-in</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/tour-config">Tour step config</a>
+                <Link to="/admin/tour-config">Tour step config</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/tour-analytics">Tour analytics</a>
+                <Link to="/admin/tour-analytics">Tour analytics</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/authorizations">Rental authorizations log</a>
+                <Link to="/admin/authorizations">Rental authorizations log</Link>
               </Button>
               <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/vehicle-queue">Vehicle submission queue</a>
+                <Link to="/admin/vehicle-queue">Vehicle submission queue</Link>
               </Button>
-
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <Link to="/admin/persona-templates">Persona templates</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="justify-start">
+                <Link to="/admin/legal-templates/preview">Legal templates preview</Link>
+              </Button>
             </div>
           </Card>
 
@@ -482,6 +511,14 @@ const AdminDashboard = () => {
             </div>
             {/* Independent Quick Access Buttons */}
             <ScrollableStrip ariaLabel="Quick access shortcuts">
+              <Button
+                variant={activeTab === 'task-portal' ? 'default' : 'outline'}
+                className="gap-2 shrink-0"
+                onClick={() => { setPortalView('support'); setActiveTab('task-portal'); }}
+              >
+                <LayoutGrid className="h-4 w-4" />
+                Task Portal
+              </Button>
               <Button
                 variant={activeTab === 'inbox' ? 'default' : 'outline'}
                 className="gap-2 shrink-0"
@@ -507,12 +544,44 @@ const AdminDashboard = () => {
                 Support Tasks
               </Button>
               <Button
+                variant={activeTab === 'applications' ? 'default' : 'outline'}
+                className="gap-2 shrink-0"
+                onClick={() => { setPortalView('crm'); setActiveTab('applications'); }}
+              >
+                <UserPlus className="h-4 w-4" />
+                Applications
+              </Button>
+              <Button
+                variant={activeTab === 'approvals' ? 'default' : 'outline'}
+                className="gap-2 shrink-0"
+                onClick={() => { setPortalView('crm'); setActiveTab('approvals'); }}
+              >
+                <ClipboardList className="h-4 w-4" />
+                Approvals ({pendingItems.length})
+              </Button>
+              <Button
                 variant={activeTab === 'attestation-review' ? 'default' : 'outline'}
                 className="gap-2 shrink-0"
                 onClick={() => { setPortalView('crm'); setActiveTab('attestation-review'); }}
               >
                 <AlertTriangle className="h-4 w-4" />
                 Referee Reviews
+              </Button>
+              <Button
+                variant={activeTab === 'tracking' ? 'default' : 'outline'}
+                className="gap-2 shrink-0"
+                onClick={() => { setPortalView('erp'); setActiveTab('tracking'); }}
+              >
+                <Car className="h-4 w-4" />
+                Live Tracking
+              </Button>
+              <Button
+                variant={activeTab === 'security' ? 'default' : 'outline'}
+                className="gap-2 shrink-0"
+                onClick={() => { setPortalView('erp'); setActiveTab('security'); }}
+              >
+                <Shield className="h-4 w-4" />
+                Security &amp; Audits
               </Button>
             </ScrollableStrip>
 
@@ -531,8 +600,16 @@ const AdminDashboard = () => {
           {portalView === 'support' && (
             <div className="space-y-6">
               {activeTab === 'task-portal' && <AdminTaskPortal />}
-              {activeTab === 'inbox' && <MessagingCenter />}
-              {activeTab === 'call-center' && <CallCenterPage />}
+              {activeTab === 'inbox' && (
+                <ErrorBoundary key="inbox">
+                  <MessagingCenter />
+                </ErrorBoundary>
+              )}
+              {activeTab === 'call-center' && (
+                <ErrorBoundary key="call-center">
+                  <CallCenterPage />
+                </ErrorBoundary>
+              )}
               {activeTab === 'contacts' && <AdminContactSettings />}
               {activeTab === 'support-tasks' && <AdminSupportTaskManagement />}
               {activeTab === 'insurance' && <InsuranceSupportDashboard />}
@@ -565,6 +642,9 @@ const AdminDashboard = () => {
                   <PhoneOtpProviderSettings />
                 </div>
               )}
+              {activeTab === 'phone-otp-providers' && <PhoneOtpProviderSettings />}
+              {activeTab === 'persona-settings' && <PersonaVerificationSettings />}
+              {activeTab === 'referee-settings' && <RefereeRequirementSettings />}
 
               {activeTab === 'negotiations' && <AdminPriceNegotiation />}
               {activeTab === 'approvals' && (
@@ -591,7 +671,19 @@ const AdminDashboard = () => {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button size="sm" variant="outline"><Eye className="w-4 h-4" /></Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="View application details"
+                              aria-label={`View application for ${item.name}`}
+                              onClick={() => {
+                                setPortalView('crm');
+                                setActiveTab('applications');
+                                toast.info(`Viewing application for ${item.name}`);
+                              }}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
                             <Button 
                               size="sm" 
                               variant="hero"
@@ -814,6 +906,7 @@ const AdminDashboard = () => {
               {activeTab === 'webhooks' && <WebhookManagement />}
               {activeTab === 'api-endpoints' && <ApiEndpointManagement />}
               {activeTab === 'security' && <AdminSecurityDashboard />}
+              {activeTab === 'email-delivery' && <AdminEmailDeliveryPage />}
               {activeTab === 'cron-jobs' && <CronJobManagement />}
               {activeTab === 'uuid-assignments' && <UserUuidAssignmentsPage />}
               {activeTab === 'tax' && <TaxManagement />}

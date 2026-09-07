@@ -95,6 +95,12 @@ interface UseVoiceDeviceResult {
   setMuted: (muted: boolean) => void;
   toggleSpeakerphone: () => Promise<void>;
   selectOutputRoute: (route: AudioOutputRoute) => Promise<void>;
+  /** Speaker volume percentage (0 to 100). */
+  speakerVolume: number;
+  /** Update speaker volume and persist preference. */
+  setSpeakerVolume: (volume: number) => void;
+  /** Play audible test chime at current volume. */
+  testSpeakerSound: () => void;
   /** Saved routing/mute preferences, restored automatically on every call. */
   preferences: AudioPreferences;
   /** Turn automatic headset/Bluetooth switching on or off (persisted). */
@@ -121,6 +127,7 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
   const [outputRoute, setOutputRoute] = useState<AudioOutputRoute>("default");
   const [outputLabel, setOutputLabel] = useState("System default");
   const [preferences, setPreferences] = useState<AudioPreferences>(DEFAULT_AUDIO_PREFERENCES);
+  const [speakerVolume, setSpeakerVolumeState] = useState<number>(80);
   const [headsetConnected, setHeadsetConnected] = useState(false);
 
   // Restore the user's saved routing/mute choice for this device.
@@ -130,8 +137,9 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     routeRef.current = stored.route;
     setPreferences(stored);
     setOutputRoute(stored.route);
+    setSpeakerVolumeState(stored.speakerVolume ?? 80);
     logAudioEvent("routing", `Restored saved audio route "${stored.route}"`, {
-      detail: { muted: stored.muted, autoSwitchToHeadset: stored.autoSwitchToHeadset },
+      detail: { muted: stored.muted, autoSwitchToHeadset: stored.autoSwitchToHeadset, speakerVolume: stored.speakerVolume },
     });
   }, []);
 
@@ -180,6 +188,16 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     call.on("accept", () => {
       setStatus("on-call");
       logAudioEvent("call", "Call accepted");
+      // Record which staff member answered so the admin call log can show it.
+      const answeredSid = (call as unknown as { parameters?: { CallSid?: string } }).parameters
+        ?.CallSid;
+      if (answeredSid) {
+        void supabase
+          .rpc("mark_voip_call_answered", { _call_sid: answeredSid })
+          .then(({ error }) => {
+            if (error) console.error("mark_voip_call_answered failed:", error.message);
+          });
+      }
       // Re-assert routing at connect time: some platforms reset the sink.
       void enableAudioDevices(deviceRef.current, routeRef.current);
       if (prefsRef.current.muted) {
@@ -326,17 +344,25 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
   );
 
   const hangUp = useCallback(() => {
+    // Live call: hang it up. Ringing inbound call: reject it.
+    // Neither: clear any stale call state and return the softphone to ready.
     callRef.current?.disconnect();
     callRef.current = null;
+    if (incomingCall) {
+      incomingCall.reject();
+      setIncomingCall(null);
+    }
     setStatus(deviceRef.current ? "ready" : "idle");
     setDiagnosticsCallId(null);
-  }, []);
+    logAudioEvent("call", "Call ended by agent");
+  }, [incomingCall]);
 
   const setMuted = useCallback((muted: boolean) => {
     const call = callRef.current;
-    if (!call) return;
-    call.mute(muted);
-    const applied = call.isMuted();
+    // Without a live call this still stores the preference, so the next
+    // call starts muted/unmuted as chosen.
+    call?.mute(muted);
+    const applied = call ? call.isMuted() : muted;
     setIsMuted(applied);
     setPreferences(saveAudioPreferences({ muted: applied }));
     prefsRef.current = { ...prefsRef.current, muted: applied };
@@ -345,8 +371,7 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
 
   const toggleMute = useCallback(() => {
     const call = callRef.current;
-    if (!call) return;
-    setMuted(!call.isMuted());
+    setMuted(call ? !call.isMuted() : !prefsRef.current.muted);
   }, [setMuted]);
 
   const selectOutputRoute = useCallback(
@@ -392,6 +417,57 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     logAudioEvent("routing", `Automatic headset switching ${enabled ? "enabled" : "disabled"}`);
   }, []);
 
+  const setSpeakerVolume = useCallback((volume: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(volume)));
+    setSpeakerVolumeState(clamped);
+    prefsRef.current = { ...prefsRef.current, speakerVolume: clamped };
+    setPreferences(saveAudioPreferences({ speakerVolume: clamped }));
+    if (typeof document !== "undefined") {
+      const audios = document.querySelectorAll("audio, video");
+      audios.forEach((el) => {
+        try {
+          (el as HTMLMediaElement).volume = clamped / 100;
+        } catch {}
+      });
+    }
+    logAudioEvent("routing", `Speaker volume set to ${clamped}%`);
+  }, []);
+
+  const testSpeakerSound = useCallback(() => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+      const now = ctx.currentTime;
+      const gainVal = (speakerVolume / 100) * 0.25;
+      const playChime = (freq: number, start: number, dur: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(gainVal, start + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + dur);
+      };
+      playChime(587.33, now, 0.2); // D5
+      playChime(880, now + 0.12, 0.35); // A5
+      setTimeout(() => {
+        ctx.close().catch(() => {});
+      }, 800);
+    } catch (e) {
+      console.debug("Audio test tone failed:", e);
+    }
+  }, [speakerVolume]);
+
   // Headset / Bluetooth hot-plug: move the output automatically, even mid-call.
   useEffect(() => {
     const stop = watchAudioDevices((headset) => {
@@ -420,14 +496,49 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     return stop;
   }, [applyAudio]);
 
+  // Presence heartbeat: tells the call router that this browser is registered
+  // and can be rung directly for incoming customer calls.
+  useEffect(() => {
+    const presence =
+      status === "on-call" || status === "connecting"
+        ? "busy"
+        : status === "ready"
+          ? "available"
+          : "offline";
+
+    const push = () => {
+      void supabase.rpc("voip_set_presence", { _status: presence, _region: "All" });
+    };
+    push();
+    if (presence === "offline") return;
+    const timer = window.setInterval(push, 30_000);
+    return () => window.clearInterval(timer);
+  }, [status]);
+
   useEffect(() => {
     return () => {
-      callRef.current?.disconnect();
-      deviceRef.current?.destroy();
+      // Teardown must never throw: an error here happens during React's commit
+      // phase and would tear down the whole dashboard, so the sibling feature
+      // the user just clicked (e.g. the Unified Inbox) would never render.
+      try {
+        callRef.current?.disconnect();
+      } catch {
+        /* the call was already gone */
+      }
+      try {
+        deviceRef.current?.destroy();
+      } catch {
+        /* the device was already destroyed or never registered */
+      }
       deviceRef.current = null;
-      setDiagnosticsCallId(null);
+      try {
+        void supabase.rpc("voip_set_presence", { _status: "offline", _region: "All" });
+      } catch {
+        /* presence is best-effort */
+      }
     };
   }, []);
+
 
   return {
     status,
@@ -440,6 +551,9 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     isSpeakerphone: outputRoute === "speaker",
     outputLabel,
     preferences,
+    speakerVolume,
+    setSpeakerVolume,
+    testSpeakerSound,
     setAutoSwitchToHeadset,
     headsetConnected,
     initialize,

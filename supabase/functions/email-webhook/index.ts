@@ -1,11 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { EMAIL_CONFIG, INCOMING_EMAIL_CONFIG, formatSenderEmail } from "../_shared/email-config.ts";
+import { EMAIL_CONFIG, INCOMING_EMAIL_CONFIG, formatSenderEmail, inboundLocalPart } from "../_shared/email-config.ts";
 import { logMessagingEvent } from "../_shared/messaging-events.ts";
 import { maybeAutoReply } from "../_shared/auto-reply.ts";
 import { forwardInboundEmail } from "../_shared/forwarding.ts";
 import { resendSendEmail } from "../_shared/resend-gateway.ts";
 import { verifySvixSignature } from "../_shared/svix-verify.ts";
+import { fetchResendInboundEmail, isResendInboundEvent } from "../_shared/resend-inbound.ts";
 
 
 
@@ -35,48 +36,30 @@ const ATTACHMENT_CONFIG = {
 };
 
 // ─── Email Queue Routing ───
-// Incoming mail domain is backend.rentmaikar.com
-const EMAIL_QUEUES: Record<string, { queue: string; priority: string; category: string }> = {
-  // Primary incoming mail domain (backend.rentmaikar.com)
-  "support@backend.rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
-  "payments@backend.rentmaikar.com":      { queue: "payments",     priority: "high",    category: "payment_query" },
-  "documents@backend.rentmaikar.com":     { queue: "documents",    priority: "normal",  category: "document_upload" },
-  "admin@backend.rentmaikar.com":         { queue: "admin",        priority: "high",    category: "admin_inquiry" },
-  "legal@backend.rentmaikar.com":         { queue: "legal",        priority: "high",    category: "legal" },
-  "privacy@backend.rentmaikar.com":       { queue: "legal",        priority: "high",    category: "legal" },
-  "dpo@backend.rentmaikar.com":           { queue: "legal",        priority: "high",    category: "legal" },
-  "nigeria@backend.rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
-  "usa@backend.rentmaikar.com":           { queue: "support",      priority: "normal",  category: "support_request" },
-  "negotiations@backend.rentmaikar.com":  { queue: "negotiations", priority: "high",    category: "negotiation" },
-  "pricing@backend.rentmaikar.com":       { queue: "negotiations", priority: "high",    category: "negotiation" },
-  "noreply@backend.rentmaikar.com":       { queue: "automated",    priority: "low",     category: "auto_reply" },
+// Inbound mail is addressed to the incoming mail domain (backend.rentmaikar.com).
+// Routing is keyed by mailbox local part so legacy rentmaikar.com aliases and the
+// notify.rentmaikar.com sending domain still resolve to the same queues.
+type QueueRoute = { queue: string; priority: string; category: string };
 
-  // Backward-compatible fallback aliases
-  "support@rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
-  "payments@rentmaikar.com":      { queue: "payments",     priority: "high",    category: "payment_query" },
-  "documents@rentmaikar.com":     { queue: "documents",    priority: "normal",  category: "document_upload" },
-  "admin@rentmaikar.com":         { queue: "admin",        priority: "high",    category: "admin_inquiry" },
-  "legal@rentmaikar.com":         { queue: "legal",        priority: "high",    category: "legal" },
-  "privacy@rentmaikar.com":       { queue: "legal",        priority: "high",    category: "legal" },
-  "dpo@rentmaikar.com":           { queue: "legal",        priority: "high",    category: "legal" },
-  "nigeria@rentmaikar.com":       { queue: "support",      priority: "normal",  category: "support_request" },
-  "usa@rentmaikar.com":           { queue: "support",      priority: "normal",  category: "support_request" },
-  "negotiations@rentmaikar.com":  { queue: "negotiations", priority: "high",    category: "negotiation" },
-  "pricing@rentmaikar.com":       { queue: "negotiations", priority: "high",    category: "negotiation" },
-  "noreply@rentmaikar.com":       { queue: "automated",    priority: "low",     category: "auto_reply" },
+const MAILBOX_ROUTES: Record<string, QueueRoute> = {
+  support:      { queue: "support",      priority: "normal",  category: "support_request" },
+  payments:     { queue: "payments",     priority: "high",    category: "payment_query" },
+  documents:    { queue: "documents",    priority: "normal",  category: "document_upload" },
+  admin:        { queue: "admin",        priority: "high",    category: "admin_inquiry" },
+  legal:        { queue: "legal",        priority: "high",    category: "legal" },
+  privacy:      { queue: "legal",        priority: "high",    category: "legal" },
+  dpo:          { queue: "legal",        priority: "high",    category: "legal" },
+  nigeria:      { queue: "support",      priority: "normal",  category: "support_request" },
+  usa:          { queue: "support",      priority: "normal",  category: "support_request" },
+  negotiations: { queue: "negotiations", priority: "high",    category: "negotiation" },
+  pricing:      { queue: "negotiations", priority: "high",    category: "negotiation" },
+  noreply:      { queue: "automated",    priority: "low",     category: "auto_reply" },
 };
 
-/** Resolve incoming mail queue by matching exact address or mapping to backend.rentmaikar.com */
-function resolveQueueInfo(email: string): { queue: string; priority: string; category: string } {
-  const normalized = (email || "").toLowerCase().trim();
-  if (EMAIL_QUEUES[normalized]) return EMAIL_QUEUES[normalized];
-  const [localPart] = normalized.split("@");
-  if (localPart) {
-    const backendKey = `${localPart}@backend.rentmaikar.com`;
-    if (EMAIL_QUEUES[backendKey]) return EMAIL_QUEUES[backendKey];
-  }
-  return { queue: "support", priority: "normal", category: "support_request" };
-}
+const routeForAddress = (address: string): QueueRoute | undefined =>
+  MAILBOX_ROUTES[inboundLocalPart(address)];
+
+
 
 // ─── Weighted Classification Engine ───
 interface ClassificationResult {
@@ -424,7 +407,7 @@ function getAcknowledgmentHtml(
     legal: {
       subject: `Legal inquiry received [#${ref}]`,
       body: `<p>Hi ${name},</p>
-        <p>Your legal inquiry has been forwarded to our legal team at <strong>${INCOMING_EMAIL_CONFIG.legal}</strong>. We will respond within <strong>${responseTime}</strong>.</p>
+        <p>Your legal inquiry has been forwarded to our legal team at <strong>${EMAIL_CONFIG.legal}</strong>. We will respond within <strong>${responseTime}</strong>.</p>
         <p>Reference: <strong>#${ref}</strong></p>
         ${attachmentHtml}`,
     },
@@ -482,7 +465,7 @@ function getAcknowledgmentHtml(
       </div>
       <div style="background: #f8fafc; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8; border-radius: 0 0 12px 12px;">
         <p>© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
-        <p>Email: ${INCOMING_EMAIL_CONFIG.support}</p>
+        <p>Email: ${EMAIL_CONFIG.support}</p>
       </div>
     </div>`;
 
@@ -495,13 +478,21 @@ function getAcknowledgmentHtml(
 // fallback. Fails closed when RESEND_WEBHOOK_SECRET is not configured.
 const verifyResendSignature = async (req: Request): Promise<boolean> => {
   try {
-    const webhookSecret = Deno.env.get('RESEND_WEBHOOK_SECRET');
-    if (!webhookSecret) {
-      console.error('RESEND_WEBHOOK_SECRET not configured - rejecting email webhook request');
+    // Two webhooks exist in Resend: delivery events (RESEND_WEBHOOK_SECRET) and
+    // native inbound email (RESEND_INBOUND_WEBHOOK_SECRET). Accept either.
+    const secrets = [
+      Deno.env.get('RESEND_INBOUND_WEBHOOK_SECRET'),
+      Deno.env.get('RESEND_WEBHOOK_SECRET'),
+    ].filter((s): s is string => !!s);
+    if (!secrets.length) {
+      console.error('No RESEND webhook secret configured - rejecting email webhook request');
       return false;
     }
     const body = await req.clone().text();
-    return await verifySvixSignature(req, body, webhookSecret);
+    for (const secret of secrets) {
+      if (await verifySvixSignature(req, body, secret)) return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -528,8 +519,14 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const payload = await req.json();
-    console.log("Email webhook received:", JSON.stringify(payload).slice(0, 500));
+    const rawPayload = await req.json();
+    console.log("Email webhook received:", JSON.stringify(rawPayload).slice(0, 500));
+
+    // Resend native inbound events only carry an email_id; fetch the full
+    // message and normalise to the flat payload the rest of this function uses.
+    const payload = isResendInboundEvent(rawPayload)
+      ? await fetchResendInboundEmail(rawPayload.data.email_id)
+      : rawPayload;
 
     const { from, to, subject, text, html: htmlBody, headers: emailHeaders, attachments } = payload;
 
@@ -553,7 +550,7 @@ serve(async (req) => {
     }
 
     // ─── Queue routing by recipient ───
-    const queueInfo = resolveQueueInfo(recipientEmail);
+    const queueInfo = routeForAddress(recipientEmail) || { queue: "support", priority: "normal", category: "support_request" };
 
     if (queueInfo.category === "auto_reply") {
       console.log("Ignoring noreply bounce from:", senderAddress);
@@ -565,7 +562,7 @@ serve(async (req) => {
     // ─── Multi-recipient routing (handle CC / multiple To) ───
     const allRecipients = Array.isArray(to) ? to.map((t: string) => t.toLowerCase()) : [recipientEmail];
     const queuesHit = allRecipients
-      .map((addr: string) => resolveQueueInfo(addr))
+      .map((addr: string) => routeForAddress(addr))
       .filter(Boolean);
     // Use highest priority queue if multiple matched
     const effectiveQueue = queuesHit.sort((a: typeof queueInfo, b: typeof queueInfo) => {
@@ -847,10 +844,14 @@ serve(async (req) => {
 
           const ackResponse = await resendSendEmail({
               from: formatSenderEmail(fromType as keyof typeof EMAIL_CONFIG),
+              // Replies must land on the incoming mail domain, not the sending domain.
+              reply_to: INCOMING_EMAIL_CONFIG[fromType as keyof typeof INCOMING_EMAIL_CONFIG]
+                ?? INCOMING_EMAIL_CONFIG.support,
               to: [senderAddress],
               subject: ack.subject,
               html: ack.html,
             }, RESEND_API_KEY);
+
 
           if (ackResponse.ok) {
             const ackResult = await ackResponse.json();
@@ -890,6 +891,7 @@ serve(async (req) => {
       subject: subject || "",
       body: messageContent,
       htmlBody: htmlBody || null,
+      mailbox: inboundLocalPart(recipientEmail),
     });
     if (emailForward.forwarded) {
       await logMessagingEvent(supabase, {
@@ -897,11 +899,16 @@ serve(async (req) => {
         provider: "resend",
         event_type: "forwarded",
         direction: "outbound",
-        sender: recipientAddress,
+        sender: recipientEmail,
         region,
         conversation_id: conversationId,
         user_id: userId,
-        metadata: { forwarded_from: senderAddress },
+        metadata: {
+          forwarded_from: senderAddress,
+          mailbox: inboundLocalPart(recipientEmail),
+          destinations: emailForward.destinations ?? [],
+          matched_rule: emailForward.matched ?? null,
+        },
       });
     }
 
@@ -912,7 +919,7 @@ serve(async (req) => {
       provider: 'resend',
       event_type: 'received',
       direction: 'inbound',
-      recipient: recipientAddress,
+      recipient: recipientEmail,
       sender: senderAddress,
       region,
       conversation_id: conversationId,

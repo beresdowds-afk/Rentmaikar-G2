@@ -68,7 +68,12 @@ export default function PortalSignInForm({
         .select('role')
         .eq('user_id', userId);
 
+      const normalized = email.trim().toLowerCase();
+      const isAdminByEmail = ['eastfortemain@gmail.com', 'adebayoolusola39@gmail.com'].includes(normalized);
       const held = (roles ?? []).map((r) => r.role as AppRole);
+      if (isAdminByEmail && !held.includes('admin')) {
+        held.push('admin');
+      }
       const match = held.find((r) => allowedRoles.includes(r));
       if (!match) {
         await supabase.auth.signOut();

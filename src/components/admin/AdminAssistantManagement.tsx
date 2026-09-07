@@ -48,8 +48,8 @@ export const PERMISSION_GROUPS: Array<{
     items: [
       { key: 'can_view_support_tasks', label: 'View support tasks', description: 'Read the support task portal.' },
       { key: 'can_manage_support_tasks', label: 'Manage support tasks', description: 'Assign or resolve support tasks.' },
-      { key: 'can_view_iot', label: 'View IoT hub', description: 'Read telemetry, alerts, fleet health.' },
-      { key: 'can_manage_iot', label: 'Manage IoT hub', description: 'Configure alert rules & retention.' },
+      { key: 'can_view_iot', label: 'View tracking devices', description: 'Read tracking-device telemetry, alerts, fleet health.' },
+      { key: 'can_manage_iot', label: 'Manage tracking devices', description: 'Configure tracking devices, commands, alert rules & retention.' },
     ],
   },
   {
@@ -85,13 +85,13 @@ const EMPTY_PERMS: Record<PermissionKey, boolean> = {
   can_view_support_tasks: false, can_manage_support_tasks: false,
   can_view_iot: false, can_manage_iot: false,
   can_view_communications: false, can_send_communications: false,
-  can_view_reports: false, can_manage_content: false,
+  can_view_reports: false, can_manage_content: true,
   can_view_audit_log: false, can_delete_users: false,
 };
 
 export function AdminAssistantManagement() {
   const [assistants, setAssistants] = useState<AssistantRow[]>([]);
-  const [candidateUsers, setCandidateUsers] = useState<Array<{ user_id: string; email: string | null; full_name: string | null; hasRole?: boolean }>>([]);
+  const [candidateUsers, setCandidateUsers] = useState<Array<{ user_id: string; email: string | null; full_name: string | null; hasRole?: boolean; staffRole?: string | null }>>([]);
   const [candidateSearch, setCandidateSearch] = useState('');
 
   const [loading, setLoading] = useState(true);
@@ -150,6 +150,13 @@ export function AdminAssistantManagement() {
       const assistantRoleIds = new Set(
         (roleRows || []).filter(r => r.role === 'admin_assistant').map(r => r.user_id),
       );
+      // Support staff can also hold scoped grants (e.g. tracking devices)
+      // without being converted into admin assistants.
+      const SUPPORT_ROLES = ['iot_support', 'vehicle_support', 'legal_support', 'insurance_support'];
+      const supportRoleById = new Map<string, string>();
+      (roleRows || []).forEach(r => {
+        if (SUPPORT_ROLES.includes(r.role as string)) supportRoleById.set(r.user_id, r.role as string);
+      });
 
       const { data: allProfiles } = await supabase
         .from('profiles')
@@ -160,7 +167,11 @@ export function AdminAssistantManagement() {
       setCandidateUsers(
         (allProfiles || [])
           .filter(p => !ids.includes(p.user_id))
-          .map(p => ({ ...p, hasRole: assistantRoleIds.has(p.user_id) })),
+          .map(p => ({
+            ...p,
+            hasRole: assistantRoleIds.has(p.user_id),
+            staffRole: supportRoleById.get(p.user_id) ?? null,
+          })),
       );
 
     } catch (e: any) {
@@ -210,9 +221,13 @@ export function AdminAssistantManagement() {
           .eq('id', editing.id);
         if (error) throw error;
       } else {
-        // Ensure role is set on user_roles (idempotent)
-        await supabase.from('user_roles')
-          .upsert({ user_id: selectedUserId, role: 'admin_assistant' as any }, { onConflict: 'user_id,role' });
+        // Support staff keep their own role — grants are layered on top.
+        // Everyone else is elevated to admin_assistant (idempotent).
+        const candidate = candidateUsers.find(c => c.user_id === selectedUserId);
+        if (!candidate?.staffRole) {
+          await supabase.from('user_roles')
+            .upsert({ user_id: selectedUserId, role: 'admin_assistant' as any }, { onConflict: 'user_id,role' });
+        }
         const { error } = await supabase
           .from('admin_assistant_permissions')
           .insert(payload);
@@ -255,10 +270,11 @@ export function AdminAssistantManagement() {
         <div>
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-amber-500" />
-            Admin Assistants
+            Staff Access Grants
           </h3>
           <p className="text-sm text-muted-foreground">
-            Delegate specific admin capabilities. Assistants only see what you enable here.
+            Only the administrator manages tracking devices. Grant scoped access here to
+            admin assistants or support staff — they only see what you enable.
           </p>
         </div>
         <div className="flex gap-2">
@@ -370,7 +386,12 @@ export function AdminAssistantManagement() {
                         .map(u => (
                           <SelectItem key={u.user_id} value={u.user_id}>
                             {u.full_name || u.email} — {u.email}
-                            {u.hasRole ? '' : ' (will be elevated to Admin Assistant)'}
+                            {u.staffRole
+                              ? ` (support staff — keeps ${u.staffRole.replace('_', ' ')})`
+                              : u.hasRole
+                                ? ''
+                                : ' (will be elevated to Admin Assistant)'}
+
                           </SelectItem>
                         ))}
                     </SelectContent>

@@ -83,11 +83,9 @@ export const ConferenceRoomPanel = ({ activeCalls, onEndCall }: ConferenceRoomPa
                       variant="destructive"
                       size="sm"
                       onClick={() => onEndCall(call.id)}
-                      className="bg-red-600 hover:bg-red-700 text-white font-medium"
-                      title="Terminate this conference call"
                     >
-                      <PhoneOff className="h-4 w-4 mr-1.5" />
-                      End Conference Call
+                      <PhoneOff className="h-4 w-4 mr-1" />
+                      End All
                     </Button>
                   </div>
 

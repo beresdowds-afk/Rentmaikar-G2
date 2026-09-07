@@ -18,14 +18,26 @@
 
 export type LiveSyncTick =
   | { type: "heartbeat"; at: number }
-  | { type: "version-check"; at: number };
+  | { type: "version-check"; at: number }
+  | { type: "pong"; at: number; clientAt: number }
+  | {
+      type: "status";
+      running: boolean;
+      heartbeatMs: number;
+      versionCheckMs: number;
+      ticksEmitted: number;
+      uptimeMs: number;
+    };
 
 export type LiveSyncCommand =
   | { type: "start"; heartbeatMs?: number; versionCheckMs?: number }
   | { type: "configure"; heartbeatMs?: number; versionCheckMs?: number }
   | { type: "pause" }
   | { type: "resume" }
-  | { type: "stop" };
+  | { type: "stop" }
+  | { type: "sync-now" }
+  | { type: "ping"; at: number }
+  | { type: "status" };
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -37,6 +49,8 @@ let versionTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatMs = 60_000;
 let versionCheckMs = 5 * 60_000;
 let running = false;
+let startedAt = Date.now();
+let ticksEmitted = 0;
 
 function clearTimers() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -45,15 +59,20 @@ function clearTimers() {
   versionTimer = null;
 }
 
+function emitHeartbeat() {
+  ticksEmitted++;
+  ctx.postMessage({ type: "heartbeat", at: Date.now() } satisfies LiveSyncTick);
+}
+
+function emitVersionCheck() {
+  ctx.postMessage({ type: "version-check", at: Date.now() } satisfies LiveSyncTick);
+}
+
 function schedule() {
   clearTimers();
   if (!running) return;
-  heartbeatTimer = setInterval(() => {
-    ctx.postMessage({ type: "heartbeat", at: Date.now() } satisfies LiveSyncTick);
-  }, heartbeatMs);
-  versionTimer = setInterval(() => {
-    ctx.postMessage({ type: "version-check", at: Date.now() } satisfies LiveSyncTick);
-  }, versionCheckMs);
+  heartbeatTimer = setInterval(emitHeartbeat, heartbeatMs);
+  versionTimer = setInterval(emitVersionCheck, versionCheckMs);
 }
 
 function applyConfig(next: { heartbeatMs?: number; versionCheckMs?: number }) {
@@ -72,6 +91,7 @@ ctx.onmessage = (event: MessageEvent<LiveSyncCommand>) => {
     case "start":
       applyConfig(data);
       running = true;
+      startedAt = Date.now();
       schedule();
       break;
     case "configure":
@@ -92,6 +112,27 @@ ctx.onmessage = (event: MessageEvent<LiveSyncCommand>) => {
     case "stop":
       running = false;
       clearTimers();
+      break;
+    case "sync-now":
+      emitHeartbeat();
+      emitVersionCheck();
+      break;
+    case "ping":
+      ctx.postMessage({
+        type: "pong",
+        at: Date.now(),
+        clientAt: data.at,
+      } satisfies LiveSyncTick);
+      break;
+    case "status":
+      ctx.postMessage({
+        type: "status",
+        running,
+        heartbeatMs,
+        versionCheckMs,
+        ticksEmitted,
+        uptimeMs: Date.now() - startedAt,
+      } satisfies LiveSyncTick);
       break;
   }
 };

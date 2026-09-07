@@ -51,9 +51,37 @@ export const ADMIN_ONLY_TABS: string[] = [
   'category-year-specs',
   // Support portal
   'task-portal',
-  // CRM
+  // CRM / Infra
   'admin-assistants',
+  'phone-otp-providers',
+  'persona-settings',
+  'referee-settings',
 ];
+
+/**
+ * Returns the portal to which a tab belongs, or null if unmapped.
+ */
+export function getPortalForTab(tab: string): PortalType | null {
+  for (const [portal, tabs] of Object.entries(PORTAL_TABS) as [PortalType, PortalTab[]][]) {
+    if (tabs.some((t) => t.value === tab)) {
+      return portal;
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns the default initial tab for a given portal.
+ */
+export function getDefaultTabForPortal(portal: PortalType): string {
+  switch (portal) {
+    case 'crm': return 'applications';
+    case 'erp': return 'tracking';
+    case 'support': return 'task-portal';
+    case 'marketing': return 'campaigns';
+    case 'docs': return 'glossary';
+  }
+}
 
 /**
  * Tabs an assistant can never access: the explicit admin-only list plus any

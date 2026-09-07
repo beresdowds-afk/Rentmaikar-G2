@@ -243,7 +243,6 @@ export function AdminWeeklyReportManagement() {
                 id="feature-toggle"
                 checked={featureEnabled}
                 onCheckedChange={handleToggleFeature}
-                disabled={isUpdatingSettings}
               />
             </div>
             <p className="text-xs text-muted-foreground mt-2">

@@ -295,7 +295,6 @@ export const InsuranceSupportDashboard = () => {
             <Switch
               id="insurance-toggle"
               checked={insuranceEnabled}
-              disabled={togglingInsurance}
               onCheckedChange={toggleInsuranceSupport}
             />
           </div>

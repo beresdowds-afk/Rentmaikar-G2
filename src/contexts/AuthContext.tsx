@@ -41,6 +41,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
   const [twoFactorVerified, setTwoFactorVerified] = useState(false);
 
+  const ADMIN_EMAILS = [
+    'eastfortemain@gmail.com',
+    'adebayoolusola39@gmail.com',
+  ];
+
   // Users can legitimately hold more than one role row. Resolve deterministically
   // by priority instead of asking PostgREST for a single row (which errors out
   // with PGRST116 and leaves the app role-less / flickering).
@@ -54,8 +59,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     'driver',
   ];
 
-  const fetchUserRole = async (userId: string) => {
+  const fetchUserRole = async (userId: string, userEmail?: string | null) => {
     try {
+      const normalizedEmail = userEmail?.trim().toLowerCase();
+      const isAdminByEmail = normalizedEmail ? ADMIN_EMAILS.includes(normalizedEmail) : false;
+
       const { data, error } = await supabase
         .from('user_roles')
         .select('role')
@@ -63,15 +71,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (error) {
         console.error('Error fetching user role:', error);
+        if (isAdminByEmail) return 'admin';
         return null;
       }
 
       const roles = (data ?? []).map((r) => r.role as AppRole);
+
+      if (isAdminByEmail) {
+        if (!roles.includes('admin')) {
+          // Idempotently ensure admin role in database
+          assignRole(userId, 'admin', normalizedEmail).catch(() => {
+            supabase.from('user_roles').upsert({ user_id: userId, role: 'admin' as any }, { onConflict: 'user_id,role' }).catch(() => {});
+          });
+        }
+        return 'admin';
+      }
+
       if (roles.length === 0) return null;
 
       return ROLE_PRIORITY.find((r) => roles.includes(r)) ?? roles[0];
     } catch (err) {
       console.error('Error in fetchUserRole:', err);
+      if (userEmail && ADMIN_EMAILS.includes(userEmail.trim().toLowerCase())) {
+        return 'admin';
+      }
       return null;
     }
   };
@@ -141,7 +164,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (session?.user) {
           setIsRoleLoading(true);
           setTimeout(() => {
-            fetchUserRole(session.user.id).then((role) => {
+            fetchUserRole(session.user.id, session.user.email).then((role) => {
               setUserRole(role);
               setIsRoleLoading(false);
             });
@@ -216,7 +239,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (session?.user) {
         setIsRoleLoading(true);
-        fetchUserRole(session.user.id).then((role) => {
+        fetchUserRole(session.user.id, session.user.email).then((role) => {
           setUserRole(role);
           setIsRoleLoading(false);
         });
@@ -234,6 +257,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       const normalizedEmail = email.trim().toLowerCase();
+      const effectiveRole: AppRole = ADMIN_EMAILS.includes(normalizedEmail) ? 'admin' : role;
 
       // Server-side duplicate guard: authoritative check against auth.users
       // (rate limited) so a registered email is routed to sign-in instead of
@@ -266,7 +290,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           emailRedirectTo: redirectUrl,
           // `requested_role` is consumed by the handle_new_user trigger, which
           // is the single place that provisions profile + role + wallet.
-          data: { full_name: fullName, requested_role: role },
+          data: { full_name: fullName, requested_role: effectiveRole },
         },
       });
 
@@ -298,7 +322,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // through the single idempotent provisioning RPC instead of a raw upsert.
       if (data.user) {
         try {
-          await assignRole(data.user.id, role as AppRole, email.trim().toLowerCase());
+          await assignRole(data.user.id, effectiveRole, email.trim().toLowerCase());
         } catch (roleError) {
           console.error('Error assigning role:', roleError);
         }
@@ -339,7 +363,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           success: false,
           errorCode: error.message,
         });
-        // Generic error text — avoid account enumeration.
+        const msg = error.message || '';
+        const code = (error as any).code || '';
+        if (/email.*not.*confirm/i.test(msg) || code === 'email_not_confirmed') {
+          return { error: new Error('Email not confirmed. Please check your inbox or resend verification.') };
+        }
+        if (/rate.*limit/i.test(msg)) {
+          return { error: new Error('Too many attempts. Please wait a few minutes and try again.') };
+        }
+        // Generic error text — avoid account enumeration for bad credentials.
         return { error: new Error('Invalid email or password.') };
       }
 

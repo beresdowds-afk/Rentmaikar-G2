@@ -180,7 +180,6 @@ export default function OrchestratorPage() {
                   </Badge>
                   <Switch
                     checked={p.enabled}
-                    disabled={!isAdmin}
                     onCheckedChange={(v) => togglePlugin(p.id, v)}
                   />
                 </div>

@@ -99,7 +99,6 @@ export function OfflineAlertControls({ devices, thresholdMinutes, onThresholdCha
             <Switch
               id="offline-enabled"
               checked={enabled}
-              disabled={saving}
               onCheckedChange={(v) => { setEnabled(v); persist({ enabled: v }); }}
             />
           </div>

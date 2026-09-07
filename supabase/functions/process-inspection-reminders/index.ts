@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { requireCronSecret } from "../_shared/cron-auth.ts";
+import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
 import { resendSendEmail } from "../_shared/resend-gateway.ts";
 
 const corsHeaders = {
@@ -43,7 +43,7 @@ const sendEmail = async (to: string, subject: string, html: string) => {
 
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const cronDenied = requireCronSecret(req);
+  const cronDenied = await requireCronSecretAsync(req);
   if (cronDenied) return cronDenied;
 
   try {

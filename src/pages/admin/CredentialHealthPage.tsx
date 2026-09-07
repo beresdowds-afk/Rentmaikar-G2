@@ -1,5 +1,7 @@
 import CredentialVerificationPanel from "@/components/admin/CredentialVerificationPanel";
 import ProviderCredentialSettings from "@/components/admin/ProviderCredentialSettings";
+import { BackendGatewayHealthCard } from "@/components/admin/BackendGatewayHealthCard";
+import { BackendBridgeStatusIndicator } from "@/components/admin/BackendBridgeStatusIndicator";
 import Seo from "@/components/seo/Seo";
 
 /**
@@ -22,6 +24,8 @@ export default function CredentialHealthPage() {
           Live status for every third-party integration. Checks re-run automatically whenever a credential is saved.
         </p>
       </header>
+      <BackendGatewayHealthCard />
+      <BackendBridgeStatusIndicator />
       <CredentialVerificationPanel />
       <ProviderCredentialSettings />
     </div>

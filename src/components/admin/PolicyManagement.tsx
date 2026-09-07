@@ -345,7 +345,6 @@ export function PolicyManagement() {
                 <Select
                   value={form.policy_type}
                   onValueChange={(value) => setForm({ ...form, policy_type: value as 'terms' | 'privacy' })}
-                  disabled={!!editingPolicy}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -362,7 +361,6 @@ export function PolicyManagement() {
                   value={form.version}
                   onChange={(e) => setForm({ ...form, version: e.target.value })}
                   placeholder="e.g., 1.0, 2.1"
-                  disabled={!!editingPolicy}
                 />
               </div>
               <div className="space-y-2">
@@ -370,7 +368,6 @@ export function PolicyManagement() {
                 <Select
                   value={form.region}
                   onValueChange={(value) => setForm({ ...form, region: value as 'USA' | 'Nigeria' | (string & {}) })}
-                  disabled={!!editingPolicy}
                 >
                   <SelectTrigger>
                     <SelectValue />

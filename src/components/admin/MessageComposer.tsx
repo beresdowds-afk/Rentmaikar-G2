@@ -32,6 +32,11 @@ import { cn } from '@/lib/utils';
 import { useCannedReplies } from '@/hooks/useCannedReplies';
 import { UseCaseDraftPicker } from '@/components/admin/UseCaseDraftPicker';
 import { renderPlaceholders, type PlaceholderValues } from '@/lib/reply-placeholders';
+import {
+  WHATSAPP_TEMPLATES_CATALOG,
+  getWhatsAppSenderForRecipient,
+  type WhatsAppTemplateDefinition,
+} from '@/lib/whatsapp-templates-registry';
 
 import {
   useMessageDrafts,
@@ -74,6 +79,7 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
   const [phone, setPhone] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [whatsappTemplateId, setWhatsappTemplateId] = useState<string>('');
   const [draftId, setDraftId] = useState<string | undefined>();
   const [search, setSearch] = useState('');
   const [bulk, setBulk] = useState<RecipientOption[]>([]);
@@ -183,6 +189,7 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
       phone,
       subject,
       body,
+      whatsappTemplateId: channel === 'whatsapp' && whatsappTemplateId ? whatsappTemplateId : undefined,
     });
     if (outcome.delivered) {
       if (draftId) deleteDraft(draftId);
@@ -408,6 +415,58 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="Message from Rentmaikar"
               />
+            </div>
+          )}
+
+          {channel === 'whatsapp' && (
+            <div className="space-y-2.5 rounded-lg border bg-emerald-50/30 p-3 dark:bg-emerald-950/10">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                  Meta-Approved WhatsApp HSM Templates
+                </Label>
+                <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/10 text-[10px] text-emerald-600">
+                  Outbound Session & HSM
+                </Badge>
+              </div>
+
+              {/* Designated Sender & Routing Rule for current phone */}
+              {(() => {
+                const routing = getWhatsAppSenderForRecipient(phone);
+                return (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded border bg-background/80 p-2 text-xs">
+                    <span className="text-[11px] text-muted-foreground">
+                      Sending via <strong>{routing.designatedSenderNumber}</strong> ({routing.label})
+                    </span>
+                    <Badge variant="secondary" className="font-mono text-[10px] uppercase">
+                      {routing.provider} • {routing.region}
+                    </Badge>
+                  </div>
+                );
+              })()}
+
+              <Select
+                value={whatsappTemplateId}
+                onValueChange={(val) => {
+                  setWhatsappTemplateId(val);
+                  const tpl = WHATSAPP_TEMPLATES_CATALOG.find((t) => t.id === val);
+                  if (tpl) {
+                    const rendered = renderPlaceholders(tpl.body, livePlaceholders, { keepUnknown: false });
+                    setBody(rendered);
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Apply an official WhatsApp template…" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64">
+                  {WHATSAPP_TEMPLATES_CATALOG.map((t) => (
+                    <SelectItem key={t.id} value={t.id} className="text-xs">
+                      <span className="font-medium">{t.title}</span>{' '}
+                      <span className="font-mono text-[10px] text-muted-foreground">({t.category})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 

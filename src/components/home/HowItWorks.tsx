@@ -1,4 +1,6 @@
-import { UserPlus, Search, CreditCard, Car } from "lucide-react";
+import { Link } from "react-router-dom";
+import { UserPlus, Search, CreditCard, Car, ArrowRight, Building } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useRegion } from "@/contexts/RegionContext";
 import { getHowItWorksContent } from "@/lib/localized-content";
 
@@ -55,6 +57,29 @@ const HowItWorks = () => {
               </div>
             );
           })}
+        </div>
+
+        {/* Action CTAs */}
+        <div className="mt-16 flex flex-col sm:flex-row justify-center items-center gap-4">
+          <Link to="/catalogue/standard">
+            <Button size="lg" variant="hero" className="gap-2 min-w-[200px]">
+              <Search className="w-4 h-4" />
+              Browse Vehicles
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </Link>
+          <Link to="/driver/register">
+            <Button size="lg" variant="outline" className="gap-2 min-w-[200px]">
+              <UserPlus className="w-4 h-4" />
+              Register as a Driver
+            </Button>
+          </Link>
+          <Link to="/owner/register">
+            <Button size="lg" variant="ghost" className="gap-2 min-w-[200px]">
+              <Building className="w-4 h-4" />
+              List Your Car
+            </Button>
+          </Link>
         </div>
       </div>
     </section>

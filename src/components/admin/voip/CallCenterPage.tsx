@@ -1,147 +1,247 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Phone, Users, History, Settings, PhoneCall, Globe, Radio, UserPlus, Volume2, Link2, Headphones, PhoneOff, Sparkles, ListOrdered, PhoneIncoming, GitBranch, UserCheck } from 'lucide-react';
+import {
+  Phone,
+  Users,
+  History,
+  Settings,
+  PhoneCall,
+  Globe,
+  Radio,
+  UserPlus,
+  Volume2,
+  Link2,
+  Sparkles,
+  PhoneOff,
+  PhoneIncoming,
+  ClipboardList,
+  MessageSquare,
+  Hash,
+  Activity,
+  UserCheck,
+} from 'lucide-react';
 import { useVoIPCalls } from '@/hooks/useVoIPCalls';
 import { useVoiceCall } from '@/hooks/useVoiceCall';
-import { useVoiceDevice } from '@/hooks/useVoiceDevice';
-import { useAccentConversionAgent } from '@/hooks/useAccentConversionAgent';
-import { useCallQueue } from '@/hooks/useCallQueue';
-import { useCallRouter } from '@/hooks/useCallRouter';
 import { CallDialer } from './CallDialer';
-import { CallHistory } from './CallHistory';
 import { CallGroups } from './CallGroups';
 import { ActiveCallPanel } from './ActiveCallPanel';
-import { AudioHardwareTester } from './AudioHardwareTester';
 import { VoIPFeatureSettings } from './VoIPFeatureSettings';
 import { OutreachContactsPanel } from './OutreachContactsPanel';
 import { ConferenceRoomPanel } from './ConferenceRoomPanel';
 import { CallRecordingsPanel } from './CallRecordingsPanel';
 import { TwiMLAppConfigPanel } from './TwiMLAppConfigPanel';
-import { AccentConversionAgentPanel } from './AccentConversionAgentPanel';
-import { CallQueueList } from './CallQueueList';
-import { CallRouterPanel } from './CallRouterPanel';
+import { OutboundNumberRouting } from './OutboundNumberRouting';
+
 import { IncomingCallAlerts } from '@/components/voice/IncomingCallAlerts';
+import { SoftphoneControls } from './SoftphoneControls';
+import { useVoiceDevice } from '@/hooks/useVoiceDevice';
 import { Badge } from '@/components/ui/badge';
-import type { CallQueueItem } from '@/types/voip';
+import { AccentConversionAgentPanel } from './AccentConversionAgentPanel';
+import { AudioHardwareTester } from './AudioHardwareTester';
+import { Button } from '@/components/ui/button';
+import { useAccentConversionAgent } from '@/hooks/useAccentConversionAgent';
+import { useCallQueue, type QueuedCall } from '@/hooks/useCallQueue';
+import { CallQueueList } from './CallQueueList';
+
+// Core Telephony Modules
+import { UnifiedTelephoneCard } from './UnifiedTelephoneCard';
+import { WhatsAppVoiceConsole } from './WhatsAppVoiceConsole';
+import { VisualIVRBuilder } from './VisualIVRBuilder';
+import { VoiceHealthDashboard } from './VoiceHealthDashboard';
+import { AgentExtensionManager } from './AgentExtensionManager';
+import { TelephonyNumbersProvisioning } from './TelephonyNumbersProvisioning';
+import { UnifiedCallHistory } from './UnifiedCallHistory';
+import { useAuth } from '@/contexts/AuthContext';
 
 export const CallCenterPage = () => {
   const { calls, groups, isLoading, activeCall, initiateCall, endCall, createGroup, deleteGroup, refreshCalls } = useVoIPCalls();
   const { incomingRequests, acceptCallRequest, rejectCallRequest, escalateCallRequest } = useVoiceCall('admin');
-  const {
-    queueItems,
-    queueStats,
-    isLoading: isQueueLoading,
-    audioAlertsEnabled,
-    toggleAudioAlerts,
-    answerCall: answerQueueCall,
-    dismissCall: dismissQueueCall,
-    escalateCall: escalateQueueCall,
-    simulateInboundCall,
-    clearAllSimulated,
-    refreshQueue,
-  } = useCallQueue();
-  const voiceDevice = useVoiceDevice();
-  const accentAgent = useAccentConversionAgent();
   const [selectedTab, setSelectedTab] = useState('dialer');
+  const voice = useVoiceDevice();
+  const queueState = useCallQueue();
+  const { userRole } = useAuth();
+
+  const isAssistant = userRole === 'admin_assistant';
+
+  // Duck the raw microphone while the American-accent voice is speaking so the
+  // caller only hears the converted output.
+  const handleDuck = useCallback((ducked: boolean) => {
+    voice.setMuted?.(ducked);
+  }, [voice]);
+
+  const accentAgent = useAccentConversionAgent({
+    onDuckMicrophone: handleDuck,
+    callId: activeCall?.id ?? null,
+  });
 
   const activeCalls = calls.filter(c => ['ringing', 'in-progress'].includes(c.status));
-  const effectiveActiveCall = activeCall || (activeCalls.length > 0 ? activeCalls[0] : null);
-  const isWebRTCOnCall = voiceDevice.status === 'on-call' || voiceDevice.status === 'connecting';
+
+  // Hangs up the browser audio session and asks the provider to terminate the call.
+  const terminateCall = useCallback(async (callId: string) => {
+    if (activeCall?.id === callId) voice.hangUp();
+    await endCall(callId);
+  }, [activeCall?.id, endCall, voice]);
+
+  const endAllCalls = useCallback(async () => {
+    voice.hangUp();
+    await Promise.allSettled(activeCalls.map(c => endCall(c.id)));
+  }, [activeCalls, endCall, voice]);
+
+  // FIFO router: answering always connects the caller who has waited longest first.
+  const answerQueuedCall = useCallback(async (call: QueuedCall) => {
+    if (call.isSimulated) {
+      queueState.removeSimulated(call.id);
+      return;
+    }
+    if (call.source === 'live_inbound') {
+      setSelectedTab('dialer');
+      await refreshCalls();
+      return;
+    }
+    await acceptCallRequest(call.recordId);
+    if (call.phoneNumber) {
+      await initiateCall('individual', call.region === 'Nigeria' ? 'Nigeria' : 'USA', [
+        { phoneNumber: call.phoneNumber, displayName: call.displayName },
+      ]);
+    }
+    await queueState.refresh();
+  }, [acceptCallRequest, initiateCall, queueState, refreshCalls]);
+
+  const escalateQueuedCall = useCallback(async (call: QueuedCall) => {
+    if (call.isSimulated || call.source === 'live_inbound') return;
+    await escalateCallRequest(call.recordId);
+    await queueState.refresh();
+  }, [escalateCallRequest, queueState]);
+
+  const dismissQueuedCall = useCallback(async (call: QueuedCall) => {
+    if (call.isSimulated) {
+      queueState.removeSimulated(call.id);
+      return;
+    }
+    if (call.source === 'live_inbound') {
+      await terminateCall(call.recordId);
+    } else {
+      await rejectCallRequest(call.recordId);
+    }
+    await queueState.refresh();
+  }, [queueState, rejectCallRequest, terminateCall]);
+
   const usaCalls = calls.filter(c => c.region === 'USA');
   const nigeriaCalls = calls.filter(c => c.region === 'Nigeria');
 
-  const handleEndAllActive = async () => {
-    if (isWebRTCOnCall) {
-      voiceDevice.hangUp();
-    }
-    for (const call of activeCalls) {
-      await endCall(call.id);
-    }
-  };
-
-  const handleAnswerFromQueue = async (item: CallQueueItem) => {
-    await answerQueueCall(item, async (callType, region, recipients) => {
-      return initiateCall(callType, region, recipients);
-    });
-    // If phone call dialed or active, user can also manage from active panel
-    refreshCalls();
-  };
-
-  const formatWaitTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const stats = [
-    {
-      label: 'Call Queue',
-      value: queueStats.totalWaiting,
-      subtext: queueStats.totalWaiting === 0 ? 'Queue clear' : `${queueStats.urgentCount} urgent`,
-      icon: ListOrdered,
-      color: queueStats.totalWaiting > 0 ? 'text-amber-500 animate-pulse' : 'text-muted-foreground',
-      tabTarget: 'queue',
-      badge: queueStats.totalWaiting > 0 ? 'WAITING' : null,
-    },
-    { label: 'Active Calls', value: activeCalls.length, subtext: `${activeCalls.length} live lines`, icon: PhoneCall, color: 'text-green-500', tabTarget: 'dialer' },
-    { label: 'USA Calls Today', value: usaCalls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, subtext: 'Regional inbound/outbound', icon: Globe, color: 'text-blue-500', tabTarget: 'history' },
-    { label: 'Nigeria Calls Today', value: nigeriaCalls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, subtext: 'Regional inbound/outbound', icon: Globe, color: 'text-emerald-500', tabTarget: 'history' },
-    { label: 'Call Groups', value: groups.length, subtext: 'Configured teams', icon: Users, color: 'text-purple-500', tabTarget: 'groups' },
+    { label: 'Active Calls', value: activeCalls.length, icon: PhoneCall, color: 'text-green-500' },
+    { label: 'USA Calls Today', value: usaCalls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, icon: Globe, color: 'text-blue-500' },
+    { label: 'Nigeria Calls Today', value: nigeriaCalls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length, icon: Globe, color: 'text-emerald-500' },
+    { label: 'Call Queue', value: queueState.metrics.waiting, icon: PhoneIncoming, color: 'text-amber-500', tab: 'queue' },
+    { label: 'Call Groups', value: groups.length, icon: Users, color: 'text-purple-500' },
   ];
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">VoIP Call Center</h2>
-          <p className="text-muted-foreground">
-            Manage VoIP audio calls using your device's speakers and microphone across USA (+1) and Nigeria (+234)
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold tracking-tight">VoIP & Telephony Command Center</h2>
+            <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-xs">
+              {isAssistant ? 'Admin Assistant Desk' : 'Platform Administrator'}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Real operational telephony system for Rentmaikar Admins across USA (+1 608-548-9220) and Nigeria (+234 916 307 2576).
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2">
           {activeCalls.length > 1 && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleEndAllActive}
-              className="h-8 text-xs bg-red-600 hover:bg-red-700"
-            >
-              <PhoneOff className="h-3.5 w-3.5 mr-1" />
-              End All Active Calls ({activeCalls.length})
+            <Button variant="destructive" size="sm" className="gap-2" onClick={() => void endAllCalls()}>
+              <PhoneOff className="h-4 w-4" />
+              End all calls ({activeCalls.length})
             </Button>
           )}
-          <Badge variant="outline" className="flex items-center gap-1">
+          <Badge variant="outline" className="flex items-center gap-1 text-xs">
             <span className="h-2 w-2 rounded-full bg-blue-500" />
-            USA: +1
+            USA DID: +1 (608) 548-9220
           </Badge>
-          <Badge variant="outline" className="flex items-center gap-1">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            Nigeria: +234
-          </Badge>
-          <Badge
-            variant="outline"
-            onClick={() => setSelectedTab('accent-agent')}
-            className={`cursor-pointer transition-colors flex items-center gap-1.5 py-1 px-2.5 ${
-              accentAgent.isListening
-                ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
-                : 'border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-950'
-            }`}
-            title="Configure American Accent Agent"
-          >
-            <span>🇺🇸</span>
-            <span className="font-semibold">Accent Agent:</span>
-            <span>{accentAgent.isListening ? 'Active' : 'Standby'}</span>
-            {accentAgent.isListening && (
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            )}
+          <Badge variant="outline" className="flex items-center gap-1 text-xs">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            Nigeria DID: +234 916 307 2576
           </Badge>
         </div>
       </div>
 
-      {/* Incoming Call Alerts */}
+      {/* Live inbound call ringing this browser — answer with mic + speaker */}
+      {voice.incomingCall && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-green-500/40 bg-green-500/10 p-4">
+          <PhoneIncoming className="h-5 w-5 animate-pulse text-green-600" />
+          <span className="text-sm font-medium">
+            Incoming call
+            {voice.incomingCall.parameters?.From ? ` from ${voice.incomingCall.parameters.From}` : ''}
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button size="sm" className="gap-2" onClick={() => voice.acceptIncoming()}>
+              <PhoneCall className="h-4 w-4" />
+              Answer
+            </Button>
+            <Button size="sm" variant="destructive" className="gap-2" onClick={() => voice.rejectIncoming()}>
+              <PhoneOff className="h-4 w-4" />
+              Decline
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Active Call Panel with Speaker Volume, Hold, Transfer, and Transcription */}
+      {activeCall && (
+        <ActiveCallPanel
+          call={activeCall}
+          onEndCall={() => { void terminateCall(activeCall.id); }}
+          isMuted={voice.isMuted}
+          onToggleMute={voice.toggleMute}
+          accentAgent={accentAgent}
+          isSpeakerOn={voice.isSpeakerphone}
+          onToggleSpeaker={() => void voice.toggleSpeakerphone()}
+          speakerVolume={voice.speakerVolume}
+          onVolumeChange={voice.setSpeakerVolume}
+          onTestSound={voice.testSpeakerSound}
+        />
+      )}
+
+      {/* Stats Summary Bar */}
+      {queueState.metrics.waiting > 0 && (
+        <button
+          type="button"
+          onClick={() => setSelectedTab('queue')}
+          className="flex w-full items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-left"
+        >
+          <PhoneIncoming className="h-5 w-5 animate-pulse text-amber-500" />
+          <span className="text-sm font-medium">
+            {queueState.metrics.waiting} caller{queueState.metrics.waiting === 1 ? '' : 's'} waiting in queue
+            {queueState.metrics.urgent > 0 ? ` · ${queueState.metrics.urgent} urgent` : ''}
+          </span>
+        </button>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-5">
+        {stats.map((stat) => (
+          <Card
+            key={stat.label}
+            className={stat.tab ? 'cursor-pointer transition-colors hover:bg-accent/40' : undefined}
+            onClick={stat.tab ? () => setSelectedTab(stat.tab as string) : undefined}
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
+              <stat.icon className={`h-4 w-4 ${stat.color}`} />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stat.value}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Incoming Call Alerts Modal/Banner */}
       <IncomingCallAlerts
         requests={incomingRequests}
         onAccept={acceptCallRequest}
@@ -150,208 +250,152 @@ export const CallCenterPage = () => {
         userRole="admin"
       />
 
-      {/* Incoming Call Queue Alert Banner */}
-      {queueStats.totalWaiting > 0 && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-foreground shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 animate-pulse flex-shrink-0">
-              <PhoneIncoming className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">
-                  {queueStats.totalWaiting} Incoming Call{queueStats.totalWaiting === 1 ? '' : 's'} Waiting in Queue
-                </span>
-                {queueStats.urgentCount > 0 && (
-                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0 font-bold animate-pulse">
-                    {queueStats.urgentCount} Urgent
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Longest wait time: <span className="font-mono font-medium text-foreground">{formatWaitTime(queueStats.longestWaitSeconds)}</span> • USA: {queueStats.usaCount} • Nigeria: {queueStats.nigeriaCount}
-              </p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => setSelectedTab('queue')}
-            className="h-8 gap-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold shadow-sm flex-shrink-0"
-          >
-            <ListOrdered className="h-3.5 w-3.5" />
-            Open Call Queue ({queueStats.totalWaiting})
-          </Button>
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {stats.map((stat) => (
-          <Card
-            key={stat.label}
-            className={`cursor-pointer transition-colors ${
-              stat.tabTarget === 'queue' && queueStats.totalWaiting > 0
-                ? 'border-amber-500/50 bg-amber-500/5 hover:bg-amber-500/10'
-                : 'hover:bg-muted/40'
-            }`}
-            onClick={() => stat.tabTarget && setSelectedTab(stat.tabTarget)}
-          >
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
-              <CardTitle className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</CardTitle>
-              <stat.icon className={`h-4 w-4 ${stat.color}`} />
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-baseline justify-between">
-                <div className="text-2xl font-bold font-mono">{stat.value}</div>
-                {stat.badge && (
-                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0 animate-pulse font-bold">
-                    {stat.badge}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{stat.subtext}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Active Call Panel (Prominent with Call End Button and Live Audio Controls) */}
-      {effectiveActiveCall && (
-        <ActiveCallPanel 
-          call={effectiveActiveCall} 
-          onEndCall={() => endCall(effectiveActiveCall.id)}
-          voiceDevice={voiceDevice}
-          accentAgent={accentAgent}
-        />
-      )}
-
-      {/* Device Hardware Tester (Speakers & Microphone) */}
-      <AudioHardwareTester voiceDevice={voiceDevice} />
-
-      {/* Main Content */}
+      {/* Navigation Tabs */}
       <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">
-        <TabsList className="flex flex-wrap items-center gap-1 w-full lg:w-auto h-auto p-1 bg-muted/80 rounded-lg">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:w-auto lg:inline-grid lg:grid-cols-11 gap-1">
+          <TabsTrigger value="dialer" className="flex items-center gap-1.5 text-xs">
+            <Phone className="h-3.5 w-3.5" />
+            <span>Softphone</span>
+          </TabsTrigger>
+          <TabsTrigger value="whatsapp-voice" className="flex items-center gap-1.5 text-xs">
+            <MessageSquare className="h-3.5 w-3.5 text-green-600" />
+            <span>WhatsApp Voice</span>
+          </TabsTrigger>
+          <TabsTrigger value="ivr" className="flex items-center gap-1.5 text-xs">
+            <Radio className="h-3.5 w-3.5 text-purple-600" />
+            <span>Visual IVR</span>
+          </TabsTrigger>
+          <TabsTrigger value="numbers" className="flex items-center gap-1.5 text-xs">
+            <Hash className="h-3.5 w-3.5 text-indigo-600" />
+            <span>Phone Numbers</span>
+          </TabsTrigger>
+          <TabsTrigger value="extensions" className="flex items-center gap-1.5 text-xs">
+            <UserCheck className="h-3.5 w-3.5 text-blue-600" />
+            <span>Extensions</span>
+          </TabsTrigger>
+          <TabsTrigger value="telecom-health" className="flex items-center gap-1.5 text-xs">
+            <Activity className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Voice Health</span>
+          </TabsTrigger>
           <TabsTrigger value="queue" className="flex items-center gap-1.5 text-xs">
-            <ListOrdered className="h-4 w-4 text-amber-500" />
-            <span>Call Queue</span>
-            {queueStats.totalWaiting > 0 && (
-              <Badge variant="destructive" className="ml-0.5 h-4 px-1.5 text-[10px] font-bold rounded-full animate-pulse">
-                {queueStats.totalWaiting}
+            <PhoneIncoming className="h-3.5 w-3.5" />
+            <span>Queue</span>
+            {queueState.metrics.waiting > 0 && (
+              <Badge className="ml-1 animate-pulse bg-amber-500 px-1 py-0 text-[10px]">
+                {queueState.metrics.waiting}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="dialer" className="flex items-center gap-1.5 text-xs">
-            <Phone className="h-4 w-4" />
-            <span>Make Call</span>
-          </TabsTrigger>
-          <TabsTrigger value="accent-agent" className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-medium">
-            <Sparkles className="h-4 w-4 text-indigo-500" />
-            <span>Accent Agent</span>
-            {accentAgent.isListening && (
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="contacts" className="flex items-center gap-1.5 text-xs">
-            <UserPlus className="h-4 w-4" />
-            <span>Contacts</span>
-          </TabsTrigger>
-          <TabsTrigger value="conferences" className="flex items-center gap-1.5 text-xs">
-            <Radio className="h-4 w-4" />
-            <span>Conferences</span>
-          </TabsTrigger>
-          <TabsTrigger value="groups" className="flex items-center gap-1.5 text-xs">
-            <Users className="h-4 w-4" />
-            <span>Groups</span>
-          </TabsTrigger>
           <TabsTrigger value="history" className="flex items-center gap-1.5 text-xs">
-            <History className="h-4 w-4" />
-            <span>History</span>
+            <History className="h-3.5 w-3.5" />
+            <span>Call Log</span>
           </TabsTrigger>
           <TabsTrigger value="recordings" className="flex items-center gap-1.5 text-xs">
-            <Volume2 className="h-4 w-4" />
+            <Volume2 className="h-3.5 w-3.5" />
             <span>Recordings</span>
           </TabsTrigger>
-          <TabsTrigger value="twiml" className="flex items-center gap-1.5 text-xs">
-            <Link2 className="h-4 w-4" />
-            <span>In-app Setup</span>
+          <TabsTrigger value="conferences" className="flex items-center gap-1.5 text-xs">
+            <Users className="h-3.5 w-3.5" />
+            <span>Conference</span>
           </TabsTrigger>
           <TabsTrigger value="settings" className="flex items-center gap-1.5 text-xs">
-            <Settings className="h-4 w-4" />
+            <Settings className="h-3.5 w-3.5" />
             <span>Settings</span>
           </TabsTrigger>
         </TabsList>
 
+        {/* Tab 1: Primary Softphone & Dialer with Unified Telephone Card */}
+        <TabsContent value="dialer" className="space-y-6">
+          <UnifiedTelephoneCard
+            voice={voice}
+            userRole={userRole || 'admin'}
+            isAssistant={isAssistant}
+            onInitiateCall={initiateCall}
+            onOpenWhatsAppConsole={() => setSelectedTab('whatsapp-voice')}
+            onOpenIVRBuilder={() => setSelectedTab('ivr')}
+          />
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <CallDialer 
+              onInitiateCall={initiateCall}
+              groups={groups}
+              isLoading={isLoading}
+              activeCall={activeCall ? { id: activeCall.id, status: activeCall.status } : null}
+              onEndCall={activeCall ? () => terminateCall(activeCall.id) : undefined}
+            />
+
+            <div className="space-y-4">
+              <AudioHardwareTester />
+              <OutreachContactsPanel onInitiateCall={initiateCall} isLoading={isLoading} />
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* Tab 2: WhatsApp Voice Console */}
+        <TabsContent value="whatsapp-voice">
+          <WhatsAppVoiceConsole voice={voice} />
+        </TabsContent>
+
+        {/* Tab 3: Visual IVR Flow Builder & Simulator */}
+        <TabsContent value="ivr">
+          <VisualIVRBuilder voice={voice} />
+        </TabsContent>
+
+        {/* Tab 4: Telephony Numbers & Inbound Provisioning */}
+        <TabsContent value="numbers">
+          <TelephonyNumbersProvisioning userRole={userRole || 'admin'} isAssistant={isAssistant} />
+        </TabsContent>
+
+        {/* Tab 5: PBX Internal Extensions & Roles */}
+        <TabsContent value="extensions">
+          <AgentExtensionManager userRole={userRole || 'admin'} isAssistant={isAssistant} />
+        </TabsContent>
+
+        {/* Tab 6: Voice Health & Gateway Telemetry */}
+        <TabsContent value="telecom-health">
+          <VoiceHealthDashboard />
+        </TabsContent>
+
+        {/* Tab 7: Inbound Queues */}
         <TabsContent value="queue">
           <CallQueueList
-            queueItems={queueItems}
-            queueStats={queueStats}
-            isLoading={isQueueLoading}
-            onAnswerCall={handleAnswerFromQueue}
-            onDismissCall={dismissQueueCall}
-            onEscalateCall={escalateQueueCall}
-            onSimulateCall={simulateInboundCall}
-            onClearSimulated={clearAllSimulated}
-            onRefresh={refreshQueue}
-            audioAlertsEnabled={audioAlertsEnabled}
-            onToggleAudioAlerts={toggleAudioAlerts}
+            queueState={queueState}
+            onAnswer={answerQueuedCall}
+            onEscalate={escalateQueuedCall}
+            onDismiss={dismissQueuedCall}
           />
         </TabsContent>
 
-        <TabsContent value="dialer">
-          <CallDialer 
-            onInitiateCall={initiateCall}
-            groups={groups}
-            isLoading={isLoading}
-            voiceDevice={voiceDevice}
-            onEndCall={endCall}
-            activeCall={effectiveActiveCall}
-            accentAgent={accentAgent}
-          />
-        </TabsContent>
-
-        <TabsContent value="accent-agent">
-          <AccentConversionAgentPanel agent={accentAgent} />
-        </TabsContent>
-
-        <TabsContent value="contacts">
-          <OutreachContactsPanel onInitiateCall={initiateCall} isLoading={isLoading} />
-        </TabsContent>
-
-        <TabsContent value="conferences">
-          <ConferenceRoomPanel
-            activeCalls={activeCalls}
-            onEndCall={endCall}
-          />
-        </TabsContent>
-
-        <TabsContent value="groups">
-          <CallGroups 
-            groups={groups}
-            onCreateGroup={createGroup}
-            onDeleteGroup={deleteGroup}
-            isLoading={isLoading}
-          />
-        </TabsContent>
-
+        {/* Tab 8: Unified Call History & Transcripts */}
         <TabsContent value="history">
-          <CallHistory 
-            calls={calls}
-            onRefresh={refreshCalls}
-            isLoading={isLoading}
-            onEndCall={endCall}
+          <UnifiedCallHistory
+            userRole={userRole || 'admin'}
+            isAssistant={isAssistant}
+            onOpenMessageComposer={(payload) => {
+              setSelectedTab('whatsapp-voice');
+            }}
           />
         </TabsContent>
 
+        {/* Tab 9: Audio Recordings */}
         <TabsContent value="recordings">
           <CallRecordingsPanel calls={calls} onRefresh={refreshCalls} isLoading={isLoading} />
         </TabsContent>
 
-        <TabsContent value="twiml">
-          <TwiMLAppConfigPanel />
+        {/* Tab 10: Multi-party Conferences */}
+        <TabsContent value="conferences">
+          <ConferenceRoomPanel
+            activeCalls={activeCalls}
+            onEndCall={terminateCall}
+          />
         </TabsContent>
 
-        <TabsContent value="settings">
+        {/* Tab 11: Telephony Settings & Outbound Routing */}
+        <TabsContent value="settings" className="space-y-4">
+          <OutboundNumberRouting />
           <VoIPFeatureSettings />
+          <TwiMLAppConfigPanel />
+          <AccentConversionAgentPanel agent={accentAgent} />
         </TabsContent>
       </Tabs>
     </div>

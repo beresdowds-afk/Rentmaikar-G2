@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, RefreshCw, Trash2, Edit, Globe, Lock, Code, Copy } from "lucide-react";
+import { BackendBridgeStatusIndicator } from "./BackendBridgeStatusIndicator";
 
 interface ApiEndpoint {
   id: string;
@@ -408,6 +409,8 @@ export const ApiEndpointManagement = () => {
 
   return (
     <div className="space-y-6">
+      <BackendBridgeStatusIndicator />
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">API Validation Endpoints</h2>

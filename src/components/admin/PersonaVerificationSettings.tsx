@@ -71,7 +71,6 @@ export function PersonaVerificationSettings() {
                 <Switch
                   id="persona-toggle"
                   checked={enabled}
-                  disabled={saving}
                   onCheckedChange={toggle}
                 />
               </div>

@@ -142,21 +142,18 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
               </>
             ) : (
               <>
-                {userType === 'driver' ? (
-                  <Link to="/driver/register">
-                    <Button variant="outline" size="sm" className="gap-2">
-                      <User className="w-4 h-4" />
-                      Driver Sign Up
-                    </Button>
-                  </Link>
-                ) : (
-                  <Link to="/owner/register">
-                    <Button variant="outline" size="sm" className="gap-2">
-                      <Building className="w-4 h-4" />
-                      List Your Car
-                    </Button>
-                  </Link>
-                )}
+                <Link to="/driver/register">
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <User className="w-4 h-4" />
+                    Driver Sign Up
+                  </Button>
+                </Link>
+                <Link to="/owner/register">
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Building className="w-4 h-4" />
+                    List Your Car
+                  </Button>
+                </Link>
                 <Link to="/auth">
                   <Button variant="default" size="sm" className="gap-2">
                     <LogIn className="w-4 h-4" />
@@ -262,21 +259,18 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
                   </>
                 ) : (
                   <>
-                    {userType === 'driver' ? (
-                      <Link to="/driver/register" onClick={() => setIsMenuOpen(false)}>
-                        <Button variant="outline" className="w-full gap-2">
-                          <User className="w-4 h-4" />
-                          Driver Sign Up
-                        </Button>
-                      </Link>
-                    ) : (
-                      <Link to="/owner/register" onClick={() => setIsMenuOpen(false)}>
-                        <Button variant="outline" className="w-full gap-2">
-                          <Building className="w-4 h-4" />
-                          List Your Car
-                        </Button>
-                      </Link>
-                    )}
+                    <Link to="/driver/register" onClick={() => setIsMenuOpen(false)}>
+                      <Button variant="outline" className="w-full gap-2">
+                        <User className="w-4 h-4" />
+                        Driver Sign Up
+                      </Button>
+                    </Link>
+                    <Link to="/owner/register" onClick={() => setIsMenuOpen(false)}>
+                      <Button variant="outline" className="w-full gap-2">
+                        <Building className="w-4 h-4" />
+                        List Your Car
+                      </Button>
+                    </Link>
                     <Link to="/auth" onClick={() => setIsMenuOpen(false)}>
                       <Button variant="default" className="w-full gap-2">
                         <LogIn className="w-4 h-4" />

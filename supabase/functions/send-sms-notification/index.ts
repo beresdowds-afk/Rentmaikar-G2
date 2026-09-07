@@ -79,6 +79,7 @@ interface SMSNotificationRequest {
   providerOverride?: "sent" | "twilio" | "termii";
   /** WhatsApp approved template (required outside the 24h session window). */
   whatsappTemplateId?: string;
+  templateName?: string;
   whatsappTemplateLanguage?: string;
   whatsappTemplateParams?: Record<string, string | number>;
   /** Public media URLs (WhatsApp only). */
@@ -188,8 +189,13 @@ const getMessageContent = (data: SMSNotificationRequest): string => {
       return `Rentmaikar: URGENT - An accident has been reported for ${safeVehicle}. Emergency services have been notified.`;
 
     // General
-    case 'general':
-      return customMessage ? `Rentmaikar: ${sanitizeString(customMessage)}` : 'Rentmaikar: You have a new notification. Please log in to view details.';
+    case 'general': {
+      if (!customMessage) return 'Rentmaikar: You have a new notification. Please log in to view details.';
+      const sanitized = sanitizeString(customMessage);
+      return sanitized.startsWith('Rentmaikar:') || sanitized.startsWith('Rentmaikar URGENT:') || sanitized.startsWith('Rentmaikar WARNING:') || sanitized.startsWith('Rentmaikar SAFETY')
+        ? sanitized
+        : `Rentmaikar: ${sanitized}`;
+    }
       
     default:
       return 'Rentmaikar: You have a new notification. Please log in to view details.';
@@ -324,13 +330,14 @@ const handler = async (req: Request): Promise<Response> => {
     // (Nigeria) remain as automatic regional fallbacks.
     if (body.providerOverride !== 'twilio' && body.providerOverride !== 'termii') {
       const isWa = body.channel === 'whatsapp';
+      const waTemplateId = body.whatsappTemplateId || body.templateName;
       const sentResult = await sendViaSent({
         to: body.phone,
         channel: isWa ? 'whatsapp' : 'sms',
         text: message,
-        template: isWa && body.whatsappTemplateId
+        template: isWa && waTemplateId
           ? {
-              id: body.whatsappTemplateId,
+              id: waTemplateId,
               language: body.whatsappTemplateLanguage,
               parameters: body.whatsappTemplateParams,
             }
@@ -351,7 +358,7 @@ const handler = async (req: Request): Promise<Response> => {
           recipient: body.phone,
           region: isNigeria ? 'NIGERIA' : 'USA',
           provider_message_id: sentResult.messageId,
-          template_name: body.notificationType,
+          template_name: waTemplateId || body.notificationType,
           metadata: { notification_type: body.notificationType, sandbox: sentResult.sandbox },
         });
         await logOutboundDecision(supabase, {

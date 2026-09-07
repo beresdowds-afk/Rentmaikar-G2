@@ -236,14 +236,24 @@ BEGIN
 END;
 $function$;
 
-SELECT cron.schedule(
-  'dispatch-event-notifications-2min',
-  '*/2 * * * *',
-  $$
-  select net.http_post(
-    url:='https://jrsydiofzceoeddjogov.supabase.co/functions/v1/dispatch-event-notifications',
-    headers:=jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='CRON_SECRET' limit 1)),
-    body:=jsonb_build_object('scheduled_at', now())
+DO $$
+BEGIN
+  PERFORM cron.unschedule('dispatch-event-notifications-2min');
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  PERFORM cron.schedule(
+    'dispatch-event-notifications-2min',
+    '*/2 * * * *',
+    $cron$
+    select net.http_post(
+      url:='https://jrsydiofzceoeddjogov.supabase.co/functions/v1/dispatch-event-notifications',
+      headers:=jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='CRON_SECRET' limit 1)),
+      body:=jsonb_build_object('scheduled_at', now())
+    );
+    $cron$
   );
-  $$
-);
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;

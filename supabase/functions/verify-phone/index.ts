@@ -34,8 +34,11 @@ const requestSchema = z.discriminatedUnion("action", [
   verifyCodeSchema,
 ]);
 
-const generateVerificationCode = (): string =>
-  Math.floor(100000 + Math.random() * 900000).toString();
+const generateVerificationCode = (): string => {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  return (100000 + (buf[0] % 900000)).toString();
+};
 
 /** Place a Twilio voice call reading the verification code twice. */
 async function placeVoiceCall(phoneE164: string, code: string): Promise<void> {

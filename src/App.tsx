@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, useNavigate, Navigate } from "react-route
 import { RegionProvider } from "@/contexts/RegionContext";
 import { UserTypeProvider } from "@/contexts/UserTypeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { BackendBridgeProvider } from "@/contexts/BackendBridgeContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import CookieConsent from "@/components/CookieConsent";
 import MessageConsent from "@/components/MessageConsent";
@@ -103,7 +104,10 @@ const HologramDeviceDetailPage = lazy(() => import("./pages/admin/HologramDevice
 const AdminNotificationRetryPage = lazy(() => import("./pages/admin/AdminNotificationRetryPage"));
 const AdminSmsConsentAuditPage = lazy(() => import("./pages/admin/AdminSmsConsentAuditPage"));
 const AdminEmailDeliveryPage = lazy(() => import("./pages/admin/AdminEmailDeliveryPage"));
+const AdminEmailRoutingPage = lazy(() => import("./pages/admin/AdminEmailRoutingPage"));
 const MessagingCenterPage = lazy(() => import("./pages/admin/MessagingCenterPage"));
+const AdminCasesPage = lazy(() => import("./pages/admin/AdminCasesPage"));
+const CustomerCasesPage = lazy(() => import("./pages/CustomerCasesPage"));
 const AdminSmsDeliveryPage = lazy(() => import("./pages/admin/AdminSmsDeliveryPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
 const AdminVehicleTelemetryPage = lazy(() => import("./pages/admin/AdminVehicleTelemetryPage"));
@@ -153,8 +157,9 @@ const App = () => (
           <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <RegionProvider>
-        <UserTypeProvider>
+      <BackendBridgeProvider>
+        <RegionProvider>
+          <UserTypeProvider>
 
           <BrowserRouter>
             <RouteProgressBar />
@@ -194,6 +199,8 @@ const App = () => (
                     <Route path="/catalogue" element={<Navigate to="/catalogue/budget" replace />} />
                     <Route path="/vehicles/:id" element={<VehicleRedirect />} />
                     <Route path="/auth" element={<Auth />} />
+                    <Route path="/driver/sign-in" element={<Navigate to="/auth" replace />} />
+                    <Route path="/driver/signin" element={<Navigate to="/auth" replace />} />
                     <Route path="/owner/sign-in" element={<OwnerSignIn />} />
                     <Route path="/owner/signin" element={<Navigate to="/owner/sign-in" replace />} />
                     <Route path="/admin/sign-in" element={<AdminSignIn />} />
@@ -481,9 +488,21 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/admin/content"
+                    element={<Navigate to="/admin?portal=crm&tab=content" replace />}
+                  />
+                  <Route
+                    path="/admin/content-editor"
+                    element={<Navigate to="/admin?portal=crm&tab=content" replace />}
+                  />
+                  <Route
+                    path="/admin/editor"
+                    element={<Navigate to="/admin?portal=crm&tab=content" replace />}
+                  />
+                  <Route
                     path="/admin/tour-config"
                     element={
-                      <ProtectedRoute allowedRoles={['admin']}>
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
                         <TourStepConfigPage />
                       </ProtectedRoute>
                     }
@@ -491,7 +510,7 @@ const App = () => (
                   <Route
                     path="/admin/legal-templates/preview"
                     element={
-                      <ProtectedRoute allowedRoles={['admin']}>
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
                         <AdminLegalTemplatePreviewPage />
                       </ProtectedRoute>
                     }
@@ -499,7 +518,7 @@ const App = () => (
                   <Route
                     path="/admin/tour-analytics"
                     element={
-                      <ProtectedRoute allowedRoles={['admin']}>
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
                         <TourAnalyticsPage />
                       </ProtectedRoute>
                     }
@@ -572,6 +591,34 @@ const App = () => (
                     element={
                       <ProtectedRoute allowedRoles={['admin']}>
                         <AdminNotificationRetryPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/cases"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
+                        <AdminProfiler id="AdminCasesPage">
+                          <AdminCasesPage />
+                        </AdminProfiler>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/support/cases"
+                    element={
+                      <ProtectedRoute>
+                        <CustomerCasesPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/email-routing"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminProfiler id="AdminEmailRoutingPage">
+                          <AdminEmailRoutingPage />
+                        </AdminProfiler>
                       </ProtectedRoute>
                     }
                   />
@@ -684,7 +731,7 @@ const App = () => (
                   <Route
                     path="/admin/persona-templates"
                     element={
-                      <ProtectedRoute allowedRoles={['admin']}>
+                      <ProtectedRoute allowedRoles={['admin', 'admin_assistant']}>
                         <AdminPersonaTemplatesPage />
                       </ProtectedRoute>
                     }
@@ -822,7 +869,8 @@ const App = () => (
 
         </UserTypeProvider>
       </RegionProvider>
-    </AuthProvider>
+    </BackendBridgeProvider>
+  </AuthProvider>
   </QueryClientProvider>
 </ErrorBoundary>
   );

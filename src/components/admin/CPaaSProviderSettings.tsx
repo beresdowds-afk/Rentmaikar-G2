@@ -78,16 +78,34 @@ export function CPaaSProviderSettings() {
             </CardDescription>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={checkProvidersHealth}
-            disabled={checkingHealth}
-            className="gap-1.5 text-xs h-8"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${checkingHealth ? "animate-spin" : ""}`} />
-            Check Health
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={checkProvidersHealth}
+              disabled={checkingHealth}
+              className="gap-1.5 text-xs h-8"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${checkingHealth ? "animate-spin" : ""}`} />
+              Check Health
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                updateConfig({
+                  enableFailover: true,
+                  primaryProvider: "auto",
+                  sandboxMode: false,
+                  channelRouting: { sms: "sent", whatsapp: "sent", rcs: "sent" },
+                });
+                toast.success("All CPaaS service providers enabled with automatic regional routing & failover!");
+              }}
+              className="gap-1.5 text-xs h-8 bg-purple-600 hover:bg-purple-700 text-white shadow-xs"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Enable All CPaaS Providers
+            </Button>
+          </div>
         </div>
       </CardHeader>
 

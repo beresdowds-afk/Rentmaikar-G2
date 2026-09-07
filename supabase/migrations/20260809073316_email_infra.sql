@@ -3,14 +3,23 @@
 -- tables used by both auth and transactional emails.
 
 -- Extensions required for queue processing
-CREATE EXTENSION IF NOT EXISTS pg_net SCHEMA extensions;
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_net SCHEMA extensions;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
     CREATE EXTENSION pg_cron;
   END IF;
-END $$;
-CREATE EXTENSION IF NOT EXISTS supabase_vault;
-CREATE EXTENSION IF NOT EXISTS pgmq;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS supabase_vault;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS pgmq;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 -- Create email queues (auth = high priority, transactional = normal)
 -- Wrapped in DO blocks to handle "queue already exists" errors idempotently.

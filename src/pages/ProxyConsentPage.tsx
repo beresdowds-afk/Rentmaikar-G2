@@ -115,7 +115,12 @@ export default function ProxyConsentPage() {
                   being provided, and I understand this authorization remains in effect until admin-mediated revocation.
                 </p>
               </div>
-              <SignaturePad onSignatureChange={setSignature} />
+              <SignaturePad
+                onSignatureChange={setSignature}
+                signerName={ctx?.proxy_full_name || undefined}
+                signerRole="Cardholder / Payer"
+                label="Cardholder Digital Signature"
+              />
               <Button onClick={submitConsent} disabled={submitting || !signature}>
                 {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
                 Submit signed consent

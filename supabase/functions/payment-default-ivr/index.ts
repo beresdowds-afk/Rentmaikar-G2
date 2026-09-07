@@ -19,6 +19,7 @@ const handler = async (req: Request): Promise<Response> => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const voiceBaseUrl = Deno.env.get("VOICE_SUPABASE_URL") || supabaseUrl;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -63,7 +64,8 @@ const handler = async (req: Request): Promise<Response> => {
 
         if (paymentDefault) {
           const sym = paymentDefault.currency === 'NGN' ? '₦' : '$';
-          const paymentLink = `https://rentmaikar.com/driver/dashboard?tab=payments`;
+          const baseUrl = supabaseUrl.replace('.supabase.co', '.lovable.app').replace('https://bwvocmhcledbwqlpcswp', 'https://rentmaikar');
+          const paymentLink = `${baseUrl}/driver/dashboard?tab=payments`;
 
           // Send payment link SMS
           await fetch(`${supabaseUrl}/functions/v1/send-sms-notification`, {
@@ -113,7 +115,7 @@ const handler = async (req: Request): Promise<Response> => {
       return new Response(
         `<Response>
           <Say voice="alice">Connecting you to a support agent now. Please hold.</Say>
-          <Dial timeout="30" action="${supabaseUrl}/functions/v1/voip-status-callback">
+          <Dial timeout="30" action="${voiceBaseUrl}/functions/v1/voip-status-callback">
             ${supportNumber}
           </Dial>
           <Say voice="alice">We were unable to connect you. A support agent will call you back within 30 minutes. Goodbye.</Say>
@@ -122,7 +124,7 @@ const handler = async (req: Request): Promise<Response> => {
       );
     } else {
       // Invalid input - retry once
-      const actionUrl = `${supabaseUrl}/functions/v1/payment-default-ivr?defaultId=${defaultId}&stage=${stage}&retry=1`;
+      const actionUrl = `${voiceBaseUrl}/functions/v1/payment-default-ivr?defaultId=${defaultId}&stage=${stage}&retry=1`;
       const isRetry = url.searchParams.get('retry') === '1';
 
       if (isRetry) {

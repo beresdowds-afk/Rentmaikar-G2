@@ -1,332 +1,229 @@
-import { useState, useEffect, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Mic, MicOff, Volume2, VolumeX, Headphones, Bluetooth, CheckCircle2, AlertTriangle, Play, Square, Activity, Loader2 } from 'lucide-react';
-import { useVoiceDevice } from '@/hooks/useVoiceDevice';
-import { ensureMediaPermissions, unlockAudioOutput } from '@/lib/media-permissions';
-import { AudioDiagnosticsPanel } from '@/components/voice/AudioDiagnosticsPanel';
-import { toast } from 'sonner';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertTriangle, Headphones, Mic, RefreshCw, Volume2 } from 'lucide-react';
 
-interface AudioHardwareTesterProps {
-  voiceDevice: ReturnType<typeof useVoiceDevice>;
-  className?: string;
+interface DeviceOption {
+  deviceId: string;
+  label: string;
 }
 
-export const AudioHardwareTester = ({ voiceDevice, className = '' }: AudioHardwareTesterProps) => {
-  const [isTestingMic, setIsTestingMic] = useState(false);
-  const [micLevel, setMicLevel] = useState(0);
-  const [isPlayingTestTone, setIsPlayingTestTone] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [isRequestingMic, setIsRequestingMic] = useState(false);
+/**
+ * Interactive audio hardware diagnostics for the call centre: pick the input
+ * and output device, watch a live microphone level meter and play a speaker
+ * test chime before dialling.
+ */
+export function AudioHardwareTester() {
+  const [inputs, setInputs] = useState<DeviceOption[]>([]);
+  const [outputs, setOutputs] = useState<DeviceOption[]>([]);
+  const [inputId, setInputId] = useState<string>('default');
+  const [outputId, setOutputId] = useState<string>('default');
+  const [level, setLevel] = useState(0);
+  const [listening, setListening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number | null>(null);
 
-  // Stop mic testing when unmounting
-  useEffect(() => {
-    return () => {
-      stopMicTest();
-    };
+  const stopListening = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    void audioCtxRef.current?.close().catch(() => undefined);
+    audioCtxRef.current = null;
+    setListening(false);
+    setLevel(0);
   }, []);
 
-  const handleRequestMic = async () => {
-    setIsRequestingMic(true);
+  const loadDevices = useCallback(async () => {
     try {
-      const ok = await ensureMediaPermissions();
-      await voiceDevice.reinitializeAudio();
-      if (ok) {
-        toast.success('Microphone access granted');
-      } else {
-        toast.error('Microphone access was denied or unavailable in your browser.');
-      }
-    } finally {
-      setIsRequestingMic(false);
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setInputs(
+        devices
+          .filter((d) => d.kind === 'audioinput')
+          .map((d, i) => ({ deviceId: d.deviceId || 'default', label: d.label || `Microphone ${i + 1}` })),
+      );
+      setOutputs(
+        devices
+          .filter((d) => d.kind === 'audiooutput')
+          .map((d, i) => ({ deviceId: d.deviceId || 'default', label: d.label || `Speaker ${i + 1}` })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to list audio devices');
     }
-  };
+  }, []);
 
-  const startMicTest = async () => {
+  useEffect(() => {
+    void loadDevices();
+    navigator.mediaDevices?.addEventListener?.('devicechange', loadDevices);
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.('devicechange', loadDevices);
+      stopListening();
+    };
+  }, [loadDevices, stopListening]);
+
+  const startListening = useCallback(async () => {
+    setError(null);
     try {
-      await ensureMediaPermissions();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-
-      const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AC();
-      audioContextRef.current = ctx;
-
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: inputId && inputId !== 'default' ? { deviceId: { exact: inputId } } : true,
+      });
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 1024;
       source.connect(analyser);
-      analyserRef.current = analyser;
-
-      setIsTestingMic(true);
-
       const buffer = new Uint8Array(analyser.frequencyBinCount);
+
       const tick = () => {
-        if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(buffer);
-        let sum = 0;
-        for (let i = 0; i < buffer.length; i++) {
-          sum += buffer[i];
+        analyser.getByteTimeDomainData(buffer);
+        let peak = 0;
+        for (let i = 0; i < buffer.length; i += 1) {
+          peak = Math.max(peak, Math.abs(buffer[i] - 128) / 128);
         }
-        const avg = sum / buffer.length;
-        const normalized = Math.min(100, Math.round((avg / 128) * 100));
-        setMicLevel(normalized);
-        animFrameRef.current = requestAnimationFrame(tick);
+        setLevel(Math.min(100, Math.round(peak * 140)));
+        rafRef.current = requestAnimationFrame(tick);
       };
-      animFrameRef.current = requestAnimationFrame(tick);
-      toast.info('Microphone test started. Speak to see live sound levels.');
-    } catch (e: any) {
-      toast.error('Could not access microphone for testing: ' + (e?.message || String(e)));
-      setIsTestingMic(false);
+      tick();
+      setListening(true);
+      // Labels only become available once permission is granted.
+      void loadDevices();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Microphone unavailable: ${err.message}`
+          : 'Microphone unavailable. Allow access in your browser settings.',
+      );
+      stopListening();
     }
-  };
+  }, [inputId, loadDevices, stopListening]);
 
-  const stopMicTest = () => {
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach(t => t.stop());
-      micStreamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    analyserRef.current = null;
-    setIsTestingMic(false);
-    setMicLevel(0);
-  };
-
-  const playSpeakerTestTone = async () => {
-    if (isPlayingTestTone) return;
-    setIsPlayingTestTone(true);
+  const playTestTone = useCallback(async () => {
+    setError(null);
     try {
-      await unlockAudioOutput();
-      const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AC();
+      const ctx = new AudioContext();
+      const dest = ctx.createMediaStreamDestination();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 660;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.9);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start();
+      osc.stop(ctx.currentTime + 1);
 
-      // Play pleasant 2-tone melodic chime: C5 (523.25Hz) then G5 (783.99Hz)
-      const now = ctx.currentTime;
-      
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(523.25, now);
-      gain1.gain.setValueAtTime(0.01, now);
-      gain1.gain.exponentialRampToValueAtTime(0.2, now + 0.05);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start(now);
-      osc1.stop(now + 0.35);
-
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(783.99, now + 0.2);
-      gain2.gain.setValueAtTime(0.01, now + 0.2);
-      gain2.gain.exponentialRampToValueAtTime(0.25, now + 0.25);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start(now + 0.2);
-      osc2.stop(now + 0.65);
-
-      setTimeout(() => {
-        ctx.close().catch(() => {});
-        setIsPlayingTestTone(false);
-        toast.success('Speaker test chime finished. You should have heard two audio tones.');
-      }, 700);
-    } catch (e: any) {
-      toast.error('Speaker test failed: ' + (e?.message || String(e)));
-      setIsPlayingTestTone(false);
+      const el = new Audio();
+      el.srcObject = dest.stream;
+      const sinkCapable = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+      if (outputId && outputId !== 'default' && typeof sinkCapable.setSinkId === 'function') {
+        await sinkCapable.setSinkId(outputId);
+      }
+      await el.play();
+      window.setTimeout(() => {
+        el.pause();
+        el.srcObject = null;
+        void ctx.close().catch(() => undefined);
+      }, 1200);
+    } catch (err) {
+      setError(err instanceof Error ? `Speaker test failed: ${err.message}` : 'Speaker test failed');
     }
-  };
+  }, [outputId]);
 
   return (
-    <Card className={`border-blue-500/20 bg-blue-500/5 ${className}`}>
+    <Card>
       <CardHeader className="pb-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Headphones className="h-4 w-4 text-blue-600" />
-              User Device Audio (Speakers & Microphone)
-            </CardTitle>
-            <CardDescription className="text-xs">
-              VoIP calls use your device's physical speakers and microphone. Test and adjust routing below.
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={voiceDevice.micPermission === 'granted' ? 'default' : 'secondary'} className="text-xs">
-              {voiceDevice.micPermission === 'granted' ? (
-                <span className="flex items-center gap-1">
-                  <CheckCircle2 className="h-3 w-3 text-emerald-400" /> Mic Granted
-                </span>
-              ) : voiceDevice.micPermission === 'denied' ? (
-                <span className="flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3 text-red-400" /> Mic Blocked
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <Mic className="h-3 w-3" /> Mic Needs Access
-                </span>
-              )}
-            </Badge>
-            <Badge variant="outline" className="text-xs">
-              {voiceDevice.outputRoute === 'speaker' ? '🔊 Speakers' : voiceDevice.outputRoute === 'bluetooth' ? '🎧 Bluetooth' : voiceDevice.outputRoute === 'earpiece' ? '📱 Earpiece' : '🔊 System Default'}
-            </Badge>
-          </div>
-        </div>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Headphones className="h-4 w-4" />
+          Audio hardware tester
+        </CardTitle>
+        <CardDescription>
+          Check your microphone level and speaker routing before placing a call.
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4 pt-0">
+      <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          {/* Microphone Card Section */}
-          <div className="rounded-lg border bg-background p-3.5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={`p-1.5 rounded-full ${voiceDevice.micPermission === 'granted' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
-                  {voiceDevice.micPermission === 'granted' ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Device Microphone</p>
-                  <p className="text-xs text-muted-foreground">Voice input for customer calls</p>
-                </div>
-              </div>
-              {voiceDevice.micPermission !== 'granted' ? (
-                <Button size="sm" variant="outline" onClick={handleRequestMic} disabled={isRequestingMic} className="h-8 text-xs">
-                  {isRequestingMic ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Mic className="h-3 w-3 mr-1" />}
-                  Enable Mic
-                </Button>
-              ) : (
-                <Badge variant="outline" className="text-emerald-600 bg-emerald-50 text-[11px]">Ready</Badge>
-              )}
-            </div>
-
-            {/* Mic Live Level Indicator */}
-            {isTestingMic ? (
-              <div className="space-y-1.5 p-2 rounded border bg-muted/40">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <Activity className="h-3 w-3 text-emerald-500 animate-pulse" /> Live Sound Level:
-                  </span>
-                  <span className="font-mono font-medium">{micLevel}%</span>
-                </div>
-                <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 transition-all duration-75"
-                    style={{ width: `${Math.max(5, micLevel)}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            <div className="flex items-center gap-2 pt-1">
-              {isTestingMic ? (
-                <Button size="sm" variant="secondary" onClick={stopMicTest} className="h-8 text-xs flex-1">
-                  <Square className="h-3 w-3 mr-1 text-red-500" /> Stop Mic Test
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={startMicTest} className="h-8 text-xs flex-1">
-                  <Play className="h-3 w-3 mr-1 text-emerald-500" /> Test Microphone
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant={voiceDevice.isMuted ? 'destructive' : 'ghost'}
-                onClick={voiceDevice.toggleMute}
-                className="h-8 text-xs"
-                title={voiceDevice.isMuted ? 'Unmute microphone' : 'Mute microphone'}
-              >
-                {voiceDevice.isMuted ? <MicOff className="h-3.5 w-3.5 mr-1" /> : <Mic className="h-3.5 w-3.5 mr-1" />}
-                {voiceDevice.isMuted ? 'Muted' : 'Live'}
-              </Button>
-            </div>
+          <div className="space-y-1.5">
+            <Label>Microphone</Label>
+            <Select value={inputId} onValueChange={setInputId}>
+              <SelectTrigger><SelectValue placeholder="System default" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">System default</SelectItem>
+                {inputs
+                  .filter((d) => d.deviceId !== 'default')
+                  .map((d) => (
+                    <SelectItem key={d.deviceId} value={d.deviceId}>{d.label}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </div>
-
-          {/* Speaker Card Section */}
-          <div className="rounded-lg border bg-background p-3.5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-full bg-blue-500/10 text-blue-600">
-                  <Volume2 className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Device Speakers</p>
-                  <p className="text-xs text-muted-foreground truncate max-w-[180px]">{voiceDevice.outputLabel || 'System Output'}</p>
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={playSpeakerTestTone}
-                disabled={isPlayingTestTone}
-                className="h-8 text-xs"
-              >
-                {isPlayingTestTone ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Volume2 className="h-3 w-3 mr-1 text-blue-500" />}
-                Test Speakers
-              </Button>
-            </div>
-
-            {/* Audio Route Selector */}
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Audio Output Destination</Label>
-              <Select
-                value={voiceDevice.outputRoute}
-                onValueChange={(val) => voiceDevice.selectOutputRoute(val as any)}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Select output device" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="speaker">🔊 Loudspeaker / Main Speakers</SelectItem>
-                  <SelectItem value="bluetooth">🎧 Bluetooth Headset / Earbuds</SelectItem>
-                  <SelectItem value="earpiece">📱 Phone Receiver / Earpiece</SelectItem>
-                  <SelectItem value="default">⚙️ System Default Device</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between text-xs pt-1 text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Bluetooth className="h-3 w-3" /> Auto-switch to headset
-              </span>
-              <Switch
-                checked={voiceDevice.preferences.autoSwitchToHeadset}
-                onCheckedChange={voiceDevice.setAutoSwitchToHeadset}
-                className="scale-75"
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label>Speaker / output</Label>
+            <Select value={outputId} onValueChange={setOutputId}>
+              <SelectTrigger><SelectValue placeholder="System default" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">System default</SelectItem>
+                {outputs
+                  .filter((d) => d.deviceId !== 'default')
+                  .map((d) => (
+                    <SelectItem key={d.deviceId} value={d.deviceId}>{d.label}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        {/* Audio Diagnostics Collapsible */}
-        <div className="flex items-center justify-between text-xs pt-1 border-t">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Input level</span>
+            <span>{level}%</span>
+          </div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-75"
+              style={{ width: `${level}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
           <Button
-            variant="link"
+            variant={listening ? 'destructive' : 'default'}
             size="sm"
-            onClick={() => setShowDiagnostics(v => !v)}
-            className="h-auto p-0 text-xs text-muted-foreground"
+            className="gap-2"
+            onClick={() => (listening ? stopListening() : void startListening())}
           >
-            {showDiagnostics ? 'Hide' : 'Show'} detailed audio hardware diagnostics
+            <Mic className="h-4 w-4" />
+            {listening ? 'Stop mic test' : 'Test microphone'}
           </Button>
-          <span className="text-[11px] text-muted-foreground">
-            WebRTC Twilio Voice Engine Ready
-          </span>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => void playTestTone()}>
+            <Volume2 className="h-4 w-4" />
+            Play speaker chime
+          </Button>
+          <Button variant="ghost" size="sm" className="gap-2" onClick={() => void loadDevices()}>
+            <RefreshCw className="h-4 w-4" />
+            Re-scan devices
+          </Button>
         </div>
-        {showDiagnostics && (
-          <AudioDiagnosticsPanel className="mt-2 pt-2 border-t" />
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </CardContent>
     </Card>
   );
-};
+}
+
+export default AudioHardwareTester;

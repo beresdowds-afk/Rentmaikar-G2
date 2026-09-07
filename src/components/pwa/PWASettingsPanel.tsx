@@ -30,6 +30,7 @@ export default function PWASettingsPanel() {
   } = useRealtimeSound();
 
   const blocked = permission === "denied";
+  const disabled = !settings.workerEnabled || blocked;
 
   return (
     <Card>
@@ -75,7 +76,6 @@ export default function PWASettingsPanel() {
           <Switch
             id="sound-worker"
             checked={settings.workerEnabled}
-            disabled={blocked}
             onCheckedChange={setWorkerEnabled}
           />
         </div>
@@ -90,7 +90,6 @@ export default function PWASettingsPanel() {
           <Switch
             id="mute-focused"
             checked={settings.muteWhenFocused}
-            disabled={blocked || !settings.workerEnabled}
             onCheckedChange={setMuteWhenFocused}
           />
         </div>
@@ -100,7 +99,6 @@ export default function PWASettingsPanel() {
         <div className="space-y-4">
           {availableRegions.map((region) => {
             const pref = regionPref(settings, region.value);
-            const disabled = blocked || !settings.workerEnabled;
             return (
               <div key={region.value} className="space-y-2 rounded-lg border p-3">
                 <div className="flex items-center justify-between gap-3">
@@ -119,7 +117,6 @@ export default function PWASettingsPanel() {
                   <Switch
                     id={`sound-${region.value}`}
                     checked={pref.enabled}
-                    disabled={disabled}
                     onCheckedChange={(v) => setRegionEnabled(region.value, v)}
                   />
                 </div>

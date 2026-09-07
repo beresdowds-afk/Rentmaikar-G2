@@ -122,7 +122,7 @@ export function ProxyNotificationPrefs({
             {Object.entries(EVENT_LABELS).map(([key, meta]) => (
               <label key={key} className="flex items-start gap-2 rounded-md border p-2 cursor-pointer">
                 <Switch checked={prefs.events[key] ?? true}
-                  onCheckedChange={(v) => setEvent(key, v)} disabled={disabled} />
+                  onCheckedChange={(v) => setEvent(key, v)} />
                 <div className="text-xs">
                   <div className="font-medium">{meta.label}</div>
                   {meta.hint && <div className="text-muted-foreground">{meta.hint}</div>}
@@ -153,7 +153,7 @@ function ChannelRow({ icon, label, checked, onChange, disabled, hint }: {
         {icon}<span>{label}</span>
         {hint && <span className="text-xs text-muted-foreground">— {hint}</span>}
       </div>
-      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
+      <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }

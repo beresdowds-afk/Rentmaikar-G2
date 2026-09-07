@@ -138,12 +138,14 @@ serve(async (req) => {
                 category: "notification",
                 country: profile?.preferred_country ?? undefined,
                 data: {
+                  firstName: vars.first_name,
                   title: mapping ? renderEventCopy(mapping.emailSubject, vars) : row.title,
                   body: mapping ? renderEventCopy(mapping.emailBody, vars) : (row.body ?? ""),
                   category: row.category,
                   status: eventStatus ?? undefined,
                   recordId: row.record_id ?? undefined,
                   deepLink: vars.deep_link,
+                  ...(row.payload ?? {}),
                 },
               }),
             });
@@ -180,6 +182,8 @@ serve(async (req) => {
                       phone: profile.phone,
                       channel,
                       notificationType: mapping.smsNotificationType,
+                      whatsappTemplateId: mapping.whatsappTemplateName,
+                      templateName: mapping.whatsappTemplateName,
                       name: vars.first_name,
                       customMessage: copy,
                     }),
@@ -229,6 +233,55 @@ serve(async (req) => {
           if (!res.ok) {
             status = "failed";
             lastError = `[${res.status}] ${await res.text()}`;
+          }
+        } else if (row.channel === "sms" || row.channel === "whatsapp") {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, phone, notification_sms, notification_whatsapp")
+            .eq("user_id", row.recipient_id)
+            .maybeSingle();
+
+          const targetPhone = row.destination || profile?.phone;
+          if (!targetPhone) {
+            status = "skipped";
+            lastError = `No phone number available for ${row.channel.toUpperCase()} dispatch`;
+          } else if (
+            (row.channel === "sms" && profile?.notification_sms === false) ||
+            (row.channel === "whatsapp" && profile?.notification_whatsapp === false)
+          ) {
+            status = "skipped";
+            lastError = `User opted out of ${row.channel.toUpperCase()} notifications`;
+          } else {
+            const vars = {
+              first_name: (profile?.full_name ?? "").split(" ")[0] || "there",
+              status: eventStatus ?? "",
+              record_id: row.record_id ?? "",
+              deep_link: row.deep_link ?? "https://rentmaikar.com",
+            };
+
+            const copy = mapping
+              ? renderEventCopy(row.channel === "whatsapp" ? mapping.whatsapp : mapping.sms, vars)
+              : (row.body ?? row.title);
+
+            const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/send-sms-notification`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceKey}`,
+              },
+              body: JSON.stringify({
+                phone: targetPhone,
+                channel: row.channel,
+                notificationType: mapping?.smsNotificationType ?? "general",
+                name: vars.first_name,
+                customMessage: copy,
+              }),
+            });
+
+            if (!res.ok) {
+              status = "failed";
+              lastError = `[${res.status}] ${await res.text()}`;
+            }
           }
         } else if (row.channel === "slack") {
           const res = await fetchWithTimeout(row.destination!, {

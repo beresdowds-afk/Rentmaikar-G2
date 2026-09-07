@@ -161,6 +161,44 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_assistant_vehicle_assignments: {
+        Row: {
+          assigned_by: string | null
+          assistant_id: string
+          created_at: string
+          id: string
+          notes: string | null
+          updated_at: string
+          vehicle_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          assistant_id: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          updated_at?: string
+          vehicle_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          assistant_id?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          updated_at?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admin_assistant_vehicle_assignments_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admin_audit_log: {
         Row: {
           action: string
@@ -963,6 +1001,85 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      case_events: {
+        Row: {
+          actor_id: string | null
+          case_id: string
+          created_at: string
+          description: string | null
+          event_type: string
+          id: string
+          metadata: Json
+        }
+        Insert: {
+          actor_id?: string | null
+          case_id: string
+          created_at?: string
+          description?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json
+        }
+        Update: {
+          actor_id?: string | null
+          case_id?: string
+          created_at?: string
+          description?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "case_events_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "support_cases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      case_notes: {
+        Row: {
+          author_id: string | null
+          author_name: string | null
+          author_role: string
+          body: string
+          case_id: string
+          created_at: string
+          id: string
+          is_internal: boolean
+        }
+        Insert: {
+          author_id?: string | null
+          author_name?: string | null
+          author_role?: string
+          body: string
+          case_id: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean
+        }
+        Update: {
+          author_id?: string | null
+          author_name?: string | null
+          author_role?: string
+          body?: string
+          case_id?: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "case_notes_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "support_cases"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       communication_providers: {
         Row: {
@@ -2902,6 +3019,7 @@ export type Database = {
         Row: {
           archived_at: string | null
           assigned_to: string | null
+          case_id: string | null
           channel: string
           created_at: string
           id: string
@@ -2920,6 +3038,7 @@ export type Database = {
         Insert: {
           archived_at?: string | null
           assigned_to?: string | null
+          case_id?: string | null
           channel: string
           created_at?: string
           id?: string
@@ -2938,6 +3057,7 @@ export type Database = {
         Update: {
           archived_at?: string | null
           assigned_to?: string | null
+          case_id?: string | null
           channel?: string
           created_at?: string
           id?: string
@@ -2953,7 +3073,15 @@ export type Database = {
           user_name?: string | null
           user_phone?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "inbox_conversations_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "support_cases"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inbox_messages: {
         Row: {
@@ -8510,6 +8638,90 @@ export type Database = {
         }
         Relationships: []
       }
+      support_cases: {
+        Row: {
+          assigned_to: string | null
+          call_id: string | null
+          case_number: string
+          conversation_id: string | null
+          created_at: string
+          customer_email: string | null
+          customer_name: string | null
+          customer_phone: string | null
+          customer_user_id: string | null
+          description: string | null
+          id: string
+          last_activity_at: string
+          metadata: Json
+          origin_channel: string
+          priority: string
+          region: string
+          resolved_at: string | null
+          status: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          call_id?: string | null
+          case_number?: string
+          conversation_id?: string | null
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          customer_user_id?: string | null
+          description?: string | null
+          id?: string
+          last_activity_at?: string
+          metadata?: Json
+          origin_channel?: string
+          priority?: string
+          region?: string
+          resolved_at?: string | null
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          call_id?: string | null
+          case_number?: string
+          conversation_id?: string | null
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string | null
+          customer_phone?: string | null
+          customer_user_id?: string | null
+          description?: string | null
+          id?: string
+          last_activity_at?: string
+          metadata?: Json
+          origin_channel?: string
+          priority?: string
+          region?: string
+          resolved_at?: string | null
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_cases_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "voip_calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "support_cases_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "inbox_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       support_staff: {
         Row: {
           assigned_city: string
@@ -11149,6 +11361,33 @@ export type Database = {
         }
         Relationships: []
       }
+      voip_agent_presence: {
+        Row: {
+          identity: string
+          last_seen_at: string
+          region: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          identity: string
+          last_seen_at?: string
+          region?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          identity?: string
+          last_seen_at?: string
+          region?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       voip_call_groups: {
         Row: {
           created_at: string
@@ -11377,9 +11616,11 @@ export type Database = {
       }
       voip_calls: {
         Row: {
+          answered_by: string | null
           call_sid: string | null
           call_type: string
           caller_role: string | null
+          case_id: string | null
           created_at: string
           direction: string
           duration_seconds: number | null
@@ -11399,9 +11640,11 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          answered_by?: string | null
           call_sid?: string | null
           call_type: string
           caller_role?: string | null
+          case_id?: string | null
           created_at?: string
           direction?: string
           duration_seconds?: number | null
@@ -11421,9 +11664,11 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          answered_by?: string | null
           call_sid?: string | null
           call_type?: string
           caller_role?: string | null
+          case_id?: string | null
           created_at?: string
           direction?: string
           duration_seconds?: number | null
@@ -11443,6 +11688,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "voip_calls_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "support_cases"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "voip_calls_initiated_by_fkey"
             columns: ["initiated_by"]
@@ -11499,6 +11751,48 @@ export type Database = {
             referencedColumns: ["user_id"]
           },
         ]
+      }
+      voip_outbound_numbers: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          is_default: boolean
+          label: string
+          phone_number: string
+          priority: number
+          region: string
+          role: Database["public"]["Enums"]["app_role"] | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          label: string
+          phone_number: string
+          priority?: number
+          region?: string
+          role?: Database["public"]["Enums"]["app_role"] | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          label?: string
+          phone_number?: string
+          priority?: number
+          region?: string
+          role?: Database["public"]["Enums"]["app_role"] | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       voip_settings: {
         Row: {
@@ -12725,6 +13019,10 @@ export type Database = {
         Returns: string
       }
       assistant_can_access_user: { Args: { _target: string }; Returns: boolean }
+      assistant_can_access_vehicle: {
+        Args: { _vehicle: string }
+        Returns: boolean
+      }
       can_delete_user_account: {
         Args: { _target_user_id: string }
         Returns: boolean
@@ -12733,6 +13031,18 @@ export type Database = {
       cancel_authorization_by_token: {
         Args: { p_by_name?: string; p_reason?: string; p_token: string }
         Returns: Json
+      }
+      case_for_call: {
+        Args: { p_call_id: string; p_subject?: string }
+        Returns: string
+      }
+      case_for_conversation: {
+        Args: {
+          p_channel?: string
+          p_conversation_id: string
+          p_subject?: string
+        }
+        Returns: string
       }
       check_auth_rate_limit: {
         Args: {
@@ -12761,6 +13071,7 @@ export type Database = {
         Returns: Json
       }
       classify_onboarding_error: { Args: { _msg: string }; Returns: string }
+      clear_voip_call_log: { Args: never; Returns: number }
       complete_idempotency_key: {
         Args: { _key: string; _response?: Json; _status: string }
         Returns: undefined
@@ -12782,6 +13093,10 @@ export type Database = {
       consume_withdrawal_authorization: {
         Args: { _id: string; _reference?: string }
         Returns: Json
+      }
+      customer_reply_to_case: {
+        Args: { p_body: string; p_case_id: string }
+        Returns: string
       }
       decide_withdrawal_authorization: {
         Args: { _decision: string; _id: string; _reason?: string }
@@ -12977,6 +13292,28 @@ export type Database = {
           value: string
         }[]
       }
+      get_assigned_mqtt_credentials: {
+        Args: never
+        Returns: {
+          broker_port: number
+          broker_url: string
+          client_id: string
+          created_at: string
+          id: string
+          installed_at: string
+          iot_device_id: string
+          is_active: boolean
+          jwt_expires_at: string
+          last_connected_at: string
+          mqtt_username: string
+          publish_topics: string[]
+          subscribe_topics: string[]
+          tls_enabled: boolean
+          topic_prefix: string
+          updated_at: string
+          vehicle_id: string
+        }[]
+      }
       get_authorization_by_token: { Args: { p_token: string }; Returns: Json }
       get_ledger_balance: {
         Args: {
@@ -13164,6 +13501,10 @@ export type Database = {
       }
       mark_all_admin_notifications_read: { Args: never; Returns: number }
       mark_in_app_messages_read: { Args: { _ids: string[] }; Returns: number }
+      mark_voip_call_answered: {
+        Args: { _call_sid: string }
+        Returns: undefined
+      }
       mask_secret_value: { Args: { _v: string }; Returns: string }
       move_to_dlq: {
         Args: {
@@ -13674,6 +14015,14 @@ export type Database = {
         Args: { _payment_id: string }
         Returns: Json
       }
+      voip_resolve_outbound_number: {
+        Args: { _region?: string; _user_id: string }
+        Returns: string
+      }
+      voip_set_presence: {
+        Args: { _region?: string; _status: string }
+        Returns: undefined
+      }
     }
     Enums: {
       access_level_enum: "view_only" | "full"
@@ -13798,12 +14147,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13827,11 +14176,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13852,11 +14201,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13877,11 +14226,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13894,11 +14243,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

@@ -45,9 +45,9 @@ function writeCookie(record: CookieConsentRecord) {
 
 export const DEFAULT_PREFS: CookiePreferences = {
   necessary: true,
-  analytics: false,
-  marketing: false,
-  preferences: false,
+  analytics: true,
+  marketing: true,
+  preferences: true,
 };
 
 const ALL_PREFS: CookiePreferences = {

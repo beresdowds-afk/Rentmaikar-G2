@@ -1,0 +1,59 @@
+{
+  "enabled": false,
+  "mode": "disabled",
+  "frontendDomain": "rentmaikar.com",
+  "frontendOrigin": "https://rentmaikar.com",
+  "backendDomain": "staging.rentmaikar.com",
+  "backendUrl": "https://staging.rentmaikar.com",
+  "allowedOrigins": [
+    "https://rentmaikar.com",
+    "https://www.rentmaikar.com",
+    "http://localhost:3000",
+    "http://localhost:5173"
+  ],
+  "allowCredentials": true,
+  "maintenanceMessage": "Direct connection between frontend (rentmaikar.com) and backend (staging.rentmaikar.com) has been disconnected upon detecting frontend call. Fallback bridge at staging.rentmaikar.com is ACTIVE.",
+  "lastToggledAt": "2026-09-06T02:05:00.000Z",
+  "lastToggledBy": "Auto-Trigger (Call detected from rentmaikar.com)",
+  "autoDisconnectOnFrontendTraffic": true,
+  "autoDisconnectTriggerCount": 1,
+  "lastAutoDisconnectTrigger": {
+    "timestamp": "2026-09-06T02:05:00.000Z",
+    "origin": "https://rentmaikar.com",
+    "referer": "https://rentmaikar.com/",
+    "path": "/api/vehicles",
+    "method": "GET",
+    "ip": "127.0.0.1",
+    "userAgent": "Mozilla/5.0 (rentmaikar.com Client)",
+    "actionTaken": "Direct link severed; staging bridge activated"
+  },
+  "history": [
+    {
+      "id": "evt-call-detected-auto-disconnect",
+      "timestamp": "2026-09-06T02:05:00.000Z",
+      "previousState": true,
+      "newState": false,
+      "mode": "disabled",
+      "toggledBy": "Auto-Trigger (Call detected from rentmaikar.com)",
+      "reason": "Direct link disconnected immediately upon detecting call from rentmaikar.com front end. Fallback bridge activated."
+    },
+    {
+      "id": "evt-1788625911826-hax6w",
+      "timestamp": "2026-09-05T16:31:51.826Z",
+      "previousState": true,
+      "newState": true,
+      "mode": "active",
+      "toggledBy": "Test Runner",
+      "reason": "Verification"
+    },
+    {
+      "id": "init-1",
+      "timestamp": "2026-09-05T16:31:51.781Z",
+      "previousState": false,
+      "newState": true,
+      "mode": "active",
+      "toggledBy": "System Initialization",
+      "reason": "Initial deployment setup connecting rentmaikar.com to staging.rentmaikar.com"
+    }
+  ]
+}

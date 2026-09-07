@@ -333,7 +333,6 @@ export default function GPSANDTRACKDeviceLinkPanel() {
                         <div className="flex items-center gap-2">
                           <Switch
                             checked={row.registry.vehicle_gps_enabled !== false}
-                            disabled={savingKey === `gps:${row.key}`}
                             onCheckedChange={(v) => toggleGps(row, v)}
                             aria-label={`GPS tracking for ${vehicleLabel(row.registry.vehicle)}`}
                           />

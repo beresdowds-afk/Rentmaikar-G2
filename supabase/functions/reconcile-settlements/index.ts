@@ -337,14 +337,20 @@ Deno.serve(async (req) => {
     let triggeredBy = req.headers.get("x-trigger-source") ?? "cron";
     const startedMs = Date.now();
 
-    // Auth: internal secret (webhooks/cron) OR an admin JWT.
-    const internal = req.headers.get("x-internal-secret");
+    // Auth: internal secret (webhooks/cron), x-cron-secret, service-role Bearer, OR an admin JWT.
+    const internal = req.headers.get("x-internal-secret") || req.headers.get("x-cron-secret");
     const cronSecret = Deno.env.get("CRON_SECRET") ?? "";
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const bearer = authHeader.replace(/^Bearer\s+/i, "");
+
     let authorized = Boolean(cronSecret) && internal === cronSecret;
+    if (!authorized && Boolean(serviceKey) && bearer === serviceKey) {
+      authorized = true;
+    }
     if (!authorized) {
-      const auth = req.headers.get("Authorization") ?? "";
-      if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
-      const { data: u } = await supa.auth.getUser(auth.replace("Bearer ", ""));
+      if (!authHeader.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
+      const { data: u } = await supa.auth.getUser(bearer);
       if (!u?.user) return json({ error: "Unauthenticated" }, 401);
       authorized = await isAdmin(supa, u.user.id);
       if (!authorized) return json({ error: "Forbidden" }, 403);

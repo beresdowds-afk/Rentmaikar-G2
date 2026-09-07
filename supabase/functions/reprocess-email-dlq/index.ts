@@ -6,7 +6,7 @@
 // exponentially. After MAX_ATTEMPTS the entry is paused and the team alerted
 // instead of the job looping forever.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const QUEUES = ["auth_emails", "transactional_emails"] as const;
 const BATCH_PER_QUEUE = 10;

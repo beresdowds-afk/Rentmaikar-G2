@@ -107,8 +107,18 @@ const emailWrapper = (content: string, title: string) => `
     </div>
     ${content}
     <div class="footer">
-      <p>© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
-      <p>Email: ${EMAIL_CONFIG.support}</p>
+      <p style="margin: 0 0 8px 0; font-weight: 600; color: #1e293b;">Rentmaikar Mobility Solutions</p>
+      <p style="margin: 0 0 4px 0;">© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
+      <p style="margin: 0 0 4px 0;">
+        <strong>US & International:</strong> +1 (608) 384-3932 &middot; 
+        <strong>Nigeria:</strong> +234 800 RENTMAIKAR
+      </p>
+      <p style="margin: 0 0 8px 0;">
+        <strong>Support:</strong> <a href="mailto:${EMAIL_CONFIG.support}" style="color: #2563eb;">${EMAIL_CONFIG.support}</a>
+      </p>
+      <p style="font-size: 11px; color: #94a3b8; margin-top: 10px;">
+        Sent via Rentmaikar Communications Gateway &middot; TLS 1.3 Encrypted &middot; A2P 10DLC Verified
+      </p>
     </div>
   </div>
 </body>
@@ -116,8 +126,9 @@ const emailWrapper = (content: string, title: string) => `
 `;
 
 // ─── Helpers ───
-const escapeHtml = (text: string): string => {
-  return text
+const escapeHtml = (text: any): string => {
+  if (text == null) return "";
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -125,9 +136,10 @@ const escapeHtml = (text: string): string => {
     .replace(/'/g, '&#039;');
 };
 
-const formatCurrency = (amount: number, currency: 'USD' | 'NGN'): string => {
-  const symbol = currency === 'NGN' ? '₦' : '$';
-  return `${symbol}${amount.toLocaleString()}`;
+const formatCurrency = (amount: any, currency: 'USD' | 'NGN' = 'NGN'): string => {
+  const num = typeof amount === 'number' ? amount : Number(amount) || 0;
+  const symbol = currency === 'USD' ? '$' : '₦';
+  return `${symbol}${num.toLocaleString()}`;
 };
 
 // ─── Multi-Language Content ───

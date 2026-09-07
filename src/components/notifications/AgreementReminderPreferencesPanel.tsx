@@ -71,7 +71,7 @@ export function AgreementReminderPreferencesPanel() {
               />
             </div>
 
-            <fieldset disabled={!draft.opted_in} className="space-y-4 disabled:opacity-50">
+            <div className="space-y-4">
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Channels</Label>
                 <div className="flex items-center justify-between rounded-lg border p-3">
@@ -120,7 +120,7 @@ export function AgreementReminderPreferencesPanel() {
                   ))}
                 </div>
               </div>
-            </fieldset>
+            </div>
 
             {noChannel && (
               <p className="text-sm text-destructive" role="alert">

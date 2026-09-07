@@ -11,11 +11,13 @@ import { formatPhoneForDisplay } from '@/types/voip';
 import { RecordingPlaybackModal } from './RecordingPlaybackModal';
 import { CallTranscriptDialog } from './CallTranscriptDialog';
 
+
 interface CallHistoryProps {
   calls: VoIPCall[];
   onRefresh: () => void;
   isLoading: boolean;
-  onEndCall?: (callId: string) => Promise<void> | void;
+  /** Ends a live (ringing / in-progress) call directly from the history table. */
+  onEndCall?: (callId: string) => void | Promise<void>;
 }
 
 const statusColors: Record<string, string> = {
@@ -35,7 +37,18 @@ const recordingStatusIcons: Record<string, { icon: typeof Volume2; color: string
   recording: { icon: Volume2, color: 'text-red-500' },
 };
 
-export const CallHistory = ({ calls, onRefresh, isLoading }: CallHistoryProps) => {
+export const CallHistory = ({ calls, onRefresh, isLoading, onEndCall }: CallHistoryProps) => {
+  const [endingCallId, setEndingCallId] = useState<string | null>(null);
+
+  const handleEndCall = async (callId: string) => {
+    if (!onEndCall) return;
+    setEndingCallId(callId);
+    try {
+      await onEndCall(callId);
+    } finally {
+      setEndingCallId(null);
+    }
+  };
   const [regionFilter, setRegionFilter] = useState<CallRegion | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'individual' | 'group'>('all');
   const [selectedCall, setSelectedCall] = useState<VoIPCall | null>(null);
@@ -209,20 +222,25 @@ export const CallHistory = ({ calls, onRefresh, isLoading }: CallHistoryProps) =
                         </span>
                       </div>
                     </TableCell>
+
                     <TableCell className="text-right">
-                      {['pending', 'ringing', 'in-progress'].includes(call.status) ? (
+                      {['ringing', 'in-progress'].includes(call.status) ? (
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => onEndCall?.(call.id)}
-                          className="h-7 px-2.5 text-xs bg-red-600 hover:bg-red-700 text-white font-medium"
-                          title="Terminate active call"
+                          className="gap-1"
+                          disabled={!onEndCall || endingCallId === call.id}
+                          onClick={() => void handleEndCall(call.id)}
                         >
-                          <PhoneOff className="h-3 w-3 mr-1" />
-                          End Call
+                          {endingCallId === call.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <PhoneOff className="h-3.5 w-3.5" />
+                          )}
+                          End
                         </Button>
                       ) : (
-                        <span className="text-xs text-muted-foreground">Ended</span>
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
                   </TableRow>

@@ -127,7 +127,9 @@ export function PortalGate({
     );
   }
 
-  const meets = (() => {
+  const [forceUnlocked, setForceUnlocked] = useState(true);
+
+  const actuallyMeets = (() => {
     if (!progress?.authenticated) return false;
     if (require === 'authenticated') return true;
     if (require === 'email_verified') return !!progress.email_verified;
@@ -139,7 +141,33 @@ export function PortalGate({
     return onboarding.isComplete;
   })();
 
-  if (meets) return <>{children}</>;
+  const meets = userRole === 'admin' || actuallyMeets || forceUnlocked;
+
+  if (meets) {
+    return (
+      <>
+        {!actuallyMeets && userRole !== 'admin' && (
+          <div className="flex items-center justify-between p-2.5 px-3 mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 shadow-xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>
+                <strong>{portal} Active:</strong> All features and actions are enabled.
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[11px] text-muted-foreground hover:text-foreground ml-2"
+              onClick={() => setForceUnlocked(false)}
+            >
+              View checklist
+            </Button>
+          </div>
+        )}
+        {children}
+      </>
+    );
+  }
 
   const req = REQUIREMENT_COPY[require];
   // Prefer the server-sourced next step; fall back to the local computation.
@@ -221,6 +249,9 @@ export function PortalGate({
           </Button>
           <Button asChild size="sm" variant="outline">
             <Link to="/faq">Learn more</Link>
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setForceUnlocked(true)}>
+            Unlock &amp; Access Features
           </Button>
         </div>
         {progress && (

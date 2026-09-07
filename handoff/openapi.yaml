@@ -1,0 +1,151 @@
+openapi: 3.0.3
+info:
+  title: RentMaikar Backend API Gateway
+  description: Public API specification for RentMaikar backend services, CPaaS messaging, telemetry, and platform webhooks.
+  version: 1.0.0
+servers:
+  - url: https://staging.rentmaikar.com/api
+    description: Staging / Production Backend Gateway
+  - url: http://localhost:5000/api
+    description: Local Development Server
+
+paths:
+  /health:
+    get:
+      summary: Service Health & Readiness Probe
+      operationId: getHealthStatus
+      responses:
+        '200':
+          description: Healthy service response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  service:
+                    type: string
+                    example: rentmaikar-backend-gateway
+                  version:
+                    type: string
+                    example: 1.0.0
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
+                  environment:
+                    type: string
+
+  /domains:
+    get:
+      summary: Retrieve Canonical Platform Domains
+      operationId: getCanonicalDomains
+      responses:
+        '200':
+          description: Domain mappings for frontend, backend, and mail systems
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  domains:
+                    type: object
+                    properties:
+                      frontendDomain:
+                        type: string
+                        example: rentmaikar.com
+                      frontendOrigin:
+                        type: string
+                        example: https://rentmaikar.com
+                      backendDomain:
+                        type: string
+                        example: staging.rentmaikar.com
+                      backendUrl:
+                        type: string
+                        example: https://staging.rentmaikar.com
+                      incomingMailDomain:
+                        type: string
+                        example: backend.rentmaikar.com
+                      outgoingMailDomain:
+                        type: string
+                        example: notify.rentmaikar.com
+
+  /cpaas/send:
+    post:
+      summary: Dispatch Multi-Channel Communication Message
+      operationId: sendCpaasMessage
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - channel
+                - recipient
+                - message
+              properties:
+                channel:
+                  type: string
+                  enum: [sms, whatsapp]
+                recipient:
+                  type: string
+                  example: "+16085489220"
+                message:
+                  type: string
+                  example: "RentMaikar verification code: 382910"
+                region:
+                  type: string
+                  enum: [USA, Nigeria]
+                metadata:
+                  type: object
+      responses:
+        '200':
+          description: Message accepted for delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  messageId:
+                    type: string
+                    example: "msg_cpaas_7812903"
+                  status:
+                    type: string
+                    example: "queued"
+        '400':
+          description: Bad request or missing parameters
+        '401':
+          description: Unauthorized
+
+  /webhooks/sent:
+    post:
+      summary: Handle Inbound Delivery Callbacks from Sent.dm
+      operationId: handleSentWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook acknowledged
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

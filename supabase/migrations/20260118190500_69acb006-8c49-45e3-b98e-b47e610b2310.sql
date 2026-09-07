@@ -1,6 +1,12 @@
 -- Enable required extensions for cron jobs
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_net SCHEMA extensions;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_cron;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- Create enum for incident types
 CREATE TYPE public.incident_type AS ENUM ('accident', 'maintenance', 'breakdown', 'theft', 'other');

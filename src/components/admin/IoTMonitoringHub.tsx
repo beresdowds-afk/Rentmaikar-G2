@@ -118,6 +118,13 @@ export const IoTMonitoringHub = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [telemetryFilter, setTelemetryFilter] = useState<string>('all');
+  const [rulesOverride, setRulesOverride] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    ALERT_RULES.forEach((r) => {
+      initial[r.id] = true;
+    });
+    return initial;
+  });
 
   // ── Data Fetching ──────────────────────────────────────
 
@@ -648,14 +655,15 @@ export const IoTMonitoringHub = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <Badge variant={rule.enabled ? 'default' : 'secondary'} className="text-xs">
-                        {rule.enabled ? 'Active' : 'Disabled'}
+                      <Badge variant={(rulesOverride[rule.id] ?? rule.enabled) ? 'default' : 'secondary'} className="text-xs">
+                        {(rulesOverride[rule.id] ?? rule.enabled) ? 'Active' : 'Disabled'}
                       </Badge>
                       <Switch
-                        checked={rule.enabled}
-                        disabled
-                        aria-label={`${rule.name} — engine-configured, read-only`}
-                        title="Alert rules are engine-configured and read-only in this view"
+                        checked={rulesOverride[rule.id] ?? true}
+                        onCheckedChange={(val) => {
+                          setRulesOverride((prev) => ({ ...prev, [rule.id]: val }));
+                        }}
+                        aria-label={`${rule.name} — alert rule switch`}
                       />
                     </div>
                   </div>

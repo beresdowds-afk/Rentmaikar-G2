@@ -687,7 +687,6 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                                 <div className="flex items-center gap-2">
                                   <Switch
                                     checked={Boolean(v.is_public)}
-                                    disabled={savingVisibility === v.id}
                                     onCheckedChange={(checked) => setVisibility(v, checked)}
                                     aria-label="Toggle public visibility"
                                   />
@@ -878,7 +877,6 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
               </div>
               <Switch
                 checked={Boolean(previewVehicle.is_public)}
-                disabled={savingVisibility === previewVehicle.id}
                 onCheckedChange={async (checked) => {
                   await setVisibility(previewVehicle, checked);
                   setPreviewVehicle({ ...previewVehicle, is_public: checked });

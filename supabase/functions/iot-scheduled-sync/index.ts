@@ -3,6 +3,7 @@
 // Protected by CRON_SECRET (x-cron-secret header) or service-role Bearer token.
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
 
 const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -11,11 +12,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const provided = req.headers.get("x-cron-secret") ?? "";
-  const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-  if (!(CRON_SECRET && provided === CRON_SECRET) && bearer !== SERVICE_KEY) {
-    return new Response("Unauthorized", { status: 401, headers: corsHeaders });
-  }
+  const cronDenied = await requireCronSecretAsync(req);
+  if (cronDenied) return cronDenied;
 
   const supa = createClient(SUPABASE_URL, SERVICE_KEY);
   const { data: schedules } = await supa.from("iot_sync_schedule").select("*");

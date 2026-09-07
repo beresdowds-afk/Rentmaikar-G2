@@ -12,6 +12,8 @@ export interface AudioPreferences {
   muted: boolean;
   /** Automatically switch output to a headset/Bluetooth device when it connects. */
   autoSwitchToHeadset: boolean;
+  /** Speaker volume percentage from 0 to 100. */
+  speakerVolume: number;
 }
 
 const STORAGE_KEY = "rentmaikar_audio_prefs";
@@ -20,6 +22,7 @@ export const DEFAULT_AUDIO_PREFERENCES: AudioPreferences = {
   route: "default",
   muted: false,
   autoSwitchToHeadset: true,
+  speakerVolume: 80,
 };
 
 const VALID_ROUTES: AudioOutputRoute[] = ["speaker", "earpiece", "bluetooth", "default"];
@@ -30,6 +33,7 @@ export function loadAudioPreferences(): AudioPreferences {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_AUDIO_PREFERENCES };
     const parsed = JSON.parse(raw) as Partial<AudioPreferences>;
+    const vol = typeof parsed.speakerVolume === "number" ? Math.max(0, Math.min(100, parsed.speakerVolume)) : 80;
     return {
       route: VALID_ROUTES.includes(parsed.route as AudioOutputRoute)
         ? (parsed.route as AudioOutputRoute)
@@ -37,6 +41,7 @@ export function loadAudioPreferences(): AudioPreferences {
       muted: typeof parsed.muted === "boolean" ? parsed.muted : false,
       autoSwitchToHeadset:
         typeof parsed.autoSwitchToHeadset === "boolean" ? parsed.autoSwitchToHeadset : true,
+      speakerVolume: vol,
     };
   } catch {
     return { ...DEFAULT_AUDIO_PREFERENCES };

@@ -1,7 +1,10 @@
+import { isCallerAdmin } from "./admin-auth.ts";
+
 // Shared caller-auth check for scheduled/cron edge functions.
 // Requires either:
-//   - a valid `x-cron-secret` header matching CRON_SECRET, OR
-//   - a Bearer token equal to SUPABASE_SERVICE_ROLE_KEY (for internal invokes).
+//   - a valid `x-cron-secret` header matching CRON_SECRET or vault-stored secret, OR
+//   - a Bearer token equal to SUPABASE_SERVICE_ROLE_KEY (for internal invokes), OR
+//   - a Bearer token of an authenticated admin user (for manual triggers from admin dashboard).
 // Returns a 401 Response when the caller is not authorized, or null when OK.
 function unauthorized(): Response {
   return new Response(
@@ -21,32 +24,41 @@ function unauthorized(): Response {
 /**
  * Async variant that additionally accepts an `x-cron-secret` matching the
  * vault-stored CRON_SECRET (used by pg_cron jobs, which cannot read edge
- * function env vars). Returns a 401 Response, or null when authorized.
+ * function env vars) or an authenticated admin user. Returns a 401 Response, or null when authorized.
  */
 export async function requireCronSecretAsync(req: Request): Promise<Response | null> {
   const sync = requireCronSecret(req);
   if (!sync) return null;
 
   const provided = req.headers.get("x-cron-secret");
-  if (!provided) return sync;
+  if (provided) {
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL");
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (supabaseUrl && serviceKey) {
+        const res = await fetch(`${supabaseUrl}/rest/v1/rpc/verify_cron_secret`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ _secret: provided }),
+        });
+        if (res.ok && (await res.json()) === true) return null;
+      }
+    } catch (_e) {
+      // fall through
+    }
+  }
 
+  // Allow authenticated admin users (e.g. manual trigger from Admin dashboard)
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return sync;
-
-    const res = await fetch(`${supabaseUrl}/rest/v1/rpc/verify_cron_secret`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({ _secret: provided }),
-    });
-    if (res.ok && (await res.json()) === true) return null;
+    if (await isCallerAdmin(req)) {
+      return null;
+    }
   } catch (_e) {
-    // fall through to unauthorized
+    // fall through
   }
 
   return unauthorized();

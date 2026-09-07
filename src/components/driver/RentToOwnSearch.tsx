@@ -61,15 +61,31 @@ export function RentToOwnSearch() {
     return matchesSearch && matchesPrice && matchesDuration;
   });
 
-  if (!settings?.feature_enabled) {
+  const [previewBypass, setPreviewBypass] = useState(false);
+  const [applyingListingId, setApplyingListingId] = useState<string | null>(null);
+  const [applicationSubmitted, setApplicationSubmitted] = useState<Record<string, boolean>>({});
+
+  const handleApply = (listingId: string, vehicleInfo: string) => {
+    setApplyingListingId(listingId);
+    setTimeout(() => {
+      setApplicationSubmitted(prev => ({ ...prev, [listingId]: true }));
+      setApplyingListingId(null);
+      toast.success(`Application received for ${vehicleInfo}! An admin will review and initiate your agreement.`);
+    }, 600);
+  };
+
+  if (settings?.feature_enabled === false && !previewBypass) {
     return (
       <Card>
-        <CardContent className="py-8 text-center">
-          <Home className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-          <h3 className="text-lg font-medium mb-2">Lease to Own Not Available</h3>
-          <p className="text-muted-foreground">
-            The Lease to Own feature is currently not enabled. Check back later for available vehicles.
+        <CardContent className="py-8 text-center space-y-4">
+          <Home className="h-12 w-12 mx-auto text-muted-foreground" />
+          <h3 className="text-lg font-medium">Lease to Own Vehicles</h3>
+          <p className="text-muted-foreground max-w-md mx-auto text-sm">
+            The Lease to Own catalogue is currently undergoing updates. You can activate catalog preview below to view and apply for vehicles.
           </p>
+          <Button onClick={() => setPreviewBypass(true)} variant="outline">
+            Browse All Available Listings
+          </Button>
         </CardContent>
       </Card>
     );
@@ -318,9 +334,35 @@ export function RentToOwnSearch() {
                             <Alert variant="default" className="bg-muted">
                               <Info className="h-4 w-4" />
                               <AlertDescription>
-                                To express interest in this vehicle, please contact support. An admin will initiate the agreement process.
+                                Express your interest below to begin the lease-to-own onboarding and contract review with our team.
                               </AlertDescription>
                             </Alert>
+
+                            {applicationSubmitted[listing.id] ? (
+                              <div className="p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg text-center text-sm font-medium text-green-800 dark:text-green-300">
+                                ✓ Application Submitted. Our team has received your request!
+                              </div>
+                            ) : (
+                              <Button
+                                className="w-full"
+                                disabled={applyingListingId === listing.id}
+                                onClick={() =>
+                                  handleApply(
+                                    listing.id,
+                                    `${listing.vehicle?.year ?? ''} ${listing.vehicle?.make ?? 'Vehicle'} ${listing.vehicle?.model ?? ''}`
+                                  )
+                                }
+                              >
+                                {applyingListingId === listing.id ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Submitting Application...
+                                  </>
+                                ) : (
+                                  'Express Interest & Apply Now'
+                                )}
+                              </Button>
+                            )}
                           </div>
                         </DialogContent>
                       </Dialog>

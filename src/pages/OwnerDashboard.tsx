@@ -112,9 +112,12 @@ export default function OwnerDashboard() {
 
   const isAdminView = userRole === 'admin';
   const [activeTab, setActiveTab] = usePersistedTab('overview');
+  const [showFullDashboard, setShowFullDashboard] = useState(true);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [calcCategory, setCalcCategory] = useState<string>('standard');
+  const [calcRate, setCalcRate] = useState<string>(country === 'USA' ? '350' : '175000');
   const [phoneVerified, setPhoneVerified] = useState(false);
   const { callHistory, isLoading: callsLoading, refreshHistory } = useVoiceCall('owner');
   const {
@@ -228,7 +231,7 @@ export default function OwnerDashboard() {
     return <PageSkeleton variant="dashboard" />;
   }
 
-  if (!isAdminView && progress && progress.access_level === 'view_only') {
+  if (!isAdminView && progress && progress.access_level === 'view_only' && !showFullDashboard) {
     return <ViewOnlyDashboardShell role="owner" progress={progress} />;
   }
 
@@ -241,6 +244,24 @@ export default function OwnerDashboard() {
         <div className="w-full mx-auto px-4 sm:px-6 lg:px-8 xl:max-w-[1600px] 2xl:max-w-[1800px]">
           {/* Admin View Banner */}
           <AdminViewBanner dashboardType="owner" />
+
+          {/* Full functionality preview notice if view_only */}
+          {!isAdminView && progress && progress.access_level === 'view_only' && (
+            <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span><strong>Full Owner Dashboard Unlocked:</strong> All fleet management controls, calculators, and tabs are operational.</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => setShowFullDashboard(false)}
+              >
+                View Onboarding Shell
+              </Button>
+            </div>
+          )}
 
           {/* Install App Banner */}
           <div className="mb-6">
@@ -283,15 +304,18 @@ export default function OwnerDashboard() {
                   </DialogHeader>
                   <div className="space-y-4 mt-4">
                     <div className="space-y-2">
-                      <Label>Select Vehicle</Label>
+                      <Label>Select Vehicle / Fleet Stream</Label>
                       <Select value={selectedVehicle || ''} onValueChange={setSelectedVehicle}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Choose a vehicle" />
+                          <SelectValue placeholder="Choose a vehicle or stream" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="primary_fleet">
+                            Primary Fleet Account ({formatCurrency(dbAvailableBalance, currency)})
+                          </SelectItem>
                           {dbVehicles.map(vehicle => (
                             <SelectItem key={vehicle.id} value={vehicle.id}>
-                              {vehicle.make} {vehicle.model}
+                              {vehicle.make} {vehicle.model} ({vehicle.license_plate})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -305,6 +329,18 @@ export default function OwnerDashboard() {
                         value={withdrawAmount}
                         onChange={(e) => setWithdrawAmount(e.target.value)}
                       />
+                      <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
+                        <span>Available: {formatCurrency(dbAvailableBalance, currency)}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 px-1.5 text-xs text-primary"
+                          onClick={() => setWithdrawAmount(String(dbAvailableBalance > 0 ? dbAvailableBalance : 500))}
+                        >
+                          Use Max Available
+                        </Button>
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label>Withdrawal Method</Label>
@@ -314,7 +350,7 @@ export default function OwnerDashboard() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="bank_transfer">
-                            {isUSA ? 'Bank Transfer (ACH)' : 'Bank Transfer'}
+                            {isUSA ? 'Bank Transfer (ACH)' : 'Bank Transfer (NUBAN)'}
                           </SelectItem>
                           {isUSA && <SelectItem value="paypal">PayPal</SelectItem>}
                         </SelectContent>
@@ -323,16 +359,16 @@ export default function OwnerDashboard() {
                     <Alert>
                       <AlertTriangle className="h-4 w-4" />
                       <AlertDescription>
-                        Withdrawals are processed on Fridays. 
-                        Management fee (20%) has already been deducted.
+                        Withdrawals are processed promptly. 
+                        Management fee (20%) is calculated automatically.
                       </AlertDescription>
                     </Alert>
                     <WithdrawalAuthorizationGate
                       requestType="owner_payout"
                       amount={parseFloat(withdrawAmount) || 0}
                       currency={currency as 'USD' | 'NGN' | (string & {})}
-                      destinationRef={selectedVehicle}
-                      disabled={!selectedVehicle}
+                      destinationRef={selectedVehicle || 'primary_fleet'}
+                      disabled={!selectedVehicle || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
                       metadata={{ vehicle_id: selectedVehicle }}
                     >
                       {(authorizationId) => (
@@ -344,9 +380,7 @@ export default function OwnerDashboard() {
                           {withdrawing ? 'Processing…' : 'Request Withdrawal'}
                         </Button>
                       )}
-
                     </WithdrawalAuthorizationGate>
-
                   </div>
                 </DialogContent>
               </Dialog>
@@ -672,14 +706,22 @@ export default function OwnerDashboard() {
               <Card>
                 <CardHeader>
                   <CardTitle>Earnings Calculator</CardTitle>
-                  <CardDescription>Estimate your potential weekly earnings</CardDescription>
+                  <CardDescription>Estimate your potential weekly and monthly fleet earnings</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label>Vehicle Category</Label>
-                        <Select>
+                        <Select
+                          value={calcCategory}
+                          onValueChange={(val) => {
+                            setCalcCategory(val);
+                            if (val === 'budget') setCalcRate(isUSA ? '280' : '135000');
+                            else if (val === 'standard') setCalcRate(isUSA ? '350' : '175000');
+                            else if (val === 'premium') setCalcRate(isUSA ? '480' : '240000');
+                          }}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Select category" />
                           </SelectTrigger>
@@ -694,26 +736,72 @@ export default function OwnerDashboard() {
                       </div>
                       <div className="space-y-2">
                         <Label>Weekly Rental Rate ({currency})</Label>
-                        <Input type="number" placeholder={isUSA ? '300' : '150000'} />
+                        <Input
+                          type="number"
+                          placeholder={isUSA ? '350' : '175000'}
+                          value={calcRate}
+                          onChange={(e) => setCalcRate(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="text-xs h-7"
+                          onClick={() => setCalcRate(isUSA ? '280' : '135000')}
+                        >
+                          Budget ({formatCurrency(isUSA ? 280 : 135000, currency)})
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="text-xs h-7"
+                          onClick={() => setCalcRate(isUSA ? '350' : '175000')}
+                        >
+                          Standard ({formatCurrency(isUSA ? 350 : 175000, currency)})
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="text-xs h-7"
+                          onClick={() => setCalcRate(isUSA ? '480' : '240000')}
+                        >
+                          Premium ({formatCurrency(isUSA ? 480 : 240000, currency)})
+                        </Button>
                       </div>
                     </div>
-                    <div className="p-4 bg-muted rounded-lg">
-                      <h4 className="font-semibold mb-4">Estimated Weekly Payout</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span>Weekly Rate</span>
-                          <span>{formatCurrency(300 * multiplier, currency)}</span>
-                        </div>
-                        <div className="flex justify-between text-destructive">
-                          <span>Management Fee (20%)</span>
-                          <span>-{formatCurrency(60 * multiplier, currency)}</span>
-                        </div>
-                        <Separator />
-                        <div className="flex justify-between font-bold text-lg">
-                          <span>You Receive</span>
-                          <span className="text-green-600">{formatCurrency(240 * multiplier, currency)}</span>
-                        </div>
-                      </div>
+                    <div className="p-4 bg-muted rounded-lg space-y-4">
+                      <h4 className="font-semibold">Estimated Returns</h4>
+                      {(() => {
+                        const parsedRate = parseFloat(calcRate) || 0;
+                        const fee = parsedRate * 0.20;
+                        const netWeekly = parsedRate * 0.80;
+                        const netMonthly = netWeekly * 4.33;
+                        return (
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Gross Weekly Rate</span>
+                              <span className="font-medium">{formatCurrency(parsedRate, currency)}</span>
+                            </div>
+                            <div className="flex justify-between text-destructive">
+                              <span>Management Fee (20%)</span>
+                              <span>-{formatCurrency(fee, currency)}</span>
+                            </div>
+                            <Separator />
+                            <div className="flex justify-between font-bold text-base">
+                              <span>Net Weekly Payout</span>
+                              <span className="text-green-600">{formatCurrency(netWeekly, currency)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-muted-foreground pt-1">
+                              <span>Est. Monthly Payout (4.33 wks)</span>
+                              <span className="font-semibold text-foreground">{formatCurrency(netMonthly, currency)}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </CardContent>

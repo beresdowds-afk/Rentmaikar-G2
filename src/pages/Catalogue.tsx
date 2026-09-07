@@ -1,7 +1,7 @@
 import Seo from "@/components/seo/Seo";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import { Search, Filter, MapPin, Calendar, Info, Loader2, AlertTriangle, ShieldAlert, RefreshCw } from "lucide-react";
+import { Search, Filter, MapPin, Calendar, Info, Loader2, AlertTriangle, ShieldAlert, RefreshCw, User, Building } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -646,9 +646,23 @@ const Catalogue = () => {
                   </p>
                 </>
               )}
-              <Button variant="outline" className="mt-4" onClick={clearFilters}>
-                Clear Filters
-              </Button>
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
+                <Button variant="outline" onClick={clearFilters}>
+                  Clear Filters
+                </Button>
+                <Link to="/driver/register">
+                  <Button variant="heroCTAGreen" className="gap-2">
+                    <User className="w-4 h-4" />
+                    Register as Driver
+                  </Button>
+                </Link>
+                <Link to="/owner/register">
+                  <Button variant="outline" className="gap-2">
+                    <Building className="w-4 h-4" />
+                    List Your Vehicle
+                  </Button>
+                </Link>
+              </div>
             </div>
           )}
         </div>

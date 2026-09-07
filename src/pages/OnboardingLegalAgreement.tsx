@@ -15,13 +15,17 @@ import {
   ArrowRight,
   CheckCircle2,
   Download,
-  
+  FileCheck,
+  FileText,
   Loader2,
+  PenTool,
   RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import rentmaikarLogo from '@/assets/rentmaikar-logo.jpg';
 import { buildAgreementValues, renderAgreementTemplate } from '@/lib/agreement-template';
+import SignaturePad from '@/components/legal/SignaturePad';
+import UserAgreementsList from '@/components/legal/UserAgreementsList';
 
 type AgreementRegion = 'USA' | 'Nigeria' | (string & {});
 
@@ -43,6 +47,7 @@ interface AcceptanceReceipt {
   version: string;
   region: AgreementRegion;
   acceptedAt: string;
+  signature?: string | null;
 }
 
 const AGREEMENT_TYPE = 'vehicle_rental';
@@ -57,10 +62,13 @@ const OnboardingLegalAgreement = () => {
   const [template, setTemplate] = useState<LegalAgreementTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
+  const [signature, setSignature] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [previousAcceptedVersion, setPreviousAcceptedVersion] = useState<string | null>(null);
   const [reAcceptRequired, setReAcceptRequired] = useState(false);
   const [receipt, setReceipt] = useState<AcceptanceReceipt | null>(null);
+  const [pendingVehicleAgreements, setPendingVehicleAgreements] = useState<number>(0);
+  const [activeTab, setActiveTab] = useState<'vehicle' | 'master'>('master');
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,6 +123,19 @@ const OnboardingLegalAgreement = () => {
           if (!cancelled && prev) setPreviousAcceptedVersion(prev.version as string);
         }
         if (!cancelled) setReAcceptRequired(Boolean(needs && acceptedTemplateId));
+
+        // Check if user has specific pending vehicle agreements to sign
+        const { count: pendingCount } = await supabase
+          .from('legal_agreements')
+          .select('id', { count: 'exact', head: true })
+          .eq('driver_id', user.id)
+          .is('driver_signature', null)
+          .not('status', 'in', '("completed","superseded","cancelled")');
+
+        if (!cancelled && pendingCount && pendingCount > 0) {
+          setPendingVehicleAgreements(pendingCount);
+          setActiveTab('vehicle');
+        }
       }
       setLoading(false);
     };
@@ -178,6 +199,7 @@ const OnboardingLegalAgreement = () => {
         version: template.version,
         region: template.region,
         acceptedAt: new Date().toISOString(),
+        signature,
       });
       setReAcceptRequired(false);
       setPreviousAcceptedVersion(null);
@@ -204,6 +226,7 @@ const OnboardingLegalAgreement = () => {
       return;
     }
     const safeTitle = template.title.replace(/[<>]/g, '');
+    const activeSig = receipt?.signature || signature;
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${safeTitle} v${template.version}</title>
       <style>
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:780px;margin:32px auto;padding:0 24px;color:#111;}
@@ -220,6 +243,12 @@ const OnboardingLegalAgreement = () => {
         <div class="meta">Version ${template.version} · Region: ${template.region} · Retrieved ${new Date().toLocaleString()}</div>
       </header>
       <pre>${rendered.replace(/</g, '&lt;')}</pre>
+      ${activeSig ? `
+        <div style="margin-top:24px;border-top:1px solid #e5e7eb;padding-top:12px;">
+          <div style="font-size:12px;color:#4b5563;margin-bottom:4px;">Digitally signed by ${(user?.user_metadata as Record<string, string> | undefined)?.full_name || user?.email || 'Driver'}:</div>
+          <img src="${activeSig}" alt="Driver Signature" style="max-height:60px;object-fit:contain;" />
+        </div>
+      ` : ''}
       <footer>Rentmaikar rental agreement — for reference. A personalized signable copy is generated when a vehicle is matched to you.</footer>
       <script>window.onload=()=>{window.focus();window.print();}</script>
       </body></html>`);
@@ -237,130 +266,184 @@ const OnboardingLegalAgreement = () => {
           </p>
         </div>
 
-        {reAcceptRequired && previousAcceptedVersion && (
-          <Alert>
-            <RefreshCw className="h-4 w-4" />
-            <AlertTitle>Updated agreement — re-acceptance required</AlertTitle>
-            <AlertDescription>
-              You previously accepted version {previousAcceptedVersion}. A newer version
-              {template ? ` (v${template.version})` : ''} is now active for {region} and must
-              be re-accepted before you can continue.
-            </AlertDescription>
-          </Alert>
+        {pendingVehicleAgreements > 0 && (
+          <div className="flex gap-2 border-b pb-3">
+            <Button
+              variant={activeTab === 'vehicle' ? 'default' : 'outline'}
+              onClick={() => setActiveTab('vehicle')}
+              className="gap-2"
+            >
+              <FileCheck className="h-4 w-4" />
+              Matched Vehicle Agreement ({pendingVehicleAgreements} Pending)
+            </Button>
+            <Button
+              variant={activeTab === 'master' ? 'default' : 'outline'}
+              onClick={() => setActiveTab('master')}
+              className="gap-2"
+            >
+              <FileText className="h-4 w-4" />
+              Master Rental Terms
+            </Button>
+          </div>
         )}
 
-        <Card>
-          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle>{template?.title ?? 'Loading agreement…'}</CardTitle>
-              <CardDescription>
-                {template
-                  ? `Version ${template.version} • Region: ${template.region}`
-                  : 'Fetching the latest approved template from the Content CMS.'}
-              </CardDescription>
-            </div>
-            {template && (
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="default">Active</Badge>
-                <Badge variant="secondary">v{template.version}</Badge>
-                <Button size="sm" variant="outline" onClick={handleDownloadPdf}>
-                  <Download className="h-4 w-4 mr-1" />
-                  Download PDF
-                </Button>
-              </div>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {loading && (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-64 w-full" />
-              </div>
-            )}
-
-            {!loading && error && (
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Agreement unavailable</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+        {pendingVehicleAgreements > 0 && activeTab === 'vehicle' ? (
+          <UserAgreementsList userType="driver" />
+        ) : (
+          <>
+            {reAcceptRequired && previousAcceptedVersion && (
+              <Alert>
+                <RefreshCw className="h-4 w-4" />
+                <AlertTitle>Updated agreement — re-acceptance required</AlertTitle>
+                <AlertDescription>
+                  You previously accepted version {previousAcceptedVersion}. A newer version
+                  {template ? ` (v${template.version})` : ''} is now active for {region} and must
+                  be re-accepted before you can continue.
+                </AlertDescription>
               </Alert>
             )}
 
-            {!loading && template && !receipt && (
-              <>
-                <ScrollArea className="h-[420px] rounded-md border bg-card p-4">
-                  <div ref={contentRef}>
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                      {rendered}
-                    </pre>
-                  </div>
-                </ScrollArea>
-
-                <div className="flex items-start gap-3 rounded-md border p-3">
-                  <Checkbox
-                    id="accept-agreement"
-                    checked={accepted}
-                    onCheckedChange={(value) => setAccepted(value === true)}
-                  />
-                  <label htmlFor="accept-agreement" className="text-sm leading-relaxed cursor-pointer">
-                    I have read and agree to the terms of the {template.title} (version {template.version}).
-                    I understand a personalized copy will be generated for signing when a vehicle is matched to me.
-                  </label>
+            <Card>
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>{template?.title ?? 'Loading agreement…'}</CardTitle>
+                  <CardDescription>
+                    {template
+                      ? `Version ${template.version} • Region: ${template.region}`
+                      : 'Fetching the latest approved template from the Content CMS.'}
+                  </CardDescription>
                 </div>
+                {template && (
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="default">Active</Badge>
+                    <Badge variant="secondary">v{template.version}</Badge>
+                    <Button size="sm" variant="outline" onClick={handleDownloadPdf}>
+                      <Download className="h-4 w-4 mr-1" />
+                      Download PDF
+                    </Button>
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loading && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-5/6" />
+                    <Skeleton className="h-64 w-full" />
+                  </div>
+                )}
 
-                <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
-                  <Button variant="outline" onClick={() => navigate(-1)} disabled={submitting}>
-                    Back
-                  </Button>
-                  <Button onClick={handleAccept} disabled={!accepted || submitting} aria-busy={submitting}>
-                    {submitting ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <ArrowRight className="h-4 w-4 mr-2" />
+                {!loading && error && (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Agreement unavailable</AlertTitle>
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {!loading && template && !receipt && (
+                  <>
+                    <ScrollArea className="h-[380px] rounded-md border bg-card p-4">
+                      <div ref={contentRef}>
+                        <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                          {rendered}
+                        </pre>
+                      </div>
+                    </ScrollArea>
+
+                    <div className="space-y-3 rounded-lg border p-4 bg-muted/20">
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <PenTool className="h-4 w-4 text-primary" />
+                        Driver Digital Signature
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Draw or type your digital signature below to confirm and bind your acceptance of the agreement terms.
+                      </p>
+                      <SignaturePad
+                        onSignatureChange={setSignature}
+                        signerName={(user?.user_metadata as Record<string, string> | undefined)?.full_name || user?.email || 'Driver'}
+                        signerRole="Driver"
+                        label="Affix Your Signature"
+                        disabled={submitting}
+                      />
+                    </div>
+
+                    <div className="flex items-start gap-3 rounded-md border p-3">
+                      <Checkbox
+                        id="accept-agreement"
+                        checked={accepted}
+                        onCheckedChange={(value) => setAccepted(value === true)}
+                      />
+                      <label htmlFor="accept-agreement" className="text-sm leading-relaxed cursor-pointer">
+                        I have read and agree to the terms of the {template.title} (version {template.version}).
+                        I confirm that the digital signature affixed above represents my official signature.
+                      </label>
+                    </div>
+
+                    <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                      <Button variant="outline" onClick={() => navigate(-1)} disabled={submitting}>
+                        Back
+                      </Button>
+                      <Button onClick={handleAccept} disabled={!accepted || !signature || submitting} aria-busy={submitting}>
+                        {submitting ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <ArrowRight className="h-4 w-4 mr-2" />
+                        )}
+                        Accept &amp; continue
+                      </Button>
+                    </div>
+                  </>
+                )}
+
+                {receipt && (
+                  <div
+                    data-testid="acceptance-receipt"
+                    className="rounded-md border border-green-500/40 bg-green-500/5 p-5 space-y-3"
+                  >
+                    <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <h2 className="text-lg font-semibold">Acceptance recorded</h2>
+                    </div>
+                    <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <dt className="text-muted-foreground">Template</dt>
+                        <dd className="font-medium">{receipt.title}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Version</dt>
+                        <dd className="font-medium">v{receipt.version} · {receipt.region}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Effective</dt>
+                        <dd className="font-medium">{new Date(receipt.acceptedAt).toLocaleString()}</dd>
+                      </div>
+                    </dl>
+
+                    {receipt.signature && (
+                      <div className="pt-2 border-t">
+                        <p className="text-xs text-muted-foreground mb-1.5 font-medium">Affixed Driver Digital Signature:</p>
+                        <div className="inline-block p-2 bg-background rounded border">
+                          <img src={receipt.signature} alt="Driver signature" className="h-12 object-contain" />
+                        </div>
+                      </div>
                     )}
-                    Accept &amp; continue
-                  </Button>
-                </div>
-              </>
-            )}
 
-            {receipt && (
-              <div
-                data-testid="acceptance-receipt"
-                className="rounded-md border border-green-500/40 bg-green-500/5 p-5 space-y-3"
-              >
-                <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <h2 className="text-lg font-semibold">Acceptance recorded</h2>
-                </div>
-                <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <dt className="text-muted-foreground">Template</dt>
-                    <dd className="font-medium">{receipt.title}</dd>
+                    <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+                      <Button variant="outline" onClick={handleDownloadPdf}>
+                        <Download className="h-4 w-4 mr-1" /> Download signed copy
+                      </Button>
+                      <Button onClick={() => navigate('/onboarding-redirect', { replace: true })}>
+                        Continue onboarding <ArrowRight className="h-4 w-4 ml-1" />
+                      </Button>
+                    </div>
                   </div>
-                  <div>
-                    <dt className="text-muted-foreground">Version</dt>
-                    <dd className="font-medium">v{receipt.version} · {receipt.region}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Effective</dt>
-                    <dd className="font-medium">{new Date(receipt.acceptedAt).toLocaleString()}</dd>
-                  </div>
-                </dl>
-                <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
-                  <Button variant="outline" onClick={handleDownloadPdf}>
-                    <Download className="h-4 w-4 mr-1" /> Download signed copy
-                  </Button>
-                  <Button onClick={() => navigate('/onboarding-redirect', { replace: true })}>
-                    Continue onboarding <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     </div>
   );

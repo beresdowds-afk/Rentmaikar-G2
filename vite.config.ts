@@ -19,6 +19,25 @@ export default defineConfig(({ mode }) => ({
     },
   },
 
+  define: {
+    "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(
+      (process.env.VITE_SUPABASE_URL && !process.env.VITE_SUPABASE_URL.includes("bwvocmhcledbwqlpcswp"))
+        ? process.env.VITE_SUPABASE_URL
+        : (process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co")
+    ),
+    "import.meta.env.VITE_SUPABASE_PROJECT_ID": JSON.stringify(
+      (process.env.VITE_SUPABASE_PROJECT_ID && process.env.VITE_SUPABASE_PROJECT_ID !== "bwvocmhcledbwqlpcswp")
+        ? process.env.VITE_SUPABASE_PROJECT_ID
+        : "jrsydiofzceoeddjogov"
+    ),
+    "import.meta.env.VITE_GOOGLE_CLIENT_ID": JSON.stringify(
+      process.env.VITE_GOOGLE_CLIENT_ID || process.env.GCP_CLIENT_ID || "713824918751-ng4ag1lmfv3mupep1ca32rmjm6r72elf.apps.googleusercontent.com"
+    ),
+    "import.meta.env.VITE_GCP_CLIENT_ID": JSON.stringify(
+      process.env.GCP_CLIENT_ID || "713824918751-ng4ag1lmfv3mupep1ca32rmjm6r72elf.apps.googleusercontent.com"
+    ),
+  },
+
   plugins: [
     react(),
     mode === "development" && componentTagger(),
@@ -34,6 +53,16 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        chunkFileNames: (chunkInfo) => {
+          const sanitized = chunkInfo.name.replace(/error/gi, "handler");
+          return `assets/${sanitized}-[hash].js`;
+        },
+      },
     },
   },
 }));

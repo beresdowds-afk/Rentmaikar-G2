@@ -97,8 +97,58 @@ function getSourceAddress(category: string, country?: string): string {
 // ─── Template Renderer ───
 function renderTemplate(
   templateName: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown> = {}
 ): { subject: string; html: string; text?: string; from: string } | null {
+  // If custom template is passed with subject & html
+  if (templateName === "custom" && data.subject && data.html) {
+    return {
+      subject: String(data.subject),
+      html: String(data.html),
+      text: typeof data.text === "string" ? data.text : undefined,
+      from: formatSenderEmail("support"),
+    };
+  }
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const futureStr = new Date(now.getTime() + 7 * 86400000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const resolvedData: Record<string, unknown> = {
+    firstName: data.firstName || data.first_name || (typeof data.name === "string" ? data.name.split(" ")[0] : "there"),
+    lastName: data.lastName || data.last_name || "",
+    userType: data.userType || "driver",
+    dashboardUrl: data.dashboardUrl || data.deepLink || data.deep_link || "https://rentmaikar.com",
+    deepLink: data.deepLink || data.deep_link || data.dashboardUrl || "https://rentmaikar.com",
+    paymentUrl: data.paymentUrl || data.payment_url || (data.deepLink as string) || "https://rentmaikar.com/dashboard/billing",
+    amount: typeof data.amount === "number" ? data.amount : Number(data.amount) || 0,
+    currency: (data.currency === "USD" ? "USD" : "NGN") as "USD" | "NGN",
+    vehicleName: data.vehicleName || data.vehicle || data.vehicle_name || "Assigned Rental Vehicle",
+    plateNumber: data.plateNumber || data.plate_number || "RM-FLEET",
+    pickupDate: data.pickupDate || data.pickup_date || dateStr,
+    returnDate: data.returnDate || data.return_date || futureStr,
+    pickupLocation: data.pickupLocation || data.pickup_location || "Designated Rentmaikar Hub",
+    bookingId: data.bookingId || data.recordId || data.record_id || "RM-" + Math.floor(100000 + Math.random() * 900000),
+    transactionId: data.transactionId || data.transaction_id || data.recordId || data.record_id || "TX-" + Date.now(),
+    paymentDate: data.paymentDate || data.payment_date || dateStr,
+    paymentMethod: data.paymentMethod || data.payment_method || "Online Card / Transfer",
+    periodStart: data.periodStart || data.period_start || dateStr,
+    periodEnd: data.periodEnd || data.period_end || futureStr,
+    failureReason: data.failureReason || data.failure_reason || "Card declined or payment window expired",
+    dueDate: data.dueDate || data.due_date || futureStr,
+    daysOverdue: data.daysOverdue || data.days_overdue || 3,
+    dailyRate: data.dailyRate || data.daily_rate || 15000,
+    lockdownReason: data.lockdownReason || data.lockdown_reason || "Overdue rental balance / Inspection required",
+    estimatedEarnings: data.estimatedEarnings || data.estimated_earnings || 45000,
+    payoutAmount: data.payoutAmount || data.amount || 45000,
+    reference: data.reference || data.transactionId || "REF-" + Date.now(),
+    title: data.title || (data.subject as string) || "Rentmaikar Notification",
+    body: data.body || (data.text as string) || "",
+    category: data.category || "notification",
+    status: data.status,
+    recordId: data.recordId || data.record_id,
+    ...data,
+  };
+
   const templateMap: Record<string, (d: any) => any> = {
     welcome_driver: welcomeDriverEmail,
     welcome_owner: welcomeOwnerEmail,
@@ -144,12 +194,11 @@ function renderTemplate(
     persona_status_digest: personaStatusDigestEmail,
     provider_health_alert: providerHealthAlertEmail,
     event_notification: eventNotificationEmail,
-
   };
 
   const fn = templateMap[templateName];
   if (!fn) return null;
-  return fn(data);
+  return fn(resolvedData);
 }
 
 // ─── Send Single Email via Resend ───

@@ -72,7 +72,6 @@ export function RefereeRequirementSettings() {
                 <Switch
                   id="referee-toggle"
                   checked={required}
-                  disabled={saving}
                   onCheckedChange={toggle}
                 />
               </div>

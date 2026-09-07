@@ -13,6 +13,7 @@ export type AdminTabKey = string;
 export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   // CRM
   applications: 'can_view_users',
+  'attestation-review': 'can_manage_users',
   accounts: 'can_view_users',
   'drivers-owners': 'can_manage_users',
   roles: 'can_manage_users',
@@ -22,9 +23,9 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   defaults: 'can_view_payments',
   'legal-agreements': 'can_view_rentals',
   'rent-to-own': 'can_view_rentals',
-  content: 'can_manage_content',
+  content: null,
   subscriptions: 'can_view_payments',
-  training: 'can_manage_content',
+  training: null,
   'roadside-partners': 'can_view_support_tasks',
   billing: 'can_view_payments',
   'proxy-billing': 'can_view_payments',
@@ -52,9 +53,13 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   tax: 'can_view_reports',
   'cron-jobs': 'can_view_reports',
   'uuid-assignments': 'can_view_users',
+  'email-delivery': 'can_view_communications',
 
   // Support
+  inbox: 'can_view_communications',
+  'call-center': 'can_view_communications',
   contacts: 'can_view_communications',
+  'support-tasks': 'can_view_support_tasks',
   insurance: 'can_view_support_tasks',
   'nigeria-verification': 'can_manage_users',
   'police-reports': 'can_manage_users',
@@ -82,7 +87,13 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
  */
 export const QUICK_ACCESS_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   inbox: 'can_view_communications',
+  // Call Center is its own surface — it must never depend on the Unified Inbox
+  // shortcut being permitted/selected.
+  'call-center': 'can_view_communications',
+  'support-tasks': 'can_view_support_tasks',
+  'attestation-review': 'can_manage_users',
 };
+
 
 function requiredPermissionForTab(tab: string): PermissionKey | null | undefined {
   if (tab in TAB_PERMISSION_MAP) return TAB_PERMISSION_MAP[tab];

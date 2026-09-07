@@ -1,6 +1,7 @@
-import { Building, Wallet, Shield, TrendingUp, Clock, Headphones } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Building, Wallet, Shield, TrendingUp, Clock, Headphones, ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useRegion } from "@/contexts/RegionContext";
-import { useUserType } from "@/contexts/UserTypeContext";
 
 interface OwnerBenefit {
   icon: React.ElementType;
@@ -76,12 +77,6 @@ const ownerBenefitsNigeria: OwnerBenefit[] = [
 
 const OwnerBenefitsSection = () => {
   const { country } = useRegion();
-  const { userType } = useUserType();
-
-  // Only show for owners (or when no type selected)
-  if (userType === "driver") {
-    return null;
-  }
 
   const benefits = country === "Nigeria" ? ownerBenefitsNigeria : ownerBenefitsUSA;
   const title = country === "Nigeria" 
@@ -128,6 +123,17 @@ const OwnerBenefitsSection = () => {
               </div>
             );
           })}
+        </div>
+
+        {/* Owner Action CTA */}
+        <div className="mt-12 text-center">
+          <Link to="/owner/register">
+            <Button variant="heroCTAGreen" size="lg" className="gap-3 py-5 px-8 text-base shadow-lg hover:scale-105 transition-transform">
+              <Building className="w-5 h-5" />
+              <span>List Your Car & Start Earning</span>
+              <ArrowRight className="w-5 h-5" />
+            </Button>
+          </Link>
         </div>
       </div>
     </section>

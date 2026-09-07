@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "https://esm.sh/resend@2.0.0";
-import { requireCronSecret } from "../_shared/cron-auth.ts";
+import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -96,7 +96,7 @@ const getTierUrgency = (days: number): 'standard' | 'priority' | 'urgent' | 'cri
 const generateExpiryTwiML = (
   item: ExpiringItem,
   recipientName: string,
-  supabaseUrl: string,
+  voiceBaseUrl: string,
   tier: NotificationTier
 ): string => {
   const typeLabel = item.type.replace('_', ' ');
@@ -128,7 +128,7 @@ const generateExpiryTwiML = (
     // 7-day: Urgent with IVR
     return `<Response>
       ${nigeriaGreeting}
-      <Gather numDigits="1" action="${supabaseUrl}/functions/v1/expiry-notification-ivr?itemId=${item.id}&type=${item.type}&vehicleId=${item.vehicle_id || ''}&tier=${tier}" method="POST" timeout="8">
+      <Gather numDigits="1" action="${voiceBaseUrl}/functions/v1/expiry-notification-ivr?itemId=${item.id}&type=${item.type}&vehicleId=${item.vehicle_id || ''}&tier=${tier}" method="POST" timeout="8">
         <Say voice="alice">
           URGENT REMINDER. Hello ${recipientName}. This is Rent My Car.
           Your ${typeLabel}${vehicleText} will expire in ${tier} days on ${item.expiry_date}.
@@ -146,7 +146,7 @@ const generateExpiryTwiML = (
   const priorityPrefix = urgency === 'priority' ? 'PRIORITY REMINDER. ' : '';
   return `<Response>
     ${nigeriaGreeting}
-    <Gather numDigits="1" action="${supabaseUrl}/functions/v1/expiry-notification-ivr?itemId=${item.id}&type=${item.type}&vehicleId=${item.vehicle_id || ''}&tier=${tier}" method="POST" timeout="8">
+    <Gather numDigits="1" action="${voiceBaseUrl}/functions/v1/expiry-notification-ivr?itemId=${item.id}&type=${item.type}&vehicleId=${item.vehicle_id || ''}&tier=${tier}" method="POST" timeout="8">
       <Say voice="alice">
         ${priorityPrefix}Hello ${recipientName}. This is Rent My Car.
         Your ${typeLabel}${vehicleText} will expire in ${tier} days on ${item.expiry_date}.
@@ -195,7 +195,7 @@ const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
-  const cronDenied = requireCronSecret(req);
+  const cronDenied = await requireCronSecretAsync(req);
   if (cronDenied) return cronDenied;
 
   const jobId = crypto.randomUUID();

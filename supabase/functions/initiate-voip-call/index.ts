@@ -43,6 +43,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const voiceBaseUrl = Deno.env.get('VOICE_SUPABASE_URL') || supabaseUrl;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -187,10 +188,10 @@ const handler = async (req: Request): Promise<Response> => {
         formData.append('From', publicSenderFor('call'));
         formData.append('Twiml', twiml);
         formData.append('Record', 'true');
-        formData.append('RecordingStatusCallback', `${supabaseUrl}/functions/v1/recording-status-callback`);
+        formData.append('RecordingStatusCallback', `${voiceBaseUrl}/functions/v1/recording-status-callback`);
         formData.append('RecordingStatusCallbackEvent', 'completed');
 
-        const callbackUrl = `${supabaseUrl}/functions/v1/voip-status-callback`;
+        const callbackUrl = `${voiceBaseUrl}/functions/v1/voip-status-callback`;
         formData.append('StatusCallback', callbackUrl);
         formData.append('StatusCallbackEvent', 'initiated ringing answered completed');
 

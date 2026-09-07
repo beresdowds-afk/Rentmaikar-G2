@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import Seo from "@/components/seo/Seo";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
-import { HelpCircle, Search, Globe, Download, FileText, Shield, Loader2 } from "lucide-react";
+import { HelpCircle, Search, Globe, Download, FileText, Shield, Loader2, User, Building, Car, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useRegion } from "@/contexts/RegionContext";
@@ -316,6 +316,37 @@ const FAQ = () => {
             ))}
           </Tabs>
         )}
+
+        {/* Action Conversion CTAs */}
+        <div className="max-w-4xl mx-auto mt-16 p-8 rounded-2xl bg-card border border-border shadow-sm text-center">
+          <h2 className="text-2xl font-display font-bold text-foreground mb-2">
+            Ready to Join Rentmaikar?
+          </h2>
+          <p className="text-muted-foreground max-w-lg mx-auto mb-6 text-sm">
+            Whether you want to rent a vehicle to drive for rideshare platforms or list your car to earn passive income, we are ready to get you moving.
+          </p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <Link to="/driver/register">
+              <Button size="lg" variant="heroCTAGreen" className="gap-2">
+                <User className="w-4 h-4" />
+                Register as a Driver
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </Link>
+            <Link to="/owner/register">
+              <Button size="lg" variant="outline" className="gap-2">
+                <Building className="w-4 h-4" />
+                List Your Vehicle
+              </Button>
+            </Link>
+            <Link to="/catalogue/standard">
+              <Button size="lg" variant="ghost" className="gap-2">
+                <Car className="w-4 h-4" />
+                Browse Catalogue
+              </Button>
+            </Link>
+          </div>
+        </div>
 
         {/* Legal Disclaimer */}
         <div className="max-w-4xl mx-auto mt-12 p-6 bg-muted/50 rounded-lg">

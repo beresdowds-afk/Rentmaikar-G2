@@ -38,20 +38,24 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END$$;
 
-SELECT cron.schedule(
-  'generate-daily-tasks',
-  '0 6 * * *',
-  $cron$
-  SELECT net.http_post(
-    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/generate-daily-tasks',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1)
-    ),
-    body := jsonb_build_object('scheduled_at', now())
-  ) AS request_id;
-  $cron$
-);
+DO $$
+BEGIN
+  PERFORM cron.schedule(
+    'generate-daily-tasks',
+    '0 6 * * *',
+    $cron$
+    SELECT net.http_post(
+      url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/generate-daily-tasks',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1)
+      ),
+      body := jsonb_build_object('scheduled_at', now())
+    ) AS request_id;
+    $cron$
+  );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- 4a. Security: two_factor_settings — users must not disable mandatory 2FA
 CREATE OR REPLACE FUNCTION public.enforce_two_factor_column_scope()

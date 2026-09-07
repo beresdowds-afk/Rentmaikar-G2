@@ -33,13 +33,13 @@ serve(async (req) => {
     if (denied) return denied;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const voiceBaseUrl = Deno.env.get("VOICE_SUPABASE_URL") || supabaseUrl;
     const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     const to = String(form.get("To") ?? "").trim();
     const from = String(form.get("From") ?? "").trim();
     const callSid = String(form.get("CallSid") ?? "");
     const region = String(form.get("Region") ?? form.get("region") ?? "USA");
-    const callerId = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
 
     if (!to) return say("No destination was provided for this call.");
 
@@ -47,6 +47,27 @@ serve(async (req) => {
     const callerUserId = from.startsWith("client:user_")
       ? from.replace("client:user_", "")
       : null;
+
+    // Outgoing legs present an admin-facing dial-out number as caller ID; the
+    // exact number is chosen from the admin-managed routing table by the
+    // staff member's role and region, with the secrets as a fallback.
+    let callerId = "";
+    if (callerUserId) {
+      const { data: routed, error: routeError } = await supabase.rpc(
+        "voip_resolve_outbound_number",
+        { _user_id: callerUserId, _region: region },
+      );
+      if (routeError) console.error("voip_resolve_outbound_number failed", routeError.message);
+      if (typeof routed === "string") callerId = routed;
+    }
+    if (!callerId) {
+      callerId =
+        Deno.env.get("TWILIO_VOICE_FROM") ||
+        Deno.env.get("TWILIO_OUTBOUND_NUMBER") ||
+        Deno.env.get("TWILIO_PHONE_NUMBER") ||
+        "";
+    }
+
 
     let dialTarget: string;
 
@@ -84,8 +105,8 @@ serve(async (req) => {
       });
     }
 
-    const statusCallback = `${supabaseUrl}/functions/v1/voip-status-callback`;
-    const recordingCallback = `${supabaseUrl}/functions/v1/recording-status-callback`;
+    const statusCallback = `${voiceBaseUrl}/functions/v1/voip-status-callback`;
+    const recordingCallback = `${voiceBaseUrl}/functions/v1/recording-status-callback`;
 
     return xml(
       `<Response><Dial answerOnBridge="true" timeout="30"` +

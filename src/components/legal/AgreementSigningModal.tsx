@@ -71,18 +71,21 @@ const AgreementSigningModal: React.FC<AgreementSigningModalProps> = ({
     
     if (userRole === 'driver' && !existingAgreement.driverSignature) return true;
     if (userRole === 'owner' && !existingAgreement.ownerSignature) return true;
-    if (userRole === 'admin' && 
-        existingAgreement.driverSignature && 
-        existingAgreement.ownerSignature && 
-        !existingAgreement.adminWitnessSignature) return true;
+    if (userRole === 'admin' && !existingAgreement.adminWitnessSignature) return true;
     
     return false;
   };
 
   const getSignatureLabel = () => {
     if (userRole === 'driver') return 'Driver Signature';
-    if (userRole === 'owner') return 'Owner Signature';
+    if (userRole === 'owner') return 'Vehicle Owner Signature';
     return 'Admin Witness Signature';
+  };
+
+  const getSignerDefaultName = () => {
+    if (userRole === 'owner') return owner.name || '';
+    if (userRole === 'driver') return driver.name || '';
+    return 'Authorized Staff Witness';
   };
 
   // The body is never hard-coded: it is the active template published in the
@@ -234,8 +237,12 @@ const AgreementSigningModal: React.FC<AgreementSigningModalProps> = ({
         {canSign() && (
           <div className="border-t pt-4 mt-4 space-y-4">
             <div>
-              <h3 className="font-medium mb-2">{getSignatureLabel()}</h3>
-              <SignaturePad onSignatureChange={setSignature} />
+              <SignaturePad
+                onSignatureChange={setSignature}
+                label={getSignatureLabel()}
+                signerName={getSignerDefaultName()}
+                signerRole={userRole === 'owner' ? 'Vehicle Owner' : userRole === 'admin' ? 'Admin Witness' : 'Driver'}
+              />
             </div>
 
             <div className="flex justify-end gap-3">

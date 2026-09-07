@@ -49,7 +49,14 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { conversationId, messageContent, recipientEmail, subject, attachments } = await req.json();
+    const {
+      conversationId,
+      messageContent,
+      recipientEmail,
+      subject,
+      fromAlias,
+      attachments,
+    } = await req.json();
 
     interface OutboundAttachment {
       filename: string;
@@ -106,32 +113,49 @@ serve(async (req) => {
     const emailSubject = outboundSubject || 
       (conversation?.subject ? `Re: ${conversation.subject}` : "Reply from Rentmaikar Support");
 
-    // Use DB-driven email config with fallback
-    const supportConfig = await getEmailConfig(supabase, 'support');
-    const fromEmail = supportConfig.formatted;
+    // Use DB-driven email config with fallback for the designated alias
+    const targetAlias = fromAlias || 'support';
+    const emailConfig = await getEmailConfig(supabase, targetAlias);
+    const fromEmail = emailConfig.formatted;
 
-    console.log(`Sending email to ${recipientEmail} from ${supportConfig.email}`);
+    const isNgRegion = conversation?.region === 'NG';
+    const supportPhone = isNgRegion ? '+234 800 RENTMAIKAR' : '+1 (608) 384-3932';
+
+    console.log(`Sending email to ${recipientEmail} from ${emailConfig.email} (alias: ${targetAlias})`);
 
     // Send email using Resend API directly
+    // Replies must come back to the inbound mailbox (Cloudflare Email Worker →
+    // email-webhook → this inbox), not to the display-only support@rentmaikar.com.
+    const replyToMailbox = "support@backend.rentmaikar.com";
+
     const emailResponse = await resendSendEmail({
         from: fromEmail,
+        reply_to: replyToMailbox,
         to: [recipientEmail],
         subject: emailSubject,
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <div style="background-color: #f97316; padding: 20px; text-align: center;">
-              <h1 style="color: white; margin: 0;">Rentmaikar</h1>
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc; padding: 20px; border-radius: 12px;">
+            <div style="background: linear-gradient(135deg, #f97316, #ea580c); padding: 24px; text-align: center; border-radius: 10px 10px 0 0;">
+              <h1 style="color: white; margin: 0; font-size: 24px; letter-spacing: 0.5px;">Rentmaikar</h1>
+              <p style="color: rgba(255,255,255,0.9); margin: 4px 0 0 0; font-size: 13px;">Smarter Vehicle Rentals for Rideshare Drivers</p>
             </div>
-            <div style="padding: 30px; background-color: #ffffff;">
-              <div style="white-space: pre-wrap; line-height: 1.6;">${outboundText.replace(/\n/g, '<br>')}</div>
-              <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-              <p style="color: #666; font-size: 14px;">
-                This is a reply from Rentmaikar Support. Please reply to this email if you need further assistance.
+            <div style="padding: 32px; background-color: #ffffff; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+              <div style="white-space: pre-wrap; line-height: 1.7; color: #1e293b; font-size: 15px;">${outboundText.replace(/\n/g, '<br>')}</div>
+              <hr style="margin: 28px 0; border: none; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b; font-size: 13px; margin: 0;">
+                This message was sent from Rentmaikar Support. You can reply directly to this email to continue the conversation.
               </p>
             </div>
-            <div style="background-color: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666;">
-              <p>© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
-              <p>Vehicle rentals for rideshare drivers</p>
+            <div style="background-color: #f1f5f9; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
+              <p style="margin: 0 0 4px 0; font-weight: 600; color: #334155;">Rentmaikar Mobility Solutions</p>
+              <p style="margin: 0 0 6px 0;">© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
+              <p style="margin: 0 0 6px 0;">
+                <strong>US & International Support:</strong> +1 (608) 384-3932 &middot; 
+                <strong>Nigeria Support:</strong> +234 800 RENTMAIKAR
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+                Dispatched via Rentmaikar Communications Gateway (Resend Verified &middot; TLS 1.3 Encrypted)
+              </p>
             </div>
           </div>
         `,

@@ -1,9 +1,11 @@
+import { useNavigate } from "react-router-dom";
 import { User, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUserType, UserType } from "@/contexts/UserTypeContext";
 import { useRegion } from "@/contexts/RegionContext";
 
 const UserTypeSelector = () => {
+  const navigate = useNavigate();
   const { userType, setUserType } = useUserType();
   const { country } = useRegion();
 
@@ -28,6 +30,11 @@ const UserTypeSelector = () => {
 
   const handleSelect = (type: UserType) => {
     setUserType(type);
+    if (type === "driver") {
+      navigate("/catalogue/standard");
+    } else if (type === "owner") {
+      navigate("/owner/register");
+    }
   };
 
   return (

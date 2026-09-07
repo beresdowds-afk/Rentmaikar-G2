@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { CurrencyIcon } from "@/components/ui/Currencyicon";
 import { useRegion } from "@/contexts/RegionContext";
-import { useUserType } from "@/contexts/UserTypeContext";
 import { getCategoryContent } from "@/lib/localized-content";
 import { useCategoryYearSpecs } from "@/hooks/useCategoryYearSpecs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -103,7 +102,6 @@ const FALLBACK_YEARS: Record<string, string> = {
 
 const CategoryCards = () => {
   const { country } = useRegion();
-  const { userType } = useUserType();
   const content = getCategoryContent(country);
   const {
     getForCategory,
@@ -113,11 +111,6 @@ const CategoryCards = () => {
     visible: yearSpecsVisible,
     specs,
   } = useCategoryYearSpecs(country);
-
-  // Only show CategoryCards for drivers (or when no type selected)
-  if (userType === "owner") {
-    return null;
-  }
 
   const yearsFor = (key: "budget" | "standard" | "premium") => {
     if (!yearSpecsVisible) return "";

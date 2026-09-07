@@ -63,5 +63,5 @@ createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
-// Register service worker
-registerPWA();
+// Initialize PWA Dedicated Web Worker & decommission legacy service workers
+void registerPWA();

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAssistantPermissions } from "@/hooks/useAssistantPermissions";
-import { assistantExcludedTabs, warnTabPermissionDrift } from "@/lib/admin-tab-registry";
+import { assistantExcludedTabs, warnTabPermissionDrift, getPortalForTab, getDefaultTabForPortal } from "@/lib/admin-tab-registry";
 import { usePersistedTab } from "@/hooks/usePersistedTab";
 
 import { Lock } from "lucide-react";
-import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones } from "lucide-react";
+import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones, ShieldCheck } from "lucide-react";
 import { CallCenterPage } from "@/components/admin/voip/CallCenterPage";
 import { HardwareManagement } from "@/components/admin/HardwareManagement";
 import { IoTMonitoringHub } from "@/components/admin/IoTMonitoringHub";
@@ -88,6 +88,7 @@ import { EmailDocs } from "@/components/admin/docs/EmailDocs";
 import { VoIPDocs } from "@/components/admin/docs/VoIPDocs";
 import PlatformGlossary from "@/components/admin/docs/PlatformGlossary";
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
+import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
 import RegionalOperationsManagement from "@/components/admin/RegionalOperationsManagement";
 import { RegionAutoBuildWorker } from "@/components/admin/RegionAutoBuildWorker";
 import NegativeAttestationReviewPanel from "@/components/admin/NegativeAttestationReviewPanel";
@@ -114,6 +115,7 @@ import { InstallAppBanner } from '@/components/pwa/InstallAppBanner';
 import { StaffSignOutButton } from '@/components/staff/StaffSignOutButton';
 import { StaffOnboardingDownloads } from '@/components/staff/StaffOnboardingDownloads';
 import { ScrollableStrip } from '@/components/ui/scrollable-strip';
+import ErrorBoundary from "@/components/errors/ErrorBoundary";
 
 
 import { useAdminFinancials, useAdminFleetCounts } from "@/hooks/useAdminFinancials";
@@ -132,6 +134,21 @@ const AdminAssistantDashboard = () => {
   const portalView = portalViewRaw as PortalType;
   const setPortalView = setPortalViewRaw as (v: PortalType) => void;
   const [activeTab, setActiveTab] = usePersistedTab('inbox');
+
+  // Synchronize portalView and activeTab so every button and tab is completely functional and independent
+  useEffect(() => {
+    const portalForActiveTab = getPortalForTab(activeTab);
+    if (portalForActiveTab && portalForActiveTab !== portalView) {
+      setPortalView(portalForActiveTab);
+    }
+  }, [activeTab, portalView, setPortalView]);
+
+  useEffect(() => {
+    const portalForActiveTab = getPortalForTab(activeTab);
+    if (portalForActiveTab && portalForActiveTab !== portalView) {
+      setActiveTab(getDefaultTabForPortal(portalView));
+    }
+  }, [portalView, activeTab, setActiveTab]);
 
   // Base admin-only tabs assistants may never see. Derived from the shared
   // registry (ADMIN_ONLY_TABS + anything unmapped in TAB_PERMISSION_MAP) so
@@ -268,241 +285,301 @@ const AdminAssistantDashboard = () => {
             <StaffOnboardingDownloads />
           </div>
 
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7 gap-4 mb-8">
-            {/* Active Vehicles */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Active Vehicles</p>
-                  <p className="text-2xl font-bold text-foreground mt-1">{counts.activeVehicles}</p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-accent">
-                  <Car className="w-6 h-6" />
-                </div>
-              </div>
-            </Card>
+          {/* Stats Grid - Dynamically filtered to the assistant's granted permissions */}
+          {(() => {
+            const showVehicles = isFullAdmin || !!perms?.can_view_vehicles;
+            const showDrivers = isFullAdmin || !!perms?.can_view_users;
+            const showFinancials = isFullAdmin || !!perms?.can_view_payments;
+            if (!showVehicles && !showDrivers && !showFinancials) return null;
 
-            {/* Active Drivers */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Active Drivers</p>
-                  <p className="text-2xl font-bold text-foreground mt-1">{counts.activeDrivers}</p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-success">
-                  <Users className="w-6 h-6" />
-                </div>
-              </div>
-            </Card>
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7 gap-4 mb-8">
+                {/* Active Vehicles */}
+                {showVehicles && (
+                  <Card className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Active Vehicles</p>
+                        <p className="text-2xl font-bold text-foreground mt-1">{counts.activeVehicles}</p>
+                      </div>
+                      <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-accent">
+                        <Car className="w-6 h-6" />
+                      </div>
+                    </div>
+                  </Card>
+                )}
 
-            {/* Monthly Income - Enhanced with breakdown */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm text-muted-foreground">Monthly Income</p>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-5 w-5"
-                          onClick={() => {
-                            refetchRates();
-                            toast.success('Exchange rates refreshed');
-                          }}
-                        >
-                          <RefreshCw className={`h-3 w-3 ${ratesLoading ? 'animate-spin' : ''}`} />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Refresh exchange rate</TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <p className="text-2xl font-bold text-green-600 mt-1">
-                    ${totalIncomeUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center text-green-600">
-                  <TrendingUp className="w-6 h-6" />
-                </div>
-              </div>
-              <div className="space-y-1.5 pt-2 border-t">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <span>🇺🇸</span> USD
-                  </span>
-                  <span className="font-medium">${financials.income.usd.toLocaleString()}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <span>🇳🇬</span> NGN
-                  </span>
-                  <span className="font-medium">₦{financials.income.ngn.toLocaleString()}</span>
-                </div>
-                {rates && (
-                  <p className="text-[10px] text-muted-foreground pt-1">
-                    Rate: USD 1 = NGN {rates.USD_NGN.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                  </p>
+                {/* Active Drivers */}
+                {showDrivers && (
+                  <Card className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Active Drivers</p>
+                        <p className="text-2xl font-bold text-foreground mt-1">{counts.activeDrivers}</p>
+                      </div>
+                      <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-success">
+                        <Users className="w-6 h-6" />
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Monthly Income - Enhanced with breakdown */}
+                {showFinancials && (
+                  <>
+                    <Card className="p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-muted-foreground">Monthly Income</p>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-5 w-5"
+                                  onClick={() => {
+                                    refetchRates();
+                                    toast.success('Exchange rates refreshed');
+                                  }}
+                                >
+                                  <RefreshCw className={`h-3 w-3 ${ratesLoading ? 'animate-spin' : ''}`} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Refresh exchange rate</TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <p className="text-2xl font-bold text-green-600 mt-1">
+                            ${totalIncomeUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center text-green-600">
+                          <TrendingUp className="w-6 h-6" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 pt-2 border-t">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <span>🇺🇸</span> USD
+                          </span>
+                          <span className="font-medium">${financials.income.usd.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <span>🇳🇬</span> NGN
+                          </span>
+                          <span className="font-medium">₦{financials.income.ngn.toLocaleString()}</span>
+                        </div>
+                        {rates && (
+                          <p className="text-[10px] text-muted-foreground pt-1">
+                            Rate: USD 1 = NGN {rates.USD_NGN.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                          </p>
+                        )}
+                      </div>
+                    </Card>
+
+                    {/* Monthly Payouts to Owners */}
+                    <Card className="p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Monthly Payouts</p>
+                          <p className="text-2xl font-bold text-blue-600 mt-1">
+                            ${totalPayoutsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+                          <Wallet className="w-6 h-6" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 pt-2 border-t">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <span>🇺🇸</span> USD
+                          </span>
+                          <span className="font-medium">${financials.ownerPayouts.usd.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <span>🇳🇬</span> NGN
+                          </span>
+                          <span className="font-medium">₦{financials.ownerPayouts.ngn.toLocaleString()}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground pt-1">
+                          Paid to owners (60% of income)
+                        </p>
+                      </div>
+                    </Card>
+
+                    {/* Admin Withdrawals */}
+                    <Card className="p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Admin Withdrawals</p>
+                          <p className="text-2xl font-bold text-primary mt-1">
+                            ${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                          <DollarSign className="w-6 h-6" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 pt-2 border-t">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Weekly</span>
+                          <span className="font-medium">${totalWeeklyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Monthly</span>
+                          <span className="font-medium">${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground pt-1">
+                          Platform earnings (40% fee)
+                        </p>
+                      </div>
+                    </Card>
+
+                    {/* Admin Balance */}
+                    <Card className="p-6">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Admin Balance</p>
+                          <p className="text-2xl font-bold text-emerald-600 mt-1">
+                            ${(totalIncomeUsd - totalPayoutsUsd).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </p>
+                        </div>
+                        <div className="w-12 h-12 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+                          <CreditCard className="w-6 h-6" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 pt-2 border-t">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <span>🇺🇸</span> USD
+                          </span>
+                          <span className="font-medium">${(financials.income.usd - financials.ownerPayouts.usd).toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <span>🇳🇬</span> NGN
+                          </span>
+                          <span className="font-medium">₦{(financials.income.ngn - financials.ownerPayouts.ngn).toLocaleString()}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground pt-1">
+                          Available platform balance
+                        </p>
+                      </div>
+                    </Card>
+
+                    {/* Payment Defaults */}
+                    <Card className="p-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Payment Defaults</p>
+                          <p className="text-2xl font-bold text-foreground mt-1">{counts.paymentDefaults}</p>
+                        </div>
+                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-destructive">
+                          <AlertTriangle className="w-6 h-6" />
+                        </div>
+                      </div>
+                    </Card>
+                  </>
                 )}
               </div>
-            </Card>
-
-            {/* Monthly Payouts to Owners */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">Monthly Payouts</p>
-                  <p className="text-2xl font-bold text-blue-600 mt-1">
-                    ${totalPayoutsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
-                  <Wallet className="w-6 h-6" />
-                </div>
-              </div>
-              <div className="space-y-1.5 pt-2 border-t">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <span>🇺🇸</span> USD
-                  </span>
-                  <span className="font-medium">${financials.ownerPayouts.usd.toLocaleString()}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <span>🇳🇬</span> NGN
-                  </span>
-                  <span className="font-medium">₦{financials.ownerPayouts.ngn.toLocaleString()}</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground pt-1">
-                  Paid to owners (60% of income)
-                </p>
-              </div>
-            </Card>
-
-            {/* Admin Withdrawals */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">Admin Withdrawals</p>
-                  <p className="text-2xl font-bold text-primary mt-1">
-                    ${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                  <DollarSign className="w-6 h-6" />
-                </div>
-              </div>
-              <div className="space-y-1.5 pt-2 border-t">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Weekly</span>
-                  <span className="font-medium">${totalWeeklyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Monthly</span>
-                  <span className="font-medium">${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground pt-1">
-                  Platform earnings (40% fee)
-                </p>
-              </div>
-            </Card>
-
-            {/* Admin Balance */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">Admin Balance</p>
-                  <p className="text-2xl font-bold text-emerald-600 mt-1">
-                    ${(totalIncomeUsd - totalPayoutsUsd).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
-                  <CreditCard className="w-6 h-6" />
-                </div>
-              </div>
-              <div className="space-y-1.5 pt-2 border-t">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <span>🇺🇸</span> USD
-                  </span>
-                  <span className="font-medium">${(financials.income.usd - financials.ownerPayouts.usd).toLocaleString()}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground flex items-center gap-1">
-                    <span>🇳🇬</span> NGN
-                  </span>
-                  <span className="font-medium">₦{(financials.income.ngn - financials.ownerPayouts.ngn).toLocaleString()}</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground pt-1">
-                  Available platform balance
-                </p>
-              </div>
-            </Card>
-
-            {/* Payment Defaults */}
-            <Card className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Payment Defaults</p>
-                  <p className="text-2xl font-bold text-foreground mt-1">{counts.paymentDefaults}</p>
-                </div>
-                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-destructive">
-                  <AlertTriangle className="w-6 h-6" />
-                </div>
-              </div>
-            </Card>
-          </div>
+            );
+          })()}
 
           {/* Daily To-Do List */}
           <div className="mb-8">
             <AdminDailyTodoList />
           </div>
 
-          {/* Admin Tools quick links */}
-          <Card className="p-4 mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <Shield className="w-4 h-4 text-primary" />
-                Admin Tools
-              </h3>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/audit-log">Security audit log</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/payments">Payments viewer</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/reconciliation">Reconciliation logs</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/settlement-reconciliation">Settlement reconciliation</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/export-audit">Document export audit</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/document-failures">Document failures</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/m/call-in">Mobile call-in</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/tour-config">Tour step config</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/tour-analytics">Tour analytics</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/authorizations">Rental authorizations log</a>
-              </Button>
-              <Button asChild variant="outline" size="sm" className="justify-start">
-                <a href="/admin/vehicle-queue">Vehicle submission queue</a>
-              </Button>
-            </div>
-          </Card>
+          {/* Admin Tools quick links - Scoped to granted roles */}
+          {(() => {
+            const showAudit = isFullAdmin || !!perms?.can_view_audit_log;
+            const showPayments = isFullAdmin || !!perms?.can_view_payments;
+            const showSupport = isFullAdmin || !!perms?.can_view_support_tasks;
+            const showComms = isFullAdmin || !!perms?.can_view_communications;
+            const showContent = true;
+            const showReports = isFullAdmin || !!perms?.can_view_reports;
+            const showVehicles = isFullAdmin || !!perms?.can_view_vehicles;
+
+            const hasAnyTool = showAudit || showPayments || showSupport || showComms || showContent || showReports || showVehicles;
+            if (!hasAnyTool) return null;
+
+            return (
+              <Card className="p-4 mb-8">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-primary" />
+                    Admin Tools
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                  {showAudit && (
+                    <Button asChild variant="outline" size="sm" className="justify-start">
+                      <a href="/admin/audit-log">Security audit log</a>
+                    </Button>
+                  )}
+                  {showPayments && (
+                    <>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/payments">Payments viewer</a>
+                      </Button>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/reconciliation">Reconciliation logs</a>
+                      </Button>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/settlement-reconciliation">Settlement reconciliation</a>
+                      </Button>
+                    </>
+                  )}
+                  {showAudit && (
+                    <Button asChild variant="outline" size="sm" className="justify-start">
+                      <a href="/admin/export-audit">Document export audit</a>
+                    </Button>
+                  )}
+                  {showSupport && (
+                    <Button asChild variant="outline" size="sm" className="justify-start">
+                      <a href="/admin/document-failures">Document failures</a>
+                    </Button>
+                  )}
+                  {showComms && (
+                    <Button asChild variant="outline" size="sm" className="justify-start">
+                      <a href="/m/call-in">Mobile call-in</a>
+                    </Button>
+                  )}
+                  {showContent && (
+                    <>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/tour-config">Tour step config</a>
+                      </Button>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/persona-templates">Persona templates</a>
+                      </Button>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/legal-templates/preview">Legal templates preview</a>
+                      </Button>
+                    </>
+                  )}
+                  {showReports && (
+                    <Button asChild variant="outline" size="sm" className="justify-start">
+                      <a href="/admin/tour-analytics">Tour analytics</a>
+                    </Button>
+                  )}
+                  {showVehicles && (
+                    <>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/authorizations">Rental authorizations log</a>
+                      </Button>
+                      <Button asChild variant="outline" size="sm" className="justify-start">
+                        <a href="/admin/vehicle-queue">Vehicle submission queue</a>
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </Card>
+            );
+          })()}
 
           {/* Portal Navigation */}
           <div className="flex flex-col gap-4 mb-6">
@@ -522,38 +599,64 @@ const AdminAssistantDashboard = () => {
             </div>
             {/* Independent Quick Access Buttons */}
             <ScrollableStrip ariaLabel="Quick access shortcuts">
-              <Button
-                variant={activeTab === 'inbox' ? 'default' : 'outline'}
-                className="gap-2 shrink-0"
-                onClick={() => { setPortalView('support'); setActiveTab('inbox'); }}
-              >
-                <Inbox className="h-4 w-4" />
-                Unified Inbox
-              </Button>
-              <Button
-                variant={activeTab === 'call-center' ? 'default' : 'outline'}
-                className="gap-2 shrink-0"
-                onClick={() => { setPortalView('support'); setActiveTab('call-center'); }}
-              >
-                <Phone className="h-4 w-4" />
-                Call Center
-              </Button>
-              <Button
-                variant={activeTab === 'support-tasks' ? 'default' : 'outline'}
-                className="gap-2 shrink-0"
-                onClick={() => { setPortalView('support'); setActiveTab('support-tasks'); }}
-              >
-                <Headphones className="h-4 w-4" />
-                Support Tasks
-              </Button>
-              <Button
-                variant={activeTab === 'attestation-review' ? 'default' : 'outline'}
-                className="gap-2 shrink-0"
-                onClick={() => { setPortalView('crm'); setActiveTab('attestation-review'); }}
-              >
-                <AlertTriangle className="h-4 w-4" />
-                Referee Reviews
-              </Button>
+              <div className="flex items-center gap-2">
+                {canAccessTab('inbox') && (
+                  <Button
+                    variant={activeTab === 'inbox' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setPortalView('support');
+                      setActiveTab('inbox');
+                    }}
+                    className="gap-2 shrink-0"
+                  >
+                    <Inbox className="h-4 w-4" />
+                    Unified Inbox
+                  </Button>
+                )}
+                {canAccessTab('call-center') && (
+                  <Button
+                    variant={activeTab === 'call-center' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setPortalView('support');
+                      setActiveTab('call-center');
+                    }}
+                    className="gap-2 shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border-primary/30"
+                  >
+                    <Headphones className="h-4 w-4" />
+                    Call Center
+                  </Button>
+                )}
+                {canAccessTab('support-tasks') && (
+                  <Button
+                    variant={activeTab === 'support-tasks' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setPortalView('support');
+                      setActiveTab('support-tasks');
+                    }}
+                    className="gap-2 shrink-0"
+                  >
+                    <Phone className="h-4 w-4" />
+                    Support Tasks
+                  </Button>
+                )}
+                {canAccessTab('attestation-review') && (
+                  <Button
+                    variant={activeTab === 'attestation-review' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setPortalView('crm');
+                      setActiveTab('attestation-review');
+                    }}
+                    className="gap-2 shrink-0"
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    Attestation Review
+                  </Button>
+                )}
+              </div>
             </ScrollableStrip>
 
           </div>
@@ -583,8 +686,16 @@ const AdminAssistantDashboard = () => {
           {activeTabAllowed && portalView === 'support' && (
             <div className="space-y-6">
               {activeTab === 'task-portal' && <AdminTaskPortal />}
-              {activeTab === 'inbox' && <MessagingCenter />}
-              {activeTab === 'call-center' && <CallCenterPage />}
+              {activeTab === 'inbox' && (
+                <ErrorBoundary key="inbox">
+                  <MessagingCenter />
+                </ErrorBoundary>
+              )}
+              {activeTab === 'call-center' && (
+                <ErrorBoundary key="call-center">
+                  <CallCenterPage />
+                </ErrorBoundary>
+              )}
               {activeTab === 'contacts' && <AdminContactSettings />}
               {activeTab === 'support-tasks' && <AdminSupportTaskManagement />}
               {activeTab === 'insurance' && <InsuranceSupportDashboard />}
@@ -601,9 +712,7 @@ const AdminAssistantDashboard = () => {
               {activeTab === 'applications' && <ApplicationManagement />}
               {activeTab === 'attestation-review' && <NegativeAttestationReviewPanel />}
               {activeTab === 'accounts' && <UserAccountsView />}
-              {activeTab === 'user-oversight' && <UserOversightPanel />}
               {activeTab === 'user-deletion' && <UserDeletionPortal />}
-              {activeTab === 'user-uuid-assignments' && <UserUuidAssignmentsPage />}
               {activeTab === 'drivers-owners' && (
                 <div className="space-y-6">
                   <UserOversightPanel />
@@ -644,7 +753,19 @@ const AdminAssistantDashboard = () => {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button size="sm" variant="outline"><Eye className="w-4 h-4" /></Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="View application details"
+                              aria-label={`View application for ${item.name}`}
+                              onClick={() => {
+                                setPortalView('crm');
+                                setActiveTab('applications');
+                                toast.info(`Viewing application for ${item.name}`);
+                              }}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
                             <Button 
                               size="sm" 
                               variant="hero"
@@ -709,10 +830,7 @@ const AdminAssistantDashboard = () => {
                 </div>
               )}
               {activeTab === 'legal-agreements' && <LegalAgreementsManagement />}
-              {activeTab === 'legal-agreement-templates' && <LegalAgreementTemplateManagement />}
               {activeTab === 'rent-to-own' && <RentToOwnManagement />}
-              {activeTab === 'billing' && <BillingDashboard />}
-              {activeTab === 'proxy-billing' && <ProxyBillingPortal />}
               {activeTab === 'content' && (
                 <Tabs defaultValue="faq" className="space-y-4">
                   <TabsList>
@@ -740,9 +858,10 @@ const AdminAssistantDashboard = () => {
                 </Tabs>
               )}
               {activeTab === 'subscriptions' && <SubscriptionManagement />}
-              {activeTab === 'tour-step-config' && <TourStepConfigPage />}
               {activeTab === 'training' && <TrainingModuleManagement />}
               {activeTab === 'roadside-partners' && <RoadsidePartnerManagement />}
+              {activeTab === 'billing' && <BillingDashboard />}
+              {activeTab === 'proxy-billing' && <ProxyBillingPortal />}
             </div>
           )}
 
@@ -868,6 +987,7 @@ const AdminAssistantDashboard = () => {
               {activeTab === 'webhooks' && <WebhookManagement />}
               {activeTab === 'api-endpoints' && <ApiEndpointManagement />}
               {activeTab === 'security' && <AdminSecurityDashboard />}
+              {activeTab === 'email-delivery' && <AdminEmailDeliveryPage />}
               {activeTab === 'cron-jobs' && <CronJobManagement />}
               {activeTab === 'uuid-assignments' && <UserUuidAssignmentsPage />}
               {activeTab === 'tax' && <TaxManagement />}

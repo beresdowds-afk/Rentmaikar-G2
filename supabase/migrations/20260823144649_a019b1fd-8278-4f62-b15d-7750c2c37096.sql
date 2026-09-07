@@ -38,20 +38,24 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
-SELECT cron.schedule(
-  'send-booking-reminders',
-  '15 * * * *',
-  $cron$
-  SELECT net.http_post(
-    url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/send-booking-reminders',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1)
-    ),
-    body := jsonb_build_object('scheduled_at', now())
-  ) AS request_id;
-  $cron$
-);
+DO $$
+BEGIN
+  PERFORM cron.schedule(
+    'send-booking-reminders',
+    '15 * * * *',
+    $cron$
+    SELECT net.http_post(
+      url := 'https://jrsydiofzceoeddjogov.supabase.co/functions/v1/send-booking-reminders',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'CRON_SECRET' LIMIT 1)
+      ),
+      body := jsonb_build_object('scheduled_at', now())
+    ) AS request_id;
+    $cron$
+  );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- 3. Admin read access to delivery outcomes (for the realtime monitor page)
 GRANT SELECT ON public.email_send_log TO authenticated;

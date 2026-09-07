@@ -52,6 +52,14 @@ describe('admin tab registry', () => {
     }
   });
 
+  it('correctly maps email-delivery to can_view_communications for assistants', () => {
+    expect(TAB_PERMISSION_MAP['email-delivery']).toBe('can_view_communications');
+    expect(ADMIN_ONLY_TABS).not.toContain('email-delivery');
+    expect(assistantCanAccessTab('email-delivery', { can_view_communications: true })).toBe(true);
+    expect(assistantCanAccessTab('email-delivery', { can_view_communications: false })).toBe(false);
+    expect(assistantCanAccessTab('email-delivery', {})).toBe(false);
+  });
+
   it('warns at most once per session in dev', () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     warnTabPermissionDrift('admin');

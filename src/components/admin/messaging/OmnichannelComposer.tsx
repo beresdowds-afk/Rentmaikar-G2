@@ -48,6 +48,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCannedReplies } from '@/hooks/useCannedReplies';
 import { renderPlaceholders } from '@/lib/reply-placeholders';
 import { EMAIL_CONFIG, EMAIL_SENDER_NAMES } from '@/lib/email-config';
+import { EMAIL_TEMPLATES_CATALOG, type EmailTemplateDefinition } from '@/lib/email-templates-registry';
+import {
+  WHATSAPP_TEMPLATES_CATALOG,
+  WHATSAPP_SENDER_CONFIG,
+  getWhatsAppSenderForRecipient,
+  type WhatsAppTemplateDefinition,
+} from '@/lib/whatsapp-templates-registry';
 import { sent } from '@/integrations/sent/client';
 import {
   MAX_ATTACHMENTS,
@@ -60,6 +67,12 @@ import { saveStoredDraft, deleteStoredDraft } from './DraftsManager';
 import { BulkContactSelector } from './BulkContactSelector';
 import { BulkDispatchProgressModal } from './BulkDispatchProgressModal';
 import type { MessagingChannel, UserContact, SavedDraft, BulkSendResult } from './types';
+import {
+  SMS_TEMPLATES,
+  calculateSmsSegments,
+  getSmsProviderAndSender,
+  type SmsTemplate,
+} from '@/lib/sms-templates';
 
 const COUNTRY_PREFIXES = [
   { code: '+1', country: 'United States & Canada', flag: '🇺🇸' },
@@ -68,29 +81,6 @@ const COUNTRY_PREFIXES = [
   { code: '+233', country: 'Ghana', flag: '🇬🇭' },
   { code: '+254', country: 'Kenya', flag: '🇰🇪' },
   { code: '+27', country: 'South Africa', flag: '🇿🇦' },
-];
-
-const WHATSAPP_TEMPLATES = [
-  {
-    id: 'rentmaikar_welcome',
-    title: 'Welcome to Rentmaikar',
-    body: 'Hello {{user_name}}, welcome to Rentmaikar! Your driver application has been received and is being verified by our operations team. We will notify you once approved.',
-  },
-  {
-    id: 'rentmaikar_payment_reminder',
-    title: 'Rental Payment Due Reminder',
-    body: 'Hi {{user_name}}, this is a friendly reminder that your weekly rental fee is scheduled for processing. Please ensure your payment method has sufficient funds.',
-  },
-  {
-    id: 'rentmaikar_vehicle_assigned',
-    title: 'Vehicle Pickup Ready',
-    body: 'Hello {{user_name}}, your vehicle is ready for pickup at the designated hub! Please bring your driver license and agreement confirmation.',
-  },
-  {
-    id: 'rentmaikar_inspection_alert',
-    title: 'Weekly Inspection Reminder',
-    body: 'Hi {{user_name}}, please complete your weekly vehicle safety check and photo upload via the driver portal today.',
-  },
 ];
 
 interface OmnichannelComposerProps {
@@ -130,12 +120,18 @@ export const OmnichannelComposer = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [emailSenderAlias, setEmailSenderAlias] = useState<string>('support');
   const [emailPriority, setEmailPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
+  const [selectedEmailTemplate, setSelectedEmailTemplate] = useState<string>('custom');
+  const [emailCategoryFilter, setEmailCategoryFilter] = useState<string>('all');
 
   // SMS specific fields
   const [smsOptOut, setSmsOptOut] = useState(true);
+  const [selectedSmsTemplate, setSelectedSmsTemplate] = useState<string>('custom');
+  const [smsCategoryFilter, setSmsCategoryFilter] = useState<string>('all');
+  const [dbSmsTemplates, setDbSmsTemplates] = useState<Array<{ id: string; template_key: string; name: string; body: string; description: string | null }>>([]);
 
   // WhatsApp specific fields
   const [selectedWhatsAppTemplate, setSelectedWhatsAppTemplate] = useState<string>('custom');
+  const [whatsappCategoryFilter, setWhatsappCategoryFilter] = useState<string>('all');
 
   // Core content & attachments
   const [messageContent, setMessageContent] = useState('');
@@ -176,6 +172,7 @@ export const OmnichannelComposer = ({
       setMessageContent(initialDraft.content || '');
       setSmsOptOut(initialDraft.smsOptOut ?? true);
       setSelectedWhatsAppTemplate(initialDraft.whatsappTemplateId || 'custom');
+      if (initialDraft.smsTemplateId) setSelectedSmsTemplate(initialDraft.smsTemplateId);
       if (initialDraft.smsCountry) setPhonePrefix(initialDraft.smsCountry);
 
       // Restore bulk recipients if present
@@ -204,6 +201,25 @@ export const OmnichannelComposer = ({
       }
     }
   }, [initialDraft]);
+
+  // Load custom templates from twilio_message_templates
+  useEffect(() => {
+    async function loadDbTemplates() {
+      try {
+        const { data, error } = await supabase
+          .from('twilio_message_templates')
+          .select('id, template_key, name, body, description')
+          .eq('is_active', true)
+          .in('channel', ['sms', 'both']);
+        if (!error && data) {
+          setDbSmsTemplates(data);
+        }
+      } catch (err) {
+        console.warn('Could not load twilio_message_templates:', err);
+      }
+    }
+    loadDbTemplates();
+  }, []);
 
   // Search users with debounce for single mode
   useEffect(() => {
@@ -288,15 +304,36 @@ export const OmnichannelComposer = ({
 
   // Auto-fill template dynamic placeholders
   const placeholderMap = useMemo(() => {
+    const isNg = (effectiveRecipient.phone || '').startsWith('+234');
+    const currency = isNg ? '₦' : '$';
     return {
       user_name: effectiveRecipient.name || 'Valued Customer',
       user_first_name: (effectiveRecipient.name || '').split(' ')[0] || 'there',
+      first_name: (effectiveRecipient.name || '').split(' ')[0] || 'there',
+      name: effectiveRecipient.name || 'Valued Customer',
       user_email: effectiveRecipient.email || 'customer@rentmaikar.com',
       user_phone: effectiveRecipient.phone || '+15550199000',
       support_email: EMAIL_CONFIG[emailSenderAlias as keyof typeof EMAIL_CONFIG] || EMAIL_CONFIG.support,
-      support_phone: '+1 (608) 384-3932',
+      support_phone: isNg ? '+234 800 RENTMAIKAR' : '+1 (608) 384-3932',
       company_name: 'Rentmaikar',
       current_date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      today: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      currency,
+      amount: '50.00',
+      daily_rate: '50.00',
+      payment_frequency: 'weekly',
+      vehicle: 'your assigned vehicle',
+      vehicle_plate: 'RM-2026',
+      pickup_location: 'Rentmaikar Fleet Hub',
+      booking_start: 'tomorrow',
+      booking_end: 'next week',
+      return_time: '12:00 PM',
+      document_type: 'Driver License',
+      portal_link: 'https://rentmaikar.com/portal',
+      referee_name: 'Referee',
+      applicant_name: effectiveRecipient.name || 'Applicant',
+      ticket_id: '1042',
+      support_message: 'Our fleet team has reviewed your request.',
     };
   }, [effectiveRecipient, emailSenderAlias]);
 
@@ -309,12 +346,28 @@ export const OmnichannelComposer = ({
     return text;
   }, [messageContent, placeholderMap, channel, smsOptOut]);
 
-  // Character & SMS Segment calculations
+  // Designated SMS Provider routing rules
+  const smsRouting = useMemo(() => {
+    return getSmsProviderAndSender(effectiveRecipient.phone);
+  }, [effectiveRecipient.phone]);
+
+  // Precise SMS Segment & Character count breakdown (GSM-7 vs UCS-2)
+  const smsSegmentDetails = useMemo(() => {
+    return calculateSmsSegments(messageContent, smsOptOut);
+  }, [messageContent, smsOptOut]);
+
   const charCount = computedBody.length;
-  const isGsm7 = /^[\u0000-\u007F\u20AC]*$/.test(computedBody);
-  const segmentLimit = isGsm7 ? 160 : 70;
-  const multiSegmentLimit = isGsm7 ? 153 : 67;
-  const smsSegments = charCount <= segmentLimit ? 1 : Math.ceil(charCount / multiSegmentLimit);
+  const smsSegments = smsSegmentDetails.segments;
+
+  // Filtered SMS templates based on category filter
+  const filteredSmsTemplates = useMemo(() => {
+    if (smsCategoryFilter === 'all') return SMS_TEMPLATES;
+    return SMS_TEMPLATES.filter((t) => t.category === smsCategoryFilter);
+  }, [smsCategoryFilter]);
+
+  const activeSmsTemplate = useMemo(() => {
+    return SMS_TEMPLATES.find((t) => t.id === selectedSmsTemplate);
+  }, [selectedSmsTemplate]);
 
   // Attachment handling
   const handleAddFiles = (files: FileList | null) => {
@@ -355,6 +408,7 @@ export const OmnichannelComposer = ({
       content: messageContent,
       smsCountry: phonePrefix,
       smsOptOut,
+      smsTemplateId: selectedSmsTemplate !== 'custom' ? selectedSmsTemplate : null,
       whatsappTemplateId: selectedWhatsAppTemplate,
       updatedAt: new Date().toISOString(),
       createdAt: initialDraft?.createdAt || new Date().toISOString(),
@@ -391,15 +445,68 @@ export const OmnichannelComposer = ({
     }
   };
 
+  // Select Email Template from Canonical Registry
+  const handleEmailTemplateChange = (templateId: string) => {
+    setSelectedEmailTemplate(templateId);
+    if (templateId === 'custom') return;
+    const tpl = EMAIL_TEMPLATES_CATALOG.find((t) => t.id === templateId);
+    if (tpl) {
+      const renderedBody = renderPlaceholders(tpl.defaultBody, placeholderMap, { keepUnknown: false });
+      const renderedSubject = renderPlaceholders(tpl.defaultSubject, placeholderMap, { keepUnknown: false });
+      setMessageContent(renderedBody);
+      setEmailSubject(renderedSubject);
+      setEmailSenderAlias(tpl.defaultSenderAlias);
+      if (tpl.priority) {
+        setEmailPriority(tpl.priority);
+      }
+      toast.success(`Applied email template: ${tpl.name}`);
+    }
+  };
+
+  // Select SMS Template
+  const handleSmsTemplateChange = (templateId: string) => {
+    setSelectedSmsTemplate(templateId);
+    if (templateId === 'custom') return;
+    const staticTpl = SMS_TEMPLATES.find((t) => t.id === templateId);
+    if (staticTpl) {
+      const rendered = renderPlaceholders(staticTpl.body, placeholderMap, { keepUnknown: false });
+      setMessageContent(rendered);
+      toast.success(`Applied SMS template: ${staticTpl.title}`);
+      return;
+    }
+    const dbTpl = dbSmsTemplates.find((t) => t.id === templateId || t.template_key === templateId);
+    if (dbTpl) {
+      const rendered = renderPlaceholders(dbTpl.body, placeholderMap, { keepUnknown: false });
+      setMessageContent(rendered);
+      toast.success(`Applied template: ${dbTpl.name}`);
+    }
+  };
+
+  const filteredWhatsAppTemplates = useMemo(() => {
+    if (whatsappCategoryFilter === 'all') return WHATSAPP_TEMPLATES_CATALOG;
+    return WHATSAPP_TEMPLATES_CATALOG.filter((t) => t.category === whatsappCategoryFilter);
+  }, [whatsappCategoryFilter]);
+
+  const activeWhatsAppTemplate = useMemo(() => {
+    if (selectedWhatsAppTemplate === 'custom') return null;
+    return (
+      WHATSAPP_TEMPLATES_CATALOG.find(
+        (t) => t.id === selectedWhatsAppTemplate || t.metaTemplateName === selectedWhatsAppTemplate,
+      ) || null
+    );
+  }, [selectedWhatsAppTemplate]);
+
   // Select WhatsApp Template
   const handleWhatsAppTemplateChange = (templateId: string) => {
     setSelectedWhatsAppTemplate(templateId);
     if (templateId === 'custom') return;
-    const tpl = WHATSAPP_TEMPLATES.find((t) => t.id === templateId);
+    const tpl = WHATSAPP_TEMPLATES_CATALOG.find(
+      (t) => t.id === templateId || t.metaTemplateName === templateId,
+    );
     if (tpl) {
       const rendered = renderPlaceholders(tpl.body, placeholderMap, { keepUnknown: false });
       setMessageContent(rendered);
-      toast.success(`Applied template: ${tpl.title}`);
+      toast.success(`Applied WhatsApp template: ${tpl.title}`);
     }
   };
 
@@ -521,6 +628,10 @@ export const OmnichannelComposer = ({
               channel,
               recipientPhone: contact.phone,
               attachments: uploadedAttachments,
+              whatsappTemplateId:
+                channel === 'whatsapp' && selectedWhatsAppTemplate !== 'custom'
+                  ? selectedWhatsAppTemplate
+                  : undefined,
             },
           });
 
@@ -530,6 +641,10 @@ export const OmnichannelComposer = ({
               to: contact.phone,
               channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
               text: body,
+              template:
+                channel === 'whatsapp' && selectedWhatsAppTemplate !== 'custom'
+                  ? { id: selectedWhatsAppTemplate }
+                  : undefined,
             });
           }
         } catch (e) {
@@ -1012,11 +1127,106 @@ export const OmnichannelComposer = ({
               {/* Email Options */}
               {channel === 'email' && (
                 <div className="space-y-3 pt-2 border-t">
-                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    3. Email Headers & Configuration
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      3. Email Template & Service Routing
+                    </Label>
+                    <Badge variant="outline" className="text-[10px] text-blue-600 bg-blue-500/10 border-blue-200">
+                      Resend Outbound • Verified Domain
+                    </Badge>
+                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Email Template Category Filter */}
+                  <div className="flex flex-wrap gap-1">
+                    {['all', 'bookings', 'billing', 'fleet', 'verify', 'support'].map((cat) => (
+                      <Button
+                        key={cat}
+                        type="button"
+                        variant={emailCategoryFilter === cat ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="h-6 text-[11px] px-2 capitalize"
+                        onClick={() => setEmailCategoryFilter(cat)}
+                      >
+                        {cat}
+                      </Button>
+                    ))}
+                  </div>
+
+                  {/* Email Template Selector */}
+                  <div>
+                    <Select value={selectedEmailTemplate} onValueChange={handleEmailTemplateChange}>
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select an official email template..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="custom" className="font-medium">
+                          ✍️ Custom Email (No Template)
+                        </SelectItem>
+                        {EMAIL_TEMPLATES_CATALOG.filter(
+                          (t) => emailCategoryFilter === 'all' || t.category === emailCategoryFilter,
+                        ).map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{t.name}</span>
+                              <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">
+                                {t.category}
+                              </Badge>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Template Meta & Designated Routing Card */}
+                  {selectedEmailTemplate !== 'custom' && (() => {
+                    const activeTpl = EMAIL_TEMPLATES_CATALOG.find((t) => t.id === selectedEmailTemplate);
+                    if (!activeTpl) return null;
+                    return (
+                      <div className="bg-muted/40 rounded-lg p-2.5 border text-xs space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-muted-foreground text-[11px] leading-relaxed">
+                            {activeTpl.description}
+                          </p>
+                          <Badge variant="secondary" className="text-[10px] whitespace-nowrap shrink-0">
+                            Alias: {activeTpl.defaultSenderAlias}
+                          </Badge>
+                        </div>
+
+                        {/* Routing Rules & Service Provider details */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-dashed text-[11px] text-muted-foreground">
+                          <div>
+                            <span className="font-medium text-foreground">Service Provider:</span> Resend API
+                            <br />
+                            <span className="font-medium text-foreground">Outbound Domain:</span> notify.rentmaikar.com
+                          </div>
+                          <div>
+                            <span className="font-medium text-foreground">Designated Phone:</span>
+                            <br />
+                            US: +1 (608) 384-3932 | NG: +234 800 RENTMAIKAR
+                          </div>
+                        </div>
+
+                        {/* Parameters */}
+                        {activeTpl.parameters.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1 pt-1">
+                            <span className="text-[10px] text-muted-foreground mr-1">Variables:</span>
+                            {activeTpl.parameters.map((p) => (
+                              <Badge
+                                key={p}
+                                variant="outline"
+                                className="text-[9px] px-1 py-0 font-mono bg-background"
+                              >
+                                {`{{${p}}}`}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                     <div>
                       <Label className="text-xs">From Alias / Department</Label>
                       <Select value={emailSenderAlias} onValueChange={setEmailSenderAlias}>
@@ -1061,38 +1271,182 @@ export const OmnichannelComposer = ({
                 </div>
               )}
 
-              {/* WhatsApp Template Selector */}
+              {/* WhatsApp Template Selector & Routing Console */}
               {channel === 'whatsapp' && (
-                <div className="space-y-2 pt-2 border-t">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      3. Official Meta-Approved WhatsApp Templates
-                    </Label>
-                    <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10">
-                      HSM Pre-approved
-                    </Badge>
+                <div className="space-y-3 pt-2 border-t">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        3. Meta-Approved WhatsApp Templates
+                      </Label>
+                      <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
+                        HSM Pre-approved
+                      </Badge>
+                    </div>
+
+                    {/* Category quick filter */}
+                    <div className="flex items-center gap-1 overflow-x-auto py-0.5">
+                      {['all', 'bookings', 'payments', 'fleet', 'verification', 'negotiations', 'support'].map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setWhatsappCategoryFilter(cat)}
+                          className={`text-[10px] px-2 py-0.5 rounded capitalize transition-colors whitespace-nowrap ${
+                            whatsappCategoryFilter === cat
+                              ? 'bg-emerald-600 text-white font-medium shadow-xs'
+                              : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Designated Sender & Provider Routing Info */}
+                  {(() => {
+                    const routing = getWhatsAppSenderForRecipient(effectiveRecipient.phone);
+                    return (
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="text-[11px] text-muted-foreground">
+                            Sending as <strong className="text-foreground">{routing.designatedSenderNumber}</strong> ({routing.label})
+                          </span>
+                        </div>
+                        <Badge variant="secondary" className="text-[10px] uppercase font-mono font-medium">
+                          Provider: {routing.provider} • {routing.region}
+                        </Badge>
+                      </div>
+                    );
+                  })()}
 
                   <Select value={selectedWhatsAppTemplate} onValueChange={handleWhatsAppTemplateChange}>
                     <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Select a pre-approved template..." />
+                      <SelectValue placeholder="Select an approved WhatsApp template..." />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="custom">Custom WhatsApp Message</SelectItem>
-                      {WHATSAPP_TEMPLATES.map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.title}
+                    <SelectContent className="max-h-72">
+                      <SelectItem value="custom">Custom WhatsApp Message (Freeform)</SelectItem>
+                      {filteredWhatsAppTemplates.map((t) => (
+                        <SelectItem key={t.id} value={t.id} className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-mono capitalize">
+                              {t.category}
+                            </span>
+                            <span className="font-medium">{t.title}</span>
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+
+                  {/* Active WhatsApp Template Card & Parameters */}
+                  {activeWhatsAppTemplate && (
+                    <div className="p-2.5 rounded-lg bg-muted/40 border text-xs space-y-1.5">
+                      <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                        <span className="font-medium text-foreground">{activeWhatsAppTemplate.title}</span>
+                        <span className="font-mono text-[10px]">Meta: {activeWhatsAppTemplate.metaTemplateName}</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground italic">
+                        {activeWhatsAppTemplate.description}
+                      </p>
+                      <div className="flex flex-wrap gap-1 pt-1 border-t text-[10px] text-muted-foreground">
+                        <span className="font-medium text-foreground">Parameters:</span>
+                        {activeWhatsAppTemplate.parameters.map((p) => (
+                          <span key={p} className="px-1 py-0.2 rounded bg-muted font-mono">
+                            {`{{${p}}}`}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* SMS Opt-Out Disclaimer */}
+              {/* SMS Template Selector & Presets */}
               {channel === 'sms' && (
-                <div className="pt-2 border-t">
-                  <div className="flex items-center space-x-2 bg-muted/40 p-2.5 rounded-lg border">
+                <div className="space-y-3 pt-2 border-t">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        3. SMS Templates & Presets
+                      </Label>
+                      <Badge variant="outline" className="text-[10px] text-blue-600 bg-blue-500/10">
+                        A2P 10DLC & Telecom Compliant
+                      </Badge>
+                    </div>
+                    {/* Category quick filter */}
+                    <div className="flex items-center gap-1">
+                      {['all', 'payments', 'bookings', 'safety', 'onboarding'].map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setSmsCategoryFilter(cat)}
+                          className={`text-[10px] px-2 py-0.5 rounded capitalize transition-colors ${
+                            smsCategoryFilter === cat
+                              ? 'bg-primary text-primary-foreground font-medium'
+                              : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Select value={selectedSmsTemplate} onValueChange={handleSmsTemplateChange}>
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Select an SMS template (Payments, Bookings, Safety, etc.)..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px]">
+                      <SelectItem value="custom" className="text-xs font-medium">
+                        ✍️ Custom SMS (Blank Composer)
+                      </SelectItem>
+                      {filteredSmsTemplates.map((t) => (
+                        <SelectItem key={t.id} value={t.id} className="text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="capitalize text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono">
+                              {t.category}
+                            </span>
+                            <span className="font-medium">{t.title}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                      {dbSmsTemplates.length > 0 && (
+                        <>
+                          <div className="px-2 py-1.5 text-[11px] font-semibold text-muted-foreground border-t">
+                            Custom Admin Templates
+                          </div>
+                          {dbSmsTemplates.map((dt) => (
+                            <SelectItem key={dt.id} value={dt.id} className="text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-mono">
+                                  custom
+                                </span>
+                                <span>{dt.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Selected Template Details Banner */}
+                  {activeSmsTemplate && (
+                    <div className="p-2.5 rounded-lg bg-muted/40 border text-xs space-y-1">
+                      <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                        <span className="font-medium text-foreground">{activeSmsTemplate.title}</span>
+                        <span>Tokens: {activeSmsTemplate.parameters.map((p) => `{{${p}}}`).join(', ')}</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground italic">
+                        {activeSmsTemplate.description}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* SMS Carrier Opt-Out Compliance */}
+                  <div className="flex items-center space-x-2 bg-muted/30 p-2.5 rounded-lg border">
                     <Checkbox
                       id="smsOptOut"
                       checked={smsOptOut}
@@ -1104,6 +1458,28 @@ export const OmnichannelComposer = ({
                     >
                       Append TCPA/Carrier Compliance footer (<code className="text-[11px] bg-muted px-1 py-0.5 rounded">Reply STOP to opt out</code>)
                     </label>
+                  </div>
+
+                  {/* Designated Provider & Routing Rules Panel */}
+                  <div className="p-2.5 rounded-lg border bg-gradient-to-r from-blue-50/40 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/20 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-medium">
+                        <Smartphone className="h-3.5 w-3.5 text-blue-600" />
+                        <span>Designated Provider: <strong>{smsRouting.providerName}</strong></span>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        Sender ID: {smsRouting.senderId}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {smsRouting.description}
+                    </p>
+                    <div className="flex items-center gap-4 text-[11px] text-muted-foreground pt-1 border-t border-blue-200/40 dark:border-blue-800/40">
+                      <span>Inbound Route: <code className="font-mono text-[10px]">{smsRouting.inboundWebhook}</code></span>
+                      {smsRouting.fallbackProvider && (
+                        <span>Fallback: {smsRouting.fallbackProvider}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1170,8 +1546,18 @@ export const OmnichannelComposer = ({
                   </div>
 
                   {channel === 'sms' && (
-                    <div className="font-mono">
-                      <span>{charCount} chars</span> • <span>{smsSegments} SMS segment{smsSegments > 1 ? 's' : ''}</span>
+                    <div className="flex items-center gap-2 font-mono text-[11px]">
+                      <span className={smsSegmentDetails.encoding === 'UCS-2' ? 'text-amber-600 font-semibold' : 'text-muted-foreground'}>
+                        {smsSegmentDetails.encoding}
+                      </span>
+                      <span>•</span>
+                      <span>
+                        {smsSegmentDetails.characterCount} chars ({smsSegmentDetails.charsRemainingInSegment} left in seg {smsSegmentDetails.segments})
+                      </span>
+                      <span>•</span>
+                      <Badge variant={smsSegmentDetails.segments > 1 ? "secondary" : "outline"} className="text-[10px] h-5">
+                        {smsSegmentDetails.segments} SMS segment{smsSegmentDetails.segments > 1 ? 's' : ''}
+                      </Badge>
                     </div>
                   )}
                 </div>

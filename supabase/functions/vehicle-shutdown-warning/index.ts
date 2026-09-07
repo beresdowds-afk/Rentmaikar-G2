@@ -42,6 +42,7 @@ const handler = async (req: Request): Promise<Response> => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const voiceBaseUrl = Deno.env.get("VOICE_SUPABASE_URL") || supabaseUrl;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
     const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN");
@@ -116,7 +117,7 @@ const handler = async (req: Request): Promise<Response> => {
     if (isMoving) {
       // VEHICLE MOVING: Pull-over warning — no auto-shutdown
       twiml = `<Response>
-        <Gather numDigits="1" action="${supabaseUrl}/functions/v1/shutdown-warning-ivr?vehicleId=${vehicleId}&driverId=${driverId}&defaultId=${defaultId || ''}&state=moving" method="POST" timeout="15">
+        <Gather numDigits="1" action="${voiceBaseUrl}/functions/v1/shutdown-warning-ivr?vehicleId=${vehicleId}&driverId=${driverId}&defaultId=${defaultId || ''}&state=moving" method="POST" timeout="15">
           <Say voice="alice">
             URGENT WARNING. This is Rentmaikar with a critical alert regarding ${vehicleInfo}.
             Your vehicle has been flagged for shutdown due to: ${sanitizedReason}.
@@ -133,7 +134,7 @@ const handler = async (req: Request): Promise<Response> => {
     } else {
       // VEHICLE PARKED: Countdown warning with dispute option
       twiml = `<Response>
-        <Gather numDigits="1" action="${supabaseUrl}/functions/v1/shutdown-warning-ivr?vehicleId=${vehicleId}&driverId=${driverId}&defaultId=${defaultId || ''}&state=parked" method="POST" timeout="30">
+        <Gather numDigits="1" action="${voiceBaseUrl}/functions/v1/shutdown-warning-ivr?vehicleId=${vehicleId}&driverId=${driverId}&defaultId=${defaultId || ''}&state=parked" method="POST" timeout="30">
           <Say voice="alice">
             CRITICAL WARNING. This is Rentmaikar. Your vehicle, ${vehicleInfo}, will be disabled in 5 minutes due to: ${sanitizedReason}.
             Press 1 to dispute this shutdown.
@@ -212,7 +213,7 @@ const handler = async (req: Request): Promise<Response> => {
           To: driverProfile.phone,
           From: twilioPhoneNumber,
           Twiml: twiml,
-          StatusCallback: `${supabaseUrl}/functions/v1/voip-status-callback`,
+          StatusCallback: `${voiceBaseUrl}/functions/v1/voip-status-callback`,
         }),
       });
       const callData = await callResponse.json();

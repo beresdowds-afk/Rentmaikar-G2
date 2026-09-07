@@ -211,7 +211,6 @@ const runToggle = async () => {
                         <TableCell>
                           <Switch
                             checked={d.status === 'active'}
-                            disabled={!hasSim || working === d.id}
                             onCheckedChange={() => setConfirm({
                               open: true, device: d,
                               action: d.status === 'active' ? 'deactivate' : 'activate',

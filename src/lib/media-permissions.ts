@@ -133,7 +133,7 @@ export async function unlockAudioOutput(): Promise<boolean> {
   }
 }
 
-const BLUETOOTH_HINTS = ["bluetooth", "airpods", "headset", "bt "];
+const BLUETOOTH_HINTS = ["bluetooth", "airpods", "headset", "bt ", "buds", "wireless", "wh-", "wf-", "hands-free"];
 const SPEAKER_HINTS = ["speaker", "speakerphone", "loud"];
 const EARPIECE_HINTS = ["earpiece", "receiver", "handset"];
 
@@ -201,6 +201,20 @@ export async function resolveAudioOutput(route: AudioOutputRoute): Promise<Audio
 /** True when the device label looks like a wired headset or Bluetooth audio device. */
 export function isHeadsetDevice(device: Pick<MediaDeviceInfo, "label">): boolean {
   return matches(device.label ?? "", [...BLUETOOTH_HINTS, "headphone", "earbud", "wired"]);
+}
+
+export const isHeadsetOrBluetoothDevice = isHeadsetDevice;
+
+/** Detect if any newly connected device is a headset or Bluetooth audio device. */
+export function detectNewlyConnectedHeadset<T extends Pick<MediaDeviceInfo, "deviceId" | "label">>(
+  previousDevices: T[],
+  currentDevices: T[],
+): T | null {
+  const previousIds = new Set(previousDevices.map((d) => d.deviceId));
+  const newHeadset = currentDevices.find(
+    (d) => !previousIds.has(d.deviceId) && isHeadsetDevice(d),
+  );
+  return newHeadset ?? null;
 }
 
 /** First connected headset/Bluetooth output, if any. */

@@ -9,8 +9,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { KeyRound, Loader2, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { KeyRound, Loader2, AlertCircle, CheckCircle, Eye, EyeOff, Mail } from 'lucide-react';
 import { toast } from 'sonner';
+import { ResendButton } from '@/components/auth/ResendButton';
+import { idempotencyHeaders, resetEmailIdempotencyKey } from '@/lib/email-idempotency';
 
 const resetPasswordSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
@@ -32,6 +34,15 @@ const ResetPassword = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isValidSession, setIsValidSession] = useState<boolean | null>(null);
   const [linkErrorMessage, setLinkErrorMessage] = useState<string | null>(null);
+  const [resendEmail, setResendEmail] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('email') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [resendStatus, setResendStatus] = useState<'idle' | 'sent' | 'error'>('idle');
   const sessionFoundRef = useRef(false);
 
   const form = useForm<ResetPasswordFormData>({
@@ -188,7 +199,7 @@ const ResetPassword = () => {
               This password reset link is invalid or has expired.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-4">
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
@@ -196,19 +207,64 @@ const ResetPassword = () => {
                 Password reset links expire <strong>1 hour</strong> after they are sent, and can only be used once.
               </AlertDescription>
             </Alert>
-            <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-1 text-muted-foreground">
-              <p className="font-medium text-foreground">Next steps:</p>
-              <ol className="list-decimal list-inside space-y-1">
-                <li>Go back to the login page.</li>
-                <li>Tap <strong>Forgot password?</strong> and enter your email again.</li>
-                <li>Use the newest email — older links stop working.</li>
-              </ol>
+
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Mail className="h-4 w-4 text-primary" />
+                <span>Resend reset email</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Enter your account email to receive a fresh password reset link via the verified gateway.
+              </p>
+
+              {resendStatus === 'sent' && (
+                <Alert className="border-green-200 bg-green-50 text-green-900 py-2">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  <AlertDescription className="text-xs text-green-800">
+                    A fresh reset email has been sent to <strong>{resendEmail}</strong>. Check your inbox and spam folder.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="space-y-2">
+                <Input
+                  type="email"
+                  placeholder="your.email@example.com"
+                  value={resendEmail}
+                  onChange={(e) => setResendEmail(e.target.value)}
+                  className="bg-background text-sm"
+                />
+                <ResendButton
+                  channel="email"
+                  identifier={resendEmail.trim().toLowerCase()}
+                  label="Resend reset email"
+                  className="w-full"
+                  variant="default"
+                  onResend={async () => {
+                    const target = resendEmail.trim().toLowerCase();
+                    if (!target || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
+                      toast.error('Please enter a valid email address.');
+                      return;
+                    }
+                    try {
+                      const { error: invokeErr } = await supabase.functions.invoke('send-password-reset', {
+                        body: { email: target, redirectOrigin: window.location.origin },
+                        headers: idempotencyHeaders('password_reset', target),
+                      });
+                      if (invokeErr) throw invokeErr;
+                      resetEmailIdempotencyKey('password_reset', target);
+                      setResendStatus('sent');
+                      toast.success('Reset email sent via Resend gateway! Check your inbox.');
+                    } catch (err) {
+                      console.error('Failed to resend reset email', err);
+                      toast.error('Unable to send reset email. Please try again shortly.');
+                    }
+                  }}
+                />
+              </div>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-2">
-            <Button className="w-full" onClick={() => navigate('/auth?forgot=1')}>
-              Request a new reset link
-            </Button>
             <Button variant="ghost" className="w-full" onClick={() => navigate('/auth')}>
               Back to Login
             </Button>

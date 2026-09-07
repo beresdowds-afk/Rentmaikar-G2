@@ -63,13 +63,14 @@ export const EmailVerification = ({
     if (!email) return;
     const target = redirectTo ?? `${window.location.origin}/auth`;
 
-    // Preferred path: branded verification email delivered through Resend.
-    if (!emailOverride) {
+    let invoked = false;
+    try {
       const { data, error } = await supabase.functions.invoke('send-verification-email', {
-        body: { redirect_to: target },
+        body: { email, redirect_to: target },
         headers: idempotencyHeaders('email_verification', email),
       });
       if (!error) {
+        invoked = true;
         const res = data as { already_verified?: boolean } | null;
         if (res?.already_verified) {
           setIsEmailVerified(true);
@@ -82,17 +83,21 @@ export const EmailVerification = ({
         toast.success('Verification email sent via Resend. Check your inbox.');
         return;
       }
-      console.warn('Resend verification failed, falling back to default email', error);
+    } catch {
+      // Function invocation failed, proceed to fallback
     }
 
-    const { error: fallbackError } = await supabase.auth.resend({
-      type: 'signup',
-      email,
-      options: { emailRedirectTo: target },
-    });
-    if (fallbackError) throw fallbackError;
-    setLastSentAt(new Date());
-    toast.success('Verification email sent! Check your inbox.');
+    if (!invoked) {
+      console.warn('Resend verification edge function unavailable, falling back to default email');
+      const { error: fallbackError } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: target },
+      });
+      if (fallbackError) throw fallbackError;
+      setLastSentAt(new Date());
+      toast.success('Verification email sent! Check your inbox.');
+    }
   };
 
   const handleCheckStatus = async () => {

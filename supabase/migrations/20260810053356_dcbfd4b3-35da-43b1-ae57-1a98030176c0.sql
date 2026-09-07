@@ -1,3 +1,4 @@
+DROP FUNCTION IF EXISTS public.admin_list_pending_training_completions(text);
 CREATE OR REPLACE FUNCTION public.admin_list_pending_training_completions(_status text DEFAULT 'pending'::text)
  RETURNS TABLE(id uuid, user_id uuid, full_name text, email text, phone text, module_id uuid, module_title text, module_region text, score integer, completed_at timestamp with time zone, verification_status text, verified_at timestamp with time zone, review_notes text)
  LANGUAGE plpgsql

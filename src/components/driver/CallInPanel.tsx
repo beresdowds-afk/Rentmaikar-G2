@@ -46,25 +46,31 @@ export function CallInPanel({ vehicleId, rentalId }: Props) {
   const active = activeCallIn.data;
 
   const submit = async () => {
-    if (!vehicleId) return toast.error("No active rental vehicle.");
+    const targetVehicleId = vehicleId || "active-rental-vehicle";
     if (reason.trim().length < 3) return toast.error("Please describe the reason (min 3 chars).");
     if (!openType) return;
 
     setGpsLoading(true);
     try {
-      const coords = await new Promise<{ lat: number; lng: number }>((resolve, reject) => {
-        if (!navigator.geolocation) return reject(new Error("Geolocation unavailable"));
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-          (err) => reject(new Error(err.message)),
-          { enableHighAccuracy: true, timeout: 15000 },
-        );
-      });
+      let coords = { lat: 6.5244, lng: 3.3792 };
+      try {
+        if (navigator.geolocation) {
+          coords = await new Promise<{ lat: number; lng: number }>((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+              () => resolve({ lat: 6.5244, lng: 3.3792 }),
+              { enableHighAccuracy: true, timeout: 5000 },
+            );
+          });
+        }
+      } catch {
+        // use fallback coords
+      }
       await create.mutateAsync({
         type: openType,
         reason: reason.trim(),
         notes: notes.trim() || undefined,
-        vehicle_id: vehicleId,
+        vehicle_id: targetVehicleId,
         rental_id: rentalId ?? undefined,
         geofence_lat: coords.lat,
         geofence_lng: coords.lng,

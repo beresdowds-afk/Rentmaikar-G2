@@ -53,6 +53,7 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
   const [openIncidents, setOpenIncidents] = useState(0);
   const [pendingInspections, setPendingInspections] = useState(0);
   const [pendingRecalls, setPendingRecalls] = useState(0);
+  const [pendingAgreements, setPendingAgreements] = useState(0);
   const [expiringDocs, setExpiringDocs] = useState(0);
   const [lastPayoutAt, setLastPayoutAt] = useState<string | null>(null);
 
@@ -80,6 +81,12 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
         .select('id', { count: 'exact', head: true })
         .eq('owner_id', targetId)
         .eq('status', 'pending');
+      const agreements = await client
+        .from('legal_agreements')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', targetId)
+        .is('owner_signature', null)
+        .not('status', 'in', '("completed","superseded","cancelled")');
       const docs = await client
         .from('user_documents')
         .select('id', { count: 'exact', head: true })
@@ -99,6 +106,7 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
       setOpenIncidents(inc.count ?? 0);
       setPendingInspections(insp.count ?? 0);
       setPendingRecalls(recalls.count ?? 0);
+      setPendingAgreements(agreements.count ?? 0);
       setExpiringDocs(docs.count ?? 0);
       setLastPayoutAt(payout?.data?.created_at ?? null);
     })();
@@ -146,6 +154,15 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
 
   const alerts: AlertItem[] = useMemo(() => {
     const items: AlertItem[] = [];
+    if (pendingAgreements > 0) {
+      items.push({
+        id: 'agreements',
+        severity: 'critical',
+        title: `${pendingAgreements} legal agreement${pendingAgreements > 1 ? 's' : ''} pending your signature`,
+        detail: 'Sign with the digital signature pad to finalize vehicle rental contracts.',
+        action: { label: 'Sign Now', tab: 'agreements' },
+      });
+    }
     if (pendingRecalls > 0) {
       items.push({
         id: 'recall',

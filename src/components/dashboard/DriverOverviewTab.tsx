@@ -52,6 +52,7 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [openIncidents, setOpenIncidents] = useState<number>(0);
   const [trainingComplete, setTrainingComplete] = useState<boolean>(false);
+  const [pendingAgreements, setPendingAgreements] = useState<number>(0);
 
   useEffect(() => {
   if (!targetId) return;
@@ -70,6 +71,7 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
         messagesResult,
         incidentsResult,
         trainingResult,
+        agreementsResult,
       ] = await Promise.all([
         supabase
           .from("weekly_inspection_reports")
@@ -109,6 +111,13 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
           .from("training_completions")
           .select("id", { count: "exact", head: true })
           .eq("user_id", targetId),
+
+        supabase
+          .from("legal_agreements")
+          .select("id", { count: "exact", head: true })
+          .eq("driver_id", targetId)
+          .is("driver_signature", null)
+          .not("status", "in", '("completed","superseded","cancelled")'),
       ]);
 
       if (cancelled) return;
@@ -119,6 +128,7 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
         messagesResult,
         incidentsResult,
         trainingResult,
+        agreementsResult,
       ].forEach((result) => {
         if (result.error) {
           console.error(result.error);
@@ -140,6 +150,7 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
       setUnreadMessages(messagesResult.count ?? 0);
       setOpenIncidents(incidentsResult.count ?? 0);
       setTrainingComplete((trainingResult.count ?? 0) > 0);
+      setPendingAgreements(agreementsResult.count ?? 0);
     } catch (error) {
       console.error("Failed loading driver dashboard", error);
     }
@@ -179,6 +190,15 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
 
   const alerts: AlertItem[] = useMemo(() => {
     const items: AlertItem[] = [];
+    if (pendingAgreements > 0) {
+      items.push({
+        id: 'agreements',
+        severity: 'critical',
+        title: `${pendingAgreements} legal agreement${pendingAgreements > 1 ? 's' : ''} pending your signature`,
+        detail: 'Review contract terms and sign with the digital signature pad to activate your vehicle rental.',
+        action: { label: 'Sign Now', tab: 'agreements' },
+      });
+    }
     if (nextPayment && nextPayment.hoursLeft < 72) {
       items.push({
         id: 'pay',

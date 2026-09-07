@@ -66,21 +66,9 @@ Deno.serve(async (req) => {
       Deno.env.get("SITE_URL") ??
       "https://rentmaikar.com";
 
-    // Primary path: the built-in auth mailer. It is always configured and does
-    // not depend on the project's Resend sender domain being verified.
-    const { error: builtInErr } = await admin.auth.resetPasswordForEmail(email, {
-      redirectTo: `${siteUrl}/reset-password`,
-    });
-
-    if (!builtInErr) {
-      console.log("reset email delivered via built-in auth mailer");
-      return ok();
-    }
-
-    console.error("built-in reset mail failed:", builtInErr.message);
-
-    // Fallback: mint a recovery link ourselves and deliver it through the
-    // branded Resend pipeline. (Requires a verified sender domain.)
+    // Primary path: mint a recovery link and deliver through our verified
+    // Resend gateway (send-outbound-email -> resend-gateway), ensuring the
+    // verified domain rewrite and 401/403 provider alerting are always active.
     const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
       type: "recovery",
       email,
@@ -88,8 +76,14 @@ Deno.serve(async (req) => {
     });
 
     if (linkErr || !linkData?.properties?.action_link) {
-      // Unknown address (or auth error) — stay silent to the caller.
-      console.log("reset link not generated:", linkErr?.message ?? "no link");
+      // Unknown address or auth error — fallback to built-in mailer
+      console.log("recovery link not generated, attempting built-in reset:", linkErr?.message ?? "no link");
+      const { error: builtInErr } = await admin.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/reset-password`,
+      });
+      if (builtInErr) {
+        console.error("built-in reset mail also failed:", builtInErr.message);
+      }
       return ok();
     }
 
@@ -105,8 +99,7 @@ Deno.serve(async (req) => {
     }
 
     // send-outbound-email is guarded by requireServiceRole, which compares the
-    // raw Bearer token — so call it with an explicit service-role header
-    // instead of functions.invoke (which does not always forward it).
+    // raw Bearer token — call with explicit service-role header.
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const sendRes = await fetch(
       `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-outbound-email`,
@@ -131,16 +124,19 @@ Deno.serve(async (req) => {
         }),
       },
     );
-    // send-outbound-email answers 200 with { success: false } when the provider
-    // rejects (e.g. an unverified Resend sender domain), so check the body too.
+
     if (!sendRes.ok) {
       console.error("branded reset email failed:", sendRes.status, await sendRes.text());
+      // Secondary fallback: built-in mailer
+      await admin.auth.resetPasswordForEmail(email, {
+        redirectTo: `${siteUrl}/reset-password`,
+      }).catch(() => undefined);
     } else {
       const rawBody = await sendRes.text();
       try {
         const parsed = JSON.parse(rawBody);
         if (parsed?.success === false || parsed?.error) {
-          console.error("branded reset email failed:", rawBody);
+          console.error("branded reset email provider error:", rawBody);
         }
       } catch { /* non-JSON body — trust the status */ }
     }

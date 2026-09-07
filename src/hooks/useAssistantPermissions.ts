@@ -6,6 +6,7 @@ import {
   assistantCanAccessTab,
   forbiddenTabsForAssistant,
 } from '@/lib/admin-tab-permissions';
+import { assistantExcludedTabs } from '@/lib/admin-tab-registry';
 
 export interface AssistantPermissionsResult {
   loading: boolean;
@@ -56,7 +57,14 @@ export function useAssistantPermissions(): AssistantPermissionsResult {
   const isAssistant = !!data?.isAssistant;
   const perms = (data?.perms ?? null) as Partial<Record<PermissionKey, boolean>> | null;
 
-  const forbiddenTabs = isFullAdmin ? [] : forbiddenTabsForAssistant(perms);
+  const forbiddenTabs = isFullAdmin
+    ? []
+    : Array.from(
+        new Set([
+          ...forbiddenTabsForAssistant(perms),
+          ...assistantExcludedTabs(),
+        ]),
+      );
 
   return {
     loading: isLoading,
