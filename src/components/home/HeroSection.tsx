@@ -90,7 +90,7 @@ const HeroSection = () => {
           <nav className="flex flex-col p-4 gap-1">
             {navLinks.map((link) => (
               <Link
-                key={link.href}
+                key={`${link.href}-${link.label}`}
                 to={link.href}
                 onClick={() => setIsMenuOpen(false)}
                 className="px-4 py-3 rounded-lg font-medium text-foreground hover:bg-primary/10 hover:text-primary transition-colors"

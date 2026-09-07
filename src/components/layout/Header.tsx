@@ -24,7 +24,6 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
 
   const navLinks = [
     { href: "/", label: "Home" },
-    { href: "/catalogue/standard", label: "Catalog" },
     { href: "/catalogue/budget", label: "Budget Cars" },
     { href: "/catalogue/standard", label: "Standard Cars" },
     { href: "/catalogue/premium", label: "Premium Cars" },
@@ -78,7 +77,7 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
           <nav className="hidden lg:flex items-center gap-1" aria-label="Main navigation">
             {navLinks.map((link) => (
               <Link
-                key={link.href}
+                key={`${link.href}-${link.label}`}
                 to={link.href}
                 className={cn(
                   "px-4 py-2 rounded-lg font-medium transition-colors",
@@ -213,7 +212,7 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
               
               {navLinks.map((link) => (
                 <Link
-                  key={link.href}
+                  key={`${link.href}-${link.label}`}
                   to={link.href}
                   onClick={() => setIsMenuOpen(false)}
                   className={cn(
