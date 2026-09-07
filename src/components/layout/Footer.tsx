@@ -100,6 +100,12 @@ const Footer = () => {
                 </li>
               )}
               <li>
+                <Link to="/report" className="text-primary-foreground/70 hover:text-accent transition-colors flex items-center gap-1">
+                  <FileText className="w-3 h-3" />
+                  Platform Features Report
+                </Link>
+              </li>
+              <li>
                 <Link to="/terms" className="text-primary-foreground/70 hover:text-accent transition-colors flex items-center gap-1">
                   <FileText className="w-3 h-3" />
                   Terms of Use

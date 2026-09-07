@@ -140,6 +140,7 @@ const NotificationPreferencesPage = lazy(() => import("./pages/NotificationPrefe
 
 const ProfileCompletionWizard = lazy(() => import("./pages/ProfileCompletionWizard"));
 const VerificationStatusPage = lazy(() => import("./pages/VerificationStatusPage"));
+const PlatformReportPage = lazy(() => import("./pages/PlatformReportPage"));
 import { OnboardingStageToaster } from "@/components/onboarding/OnboardingStageToaster";
 import PhoneVerificationPrompt from "@/components/phone/PhoneVerificationPrompt";
 
@@ -262,6 +263,9 @@ const App = () => (
                   <Route path="/sms-opt-in" element={<SmsOptIn />} />
                   <Route path="/faq" element={<FAQ />} />
                   <Route path="/how-it-works" element={<HowItWorksPage />} />
+                  <Route path="/report" element={<PlatformReportPage />} />
+                  <Route path="/features" element={<PlatformReportPage />} />
+                  <Route path="/features-report" element={<PlatformReportPage />} />
                   <Route path="/guides/renting-vs-owning-for-rideshare" element={<RentingVsOwning />} />
                   <Route 
                     path="/admin" 
