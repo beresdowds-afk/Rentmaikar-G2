@@ -31,10 +31,16 @@ export default defineConfig(({ mode }) => ({
         : "jrsydiofzceoeddjogov"
     ),
     "import.meta.env.VITE_GOOGLE_CLIENT_ID": JSON.stringify(
-      process.env.VITE_GOOGLE_CLIENT_ID || process.env.GCP_CLIENT_ID || "713824918751-ng4ag1lmfv3mupep1ca32rmjm6r72elf.apps.googleusercontent.com"
+      (process.env.VITE_GOOGLE_CLIENT_ID && process.env.VITE_GOOGLE_CLIENT_ID.includes(".apps.googleusercontent.com"))
+        ? process.env.VITE_GOOGLE_CLIENT_ID
+        : (process.env.GCP_CLIENT_ID && process.env.GCP_CLIENT_ID.includes(".apps.googleusercontent.com"))
+          ? process.env.GCP_CLIENT_ID
+          : "713824918751-edb6n7rsemun54nm07aitlql9mnhdlij.apps.googleusercontent.com"
     ),
     "import.meta.env.VITE_GCP_CLIENT_ID": JSON.stringify(
-      process.env.GCP_CLIENT_ID || "713824918751-ng4ag1lmfv3mupep1ca32rmjm6r72elf.apps.googleusercontent.com"
+      (process.env.GCP_CLIENT_ID && process.env.GCP_CLIENT_ID.includes(".apps.googleusercontent.com"))
+        ? process.env.GCP_CLIENT_ID
+        : "713824918751-edb6n7rsemun54nm07aitlql9mnhdlij.apps.googleusercontent.com"
     ),
     "import.meta.env.VITE_GCP_PROJECT_ID": JSON.stringify(
       process.env.VITE_GCP_PROJECT_ID || process.env.GCP_PROJECT_ID || "probable-dream-477110-t5"
