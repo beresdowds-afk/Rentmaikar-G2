@@ -173,7 +173,7 @@ const sections = [
     title: "7. Treasury, Payments & Financial Reconciliation",
     count: "10 Features",
     features: [
-      { name: "Multi-PSP Payment Gateways", desc: "Native integration with Paystack, Flutterwave, Monnify, and Stripe." },
+      { name: "Multi-PSP Payment Gateways", desc: "Native integration with PayPal (Global/US), OPay (Nigeria Cashier), Paystack, Flutterwave, and Stripe." },
       { name: "Settlement Reconciliation Engine", desc: "Automated comparison of bank settlement reports against system invoices." },
       { name: "Automated Rental Escrow", desc: "Segregated deposit holding and conditional refund authorization." },
       { name: "Billing Reconciliation", desc: "Audit of expected driver billing cycles against captured payments." },

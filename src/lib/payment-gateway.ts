@@ -55,7 +55,7 @@ export class PaymentGateway {
     this.region = region;
   }
 
-  get gateway(): 'paypal' | 'paystack' {
+  get gateway(): 'paypal' | 'paystack' | 'opay' {
     return this.region.paymentGateway;
   }
 
@@ -77,6 +77,8 @@ export class PaymentGateway {
     
     if (this.gateway === 'paypal') {
       return this.initializePayPalPayment(breakdown, driverId, vehicleId, rentalId, metadata);
+    } else if (this.gateway === 'opay') {
+      return this.initializeOPayPayment(breakdown, driverId, vehicleId, rentalId, metadata);
     } else {
       return this.initializePaystackPayment(breakdown, driverId, vehicleId, rentalId, metadata);
     }
@@ -162,13 +164,76 @@ export class PaymentGateway {
   }
 
   /**
+   * Initialize OPay payment (Nigeria) via Cashier API.
+   */
+  private async initializeOPayPayment(
+    breakdown: PaymentBreakdown,
+    driverId: string,
+    vehicleId: string,
+    rentalId: string,
+    metadata?: Record<string, unknown>
+  ): Promise<PaymentResult> {
+    try {
+      const { createOPayOrder } = await import('./opay-client');
+      const result = await createOPayOrder({
+        amount: breakdown.driverTotal,
+        currency: 'NGN',
+        driverId,
+        vehicleId,
+        rentalId,
+        paymentFrequency: breakdown.frequency,
+        productName: `Rentmaikar Vehicle Rental`,
+        productDesc: `Rental payment — ${formatCurrency(breakdown.baseAmount, 'NGN')}`,
+        metadata,
+      });
+
+      return {
+        success: true,
+        transactionId: result.reference,
+        redirectUrl: result.cashierUrl ?? null,
+        gatewayResponse: result,
+      };
+    } catch (error) {
+      console.error('[OPay] Payment initialization failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OPay payment initialization failed',
+      };
+    }
+  }
+
+  /**
    * Verify payment completion
    */
   async verifyPayment(transactionId: string): Promise<PaymentResult> {
     if (this.gateway === 'paypal') {
       return this.verifyPayPalPayment(transactionId);
+    } else if (this.gateway === 'opay') {
+      return this.verifyOPayPayment(transactionId);
     } else {
       return this.verifyPaystackPayment(transactionId);
+    }
+  }
+
+  /**
+   * Verify OPay transaction status via Cashier Status API
+   */
+  private async verifyOPayPayment(reference: string): Promise<PaymentResult> {
+    try {
+      const { queryOPayStatus } = await import('./opay-client');
+      const result = await queryOPayStatus({ reference });
+
+      return {
+        success: result.status === 'SUCCESSFUL',
+        transactionId: result.reference,
+        gatewayResponse: result,
+      };
+    } catch (error) {
+      console.error('[OPay] Payment verification failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OPay payment verification failed',
+      };
     }
   }
 

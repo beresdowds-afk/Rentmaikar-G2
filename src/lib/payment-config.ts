@@ -40,8 +40,8 @@ export const PAYMENT_CONFIG = {
   
   // Payment methods
   PAYMENT_METHODS: {
-    USA: ['paypal', 'bank_transfer'] as const,
-    NIGERIA: ['paystack', 'bank_transfer'] as const,
+    USA: ['paypal', 'stripe', 'bank_transfer'] as const,
+    NIGERIA: ['paystack', 'opay', 'flutterwave', 'bank_transfer'] as const,
   },
   
   // Bank details for manual transfers

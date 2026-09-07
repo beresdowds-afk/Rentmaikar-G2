@@ -5,7 +5,7 @@ export interface Region {
   currency: 'USD' | 'NGN' | (string & {});
   center: { lat: number; lng: number };
   zoom: number;
-  paymentGateway: 'paypal' | 'paystack';
+  paymentGateway: 'paypal' | 'paystack' | 'opay';
   requiresPoliceReport: boolean;
   cities?: string[];
 }
