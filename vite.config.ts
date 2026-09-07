@@ -36,6 +36,9 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_GCP_CLIENT_ID": JSON.stringify(
       process.env.GCP_CLIENT_ID || "713824918751-ng4ag1lmfv3mupep1ca32rmjm6r72elf.apps.googleusercontent.com"
     ),
+    "import.meta.env.VITE_GCP_PROJECT_ID": JSON.stringify(
+      process.env.VITE_GCP_PROJECT_ID || process.env.GCP_PROJECT_ID || "probable-dream-477110-t5"
+    ),
   },
 
   plugins: [

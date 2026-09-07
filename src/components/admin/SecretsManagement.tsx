@@ -375,7 +375,7 @@ const secrets: SecretConfig[] = [
   {
     name: "GCP_PROJECT_ID",
     displayName: "Google Cloud Project ID",
-    description: "Google Cloud Project identifier (e.g. avian-computer-477009-v0)",
+    description: "Google Cloud Project identifier (e.g. probable-dream-477110-t5)",
     category: "gcp",
     testable: false,
     docsUrl: "https://cloud.google.com/resource-manager/docs/creating-managing-projects",
