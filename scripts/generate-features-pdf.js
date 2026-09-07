@@ -30,7 +30,7 @@ function renderHeaderBar(isFirstPage) {
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
     doc.text("RentMaikar - Official Platform Feature & Architecture Catalog", margin, 9);
-    doc.text("Confidential / Enterprise Operations", pageWidth - margin, 9, { align: "right" });
+    doc.text("CONFIDENTIAL / INTERNAL ADMIN USE ONLY", pageWidth - margin, 9, { align: "right" });
     y = 18;
   }
 }

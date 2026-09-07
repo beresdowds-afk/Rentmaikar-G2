@@ -85,6 +85,7 @@ import { MessagingDocs } from "@/components/admin/docs/MessagingDocs";
 import { EmailDocs } from "@/components/admin/docs/EmailDocs";
 import { VoIPDocs } from "@/components/admin/docs/VoIPDocs";
 import PlatformGlossary from "@/components/admin/docs/PlatformGlossary";
+import PlatformFeaturesReport from "@/components/admin/docs/PlatformFeaturesReport";
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
 import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
 import RegionalOperationsManagement from "@/components/admin/RegionalOperationsManagement";
@@ -931,6 +932,7 @@ const AdminDashboard = () => {
           {/* Docs Portal */}
           {portalView === 'docs' && (
             <div className="space-y-6">
+              {activeTab === 'platform-features' && <PlatformFeaturesReport />}
               {activeTab === 'messaging-docs' && <MessagingDocs />}
               {activeTab === 'email-docs' && <EmailDocs />}
               {activeTab === 'voip-docs' && <VoIPDocs />}

@@ -107,6 +107,7 @@ export const marketingTabs: PortalTab[] = [
 ];
 
 export const docsTabs: PortalTab[] = [
+  { value: "platform-features", label: "Features Report", icon: <FileText className="h-4 w-4" /> },
   { value: "glossary", label: "Platform Glossary", icon: <BookOpen className="h-4 w-4" /> },
   { value: "messaging-docs", label: "SMS & WhatsApp", icon: <MessageSquare className="h-4 w-4" /> },
   { value: "email-docs", label: "Email System", icon: <Mail className="h-4 w-4" /> },

@@ -295,9 +295,9 @@ export default function PlatformReportPage() {
       <main className="flex-1 container mx-auto px-4 py-24 max-w-5xl">
         {/* Top Navigation */}
         <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-200">
-          <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors">
+          <Link to="/admin?portal=docs&tab=platform-features" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
             <ArrowLeft className="w-4 h-4" />
-            Back to Home
+            Back to Admin Docs Portal
           </Link>
 
           <div className="flex items-center gap-3">
@@ -323,16 +323,16 @@ export default function PlatformReportPage() {
         </div>
 
         {/* Hero Title Card */}
-        <div className="bg-slate-900 text-white rounded-2xl p-8 mb-8 shadow-md">
-          <div className="flex items-center gap-2 text-blue-400 text-xs font-semibold uppercase tracking-wider mb-2">
+        <div className="bg-slate-900 text-white rounded-2xl p-8 mb-8 shadow-md relative overflow-hidden">
+          <div className="flex items-center gap-2 text-amber-400 text-xs font-semibold uppercase tracking-wider mb-2">
             <ShieldCheck className="w-4 h-4" />
-            Official System Specification
+            Confidential - Internal Admin Documentation
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2">
             RentMaikar Operations Platform
           </h1>
           <p className="text-slate-300 text-base max-w-3xl">
-            Comprehensive breakdown of all 68 active core features, architectural modules, and role-based permissions governing the RentMaikar vehicle rental and IoT fleet ecosystem.
+            Internal architectural catalog detailing all 68 active core features, operational modules, and multi-role permission boundaries governing the RentMaikar vehicle rental and IoT fleet ecosystem.
           </p>
         </div>
 

@@ -263,9 +263,17 @@ const App = () => (
                   <Route path="/sms-opt-in" element={<SmsOptIn />} />
                   <Route path="/faq" element={<FAQ />} />
                   <Route path="/how-it-works" element={<HowItWorksPage />} />
-                  <Route path="/report" element={<PlatformReportPage />} />
-                  <Route path="/features" element={<PlatformReportPage />} />
-                  <Route path="/features-report" element={<PlatformReportPage />} />
+                  <Route 
+                    path="/admin/features-report" 
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <PlatformReportPage />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route path="/report" element={<Navigate to="/admin?portal=docs&tab=platform-features" replace />} />
+                  <Route path="/features" element={<Navigate to="/admin?portal=docs&tab=platform-features" replace />} />
+                  <Route path="/features-report" element={<Navigate to="/admin?portal=docs&tab=platform-features" replace />} />
                   <Route path="/guides/renting-vs-owning-for-rideshare" element={<RentingVsOwning />} />
                   <Route 
                     path="/admin" 
