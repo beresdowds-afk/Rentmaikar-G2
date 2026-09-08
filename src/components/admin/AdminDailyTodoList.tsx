@@ -112,23 +112,44 @@ export const AdminDailyTodoList = ({ isEmbedPage = false }: AdminDailyTodoListPr
 
       const priorityWeight: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
+      let loadedTasks: DailyTask[] = [];
       if (data && data.length > 0) {
-        // If there are tasks in the database, sort and use them
-        const sorted = [...data].sort((a: DailyTask, b: DailyTask) => {
-          if (a.is_completed !== b.is_completed) return a.is_completed ? 1 : -1;
-          return (priorityWeight[a.priority] ?? 2) - (priorityWeight[b.priority] ?? 2);
-        });
-        setTasks(sorted);
+        loadedTasks = [...data];
       } else {
-        // If no tasks exist in database for today, provide default operational tasks
-        // ensuring at least 8 items are present so 6 items are visible in the scrolling iframe
-        const seeded: DailyTask[] = INITIAL_OPERATIONAL_TASKS.map((item, idx) => ({
+        loadedTasks = INITIAL_OPERATIONAL_TASKS.map((item, idx) => ({
           ...item,
           id: `seed-task-${today}-${idx}`,
           task_date: today,
         }));
-        setTasks(seeded);
       }
+
+      // Merge any pending AI auto-responder drafts from local storage
+      try {
+        const localDrafts = JSON.parse(localStorage.getItem('rentmaikar:pending_todo_drafts') || '[]');
+        if (Array.isArray(localDrafts) && localDrafts.length > 0) {
+          const formattedLocal: DailyTask[] = localDrafts.map((d: any) => ({
+            id: d.id,
+            category: d.category || 'inbox',
+            title: d.title,
+            description: d.description,
+            priority: d.priority || 'high',
+            is_completed: !!d.is_completed,
+            completed_at: d.completed_at || null,
+            task_date: d.task_date || today,
+            source_table: d.source_table || 'inbox_conversations',
+          }));
+          // Prepend uncompleted local drafts
+          loadedTasks = [...formattedLocal.filter(l => !loadedTasks.some(t => t.id === l.id)), ...loadedTasks];
+        }
+      } catch {
+        // Ignore local parse errors
+      }
+
+      const sorted = loadedTasks.sort((a: DailyTask, b: DailyTask) => {
+        if (a.is_completed !== b.is_completed) return a.is_completed ? 1 : -1;
+        return (priorityWeight[a.priority] ?? 2) - (priorityWeight[b.priority] ?? 2);
+      });
+      setTasks(sorted);
     } catch (err) {
       console.error('Error fetching daily tasks:', err);
       // Fallback

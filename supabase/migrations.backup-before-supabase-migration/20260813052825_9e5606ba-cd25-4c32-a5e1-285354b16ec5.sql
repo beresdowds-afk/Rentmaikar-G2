@@ -1,1 +1,0 @@
-UPDATE public.telemetry_providers SET display_name = 'GPSANDTRACK' WHERE name = 'sarekon';

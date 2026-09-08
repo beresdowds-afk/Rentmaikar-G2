@@ -1,2 +1,0 @@
-ALTER PUBLICATION supabase_realtime ADD TABLE public.platform_company_info;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.user_uuid_assignments;

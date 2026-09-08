@@ -1,2 +1,0 @@
-ALTER TABLE public.opay_transactions ADD COLUMN IF NOT EXISTS idempotency_key text;
-CREATE UNIQUE INDEX IF NOT EXISTS opay_transactions_idempotency_key_uidx ON public.opay_transactions (idempotency_key) WHERE idempotency_key IS NOT NULL;

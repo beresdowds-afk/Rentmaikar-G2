@@ -1,1 +1,0 @@
-ALTER TABLE public.vehicle_geofences ALTER COLUMN call_in_id DROP NOT NULL;

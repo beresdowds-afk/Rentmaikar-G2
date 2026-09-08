@@ -44,6 +44,21 @@
 
   <body>
     <div id="root"></div>
+    <!-- Early bootstrap error catcher: Prevents mystery blank screens if a module error occurs before React mounts -->
+    <script>
+      window.addEventListener('error', function (e) {
+        var root = document.getElementById('root');
+        if (root && (!root.innerHTML || root.innerHTML.trim() === '')) {
+          root.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0A1628;color:#fff;font-family:system-ui,-apple-system,sans-serif;padding:24px;text-align:center;">' +
+            '<div style="max-width:480px;background:#132238;padding:32px;border-radius:16px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);border:1px solid #1E3A5F;">' +
+            '<div style="width:48px;height:48px;background:rgba(239,68,68,0.15);color:#ef4444;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:24px;font-weight:bold;">!</div>' +
+            '<h2 style="margin:0 0 8px;font-size:20px;font-weight:600;">Unable to load RentMaikar</h2>' +
+            '<p style="color:#94a3b8;font-size:14px;line-height:1.5;margin:0 0 20px;">' + (e.message || 'An initialization error occurred during startup.') + '</p>' +
+            '<button onclick="window.location.reload(true)" style="background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-weight:500;cursor:pointer;font-size:14px;">Reload Application</button>' +
+            '</div></div>';
+        }
+      });
+    </script>
     <!-- Meta Pixel (loaded via src/lib/meta-pixel.ts once user consent + VITE_META_PIXEL_ID are set) -->
     <noscript><img height="1" width="1" style="display:none" alt="" src="https://www.facebook.com/tr?ev=PageView&noscript=1" /></noscript>
     <script type="module" src="/src/main.tsx"></script>

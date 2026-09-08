@@ -87,7 +87,7 @@ export const erpTabs: PortalTab[] = [
 
 export const supportTabs: PortalTab[] = [
   { value: "task-portal", label: "Task Portal", icon: <LayoutGrid className="h-4 w-4" />, dataTour: "admin-portal" },
-  { value: "inbox", label: "Unified Inbox", icon: <Inbox className="h-4 w-4" /> },
+  { value: "inbox", label: "Message Console", icon: <MessageSquare className="h-4 w-4" /> },
   { value: "call-center", label: "Call Center", icon: <Phone className="h-4 w-4" /> },
   { value: "contacts", label: "Contact Settings", icon: <MessageSquare className="h-4 w-4" />, dataTour: "admin-contacts" },
   { value: "support-tasks", label: "Support Tasks", icon: <Headphones className="h-4 w-4" /> },
