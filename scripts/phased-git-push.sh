@@ -51,13 +51,17 @@ fi
 echo "==> Remote origin target: $REPO_URL"
 
 # ------------------------------------------------------------------------------
-# PRE-PUSH: Fetch and Pull remote history to align git tree
+# PRE-PUSH: Fetch and align with remote history
 # ------------------------------------------------------------------------------
 echo "==> [Pre-Push] Fetching existing commits from remote origin..."
 if git ls-remote --exit-code origin &>/dev/null; then
-  echo "==> Pulling remote origin/main (rebase with allow-unrelated-histories)..."
   git fetch origin main || true
-  git pull origin main --rebase --allow-unrelated-histories -X ours || true
+  # Only attempt rebase if working directory is clean, or stash changes temporarily
+  if [ -z "$(git status --porcelain)" ]; then
+    git pull origin main --rebase --allow-unrelated-histories -X ours || true
+  else
+    echo "==> Working directory has local changes; proceeding to phase commits..."
+  fi
   echo "✓ Remote history reconciled."
 fi
 
