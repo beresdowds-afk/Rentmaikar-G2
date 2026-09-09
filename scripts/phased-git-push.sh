@@ -13,24 +13,25 @@ echo "=================================================================="
 echo "  RentMaikar Phased Git Repository Push"
 echo "=================================================================="
 
-# Ensure Git author information is configured
-if [ -z "$(git config user.name || true)" ]; then
-  git config user.name "RentMaikar Bot"
-fi
-if [ -z "$(git config user.email || true)" ]; then
-  git config user.email "adebayoolusola39@gmail.com"
-fi
-
-# Increase git HTTP buffer to 500MB to avoid large-pack dropouts
-git config --global http.postBuffer 524288000
-git config --global http.maxRequestBuffer 104857600
-git config --global core.compression 9
-
+# Ensure repository is initialized first
 if [ ! -d ".git" ]; then
   echo "==> Initializing git repository..."
   git init
   git branch -M main
 fi
+
+# Ensure Git author information is configured
+if [ -z "$(git config user.name 2>/dev/null || true)" ]; then
+  git config user.name "Olusola Adebayo"
+fi
+if [ -z "$(git config user.email 2>/dev/null || true)" ]; then
+  git config user.email "beresdowds@gmail.com"
+fi
+
+# Increase git HTTP buffer to 500MB to avoid large-pack dropouts
+git config http.postBuffer 524288000 || git config --global http.postBuffer 524288000 || true
+git config http.maxRequestBuffer 104857600 || git config --global http.maxRequestBuffer 104857600 || true
+git config core.compression 9 || git config --global core.compression 9 || true
 
 # Determine authenticated remote URL if GITHUB_TOKEN is available
 PUSH_REMOTE_URL="$REPO_URL"

@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "check": "npm run lint && npm run typecheck && npm run test",
     "clean": "rm -rf dist node_modules",
+    "git:push": "bash scripts/phased-git-push.sh",
     "diagnose": "npx tsx scripts/diagnose-build-env.ts",
     "prepare": "node -e \"if(require('fs').existsSync('.git')){try{require('child_process').execSync('husky install',{stdio:'inherit'})}catch(e){}}\"",
     "predev": "npx tsx scripts/generate-sitemap.ts",
