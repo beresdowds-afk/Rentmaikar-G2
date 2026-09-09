@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # ==============================================================================
-# RentMaikar Phased Git Commit & Push Script
-# Solves GitHub timeout / 413 Payload Too Large errors by committing in 3 phases
+# RentMaikar Permanent Resilient Phased Git Commit & Push Script
+# 
+# Solves GitHub timeout / 413 Payload Too Large / non-fast-forward rejection
+# by aligning directly with origin/main and committing/pushing in 3 phases.
 # ==============================================================================
 
 REPO_URL="${1:-https://github.com/beresdowds-afk/Rentmaikar-G2.git}"
@@ -13,14 +15,20 @@ echo "=================================================================="
 echo "  RentMaikar Phased Git Repository Push"
 echo "=================================================================="
 
-# Ensure repository is initialized first
+# 1. Ensure repository is initialized
 if [ ! -d ".git" ]; then
   echo "==> Initializing git repository..."
   git init
   git branch -M main
 fi
 
-# Ensure Git author information is configured
+# Ensure branch is main
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'main')"
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  git branch -M main || true
+fi
+
+# 2. Ensure Git author information is configured
 if [ -z "$(git config user.name 2>/dev/null || true)" ]; then
   git config user.name "Olusola Adebayo"
 fi
@@ -28,19 +36,18 @@ if [ -z "$(git config user.email 2>/dev/null || true)" ]; then
   git config user.email "beresdowds@gmail.com"
 fi
 
-# Increase git HTTP buffer to 500MB to avoid large-pack dropouts
+# 3. Increase git HTTP buffers to 500MB to avoid large-pack dropouts and timeouts
 git config http.postBuffer 524288000 || git config --global http.postBuffer 524288000 || true
 git config http.maxRequestBuffer 104857600 || git config --global http.maxRequestBuffer 104857600 || true
 git config core.compression 9 || git config --global core.compression 9 || true
 
-# Determine authenticated remote URL if GITHUB_TOKEN is available
+# 4. Determine authenticated remote URL
 PUSH_REMOTE_URL="$REPO_URL"
 if [ -n "$GITHUB_TOKEN" ]; then
-  # Strip any existing https:// or credentials
   CLEAN_REPO="${REPO_URL#https://}"
   CLEAN_REPO="${CLEAN_REPO#*@}"
   PUSH_REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@${CLEAN_REPO}"
-  echo "==> Authenticated remote URL configured with Fine-Grained Token."
+  echo "==> Authenticated remote URL configured with access token."
 fi
 
 if git remote | grep -q "^origin$"; then
@@ -48,25 +55,61 @@ if git remote | grep -q "^origin$"; then
 else
   git remote add origin "$PUSH_REMOTE_URL"
 fi
-echo "==> Remote origin target: $REPO_URL"
+echo "==> Remote target: $REPO_URL"
 
-# ------------------------------------------------------------------------------
-# PRE-PUSH: Fetch and align with remote history
-# ------------------------------------------------------------------------------
-echo "==> [Pre-Push] Fetching existing commits from remote origin..."
+# 5. Fetch and reconcile remote history (Prevents non-fast-forward rejections)
+echo "==> [Pre-Push] Checking remote origin status..."
 if git ls-remote --exit-code origin &>/dev/null; then
-  git fetch origin main || true
-  # Only attempt rebase if working directory is clean, or stash changes temporarily
-  if [ -z "$(git status --porcelain)" ]; then
-    git pull origin main --rebase --allow-unrelated-histories -X ours || true
-  else
-    echo "==> Working directory has local changes; proceeding to phase commits..."
+  echo "==> Fetching commits from origin/main..."
+  git fetch origin main --depth=20 || git fetch origin main || true
+
+  if git rev-parse --verify origin/main >/dev/null 2>&1; then
+    # If local branch has no commits yet (brand new git init), align HEAD to origin/main
+    if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+      echo "==> Aligning working tree with origin/main to guarantee fast-forward commits..."
+      git reset --mixed origin/main
+    else
+      # If local has commits, ensure we are based on origin/main
+      MERGE_BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+      REMOTE_HEAD="$(git rev-parse origin/main 2>/dev/null || true)"
+      if [ -n "$REMOTE_HEAD" ] && [ "$MERGE_BASE" != "$REMOTE_HEAD" ]; then
+        echo "==> Aligning branch delta with origin/main..."
+        git rebase origin/main || git reset --mixed origin/main
+      fi
+    fi
+    echo "✓ Remote history successfully reconciled."
   fi
-  echo "✓ Remote history reconciled."
 fi
 
+# Helper function to push with retry
+push_with_retry() {
+  local phase_name="$1"
+  local max_attempts=3
+  local attempt=1
+  local success=0
+
+  while [ $attempt -le $max_attempts ]; do
+    echo "==> Pushing $phase_name to origin/main (Attempt $attempt of $max_attempts)..."
+    if git push origin main; then
+      echo "✓ $phase_name pushed successfully."
+      success=1
+      break
+    else
+      echo "⚠ Push attempt $attempt failed. Fetching and retrying in 3 seconds..."
+      git fetch origin main || true
+      sleep 3
+      attempt=$((attempt + 1))
+    fi
+  done
+
+  if [ $success -ne 1 ]; then
+    echo "❌ Failed to push $phase_name after $max_attempts attempts."
+    exit 1
+  fi
+}
+
 # ------------------------------------------------------------------------------
-# PHASE 1: Root Configs, Public Assets, Docs, Scripts & Tooling (~100 files)
+# PHASE 1: Root Configs, Public Assets, Docs, Scripts & Tooling
 # ------------------------------------------------------------------------------
 echo ""
 echo "==> [Phase 1/3] Staging core configuration, public assets, docs & tooling..."
@@ -97,19 +140,15 @@ git add \
   README.md || true
 
 if ! git diff --cached --quiet; then
-  git commit -m "chore(init): [Phase 1/3] root configs, public assets, docs and tooling"
+  git commit -m "chore(config): [Phase 1/3] root configs, public assets, docs and tooling"
   echo "✓ Phase 1 committed successfully."
-  if git remote | grep -q "^origin$"; then
-    echo "==> Pushing Phase 1 to origin/main..."
-    git push -u origin main
-    echo "✓ Phase 1 pushed successfully."
-  fi
+  push_with_retry "Phase 1"
 else
   echo "ℹ Phase 1: No staged changes."
 fi
 
 # ------------------------------------------------------------------------------
-# PHASE 2: Supabase Migrations, Edge Functions & Backend (~630 files)
+# PHASE 2: Supabase Migrations, Edge Functions & Backend
 # ------------------------------------------------------------------------------
 echo ""
 echo "==> [Phase 2/3] Staging backend services & Supabase database engine..."
@@ -118,17 +157,13 @@ git add supabase/ backend/ || true
 if ! git diff --cached --quiet; then
   git commit -m "feat(backend): [Phase 2/3] supabase migrations, edge functions and backend services"
   echo "✓ Phase 2 committed successfully."
-  if git remote | grep -q "^origin$"; then
-    echo "==> Pushing Phase 2 to origin/main..."
-    git push origin main
-    echo "✓ Phase 2 pushed successfully."
-  fi
+  push_with_retry "Phase 2"
 else
   echo "ℹ Phase 2: No staged changes."
 fi
 
 # ------------------------------------------------------------------------------
-# PHASE 3: Frontend Application, UI Components, Pages & Logic (~1035 files)
+# PHASE 3: Frontend Application, UI Components, Pages & Logic
 # ------------------------------------------------------------------------------
 echo ""
 echo "==> [Phase 3/3] Staging frontend UI, components, hooks, contexts and pages..."
@@ -138,16 +173,12 @@ git add . || true
 if ! git diff --cached --quiet; then
   git commit -m "feat(frontend): [Phase 3/3] react application, UI components, hooks and pages"
   echo "✓ Phase 3 committed successfully."
-  if git remote | grep -q "^origin$"; then
-    echo "==> Pushing Phase 3 to origin/main..."
-    git push origin main
-    echo "✓ Phase 3 pushed successfully."
-  fi
+  push_with_retry "Phase 3"
 else
   echo "ℹ Phase 3: No staged changes."
 fi
 
 echo ""
 echo "=================================================================="
-echo "🎉 All 3 phases committed and pushed successfully!"
+echo "🎉 All changes committed and pushed to origin/main successfully!"
 echo "=================================================================="

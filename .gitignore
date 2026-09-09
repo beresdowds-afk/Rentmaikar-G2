@@ -49,4 +49,5 @@ playwright/.cache/
 .cache/
 .temp/
 .lovable/
+build-diagnosis-report.json
 
