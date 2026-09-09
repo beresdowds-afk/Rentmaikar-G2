@@ -71,6 +71,11 @@ vi.mock("@/integrations/supabase/client", () => {
 
       removeAllChannels: vi.fn(),
 
+      rpc: vi.fn(async () => ({
+        data: [],
+        error: null,
+      })),
+
       auth: {
         getUser: vi.fn(async () => ({
           data: {

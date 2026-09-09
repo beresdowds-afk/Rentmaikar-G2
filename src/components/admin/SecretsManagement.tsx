@@ -337,7 +337,15 @@ const secrets: SecretConfig[] = [
     testable: false,
     region: "Nigeria",
   },
-  // Telemetry — Traccar (alternative to EMQX)
+  // Telemetry — Traccar (GPS Tracking & Telemetry)
+  {
+    name: "TRACCAR_BASE_URL",
+    displayName: "Traccar Base URL",
+    description: "Server root URL for the Traccar GPS instance (e.g. https://traccar.example.com)",
+    category: "iot",
+    testable: false,
+    docsUrl: "https://www.traccar.org/documentation/",
+  },
   {
     name: "TRACCAR_API_URL",
     displayName: "Traccar API URL",
@@ -350,6 +358,34 @@ const secrets: SecretConfig[] = [
     name: "TRACCAR_API_TOKEN",
     displayName: "Traccar API Token",
     description: "Bearer token for authenticating to the Traccar REST API",
+    category: "iot",
+    testable: false,
+  },
+  {
+    name: "TRACCAR_API_KEY",
+    displayName: "Traccar API Key",
+    description: "Alternative alias for authenticating to the Traccar API",
+    category: "iot",
+    testable: false,
+  },
+  {
+    name: "TRACCAR_EMAIL",
+    displayName: "Traccar Account Email",
+    description: "User account email for Traccar basic auth and session authentication",
+    category: "iot",
+    testable: false,
+  },
+  {
+    name: "TRACCAR_PASSWORD",
+    displayName: "Traccar Account Password",
+    description: "User account password for Traccar basic auth and session authentication",
+    category: "iot",
+    testable: false,
+  },
+  {
+    name: "TRACCAR_VAPID_KEY",
+    displayName: "Traccar VAPID Key",
+    description: "Voluntary Application Server Identification key for Traccar web push notifications",
     category: "iot",
     testable: false,
   },

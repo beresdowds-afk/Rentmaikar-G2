@@ -38,9 +38,10 @@ interface Version {
 
 const FIELDS: Array<{ key: string; label: string; secret: boolean; placeholder: string }> = [
   { key: "base_url", label: "Server base URL", secret: false, placeholder: "https://traccar.example.com" },
+  { key: "token", label: "API token / Key", secret: true, placeholder: "Leave blank to keep current" },
   { key: "email", label: "Tracker email", secret: false, placeholder: "fleet@rentmaikar.com" },
   { key: "password", label: "Tracker password", secret: true, placeholder: "Leave blank to keep current" },
-  { key: "token", label: "API token (optional, overrides email/password)", secret: true, placeholder: "Leave blank to keep current" },
+  { key: "vapid_key", label: "VAPID key (push notifications)", secret: true, placeholder: "Leave blank to keep current" },
 ];
 
 /**
@@ -100,6 +101,13 @@ export function TraccarCredentialsPanel() {
     if (Object.keys(payload).length === 0) {
       toast.error("Enter at least one value to save");
       return;
+    }
+    if (payload.base_url) {
+      let cleaned = payload.base_url.trim().replace(/\/+$/, "");
+      if (cleaned.endsWith("/api")) {
+        cleaned = cleaned.slice(0, -4).replace(/\/+$/, "");
+      }
+      payload.base_url = cleaned;
     }
     setSaving(true);
     try {

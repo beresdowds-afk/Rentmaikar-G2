@@ -11,13 +11,18 @@ export interface RegionOption {
 
 export interface AllowedRegionRow {
   id?: string;
-  country_name: string;
-  country_code: string;
+  country_name?: string;
+  country_code?: string;
   currency_code?: string;
   currency_symbol?: string;
   phone_prefix?: string;
   flag_emoji?: string;
   is_active?: boolean;
+  value?: string;
+  label?: string;
+  flag?: string;
+  currency?: string;
+  built_in?: boolean;
 }
 
 export const BUILTIN_REGION_OPTIONS: RegionOption[] = [
@@ -48,7 +53,7 @@ const CACHE_KEY = 'rm_region_cache_v1';
 export function mergeRegions(customRegions: RegionOption[] = []): RegionOption[] {
   const customMap = new Map<string, RegionOption>();
   for (const r of customRegions) {
-    if (r.value) customMap.set(r.value.toLowerCase(), r);
+    if (r && r.value) customMap.set(r.value.toLowerCase(), r);
   }
   const result = [...BUILTIN_REGION_OPTIONS];
   for (const [key, val] of customMap.entries()) {
@@ -60,16 +65,30 @@ export function mergeRegions(customRegions: RegionOption[] = []): RegionOption[]
 }
 
 export function mapAllowedRegionRows(rows: AllowedRegionRow[] = []): RegionOption[] {
-  return rows.map((row) => ({
-    value: row.country_name,
-    label: row.country_name,
-    flag: row.flag_emoji || '🌐',
-    countryCode: row.country_code,
-    currency: row.currency_code || 'USD',
-    currencySymbol: row.currency_symbol || '$',
-    phonePrefix: row.phone_prefix || '+1',
-    builtIn: BUILTIN_REGION_OPTIONS.some((b) => b.value.toLowerCase() === row.country_name.toLowerCase()),
-  }));
+  return (rows ?? [])
+    .map((row) => {
+      const name = String(row.country_name || row.value || row.label || '').trim();
+      const code = String(row.country_code || '').trim().toUpperCase();
+      const curr = String(row.currency_code || row.currency || 'USD').trim().toUpperCase();
+      const sym = String(row.currency_symbol || '$').trim();
+      const prefix = String(row.phone_prefix || '+1').trim();
+      const flag = row.flag_emoji || row.flag || '🌐';
+      const isBuiltIn =
+        row.built_in ??
+        BUILTIN_REGION_OPTIONS.some((b) => b.value.toLowerCase() === name.toLowerCase());
+
+      return {
+        value: name,
+        label: row.label ? String(row.label).trim() : name,
+        flag,
+        countryCode: code,
+        currency: curr,
+        currencySymbol: sym,
+        phonePrefix: prefix,
+        builtIn: isBuiltIn,
+      };
+    })
+    .filter((r) => r.value.length > 0);
 }
 
 export function readRegionCache(): { regions: RegionOption[]; timestamp: number } | null {

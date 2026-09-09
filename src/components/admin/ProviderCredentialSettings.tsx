@@ -36,6 +36,7 @@ const FIELDS: Record<"hologram" | "traccar", Array<{ key: string; label: string;
     { key: "token", label: "API token (or use email + password)", secret: true },
     { key: "email", label: "Email", secret: false },
     { key: "password", label: "Password", secret: true },
+    { key: "vapid_key", label: "VAPID key", secret: true },
   ],
 };
 
@@ -47,8 +48,15 @@ function ProviderForm({ provider }: { provider: "hologram" | "traccar" }) {
   const save = useMutation({
     mutationFn: async () => {
       const payload = Object.fromEntries(
-        Object.entries(values).filter(([, v]) => v && v.trim().length > 0),
+        Object.entries(values).filter(([, v]) => v && v.trim().length > 0).map(([k, v]) => [k, v.trim()]),
       );
+      if (payload.base_url) {
+        let cleaned = payload.base_url.replace(/\/+$/, "");
+        if (cleaned.endsWith("/api")) {
+          cleaned = cleaned.slice(0, -4).replace(/\/+$/, "");
+        }
+        payload.base_url = cleaned;
+      }
       if (Object.keys(payload).length === 0) throw new Error("Enter at least one value");
       const { error } = await supabase.rpc("provider_write_credentials" as never, {
         _provider: provider,
