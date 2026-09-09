@@ -37,9 +37,36 @@ type ErrResult =
   };
 export type TraccarResult<T = unknown> = OkResult<T> | ErrResult;
 
-/** The stored secret is TRACCAR_API_TOKEN; TRACCAR_TOKEN kept as a legacy alias. */
+/** The stored secret is TRACCAR_API_TOKEN; TRACCAR_API_KEY and TRACCAR_TOKEN are supported aliases. */
 function envToken(): string {
-  return Deno.env.get("TRACCAR_API_TOKEN") || Deno.env.get("TRACCAR_TOKEN") || "";
+  return (
+    providerOverride("traccar", "token") ||
+    providerOverride("traccar", "api_token") ||
+    providerOverride("traccar", "api_key") ||
+    Deno.env.get("TRACCAR_API_TOKEN") ||
+    Deno.env.get("TRACCAR_API_KEY") ||
+    Deno.env.get("TRACCAR_TOKEN") ||
+    ""
+  ).trim();
+}
+
+function cleanBaseUrl(raw: string): string {
+  let url = raw.trim().replace(/\/+$/, "");
+  if (url.endsWith("/api")) {
+    url = url.slice(0, -4).replace(/\/+$/, "");
+  }
+  return url;
+}
+
+function resolveBaseUrl(): string {
+  const raw = (
+    providerOverride("traccar", "base_url") ||
+    providerOverride("traccar", "api_url") ||
+    Deno.env.get("TRACCAR_BASE_URL") ||
+    Deno.env.get("TRACCAR_API_URL") ||
+    ""
+  );
+  return cleanBaseUrl(raw);
 }
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -47,10 +74,10 @@ const MAX_ATTEMPTS = 3;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function creds() {
-  const base = (providerOverride("traccar", "base_url") || Deno.env.get("TRACCAR_BASE_URL") || "").replace(/\/+$/, "");
-  const token = providerOverride("traccar", "token") || envToken();
-  const email = providerOverride("traccar", "email") || Deno.env.get("TRACCAR_EMAIL") || "";
-  const password = providerOverride("traccar", "password") || Deno.env.get("TRACCAR_PASSWORD") || "";
+  const base = resolveBaseUrl();
+  const token = envToken();
+  const email = (providerOverride("traccar", "email") || Deno.env.get("TRACCAR_EMAIL") || "").trim();
+  const password = (providerOverride("traccar", "password") || Deno.env.get("TRACCAR_PASSWORD") || "").trim();
   if (!base) return null;
   if (!token && !(email && password)) return null;
   return { base, token, email, password };
@@ -58,10 +85,10 @@ function creds() {
 
 /** Which credential pieces are absent — powers precise "not configured" errors. */
 export function missingCredentials(): string[] {
-  const base = providerOverride("traccar", "base_url") || Deno.env.get("TRACCAR_BASE_URL") || "";
-  const token = providerOverride("traccar", "token") || envToken();
-  const email = providerOverride("traccar", "email") || Deno.env.get("TRACCAR_EMAIL") || "";
-  const password = providerOverride("traccar", "password") || Deno.env.get("TRACCAR_PASSWORD") || "";
+  const base = resolveBaseUrl();
+  const token = envToken();
+  const email = (providerOverride("traccar", "email") || Deno.env.get("TRACCAR_EMAIL") || "").trim();
+  const password = (providerOverride("traccar", "password") || Deno.env.get("TRACCAR_PASSWORD") || "").trim();
   const missing: string[] = [];
   if (!base) missing.push("base_url");
   if (!token) {

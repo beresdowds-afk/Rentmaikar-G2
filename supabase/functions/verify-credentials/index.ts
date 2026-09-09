@@ -219,7 +219,15 @@ const CHECKS: Check[] = [
   {
     provider: "traccar",
     label: "Traccar (telemetry)",
-    secrets: ["TRACCAR_BASE_URL", "TRACCAR_API_TOKEN", "TRACCAR_EMAIL", "TRACCAR_PASSWORD"],
+    secrets: [
+      "TRACCAR_BASE_URL",
+      "TRACCAR_API_URL",
+      "TRACCAR_API_TOKEN",
+      "TRACCAR_API_KEY",
+      "TRACCAR_EMAIL",
+      "TRACCAR_PASSWORD",
+      "TRACCAR_VAPID_KEY",
+    ],
     run: async () => {
       await traccar.ensureReady();
       if (!traccar.isConfigured()) return { status: "not_configured", message: "Traccar credentials are not set." };

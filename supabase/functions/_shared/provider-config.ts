@@ -36,7 +36,7 @@ const KV_KEY: Record<ManagedProvider, string> = {
 /** Non-secret keys that may live in platform_kv_settings. */
 const PUBLIC_KEYS: Record<ManagedProvider, string[]> = {
   hologram: ["org_id", "base_url"],
-  traccar: ["base_url", "email"],
+  traccar: ["base_url", "api_url", "email"],
   sarekon: ["base_url", "username", "user_id"],
   // Opay/PayPal: the non-secret half of the config, including the sandbox vs
   // live switch the admin settings page writes.
