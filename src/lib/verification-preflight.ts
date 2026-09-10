@@ -39,11 +39,14 @@ export interface ConfigCheckResult {
 /** Validate the client-side configuration required for auth to work at all. */
 export function checkAppConfig(): ConfigCheckResult {
   const env = import.meta.env as Record<string, string | undefined>;
-  const required = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_PUBLISHABLE_KEY'];
-  const missing = required.filter((k) => !env[k]);
-  const suspicious: string[] = [];
+  const url = env.VITE_SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co";
+  const key = env.VITE_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_ANON_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
 
-  const url = env.VITE_SUPABASE_URL;
+  const missing: string[] = [];
+  if (!url) missing.push('VITE_SUPABASE_URL');
+  if (!key) missing.push('VITE_SUPABASE_PUBLISHABLE_KEY');
+
+  const suspicious: string[] = [];
   if (url && !/^https:\/\//.test(url)) suspicious.push('VITE_SUPABASE_URL is not https');
   if (typeof window !== 'undefined') {
     const { protocol, hostname } = window.location;
