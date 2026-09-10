@@ -58,19 +58,20 @@ jobs:
       - name: Build and Push Docker Image
         if: ${{ secrets.GCP_SA_KEY != '' }}
         run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}"
           docker build \
-            --build-arg VITE_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
-            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" \
-            -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:${{ github.sha }} \
-            -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:latest .
-          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:${{ github.sha }}
-          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:latest
+            --build-arg VITE_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL || 'https://jrsydiofzceoeddjogov.supabase.co' }}" \
+            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p' }}" \
+            -t gcr.io/${PROJECT_ID}/rentmaikar:${{ github.sha }} \
+            -t gcr.io/${PROJECT_ID}/rentmaikar:latest .
+          docker push gcr.io/${PROJECT_ID}/rentmaikar:${{ github.sha }}
+          docker push gcr.io/${PROJECT_ID}/rentmaikar:latest
 
       - name: Deploy to Cloud Run
         if: ${{ secrets.GCP_SA_KEY != '' }}
         run: |
-          gcloud run deploy rentmaikar \
-            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/rentmaikar:${{ github.sha }} \
-            --region europe-west2 \
+          gcloud run deploy rentmaikar-g2 \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar:${{ github.sha }} \
+            --region europe-west1 \
             --port 80 \
             --allow-unauthenticated
