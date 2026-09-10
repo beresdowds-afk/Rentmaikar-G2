@@ -25,8 +25,9 @@ export function CallInMonitor() {
       <CardHeader>
         <CardTitle>Driver Call-Ins</CardTitle>
         <CardDescription>
-          Fault, maintenance, and sick call-ins. Payments are suspended while active; geofence breaches
-          auto-reactivate payments. Repeated call-ins on 2 consecutive days trigger a recall request.
+          Fault, maintenance, and sick call-ins. Fault/Maintenance are renewable every 24hrs up to a maximum of 3 times (72h),
+          after which a vehicle call-in/recall is automatically initiated. Payments are suspended while active; geofence breaches
+          auto-reactivate payments.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -42,6 +43,7 @@ export function CallInMonitor() {
                 <TableHead>Vehicle</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Renewals</TableHead>
                 <TableHead>Started</TableHead>
                 <TableHead>Expires</TableHead>
                 <TableHead>Reason</TableHead>
@@ -60,6 +62,20 @@ export function CallInMonitor() {
                       {c.status}
                     </Badge>
                     {c.extend_requested && <Badge variant="outline" className="ml-1">extend</Badge>}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {c.type === "sick" ? (
+                      <span className="text-muted-foreground">7d cap</span>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        <Badge variant={c.recall_initiated || (c.renewal_count ?? 0) >= (c.max_renewals ?? 3) ? "destructive" : "outline"} className="w-fit text-[11px]">
+                          {c.renewal_count ?? 0}/{c.max_renewals ?? 3}
+                        </Badge>
+                        {c.recall_initiated && (
+                          <span className="text-[10px] text-destructive font-semibold">Vehicle Call-In</span>
+                        )}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">{formatDistanceToNow(new Date(c.started_at), { addSuffix: true })}</TableCell>
                   <TableCell className="text-xs">{formatDistanceToNow(new Date(c.expires_at), { addSuffix: true })}</TableCell>

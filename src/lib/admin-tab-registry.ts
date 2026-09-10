@@ -10,6 +10,7 @@ import {
   crmTabs,
   erpTabs,
   supportTabs,
+  contentEditorTabs,
   marketingTabs,
   docsTabs,
   type PortalTab,
@@ -21,13 +22,15 @@ export const PORTAL_TABS: Record<PortalType, PortalTab[]> = {
   crm: crmTabs,
   erp: erpTabs,
   support: supportTabs,
+  'content-editor': contentEditorTabs,
   marketing: marketingTabs,
   docs: docsTabs,
+  content: contentEditorTabs,
 };
 
 /** Every tab value rendered anywhere in the admin portal navigation. */
-export const ALL_ADMIN_TABS: string[] = Object.values(PORTAL_TABS).flatMap((tabs) =>
-  tabs.map((t) => t.value),
+export const ALL_ADMIN_TABS: string[] = Array.from(
+  new Set(Object.values(PORTAL_TABS).flatMap((tabs) => tabs.map((t) => t.value))),
 );
 
 /**
@@ -78,8 +81,10 @@ export function getDefaultTabForPortal(portal: PortalType): string {
     case 'crm': return 'applications';
     case 'erp': return 'tracking';
     case 'support': return 'task-portal';
+    case 'content-editor':
+    case 'content': return 'faq';
     case 'marketing': return 'campaigns';
-    case 'docs': return 'glossary';
+    case 'docs': return 'platform-features';
   }
 }
 

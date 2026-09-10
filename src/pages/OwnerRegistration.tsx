@@ -818,6 +818,7 @@ const OwnerRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="I have read and agree to the Terms of Service"
                       onCheckedChange={(checked) =>
                         setValue("agreeTerms", checked as boolean)
                       }
@@ -851,6 +852,7 @@ const OwnerRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="I have read and agree to the Privacy Policy"
                       onCheckedChange={(checked) =>
                         setValue("agreePrivacy", checked as boolean)
                       }
@@ -884,6 +886,7 @@ const OwnerRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50 bg-accent/5">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="IoT Tracking Device Requirement Consent"
                       onCheckedChange={(checked) =>
                         setValue("agreeIoT", checked as boolean)
                       }
@@ -905,6 +908,7 @@ const OwnerRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50 bg-primary/5">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="Platform Fee Acknowledgement"
                       onCheckedChange={(checked) =>
                         setValue("agreeFees", checked as boolean)
                       }

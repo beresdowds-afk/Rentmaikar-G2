@@ -26,6 +26,7 @@ import { useDriverDashboard } from '@/hooks/useDriverDashboard';
 import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency } from '@/lib/payment-config';
 import { format, formatDistanceToNowStrict, differenceInHours } from 'date-fns';
+import { RefereePickupGate } from '@/components/driver/RefereePickupGate';
 
 interface Props {
   onNavigateTab: (tab: string) => void;
@@ -375,6 +376,9 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
         <QuickAction icon={ShieldCheck} label="Insurance & training" onClick={() => onNavigateTab('subscriptions')} />
         <QuickAction icon={MessageSquare} label="Open messages" onClick={() => onNavigateTab('messages')} />
       </div>
+
+      {/* Provisioned Vehicle Pickup & Referee Gate */}
+      <RefereePickupGate />
 
       {/* Active vehicle summary */}
       <Card>

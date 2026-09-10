@@ -127,7 +127,7 @@ export function PortalGate({
     );
   }
 
-  const [forceUnlocked, setForceUnlocked] = useState(true);
+  const [forceUnlocked, setForceUnlocked] = useState(false);
 
   const actuallyMeets = (() => {
     if (!progress?.authenticated) return false;

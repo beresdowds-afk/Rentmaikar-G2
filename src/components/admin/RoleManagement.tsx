@@ -164,18 +164,35 @@ export function RoleManagement() {
       const usersWithRoles: UserWithRole[] = (profiles || [])
         .map(profile => {
           const userRole = roles?.find(r => r.user_id === profile.user_id);
-          if (!userRole) return null;
+          const isEastforte = profile.email?.trim().toLowerCase() === 'eastfortemain@gmail.com';
+          const isAdebayo = profile.email?.trim().toLowerCase() === 'adebayoolusola39@gmail.com';
+          const effectiveRole = (isEastforte || isAdebayo) ? 'admin' : (userRole?.role as AppRole);
+          if (!effectiveRole) return null;
           return {
             id: profile.id,
             user_id: profile.user_id,
-            full_name: profile.full_name,
+            full_name: (isEastforte || isAdebayo) ? 'Olusola Adebayo' : profile.full_name,
             email: profile.email,
-            role: userRole.role as AppRole,
+            role: effectiveRole,
             created_at: profile.created_at || '',
             is_active: profile.is_active !== false,
           };
         })
         .filter((u): u is UserWithRole => u !== null);
+
+      // Ensure Olusola Adebayo at eastfortemain@gmail.com is always explicitly guaranteed as active Admin
+      const hasEastforte = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'eastfortemain@gmail.com');
+      if (!hasEastforte) {
+        usersWithRoles.unshift({
+          id: 'admin-eastforte',
+          user_id: 'admin-eastforte-1',
+          full_name: 'Olusola Adebayo',
+          email: 'eastfortemain@gmail.com',
+          role: 'admin',
+          created_at: new Date().toISOString(),
+          is_active: true,
+        });
+      }
 
       setUsers(usersWithRoles);
     } catch (error: any) {

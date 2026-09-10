@@ -23,7 +23,6 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   defaults: 'can_view_payments',
   'legal-agreements': 'can_view_rentals',
   'rent-to-own': 'can_view_rentals',
-  content: null,
   subscriptions: 'can_view_payments',
   training: null,
   'roadside-partners': 'can_view_support_tasks',
@@ -66,6 +65,14 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   'payment-accounts': 'can_view_payments',
   'expiry-notifications': 'can_view_support_tasks',
 
+  // Content Editor
+  content: null,
+  faq: null,
+  policies: null,
+  'legal-templates': 'can_view_rentals',
+  'tour-guides': null,
+  'message-templates': 'can_view_communications',
+
   // Marketing – requires reports
   campaigns: 'can_view_reports',
   facebook: 'can_view_reports',
@@ -74,6 +81,7 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   google: 'can_view_reports',
 
   // Docs – reference material, always available to assistants and support staff.
+  'platform-features': null,
   glossary: null,
   'messaging-docs': null,
   'email-docs': null,

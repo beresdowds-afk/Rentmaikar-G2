@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, RefreshCw, Play, CheckCircle2, AlertTriangle, Cpu } from "lucide-react";
+import { Loader2, RefreshCw, Play, CheckCircle2, AlertTriangle, Cpu, Radio } from "lucide-react";
 import { toast } from "sonner";
+import { IoTLivenessCommandBar } from "./IoTLivenessCommandBar";
+import { IoTAuditLogFeed } from "./IoTAuditLogFeed";
 
 interface ProvisioningState {
   id: string;
@@ -150,9 +152,17 @@ export function IoTProvisioningPanel() {
             <Badge variant={stageVariant[s.stage] ?? "outline"}>{s.stage.replace(/_/g, " ")}</Badge>
           </TableCell>
           <TableCell>
-            <Badge variant={s.test_status === "passed" ? "default" : s.test_status === "failed" ? "destructive" : "outline"}>
-              {s.test_status.replace(/_/g, " ")}
-            </Badge>
+            {s.test_status === "passed" ? (
+              <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" /> Active (Live)
+              </Badge>
+            ) : s.test_status === "failed" ? (
+              <Badge variant="destructive">Failed</Badge>
+            ) : (
+              <Badge variant="outline" className="text-muted-foreground gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> {s.test_status.replace(/_/g, " ")}
+              </Badge>
+            )}
           </TableCell>
           <TableCell className="text-xs text-muted-foreground max-w-[280px]">
             {s.last_error || (s.ready_at ? `Ready ${new Date(s.ready_at).toLocaleString()}` : "—")}
@@ -163,6 +173,9 @@ export function IoTProvisioningPanel() {
 
   return (
     <div className="space-y-6">
+      {/* Real-Time Liveness Test & Auto-Enabling Engine */}
+      <IoTLivenessCommandBar onRefresh={load} />
+
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div>
@@ -301,6 +314,9 @@ export function IoTProvisioningPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* Real-time Provisioning & Auto-Enabling Audit Stream */}
+      <IoTAuditLogFeed title="IoT Provisioning & Auto-Enabling Audit Stream" maxRows={20} />
     </div>
   );
 }

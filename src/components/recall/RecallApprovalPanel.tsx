@@ -137,7 +137,14 @@ export function RecallApprovalPanel({ mode }: Props) {
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription className="text-xs">
-                    <strong>{r.recall_type}:</strong> {r.recall_reason}
+                    <strong>
+                      {r.recall_type === "fault_maintenance_max_renewals"
+                        ? "Vehicle Call-In (Max 3 Renewals Reached)"
+                        : r.recall_type === "sick_extension"
+                        ? "Sick Extension Recall"
+                        : r.recall_type}:
+                    </strong>{" "}
+                    {r.recall_reason}
                   </AlertDescription>
                 </Alert>
                 <div className="grid gap-2 text-xs sm:grid-cols-2">

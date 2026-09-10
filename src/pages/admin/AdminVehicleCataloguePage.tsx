@@ -41,6 +41,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { IoTLivenessCommandBar } from "@/components/admin/IoTLivenessCommandBar";
+import { IoTAuditLogFeed } from "@/components/admin/IoTAuditLogFeed";
 import {
   Car,
   Search,
@@ -176,6 +178,21 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as VehicleRow[];
+    },
+  });
+
+  const { data: deviceMap, refetch: refetchDevices } = useQuery({
+    queryKey: ["admin-catalogue-devices"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("iot_devices")
+        .select("id, serial_number, vehicle_id, status");
+      if (error) return new Map<string, { id: string; serial_number: string; status: string }>();
+      const map = new Map<string, { id: string; serial_number: string; status: string }>();
+      (data || []).forEach((d) => {
+        if (d.vehicle_id) map.set(d.vehicle_id, d);
+      });
+      return map;
     },
   });
 
@@ -499,6 +516,9 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
         </div>
       )}
 
+      {/* Real-time Liveness Test & Auto-Enabling Engine */}
+      <IoTLivenessCommandBar onRefresh={() => { refetchVehicles(); refetchDevices(); }} />
+
       <Tabs defaultValue="catalogue" className="space-y-4">
         <TabsList>
           <TabsTrigger value="catalogue" className="gap-2">
@@ -659,6 +679,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                           <TableHead>Location</TableHead>
                           <TableHead>Country</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>IoT Device / Liveness</TableHead>
                           <TableHead>Public</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -666,6 +687,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                       <TableBody>
                         {paged.map((v) => {
                           const country = inferCountry(v);
+                          const dev = deviceMap?.get(v.id);
                           return (
                             <TableRow key={v.id}>
                               <TableCell>
@@ -682,6 +704,25 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                                 <Badge variant="outline" className={statusColors[v.status || "pending"]}>
                                   {v.status || "pending"}
                                 </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {dev ? (
+                                  dev.status === "active" ? (
+                                    <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 whitespace-nowrap">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                                      Live ({dev.serial_number})
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-muted-foreground border-border gap-1.5 whitespace-nowrap">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                      Inactive ({dev.serial_number})
+                                    </Badge>
+                                  )
+                                ) : (
+                                  <Badge variant="outline" className="text-amber-600 border-amber-500/30 bg-amber-500/5 whitespace-nowrap">
+                                    No Device
+                                  </Badge>
+                                )}
                               </TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2">
@@ -708,7 +749,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                         })}
                         {!paged.length && (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                            <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
                               No vehicles match these filters.
                             </TableCell>
                           </TableRow>
@@ -748,6 +789,9 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
               )}
             </CardContent>
           </Card>
+
+          {/* Real-time Vehicle Auto-Provisioning & Catalogue Audit Stream */}
+          <IoTAuditLogFeed title="Vehicle Auto-Provisioning & Public Catalogue Audit Stream" maxRows={15} />
         </TabsContent>
 
         <TabsContent value="recommendations" className="space-y-4">

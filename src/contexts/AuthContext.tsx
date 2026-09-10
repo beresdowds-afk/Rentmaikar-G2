@@ -46,6 +46,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     'adebayoolusola39@gmail.com',
   ];
 
+  const KNOWN_ADMINS: Record<string, { fullName: string; phone: string; role: AppRole }> = {
+    'eastfortemain@gmail.com': {
+      fullName: 'Olusola Adebayo',
+      phone: '+2348139051772',
+      role: 'admin',
+    },
+    'adebayoolusola39@gmail.com': {
+      fullName: 'Olusola Adebayo',
+      phone: '+2348139051772',
+      role: 'admin',
+    },
+  };
+
   // Users can legitimately hold more than one role row. Resolve deterministically
   // by priority instead of asking PostgREST for a single row (which errors out
   // with PGRST116 and leaves the app role-less / flickering).
@@ -78,12 +91,55 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const roles = (data ?? []).map((r) => r.role as AppRole);
 
       if (isAdminByEmail) {
+        const adminInfo = normalizedEmail ? KNOWN_ADMINS[normalizedEmail] : null;
         if (!roles.includes('admin')) {
           // Idempotently ensure admin role in database
           assignRole(userId, 'admin', normalizedEmail).catch(() => {
             supabase.from('user_roles').upsert({ user_id: userId, role: 'admin' as any }, { onConflict: 'user_id,role' }).catch(() => {});
           });
         }
+
+        // Sync admin profile and 2FA settings
+        if (adminInfo) {
+          supabase
+            .from('profiles')
+            .upsert(
+              {
+                user_id: userId,
+                email: normalizedEmail,
+                full_name: adminInfo.fullName,
+                phone: adminInfo.phone,
+              },
+              { onConflict: 'user_id' }
+            )
+            .catch(() => {});
+
+          supabase
+            .from('two_factor_settings')
+            .upsert(
+              {
+                user_id: userId,
+                phone_number: adminInfo.phone,
+                preferred_channel: 'sms',
+                is_enabled: true,
+              },
+              { onConflict: 'user_id' }
+            )
+            .catch(() => {});
+
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('rentmaikar_admin_active', 'true');
+              localStorage.setItem('rentmaikar_admin_role', 'admin');
+              localStorage.setItem('rentmaikar_admin_email', normalizedEmail!);
+              localStorage.setItem('rentmaikar_admin_name', adminInfo.fullName);
+              localStorage.setItem('rentmaikar_admin_phone', adminInfo.phone);
+            } catch {
+              // ignore
+            }
+          }
+        }
+
         return 'admin';
       }
 
@@ -98,7 +154,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return null;
     }
   };
-
 
   const check2FAStatus = async (userId: string): Promise<TwoFactorStatus | null> => {
     try {
@@ -116,16 +171,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         body: { action: 'status', user_id: userId },
       });
 
-      const isSetup = (data && data.success && data.is_setup) || isAuthenticator || !!settings?.is_enabled;
+      const currentUserEmail = user?.email?.trim().toLowerCase();
+      const adminInfo = currentUserEmail ? KNOWN_ADMINS[currentUserEmail] : null;
+      const effectivePhone = settings?.phone_number || adminInfo?.phone || undefined;
+
+      const isSetup = (data && data.success && data.is_setup) || isAuthenticator || !!settings?.is_enabled || !!adminInfo;
       const requires2FA = (data && data.success && data.requires_2fa) || isAuthenticator || !!settings?.is_enabled;
 
       const status: TwoFactorStatus = {
         requires_2fa: requires2FA,
         is_setup: isSetup,
         is_mandatory: (data && data.success && data.is_mandatory) || false,
-        has_phone: (data && data.success && data.has_phone) || !!settings?.phone_number,
+        has_phone: (data && data.success && data.has_phone) || !!effectivePhone,
         preferred_channel: isAuthenticator ? 'authenticator' : (settings?.preferred_channel || (data && data.preferred_channel) || 'sms'),
-        phone: settings?.phone_number || undefined,
+        phone: effectivePhone,
       };
       setTwoFactorStatus(status);
       return status;
@@ -257,6 +316,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       const normalizedEmail = email.trim().toLowerCase();
+      const adminInfo = KNOWN_ADMINS[normalizedEmail];
+      const effectiveFullName = fullName.trim() || adminInfo?.fullName || fullName;
       const effectiveRole: AppRole = ADMIN_EMAILS.includes(normalizedEmail) ? 'admin' : role;
 
       // Server-side duplicate guard: authoritative check against auth.users
@@ -290,7 +351,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           emailRedirectTo: redirectUrl,
           // `requested_role` is consumed by the handle_new_user trigger, which
           // is the single place that provisions profile + role + wallet.
-          data: { full_name: fullName, requested_role: effectiveRole },
+          data: { full_name: effectiveFullName, requested_role: effectiveRole },
         },
       });
 

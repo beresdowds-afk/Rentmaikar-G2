@@ -22,12 +22,33 @@ export const PORTALS: Record<string, PortalDefinition> = {
     require: 'approved',
     title: 'Available Vehicles',
   },
+  'driver-payments': {
+    key: 'payments',
+    role: 'driver',
+    tab: 'payments',
+    require: 'approved',
+    title: 'Driver Payments',
+  },
+  'driver-training': {
+    key: 'training',
+    role: 'driver',
+    tab: 'training',
+    require: 'authenticated',
+    title: 'Driver Training',
+  },
   'owner-fleet': {
     key: 'fleet',
     role: 'owner',
     tab: 'fleet',
     require: 'approved',
     title: 'Owner Fleet',
+  },
+  'owner-vehicles': {
+    key: 'vehicles',
+    role: 'owner',
+    tab: 'vehicles',
+    require: 'approved',
+    title: 'Owner Vehicles',
   },
   'owner-payouts': {
     key: 'payouts',
@@ -36,17 +57,17 @@ export const PORTALS: Record<string, PortalDefinition> = {
     require: 'approved',
     title: 'Owner Payouts',
   },
+  'owner-insurance': {
+    key: 'insurance',
+    role: 'owner',
+    tab: 'insurance',
+    require: 'authenticated',
+    title: 'Owner Insurance',
+  },
 };
 
 export function getPortal(role: 'driver' | 'owner', portalKey: string): PortalDefinition | null {
   const direct = PORTALS[`${role}-${portalKey}`];
   if (direct) return direct;
-
-  return {
-    key: portalKey,
-    role,
-    tab: portalKey,
-    require: 'approved',
-    title: portalKey.charAt(0).toUpperCase() + portalKey.slice(1),
-  };
+  return null;
 }

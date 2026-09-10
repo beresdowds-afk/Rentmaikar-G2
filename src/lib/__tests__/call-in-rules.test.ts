@@ -33,6 +33,70 @@ export function shouldEscalateToRecall(callIns: { started_at: string; type: stri
   return d2 - d1 === 24 * 60 * 60 * 1000;
 }
 
+// ---- Fault / Maintenance Renewal & Vehicle Call-In Rules ----
+export const MAX_CALL_IN_RENEWALS = 3;
+export const RENEWAL_EXTENSION_MS = 24 * 60 * 60 * 1000;
+
+export interface CallInRenewalState {
+  type: "fault" | "maintenance" | "sick";
+  status: string;
+  renewal_count: number;
+  max_renewals?: number;
+  expires_at: string;
+  recall_initiated?: boolean;
+}
+
+export function canRenewCallIn(callIn: CallInRenewalState): { eligible: boolean; reason?: string } {
+  if (callIn.status !== "active") {
+    return { eligible: false, reason: "Only active call-ins can be renewed" };
+  }
+  if (callIn.type !== "fault" && callIn.type !== "maintenance") {
+    return { eligible: false, reason: "Only fault and maintenance call-ins are renewable every 24hrs" };
+  }
+  const max = callIn.max_renewals ?? MAX_CALL_IN_RENEWALS;
+  if (callIn.renewal_count >= max) {
+    return { eligible: false, reason: `Maximum of ${max} renewals reached. Vehicle call-in process required.` };
+  }
+  return { eligible: true };
+}
+
+export function computeRenewal(
+  callIn: CallInRenewalState,
+  referenceTime: Date = new Date()
+): {
+  new_renewal_count: number;
+  new_expires_at: Date;
+  should_initiate_vehicle_call_in: boolean;
+  message: string;
+} {
+  const max = callIn.max_renewals ?? MAX_CALL_IN_RENEWALS;
+  const currentCount = callIn.renewal_count || 0;
+
+  if (currentCount >= max) {
+    return {
+      new_renewal_count: currentCount,
+      new_expires_at: new Date(callIn.expires_at),
+      should_initiate_vehicle_call_in: true,
+      message: `Maximum ${max} renewals reached. Vehicle call-in process initiated.`,
+    };
+  }
+
+  const newCount = currentCount + 1;
+  const currentExpires = new Date(callIn.expires_at).getTime();
+  const baseTime = Math.max(currentExpires, referenceTime.getTime());
+  const newExpiresAt = new Date(baseTime + RENEWAL_EXTENSION_MS);
+  const shouldInitiateRecall = newCount >= max;
+
+  return {
+    new_renewal_count: newCount,
+    new_expires_at: newExpiresAt,
+    should_initiate_vehicle_call_in: shouldInitiateRecall,
+    message: shouldInitiateRecall
+      ? `Final renewal (${newCount} of ${max}) granted. Vehicle call-in process initiated for mandatory inspection.`
+      : `Renewed for 24 hours. (Renewal ${newCount} of ${max}).`,
+  };
+}
+
 describe("call-in expiry (24h / 7d rules)", () => {
   const start = new Date("2026-07-09T10:00:00Z");
 
@@ -119,3 +183,118 @@ describe("2-consecutive-days recall escalation", () => {
     ])).toBe(false);
   });
 });
+
+describe("fault & maintenance renewals every 24hrs up to maximum of 3", () => {
+  const baseExpiry = "2026-07-10T10:00:00.000Z";
+
+  it("fault call-in with 0 renewals is eligible to renew", () => {
+    const res = canRenewCallIn({
+      type: "fault",
+      status: "active",
+      renewal_count: 0,
+      expires_at: baseExpiry,
+    });
+    expect(res.eligible).toBe(true);
+  });
+
+  it("maintenance call-in with 1 renewal is eligible to renew", () => {
+    const res = canRenewCallIn({
+      type: "maintenance",
+      status: "active",
+      renewal_count: 1,
+      expires_at: baseExpiry,
+    });
+    expect(res.eligible).toBe(true);
+  });
+
+  it("renewal #1 adds 24 hours to expiry and increments count to 1", () => {
+    const ref = new Date("2026-07-09T12:00:00.000Z");
+    const result = computeRenewal(
+      {
+        type: "fault",
+        status: "active",
+        renewal_count: 0,
+        expires_at: baseExpiry,
+      },
+      ref
+    );
+    expect(result.new_renewal_count).toBe(1);
+    expect(result.new_expires_at.toISOString()).toBe("2026-07-11T10:00:00.000Z");
+    expect(result.should_initiate_vehicle_call_in).toBe(false);
+  });
+
+  it("renewal #2 adds another 24 hours (count becomes 2) without vehicle call-in", () => {
+    const exp2 = "2026-07-11T10:00:00.000Z";
+    const ref = new Date("2026-07-10T12:00:00.000Z");
+    const result = computeRenewal({
+      type: "maintenance",
+      status: "active",
+      renewal_count: 1,
+      expires_at: exp2,
+    }, ref);
+    expect(result.new_renewal_count).toBe(2);
+    expect(result.new_expires_at.toISOString()).toBe("2026-07-12T10:00:00.000Z");
+    expect(result.should_initiate_vehicle_call_in).toBe(false);
+  });
+
+  it("renewal #3 reaches the maximum allowed (3) and flags vehicle call-in initiation", () => {
+    const exp3 = "2026-07-12T10:00:00.000Z";
+    const ref = new Date("2026-07-11T12:00:00.000Z");
+    const result = computeRenewal({
+      type: "fault",
+      status: "active",
+      renewal_count: 2,
+      expires_at: exp3,
+    }, ref);
+    expect(result.new_renewal_count).toBe(3);
+    expect(result.new_expires_at.toISOString()).toBe("2026-07-13T10:00:00.000Z");
+    expect(result.should_initiate_vehicle_call_in).toBe(true);
+  });
+
+  it("cannot renew beyond maximum of 3 renewals", () => {
+    const res = canRenewCallIn({
+      type: "fault",
+      status: "active",
+      renewal_count: 3,
+      expires_at: "2026-07-13T10:00:00.000Z",
+    });
+    expect(res.eligible).toBe(false);
+    expect(res.reason).toContain("Maximum of 3 renewals reached");
+  });
+
+  it("attempting renewal when already at max (3) initiates vehicle call-in process", () => {
+    const exp = "2026-07-13T10:00:00.000Z";
+    const result = computeRenewal({
+      type: "fault",
+      status: "active",
+      renewal_count: 3,
+      expires_at: exp,
+    });
+    expect(result.new_renewal_count).toBe(3);
+    expect(result.should_initiate_vehicle_call_in).toBe(true);
+    expect(result.message).toContain("Vehicle call-in process initiated");
+  });
+
+  it("sick call-ins cannot use the 24h fault/maintenance renewal process", () => {
+    const res = canRenewCallIn({
+      type: "sick",
+      status: "active",
+      renewal_count: 0,
+      expires_at: baseExpiry,
+    });
+    expect(res.eligible).toBe(false);
+    expect(res.reason).toContain("Only fault and maintenance call-ins are renewable every 24hrs");
+  });
+
+  it("non-active call-ins cannot be renewed", () => {
+    const res = canRenewCallIn({
+      type: "fault",
+      status: "cancelled",
+      renewal_count: 1,
+      expires_at: baseExpiry,
+    });
+    expect(res.eligible).toBe(false);
+    expect(res.reason).toContain("Only active call-ins can be renewed");
+  });
+});
+

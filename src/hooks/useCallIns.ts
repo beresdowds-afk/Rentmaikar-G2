@@ -99,5 +99,44 @@ export function useCallIns() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  return { activeCallIn, history, create, cancel, requestExtension };
+  const renew = useMutation({
+    mutationFn: async ({ id, notes }: { id: string; notes?: string }) => {
+      try {
+        const { data, error } = await supabase.functions.invoke("renew-call-in", {
+          body: { call_in_id: id, notes },
+        });
+        if (!error && data) {
+          if ((data as any).error) throw new Error((data as any).error);
+          return data;
+        }
+      } catch (err) {
+        console.warn("renew-call-in edge function fallback to rpc:", err);
+      }
+
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)("renew_driver_call_in", {
+        p_call_in_id: id,
+        p_notes: notes ?? null,
+      });
+      if (rpcError) throw rpcError;
+      if (rpcData && (rpcData as any).error) throw new Error((rpcData as any).error);
+      return rpcData;
+    },
+    onSuccess: (res: any) => {
+      if (res?.max_reached || res?.recall_initiated) {
+        toast.warning(
+          res?.message || "Maximum 3 renewals reached. Vehicle call-in process initiated.",
+          { duration: 7000 }
+        );
+      } else {
+        toast.success(res?.message || "Call-in renewed for 24 hours.");
+      }
+      qc.invalidateQueries({ queryKey: ["active-call-in"] });
+      qc.invalidateQueries({ queryKey: ["call-in-history"] });
+      qc.invalidateQueries({ queryKey: ["admin-call-ins"] });
+      qc.invalidateQueries({ queryKey: ["recalls-approvals"] });
+    },
+    onError: (e: Error) => toast.error(e.message || "Failed to renew call-in"),
+  });
+
+  return { activeCallIn, history, create, cancel, requestExtension, renew };
 }

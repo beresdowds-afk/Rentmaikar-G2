@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, RefreshCw, XCircle, MessageSquareWarning, Loader2 } from "lucide-react";
+import { AlertTriangle, RefreshCw, XCircle, MessageSquareWarning, Loader2, ShieldAlert } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -149,6 +149,40 @@ export default function NegativeAttestationReviewPanel() {
     }
   };
 
+  const lockdownVehicle = async (row: NegativeAttestation) => {
+    if (!row.applicant_id) {
+      toast.error("Applicant user ID not available for vehicle lockdown");
+      return;
+    }
+    setBusyId(row.id);
+    try {
+      const note = notes[row.id] ?? "Adverse referee attestation";
+      const { data, error } = await supabase.rpc("lockdown_and_recall_vehicle", {
+        _driver_id: row.applicant_id,
+        _reason: `Admin-enforced after adverse attestation from referee ${row.full_name}: ${note}`,
+        _referee_name: row.full_name,
+      } as any);
+
+      if (error) throw error;
+      const res = data as any;
+      if (res?.success) {
+        toast.success(`Vehicle ${res.vehicle_label ?? ""} locked down and recall initiated`);
+      } else {
+        toast.info(res?.message ?? "No active matched or rented vehicle found for driver");
+      }
+
+      await recordAudit("lockdown_and_recall_vehicle_negative_referee", row.id, {
+        application_id: row.application_id,
+        referee: row.full_name,
+        result: res,
+      });
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to trigger vehicle lockdown");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <Card className="p-6">
       <div className="flex items-center justify-between mb-4">
@@ -216,6 +250,15 @@ export default function NegativeAttestationReviewPanel() {
                   onClick={() => requestUpdates(r)}
                 >
                   <RefreshCw className="h-4 w-4 mr-2" /> Request Referee Updates
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="bg-red-700 hover:bg-red-800 text-white"
+                  disabled={busyId === r.id || !r.applicant_id}
+                  onClick={() => lockdownVehicle(r)}
+                >
+                  <ShieldAlert className="h-4 w-4 mr-2" /> Lockdown &amp; Recall Vehicle
                 </Button>
               </div>
             </div>

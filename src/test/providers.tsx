@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HelmetProvider } from "react-helmet-async";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { UserTypeProvider } from "@/contexts/UserTypeContext";
 
 /**
  * Shared provider shell for jsdom tests.
@@ -18,7 +19,9 @@ export function TestProviders({ children }: { children: ReactNode }) {
   return (
     <HelmetProvider>
       <QueryClientProvider client={client}>
-        <TooltipProvider>{children}</TooltipProvider>
+        <UserTypeProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </UserTypeProvider>
       </QueryClientProvider>
     </HelmetProvider>
   );

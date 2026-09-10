@@ -15,8 +15,12 @@ import { useRegionSamples } from '@/hooks/useRegionSamples';
 interface PickupDetails {
   has_rental: boolean;
   referees_submitted: boolean;
+  vehicle_enabled?: boolean;
+  disabled_reason?: string | null;
+  match_id?: string | null;
+  match_status?: string | null;
   rental_id?: string;
-  vehicle?: { make?: string; model?: string; year?: number; license_plate?: string } | null;
+  vehicle?: { id?: string; make?: string; model?: string; year?: number; license_plate?: string } | null;
   pickup?: {
     location?: string | null;
     address?: string | null;
@@ -106,8 +110,8 @@ export function RefereePickupGate() {
         supabase.functions.invoke('verify-referees', { body: { application_id: applicationId } }),
       ]);
 
-      toast.success('Referees submitted', {
-        description: 'Pickup location unlocked. Your referees will be contacted to attest for you.',
+      toast.success('Referees submitted — Provisioned vehicle enabled', {
+        description: 'Your vehicle has been enabled and pickup location unlocked. Your referees will be contacted to attest for you.',
       });
       await queryClient.invalidateQueries({ queryKey: ['my-pickup-details'] });
     } catch (err) {
@@ -121,19 +125,31 @@ export function RefereePickupGate() {
 
   if (!data.referees_submitted) {
     return (
-      <Card className="border-accent/40">
+      <Card className="border-amber-500/40 bg-amber-500/5">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Lock className="h-5 w-5 text-accent" />
-            Vehicle pickup location locked
-          </CardTitle>
-          <CardDescription>
-            To protect owners, the pickup location for {vehicleLabel} is revealed only after you
-            submit three referees who can vouch for you. Each referee needs a full name plus a
-            phone number or an email address.
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <Lock className="h-5 w-5 text-amber-500" />
+              Provisioned Vehicle Disabled · Referee Submission Required
+            </CardTitle>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+              Vehicle Disabled
+            </span>
+          </div>
+          <CardDescription className="text-sm">
+            <strong className="text-foreground">Condition for vehicle pickup:</strong> As required by fleet provisioning policy, matched provisioned vehicles are automatically disabled immediately upon signing the owner-driver agreement. Submitting your 3 referee contact details below will immediately <strong>enable the provisioned vehicle</strong> and unlock the handover pickup details.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="p-3.5 rounded-lg border border-amber-500/30 bg-background text-xs space-y-1 text-muted-foreground">
+            <p className="font-semibold text-foreground flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-amber-500" />
+              Referee Verification &amp; Security Lockdown Policy
+            </p>
+            <p>
+              Referee contact details are verified prior to final handover. Any adverse or negative report submitted by a referee is a basis for vehicle security lockdown and immediate recall.
+            </p>
+          </div>
           {referees.map((r, idx) => (
             <div key={idx} className="p-4 rounded-lg border border-border space-y-3">
               <h4 className="font-medium text-foreground flex items-center gap-2">
@@ -188,7 +204,7 @@ export function RefereePickupGate() {
             ) : (
               <ShieldCheck className="h-4 w-4 mr-2" />
             )}
-            Submit referees &amp; unlock pickup location
+            Submit referees &amp; enable provisioned vehicle
           </Button>
         </CardContent>
       </Card>
@@ -199,15 +215,26 @@ export function RefereePickupGate() {
   const hasAny =
     !!(pickup?.city || pickup?.address || pickup?.location || pickup?.instructions);
   return (
-    <Card className="border-accent/40">
+    <Card className="border-emerald-500/40 bg-emerald-500/5">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MapPin className="h-5 w-5 text-accent" />
-          Vehicle pickup location
-        </CardTitle>
-        <CardDescription>Collect {vehicleLabel} at the location below.</CardDescription>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2">
+            <MapPin className="h-5 w-5 text-emerald-600" />
+            Vehicle Pickup Location &amp; Status
+          </CardTitle>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+            Vehicle Enabled
+          </span>
+        </div>
+        <CardDescription>
+          Referee contacts on file. {vehicleLabel} is <strong>enabled for pickup</strong>. Coordinate handover with the team.
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2 text-sm">
+      <CardContent className="space-y-3 text-sm">
+        <div className="p-3 rounded-lg border border-emerald-500/30 bg-background flex items-center gap-2 text-xs text-muted-foreground">
+          <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+          <span>Provisioned vehicle engine starter is enabled. Adherence to platform guidelines and positive referee standing are required throughout your rental.</span>
+        </div>
         {pickup?.city && (
           <p>
             <span className="text-muted-foreground">City: </span>
@@ -234,7 +261,7 @@ export function RefereePickupGate() {
         )}
         {!hasAny && (
           <p className="text-muted-foreground">
-            The owner has not shared exact pickup details yet — our team will contact you with
+            The owner has not shared exact pickup coordinates yet — our team will contact you with
             handover arrangements.
           </p>
         )}

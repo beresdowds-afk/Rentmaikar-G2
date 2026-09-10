@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { invokeEdge } from "@/lib/edge-invoke";
+import { scanSarekonFleet, checkAndVerifyAgreements } from "@/services/sarekonAutoSyncService";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Wrench, UserCheck, ArrowRightLeft, FileSignature, PlugZap, Undo2, Search, ShieldCheck, History as HistoryIcon } from "lucide-react";
+import { Loader2, Wrench, UserCheck, ArrowRightLeft, FileSignature, PlugZap, Undo2, Search, ShieldCheck, History as HistoryIcon, Radar, Car, CheckCircle2, AlertCircle, Send, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 interface Diagnosis {
@@ -186,13 +187,78 @@ export default function GPSANDTRACKFleetAdminPanel({ onChanged }: { onChanged?: 
   const [auditOutcome, setAuditOutcome] = useState("all");
   const [auditDays, setAuditDays] = useState("30");
 
+  // autoscan & agreement detection state
+  const [scanStats, setScanStats] = useState<{
+    total_scanned?: number;
+    active_count?: number;
+    dormant_count?: number;
+    unprovisioned_count?: number;
+    usa_vehicles_linked?: Array<{ serial_number: string; vehicle_label: string }>;
+    driver_vehicles_published?: Array<{
+      driver_name: string;
+      vehicle_description: string;
+      address: string | null;
+      speed_kmh: number;
+      latitude: number;
+      longitude: number;
+    }>;
+    agreements_checked?: {
+      total: number;
+      completed: number;
+      pending: number;
+      pickup_notifications_sent: number;
+    };
+  } | null>(null);
+
 
   const run = useCallback(
     async (key: string, body: Record<string, unknown>, successMessage: string) => {
       setBusy(key);
       try {
         const { data, error } = await invokeEdge("sarekon-admin", body);
-        if (error) throw new Error(error.message);
+
+        if (error) {
+          const errMsg = error.message || "";
+          const isMissingFunction =
+            errMsg.includes("Requested function was not found") ||
+            errMsg.includes("not found") ||
+            errMsg.includes("404");
+
+          if (isMissingFunction) {
+            // Client fallback for scan_and_sync
+            if (key === "scan_and_sync") {
+              const fallback = await scanSarekonFleet();
+              toast.success("Database scanned directly (Edge function 'sarekon-admin' is not deployed).");
+              setResult({
+                action: key,
+                ok: true,
+                diagnosis: {
+                  title: "Direct Database Fallback Active",
+                  detail: "The Supabase Edge Function 'sarekon-admin' is not deployed (HTTP 404). Performed direct database check.",
+                  hints: ["Deploy the edge function using: supabase functions deploy sarekon-admin"],
+                },
+                payload: fallback,
+              });
+              onChanged?.();
+              return fallback as unknown as Record<string, unknown>;
+            }
+
+            // Client fallback for check_agreements
+            if (key === "check_agreements") {
+              const res = await checkAndVerifyAgreements();
+              toast.success(`Agreements Verified: ${res.completed} completed, ${res.pending} pending.`);
+              onChanged?.();
+              return { ok: true, ...res } as unknown as Record<string, unknown>;
+            }
+
+            throw new Error(
+              "Supabase Edge Function 'sarekon-admin' is not deployed on this project (HTTP 404). Deploy using: supabase functions deploy sarekon-admin"
+            );
+          }
+
+          throw new Error(error.message);
+        }
+
         const d = (data ?? {}) as Record<string, unknown>;
         if (d.error && d.ok === undefined) throw new Error(String(d.error));
         const diagnosis = d.diagnosis as Diagnosis | undefined;
@@ -245,7 +311,168 @@ export default function GPSANDTRACKFleetAdminPanel({ onChanged }: { onChanged?: 
         </Alert>
       )}
 
-      <Accordion type="multiple" defaultValue={["install"]} className="space-y-3">
+      <Accordion type="multiple" defaultValue={["autoscan", "install"]} className="space-y-3">
+        {/* ---------------- Continuous Scanner & Agreement Verification ---------------- */}
+        <AccordionItem value="autoscan" className="rounded-lg border border-primary/20 bg-primary/[0.02] px-4">
+          <AccordionTrigger className="text-base font-semibold">
+            <span className="flex items-center gap-2 text-primary">
+              <Radar className="h-5 w-5 animate-pulse text-primary" />
+              Continuous SAREKON Fleet Scanner & Agreement Gating
+            </span>
+          </AccordionTrigger>
+          <AccordionContent className="space-y-5 pb-4">
+            <p className="text-xs text-muted-foreground">
+              Continuously scans SAREKON for new devices, registers them, tests liveness (active vs dormant vs unprovisioned),
+              auto-links them to <strong>USA-listed vehicles only</strong>, auto-detects driver-owner agreement completion before enabling live maps,
+              and sends pickup location notifications to drivers.
+            </p>
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                onClick={async () => {
+                  const data = await run("scan_and_sync", { action: "scan_and_sync" }, "Fleet scanned and synchronized successfully");
+                  if (data && data.ok) {
+                    setScanStats(data as typeof scanStats);
+                  }
+                }}
+                disabled={!!busy}
+                className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {busy === "scan_and_sync" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Radar className="h-4 w-4" />}
+                Run Full Auto-Scan & Sync
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const data = await run("check_agreements", { action: "check_agreements" }, "Driver-owner agreements checked");
+                  if (data) {
+                    toast.success(
+                      `Agreements Verified: ${data.completed} completed, ${data.pending} pending. ${data.pickup_notifications_sent} pickup notifications sent.`
+                    );
+                    onChanged?.();
+                  }
+                }}
+                disabled={!!busy}
+                className="gap-2"
+              >
+                {busy === "check_agreements" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                Auto-Detect Agreements & Send Notifications
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const data = await run("auto_link_usa", { action: "auto_link_usa" }, "USA vehicles linked");
+                  if (data) {
+                    const linked = (data.usa_vehicles_linked as unknown[]) ?? [];
+                    toast.success(`Linked ${linked.length} devices to USA-only vehicles.`);
+                    onChanged?.();
+                  }
+                }}
+                disabled={!!busy}
+                className="gap-2"
+              >
+                {busy === "auto_link_usa" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Car className="h-4 w-4 text-primary" />}
+                Link USA Vehicles Only
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const data = await run("driver_vehicles", { action: "driver_vehicles" }, "Queried active driver vehicles");
+                  if (data && Array.isArray(data.driver_vehicles)) {
+                    toast.success(`Published ${data.driver_vehicles.length} active driver vehicles.`);
+                    onChanged?.();
+                  }
+                }}
+                disabled={!!busy}
+                className="gap-2"
+              >
+                {busy === "driver_vehicles" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 text-blue-600" />}
+                Publish Driver Vehicles to Live Map
+              </Button>
+            </div>
+
+            {/* Metrics cards if available */}
+            {scanStats && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-lg border bg-card">
+                    <p className="text-xs text-muted-foreground">Scanned Devices</p>
+                    <p className="text-xl font-bold text-foreground">{scanStats.total_scanned ?? 0}</p>
+                  </div>
+                  <div className="p-3 rounded-lg border bg-emerald-500/10 border-emerald-500/20">
+                    <p className="text-xs text-muted-foreground">Active & Live</p>
+                    <p className="text-xl font-bold text-emerald-600">{scanStats.active_count ?? 0}</p>
+                  </div>
+                  <div className="p-3 rounded-lg border bg-amber-500/10 border-amber-500/20">
+                    <p className="text-xs text-muted-foreground">Dormant</p>
+                    <p className="text-xl font-bold text-amber-600">{scanStats.dormant_count ?? 0}</p>
+                  </div>
+                  <div className="p-3 rounded-lg border bg-blue-500/10 border-blue-500/20">
+                    <p className="text-xs text-muted-foreground">USA Linked</p>
+                    <p className="text-xl font-bold text-blue-600">{scanStats.usa_vehicles_linked?.length ?? 0}</p>
+                  </div>
+                </div>
+
+                {scanStats.agreements_checked && (
+                  <div className="p-3 rounded-lg border bg-muted/40 space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold">Agreement Verification & Notifications:</span>
+                      <Badge variant="outline">
+                        {scanStats.agreements_checked.completed} Completed · {scanStats.agreements_checked.pending} Gated Pending
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {scanStats.agreements_checked.pickup_notifications_sent} pickup location notifications dispatched to drivers with verified agreements.
+                    </p>
+                  </div>
+                )}
+
+                {/* Published driver vehicles */}
+                {scanStats.driver_vehicles_published && scanStats.driver_vehicles_published.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      Active Driver-Linked Vehicles Published to Live Map ({scanStats.driver_vehicles_published.length})
+                    </div>
+                    <div className="max-h-48 overflow-auto rounded-md border text-xs">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Driver</TableHead>
+                            <TableHead>Vehicle</TableHead>
+                            <TableHead>Speed</TableHead>
+                            <TableHead>Location</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {scanStats.driver_vehicles_published.map((v, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="font-medium text-primary">{v.driver_name}</TableCell>
+                              <TableCell>{v.vehicle_description}</TableCell>
+                              <TableCell>{Math.round(v.speed_kmh * 0.621371)} mph</TableCell>
+                              <TableCell className="max-w-[200px] truncate text-muted-foreground">
+                                {v.address || `${v.latitude.toFixed(4)}, ${v.longitude.toFixed(4)}`}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </AccordionContent>
+        </AccordionItem>
+
         {/* ---------------- Installation ---------------- */}
         <AccordionItem value="install" className="rounded-lg border px-4">
           <AccordionTrigger className="text-base">

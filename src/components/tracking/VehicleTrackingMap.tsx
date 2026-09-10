@@ -42,6 +42,9 @@ type ExtendedVehicle = VehicleLocation & {
   daysOverdue?: number;
   serialNumber?: string;
   isStale?: boolean;
+  agreementStatus?: 'completed' | 'pending' | 'none';
+  isTrackingGated?: boolean;
+  address?: string | null;
 };
 
 const KMH_TO_MPH = 0.621371;
@@ -64,17 +67,21 @@ const VehicleTrackingMap = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [thresholdMinutes, setThresholdMinutes] = useState(60);
   const [liveOverrides, setLiveOverrides] = useState<Record<string, Partial<VehicleLocation>>>({});
+  const [isScanningSarekon, setIsScanningSarekon] = useState(false);
 
-  const { devices, loading, syncing, error, lastLoadedAt, syncNow } = useFleetDeviceLocations();
+  const { devices, loading, syncing, error, lastLoadedAt, syncNow, scanSarekonAndLinkUSA } = useFleetDeviceLocations();
 
-  // Real device positions -> map markers. Each tracker plots at its latest
-  // known fix; a device is "stale" when it has been silent past the threshold.
-  const vehicles: ExtendedVehicle[] = useMemo(
+  // Real device positions -> map markers.
+  // Vehicles with incomplete driver-owner agreements are gated until both signatures are complete.
+  const allVehicles: ExtendedVehicle[] = useMemo(
     () =>
       devices.map((d) => {
         const silentFor = minutesSince(d.lastPing);
         const isStale = silentFor === null || silentFor > thresholdMinutes;
         const speedMph = d.speedKmh * KMH_TO_MPH;
+        const provLabel = d.provider === 'traccar' ? 'Traccar' : d.provider === 'sarekon' ? 'GPSANDTRACK' : 'EMQX';
+        const driverLabel = d.driverName ? `${d.driverName} (Driver) · ${provLabel}` : provLabel;
+
         const base: ExtendedVehicle = {
           vehicleId: d.vehicleId ?? d.deviceRowId,
           latitude: d.latitude,
@@ -88,28 +95,27 @@ const VehicleTrackingMap = () => {
           make: d.make,
           model: d.model,
           licensePlate: d.licensePlate,
-          // Provider is a label only — positions are already normalized upstream,
-          // so the map never parses provider-specific payloads.
           driverName: [
-            d.provider === 'traccar'
-              ? 'Traccar'
-              : d.provider === 'sarekon'
-                ? 'GPSANDTRACK'
-                : 'EMQX',
+            driverLabel,
             d.serialNumber,
             isStale
               ? `last seen ${silentFor === null ? 'unknown' : `${silentFor}m ago`}`
               : 'LIVE',
           ].join(' · '),
-
-
           serialNumber: d.serialNumber,
           isStale,
+          agreementStatus: d.agreementStatus,
+          isTrackingGated: d.isTrackingGated,
+          address: d.address,
         };
         return { ...base, ...(liveOverrides[base.vehicleId] ?? {}) };
       }),
     [devices, thresholdMinutes, liveOverrides],
   );
+
+  // Filter for map markers: only enable live location if agreement is completed or not gated
+  const vehicles = useMemo(() => allVehicles.filter(v => !v.isTrackingGated), [allVehicles]);
+  const gatedCount = useMemo(() => allVehicles.filter(v => v.isTrackingGated).length, [allVehicles]);
 
   const setVehicles = useCallback(
     (updater: (prev: ExtendedVehicle[]) => ExtendedVehicle[]) => {
@@ -340,11 +346,34 @@ const VehicleTrackingMap = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={async () => {
+              setIsScanningSarekon(true);
+              try {
+                const res = await scanSarekonAndLinkUSA();
+                toast.success(
+                  `SAREKON Scan Complete: ${res.total_scanned} devices evaluated (${res.active_count} live). ${res.usa_vehicles_linked?.length ?? 0} linked to USA vehicles. ${res.driver_vehicles_published?.length ?? 0} driver vehicles published.`
+                );
+              } catch (e) {
+                toast.error(`SAREKON scan error: ${(e as Error).message}`);
+              } finally {
+                setIsScanningSarekon(false);
+              }
+            }}
+            disabled={isScanningSarekon || syncing || loading}
+            className="gap-1 bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            <RefreshCw className={`w-4 h-4 ${isScanningSarekon ? 'animate-spin' : ''}`} />
+            {isScanningSarekon ? 'Scanning SAREKON…' : 'Scan SAREKON Fleet'}
+          </Button>
+
           <Button 
             size="sm" 
             variant="outline" 
             onClick={refreshVehicles}
-            disabled={syncing || loading}
+            disabled={syncing || loading || isScanningSarekon}
             className="gap-1"
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
@@ -367,6 +396,18 @@ const VehicleTrackingMap = () => {
           )}
         </div>
       </div>
+
+      {/* Agreement Gating Info Banner */}
+      {gatedCount > 0 && (
+        <div className="flex items-center justify-between p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-sm">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span>
+              <strong>{gatedCount} provisioned vehicle(s)</strong> have live location gated awaiting completed driver & owner signatures. Pickup location notifications are dispatched automatically upon agreement completion.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

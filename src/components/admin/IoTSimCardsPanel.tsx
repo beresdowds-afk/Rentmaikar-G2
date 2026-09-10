@@ -31,6 +31,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
+import { IoTLivenessCommandBar } from "./IoTLivenessCommandBar";
+import { IoTAuditLogFeed } from "./IoTAuditLogFeed";
 
 interface SimCard {
   id: string;
@@ -568,6 +570,9 @@ export function IoTSimCardsPanel() {
         </div>
       </div>
 
+      {/* Real-time Liveness & Auto-Enabling Bar */}
+      <IoTLivenessCommandBar onRefresh={() => void loadData()} />
+
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card className="p-4">
@@ -686,12 +691,17 @@ export function IoTSimCardsPanel() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={isActive ? "default" : "secondary"}
-                          className={isActive ? "bg-emerald-600 hover:bg-emerald-700" : ""}
-                        >
-                          {sim.status}
-                        </Badge>
+                        {isActive ? (
+                          <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                            Active (Live)
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground border-border gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                            {sim.status === "suspended" ? "Suspended" : sim.status === "inventory" ? "Inventory" : "Inactive"}
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="text-xs font-medium">{sim.plan_name || "Telemetry Plan"}</div>
@@ -751,6 +761,9 @@ export function IoTSimCardsPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* Real-Time IoT Audit Stream */}
+      <IoTAuditLogFeed title="SIM & Device Auto-Enabling Audit Stream" maxRows={20} />
 
       {/* Edit / Reassign Configuration Modal */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>

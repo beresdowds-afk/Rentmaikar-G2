@@ -71,6 +71,9 @@ import { PhoneOtpProviderSettings } from "@/components/admin/PhoneOtpProviderSet
 import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 import { RefereeRequirementSettings } from "@/components/admin/RefereeRequirementSettings";
 
+import { SectionErrorBoundary } from "@/components/admin/SectionErrorBoundary";
+import { useDecoupledAdminPortal } from "@/hooks/useDecoupledAdminPortal";
+import PlatformFeaturesReport from "@/components/admin/docs/PlatformFeaturesReport";
 import { PortalNavigation, type PortalType } from "@/components/admin/PortalNavigation";
 import { AdminNotificationsBell } from "@/components/admin/AdminNotificationsBell";
 
@@ -130,25 +133,13 @@ const AdminAssistantDashboard = () => {
   const { paymentDefaults } = usePaymentDefaults();
   const { approvals: pendingItems, refresh: refreshApprovals } = usePendingApprovals();
   const [approvingId, setApprovingId] = useState<string | null>(null);
-  const [portalViewRaw, setPortalViewRaw] = usePersistedTab('support', 'portal');
-  const portalView = portalViewRaw as PortalType;
-  const setPortalView = setPortalViewRaw as (v: PortalType) => void;
-  const [activeTab, setActiveTab] = usePersistedTab('inbox');
-
-  // Synchronize portalView and activeTab so every button and tab is completely functional and independent
-  useEffect(() => {
-    const portalForActiveTab = getPortalForTab(activeTab);
-    if (portalForActiveTab && portalForActiveTab !== portalView) {
-      setPortalView(portalForActiveTab);
-    }
-  }, [activeTab, portalView, setPortalView]);
-
-  useEffect(() => {
-    const portalForActiveTab = getPortalForTab(activeTab);
-    if (portalForActiveTab && portalForActiveTab !== portalView) {
-      setActiveTab(getDefaultTabForPortal(portalView));
-    }
-  }, [portalView, activeTab, setActiveTab]);
+  const {
+    portalView,
+    activeTab,
+    setPortalView,
+    setActiveTab,
+    navigateTo,
+  } = useDecoupledAdminPortal('support', 'inbox', 'assistant');
 
   // Base admin-only tabs assistants may never see. Derived from the shared
   // registry (ADMIN_ONLY_TABS + anything unmapped in TAB_PERMISSION_MAP) so
@@ -174,7 +165,7 @@ const AdminAssistantDashboard = () => {
     () => Array.from(new Set([...BASE_EXCLUDED_TABS, ...rbacForbidden])),
     [BASE_EXCLUDED_TABS, rbacForbidden],
   );
-  // Docs portal is available to admins and assistants; individual docs tabs are
+  // Docs and Content Editor portals are available to admins and assistants; individual tabs are
   // still gated by the role management portal via TAB_PERMISSION_MAP.
   const EXCLUDED_PORTALS: PortalType[] = !isFullAdmin && !isAssistant
     ? (['marketing', 'docs'] as PortalType[])
@@ -188,10 +179,9 @@ const AdminAssistantDashboard = () => {
     const fallback = ['inbox', 'expiry-notifications', 'contacts', 'approvals']
       .find((t) => canAccessTab(t));
     if (fallback) {
-      setActiveTab(fallback);
-      setPortalView('support');
+      navigateTo('support', fallback);
     }
-  }, [activeTab, canAccessTab, permsLoading, setActiveTab, setPortalView]);
+  }, [activeTab, canAccessTab, permsLoading, navigateTo]);
 
   const activeTabAllowed = permsLoading || canAccessTab(activeTab);
   const { isOpen: isTourOpen, completeTour, resetTour } = useAdminOnboardingTour();
@@ -633,8 +623,7 @@ const AdminAssistantDashboard = () => {
                     variant={activeTab === 'support-tasks' ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => {
-                      setPortalView('support');
-                      setActiveTab('support-tasks');
+                      navigateTo('support', 'support-tasks');
                     }}
                     className="gap-2 shrink-0"
                   >
@@ -647,8 +636,7 @@ const AdminAssistantDashboard = () => {
                     variant={activeTab === 'attestation-review' ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => {
-                      setPortalView('crm');
-                      setActiveTab('attestation-review');
+                      navigateTo('crm', 'attestation-review');
                     }}
                     className="gap-2 shrink-0"
                   >
@@ -665,8 +653,7 @@ const AdminAssistantDashboard = () => {
           <PortalAnalyticsCards 
             activePortal={portalView} 
             onNavigate={(portal, tab) => {
-              setPortalView(portal);
-              setActiveTab(tab);
+              navigateTo(portal, tab);
             }}
           />
 
@@ -684,86 +671,88 @@ const AdminAssistantDashboard = () => {
 
           {/* Support Portal */}
           {activeTabAllowed && portalView === 'support' && (
-            <div className="space-y-6">
-              {activeTab === 'task-portal' && <AdminTaskPortal />}
-              {activeTab === 'inbox' && (
-                <ErrorBoundary key="inbox">
-                  <MessagingCenter />
-                </ErrorBoundary>
-              )}
-              {activeTab === 'call-center' && (
-                <ErrorBoundary key="call-center">
-                  <CallCenterPage />
-                </ErrorBoundary>
-              )}
-              {activeTab === 'contacts' && <AdminContactSettings />}
-              {activeTab === 'support-tasks' && <AdminSupportTaskManagement />}
-              {activeTab === 'insurance' && <InsuranceSupportDashboard />}
-              {activeTab === 'nigeria-verification' && <NigeriaDriverVerification />}
-              {activeTab === 'police-reports' && <PoliceReportVerification />}
-              {activeTab === 'payment-accounts' && <PaymentAccountsSupportDashboard />}
-              {activeTab === 'expiry-notifications' && <ExpiryNotificationsWidget />}
-            </div>
+            <SectionErrorBoundary section="SUPPORT" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'task-portal' && <AdminTaskPortal />}
+                {activeTab === 'inbox' && (
+                  <ErrorBoundary key="inbox">
+                    <MessagingCenter />
+                  </ErrorBoundary>
+                )}
+                {activeTab === 'call-center' && (
+                  <ErrorBoundary key="call-center">
+                    <CallCenterPage />
+                  </ErrorBoundary>
+                )}
+                {activeTab === 'contacts' && <AdminContactSettings />}
+                {activeTab === 'support-tasks' && <AdminSupportTaskManagement />}
+                {activeTab === 'insurance' && <InsuranceSupportDashboard />}
+                {activeTab === 'nigeria-verification' && <NigeriaDriverVerification />}
+                {activeTab === 'police-reports' && <PoliceReportVerification />}
+                {activeTab === 'payment-accounts' && <PaymentAccountsSupportDashboard />}
+                {activeTab === 'expiry-notifications' && <ExpiryNotificationsWidget />}
+              </div>
+            </SectionErrorBoundary>
           )}
 
           {/* CRM Portal */}
           {activeTabAllowed && portalView === 'crm' && (
-            <div className="space-y-6">
-              {activeTab === 'applications' && <ApplicationManagement />}
-              {activeTab === 'attestation-review' && <NegativeAttestationReviewPanel />}
-              {activeTab === 'accounts' && <UserAccountsView />}
-              {activeTab === 'user-deletion' && <UserDeletionPortal />}
-              {activeTab === 'drivers-owners' && (
-                <div className="space-y-6">
-                  <UserOversightPanel />
-                  <DriversOwnersManagement />
-                </div>
-              )}
-              {activeTab === 'roles' && <RoleManagement />}
-              {activeTab === 'admin-assistants' && (
-                <div className="space-y-6">
-                  <AdminAssistantManagement />
-                  <PersonaVerificationSettings />
-                  <RefereeRequirementSettings />
-                  <PhoneOtpProviderSettings />
-                </div>
-              )}
-              {activeTab === 'negotiations' && <AdminPriceNegotiation />}
-              {activeTab === 'approvals' && (
-                <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Pending Approvals ({pendingItems.length})</h3>
-                  
-                  {pendingItems.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <CheckCircle className="h-12 w-12 mx-auto mb-3 text-success" />
-                      <p>All approvals have been processed!</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {pendingItems.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center">
-                              <Clock className="w-5 h-5 text-warning" />
+            <SectionErrorBoundary section="CRM" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'applications' && <ApplicationManagement />}
+                {activeTab === 'attestation-review' && <NegativeAttestationReviewPanel />}
+                {activeTab === 'accounts' && <UserAccountsView />}
+                {activeTab === 'user-deletion' && <UserDeletionPortal />}
+                {activeTab === 'drivers-owners' && (
+                  <div className="space-y-6">
+                    <UserOversightPanel />
+                    <DriversOwnersManagement />
+                  </div>
+                )}
+                {activeTab === 'roles' && <RoleManagement />}
+                {activeTab === 'admin-assistants' && (
+                  <div className="space-y-6">
+                    <AdminAssistantManagement />
+                    <PersonaVerificationSettings />
+                    <RefereeRequirementSettings />
+                    <PhoneOtpProviderSettings />
+                  </div>
+                )}
+                {activeTab === 'negotiations' && <AdminPriceNegotiation />}
+                {activeTab === 'approvals' && (
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Pending Approvals ({pendingItems.length})</h3>
+                    
+                    {pendingItems.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <CheckCircle className="h-12 w-12 mx-auto mb-3 text-success" />
+                        <p>All approvals have been processed!</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {pendingItems.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center">
+                                <Clock className="w-5 h-5 text-warning" />
+                              </div>
+                              <div>
+                                <p className="font-medium">{item.name}</p>
+                                <p className="text-sm text-muted-foreground">{item.type} • {item.location}</p>
+                                <p className="text-xs text-muted-foreground">{item.email}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-medium">{item.name}</p>
-                              <p className="text-sm text-muted-foreground">{item.type} • {item.location}</p>
-                              <p className="text-xs text-muted-foreground">{item.email}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              title="View application details"
-                              aria-label={`View application for ${item.name}`}
-                              onClick={() => {
-                                setPortalView('crm');
-                                setActiveTab('applications');
-                                toast.info(`Viewing application for ${item.name}`);
-                              }}
-                            >
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="View application details"
+                                aria-label={`View application for ${item.name}`}
+                                onClick={() => {
+                                  navigateTo('crm', 'applications');
+                                  toast.info(`Viewing application for ${item.name}`);
+                                }}
+                              >
                               <Eye className="w-4 h-4" />
                             </Button>
                             <Button 
@@ -831,43 +820,19 @@ const AdminAssistantDashboard = () => {
               )}
               {activeTab === 'legal-agreements' && <LegalAgreementsManagement />}
               {activeTab === 'rent-to-own' && <RentToOwnManagement />}
-              {activeTab === 'content' && (
-                <Tabs defaultValue="faq" className="space-y-4">
-                  <TabsList>
-                    <TabsTrigger value="faq">FAQ Management</TabsTrigger>
-                    <TabsTrigger value="policies">Policy Versions</TabsTrigger>
-                    <TabsTrigger value="legal-templates">Legal Agreements</TabsTrigger>
-                    <TabsTrigger value="tour-guides">Tour Guides</TabsTrigger>
-                    <TabsTrigger value="message-templates">Message Templates</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="faq">
-                    <FAQManagement />
-                  </TabsContent>
-                  <TabsContent value="policies">
-                    <PolicyManagement />
-                  </TabsContent>
-                  <TabsContent value="legal-templates">
-                    <LegalAgreementTemplateManagement />
-                  </TabsContent>
-                  <TabsContent value="tour-guides">
-                    <TourStepConfigPage />
-                  </TabsContent>
-                  <TabsContent value="message-templates">
-                    <TwilioTemplateManager />
-                  </TabsContent>
-                </Tabs>
-              )}
               {activeTab === 'subscriptions' && <SubscriptionManagement />}
               {activeTab === 'training' && <TrainingModuleManagement />}
               {activeTab === 'roadside-partners' && <RoadsidePartnerManagement />}
               {activeTab === 'billing' && <BillingDashboard />}
               {activeTab === 'proxy-billing' && <ProxyBillingPortal />}
             </div>
-          )}
+          </SectionErrorBoundary>
+        )}
 
           {/* ERP Portal */}
           {activeTabAllowed && portalView === 'erp' && (
-            <div className="space-y-6">
+            <SectionErrorBoundary section="ERP" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
               {activeTab === 'tracking' && (
                 <Card className="p-6">
                   <h3 className="text-lg font-semibold mb-4">Live Vehicle Tracking</h3>
@@ -994,29 +959,48 @@ const AdminAssistantDashboard = () => {
               {activeTab === 'settings' && <RegionalOperationsManagement />}
               {activeTab === 'region-autobuild' && <RegionAutoBuildWorker />}
             </div>
+          </SectionErrorBoundary>
+        )}
+
+          {/* Content Editor Portal */}
+          {activeTabAllowed && (portalView === 'content-editor' || portalView === 'content') && (
+            <SectionErrorBoundary section="CONTENT EDITOR" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {(activeTab === 'faq' || activeTab === 'content') && <FAQManagement />}
+                {activeTab === 'policies' && <PolicyManagement />}
+                {activeTab === 'legal-templates' && <LegalAgreementTemplateManagement />}
+                {activeTab === 'tour-guides' && <TourStepConfigPage />}
+                {activeTab === 'message-templates' && <TwilioTemplateManager />}
+              </div>
+            </SectionErrorBoundary>
           )}
 
           {/* Marketing Portal */}
           {activeTabAllowed && portalView === 'marketing' && (
-            <div className="space-y-6">
-              {activeTab === 'campaigns' && <SocialMediaManagement />}
-              {['facebook', 'instagram', 'linkedin', 'google'].includes(activeTab) && (
-                <>
-                  <SocialChannelIntegrations />
-                  <SocialMediaManagement />
-                </>
-              )}
-            </div>
+            <SectionErrorBoundary section="MARKETING" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'campaigns' && <SocialMediaManagement />}
+                {['facebook', 'instagram', 'linkedin', 'google'].includes(activeTab) && (
+                  <>
+                    <SocialChannelIntegrations />
+                    <SocialMediaManagement />
+                  </>
+                )}
+              </div>
+            </SectionErrorBoundary>
           )}
 
           {/* Docs Portal */}
           {activeTabAllowed && portalView === 'docs' && (
-            <div className="space-y-6">
-              {activeTab === 'messaging-docs' && <MessagingDocs />}
-              {activeTab === 'email-docs' && <EmailDocs />}
-              {activeTab === 'voip-docs' && <VoIPDocs />}
-              {activeTab === 'glossary' && <PlatformGlossary />}
-            </div>
+            <SectionErrorBoundary section="DOCS" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'platform-features' && <PlatformFeaturesReport />}
+                {activeTab === 'messaging-docs' && <MessagingDocs />}
+                {activeTab === 'email-docs' && <EmailDocs />}
+                {activeTab === 'voip-docs' && <VoIPDocs />}
+                {activeTab === 'glossary' && <PlatformGlossary />}
+              </div>
+            </SectionErrorBoundary>
           )}
         </div>
       </main>

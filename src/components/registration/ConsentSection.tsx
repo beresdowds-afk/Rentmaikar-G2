@@ -71,6 +71,7 @@ export function ConsentSection({
         <div className="flex items-start space-x-3 pl-8">
           <Checkbox
             id="messagingConsent"
+            aria-label="Messaging notifications consent"
             checked={messagingConsent}
             onCheckedChange={(checked) => onMessagingConsentChange(checked as boolean)}
           />
@@ -87,13 +88,14 @@ export function ConsentSection({
             value={messagingChannel}
             onValueChange={(v) => onMessagingChannelChange(v as MessagingChannel)}
             className="flex items-center gap-6"
+            aria-label="Preferred messaging notification channel"
           >
             <label className="flex items-center gap-2 cursor-pointer">
-              <RadioGroupItem value="sms" id="channel-sms" />
+              <RadioGroupItem value="sms" id="channel-sms" aria-label="SMS notification channel" />
               <span className="text-sm text-foreground">SMS</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
-              <RadioGroupItem value="whatsapp" id="channel-whatsapp" />
+              <RadioGroupItem value="whatsapp" id="channel-whatsapp" aria-label="WhatsApp notification channel" />
               <span className="text-sm text-foreground">WhatsApp</span>
             </label>
           </RadioGroup>
@@ -118,6 +120,7 @@ export function ConsentSection({
         <div className="flex items-start space-x-3 pl-8">
           <Checkbox
             id="dataSharingConsent"
+            aria-label="Third-party data sharing consent"
             checked={dataSharingConsent}
             onCheckedChange={(checked) => onDataSharingConsentChange(checked as boolean)}
           />

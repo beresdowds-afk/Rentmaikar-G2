@@ -51,6 +51,7 @@ export function SmsConsentCheckboxes({
       <div className="flex items-start space-x-3 pl-8">
         <Checkbox
           id="smsServiceConsent"
+          aria-label="I agree to receive transactional and service text messages from Rentmaikar"
           checked={smsServiceConsent}
           onCheckedChange={(checked) => onSmsServiceConsentChange(checked as boolean)}
         />
@@ -74,6 +75,7 @@ export function SmsConsentCheckboxes({
       <div className="flex items-start space-x-3 pl-8">
         <Checkbox
           id="smsMarketingConsent"
+          aria-label="I agree to receive promotional messages, discounts and special offers from Rentmaikar"
           checked={smsMarketingConsent}
           onCheckedChange={(checked) => onSmsMarketingConsentChange(checked as boolean)}
         />

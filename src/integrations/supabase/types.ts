@@ -1481,6 +1481,11 @@ export type Database = {
           reason: string
           rental_id: string | null
           started_at: string
+          renewal_count: number
+          max_renewals: number
+          last_renewed_at: string | null
+          recall_initiated: boolean
+          recall_id: string | null
           status: Database["public"]["Enums"]["call_in_status"]
           telemetry_snapshot: Json | null
           type: Database["public"]["Enums"]["call_in_type"]
@@ -1501,6 +1506,11 @@ export type Database = {
           notes?: string | null
           reason: string
           rental_id?: string | null
+          renewal_count?: number
+          max_renewals?: number
+          last_renewed_at?: string | null
+          recall_initiated?: boolean
+          recall_id?: string | null
           started_at?: string
           status?: Database["public"]["Enums"]["call_in_status"]
           telemetry_snapshot?: Json | null
@@ -1522,6 +1532,11 @@ export type Database = {
           notes?: string | null
           reason?: string
           rental_id?: string | null
+          renewal_count?: number
+          max_renewals?: number
+          last_renewed_at?: string | null
+          recall_initiated?: boolean
+          recall_id?: string | null
           started_at?: string
           status?: Database["public"]["Enums"]["call_in_status"]
           telemetry_snapshot?: Json | null
@@ -1750,6 +1765,7 @@ export type Database = {
           region: string | null
           status: string
           updated_at: string
+          vehicle_enabled: boolean
           vehicle_id: string
         }
         Insert: {
@@ -1773,6 +1789,7 @@ export type Database = {
           region?: string | null
           status?: string
           updated_at?: string
+          vehicle_enabled?: boolean
           vehicle_id: string
         }
         Update: {
@@ -1796,6 +1813,7 @@ export type Database = {
           region?: string | null
           status?: string
           updated_at?: string
+          vehicle_enabled?: boolean
           vehicle_id?: string
         }
         Relationships: [
@@ -11093,12 +11111,17 @@ export type Database = {
         Row: {
           color: string | null
           created_at: string | null
+          disabled_at: string | null
+          disabled_reason: string | null
+          enabled_at: string | null
           gps_tracking_enabled: boolean
           id: string
           inspection_expiry: string | null
           insurance_expiry: string | null
+          is_enabled: boolean
           is_public: boolean
           license_plate: string
+          lockdown_reason: string | null
           make: string
           model: string
           owner_id: string
@@ -11122,12 +11145,17 @@ export type Database = {
         Insert: {
           color?: string | null
           created_at?: string | null
+          disabled_at?: string | null
+          disabled_reason?: string | null
+          enabled_at?: string | null
           gps_tracking_enabled?: boolean
           id?: string
           inspection_expiry?: string | null
           insurance_expiry?: string | null
+          is_enabled?: boolean
           is_public?: boolean
           license_plate: string
+          lockdown_reason?: string | null
           make: string
           model: string
           owner_id: string
@@ -11151,12 +11179,17 @@ export type Database = {
         Update: {
           color?: string | null
           created_at?: string | null
+          disabled_at?: string | null
+          disabled_reason?: string | null
+          enabled_at?: string | null
           gps_tracking_enabled?: boolean
           id?: string
           inspection_expiry?: string | null
           insurance_expiry?: string | null
+          is_enabled?: boolean
           is_public?: boolean
           license_plate?: string
+          lockdown_reason?: string | null
           make?: string
           model?: string
           owner_id?: string

@@ -12,6 +12,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Plus, ShoppingCart, RefreshCw, Loader2, Info, Cpu, CreditCard as SimCard } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { IoTLivenessCommandBar } from '@/components/admin/IoTLivenessCommandBar';
+import { IoTAuditLogFeed } from '@/components/admin/IoTAuditLogFeed';
 
 interface Sim {
   id: string;
@@ -242,6 +244,9 @@ export const DeviceRegistry = () => {
         </Alert>
       )}
 
+      {/* Real-time Liveness & Hardware Auto-Enabling Bar */}
+      <IoTLivenessCommandBar onRefresh={load} />
+
       {/* eSIM inventory */}
       <Card>
         <CardHeader>
@@ -362,7 +367,17 @@ export const DeviceRegistry = () => {
                       </TableCell>
                       <TableCell>{s.msisdn || '—'}</TableCell>
                       <TableCell>{s.plan_name || '—'}</TableCell>
-                      <TableCell><Badge variant={s.status === 'active' ? 'default' : 'secondary'}>{s.status}</Badge></TableCell>
+                      <TableCell>
+                        {s.status === 'active' ? (
+                          <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" /> Active (Live)
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground border-border gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> {s.status || 'Inactive'}
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm">{s.data_usage_mb ?? 0} MB</TableCell>
                       <TableCell className="text-right">
                         <Button
@@ -451,7 +466,17 @@ export const DeviceRegistry = () => {
                       <TableCell className="font-medium">{d.serial_number}</TableCell>
                       <TableCell className="font-mono text-xs">{d.imei}</TableCell>
                       <TableCell>{d.device_model || '—'}</TableCell>
-                      <TableCell><Badge variant={d.status === 'active' ? 'default' : 'secondary'}>{d.status}</Badge></TableCell>
+                      <TableCell>
+                        {d.status === 'active' ? (
+                          <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" /> Active (Live)
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground border-border gap-1.5">
+                            <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> Inactive
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell>{d.vehicle_id ? <Badge variant="outline">Linked</Badge> : <span className="text-muted-foreground text-sm">Not linked</span>}</TableCell>
                     </TableRow>
                   ))}
@@ -461,6 +486,9 @@ export const DeviceRegistry = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Real-Time IoT Hardware Audit Stream */}
+      <IoTAuditLogFeed title="Hardware & Device Auto-Enabling Audit Stream" maxRows={20} />
     </div>
   );
 };

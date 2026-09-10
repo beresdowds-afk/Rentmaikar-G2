@@ -539,12 +539,12 @@ const DriverRegistration = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Country</Label>
+                    <Label htmlFor="driver-country-select">Country</Label>
                     <Select
                       defaultValue="usa"
                       onValueChange={(value) => setValue("country", value as "usa" | "nigeria")}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger id="driver-country-select" aria-label="Select Country">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -554,9 +554,9 @@ const DriverRegistration = () => {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>City</Label>
+                    <Label htmlFor="driver-city-select">City</Label>
                     <Select onValueChange={(value) => setValue("city", value)}>
-                      <SelectTrigger>
+                      <SelectTrigger id="driver-city-select" aria-label="Select City">
                         <SelectValue placeholder="Select city" />
                       </SelectTrigger>
                       <SelectContent>
@@ -655,6 +655,7 @@ const DriverRegistration = () => {
                       }`}
                     >
                       <Checkbox
+                        aria-label={platform.label}
                         checked={selectedPlatforms.includes(platform.id)}
                         onCheckedChange={(checked) =>
                           handlePlatformChange(platform.id, checked as boolean)
@@ -777,6 +778,7 @@ const DriverRegistration = () => {
                 
                 <label className="flex items-start gap-3 p-4 rounded-lg border border-border hover:border-accent/50 cursor-pointer">
                   <Checkbox
+                    aria-label="I have a valid driver's license"
                     onCheckedChange={(checked) =>
                       setValue("hasDriverLicense", checked as boolean)
                     }
@@ -796,6 +798,7 @@ const DriverRegistration = () => {
                 <div className="p-4 rounded-lg border-2 border-warning/50 bg-warning/5">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="Acknowledge refundable security deposit required"
                       onCheckedChange={(checked) =>
                         setValue("securityDepositAcknowledged", checked as boolean)
                       }
@@ -847,6 +850,7 @@ const DriverRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="I have read and agree to the Terms of Service"
                       onCheckedChange={(checked) =>
                         setValue("agreeTerms", checked as boolean)
                       }
@@ -880,6 +884,7 @@ const DriverRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="I have read and agree to the Privacy Policy"
                       onCheckedChange={(checked) =>
                         setValue("agreePrivacy", checked as boolean)
                       }
@@ -913,6 +918,7 @@ const DriverRegistration = () => {
                 <div className="p-4 rounded-lg border border-border hover:border-accent/50 bg-warning/5">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="IoT Tracking and Remote Deactivation Consent"
                       onCheckedChange={(checked) =>
                         setValue("agreeIoT", checked as boolean)
                       }
@@ -934,6 +940,7 @@ const DriverRegistration = () => {
                 <div className="p-4 rounded-lg border-2 border-destructive/30 bg-destructive/5">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <Checkbox
+                      aria-label="Late Payment and Default Policy Acknowledgment"
                       onCheckedChange={(checked) =>
                         setValue("agreeFees", checked as boolean)
                       }

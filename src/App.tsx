@@ -78,6 +78,7 @@ const MobileNotificationPreferences = lazy(() => import("./pages/MobileNotificat
 const PaymentReceipt = lazy(() => import("./pages/PaymentReceipt"));
 const ReconciliationLogsPage = lazy(() => import("./pages/admin/ReconciliationLogsPage"));
 const AdminSettlementRunsPage = lazy(() => import("./pages/admin/AdminSettlementRunsPage"));
+const AccessibilityOverlay = lazy(() => import("./components/dev/AccessibilityOverlay"));
 const CredentialHealthPage = lazy(() => import("./pages/admin/CredentialHealthPage"));
 const PaymentProviderSettingsPage = lazy(() => import("./pages/admin/PaymentProviderSettingsPage"));
 const BillingReconciliationPage = lazy(() => import("./pages/admin/BillingReconciliationPage"));
@@ -873,6 +874,7 @@ const App = () => (
                   </Routes>
                 </div>
 
+                <AccessibilityOverlay />
               </Suspense>
 
             </TooltipProvider>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeEdge } from "@/lib/edge-invoke";
+import { scanSarekonFleet } from "@/services/sarekonAutoSyncService";
 
 export interface FleetDevice {
   deviceRowId: string;
@@ -23,6 +24,9 @@ export interface FleetDevice {
   model: string;
   licensePlate: string;
   address: string | null;
+  agreementStatus?: "completed" | "pending" | "none";
+  isTrackingGated?: boolean;
+  driverName?: string | null;
 }
 
 interface TelemetryStateRow {
@@ -94,20 +98,46 @@ export function useFleetDeviceLocations() {
     // written by the unified location service for every provider alike.
     const vehicleIds = rows.map((r) => r.vehicle_id).filter((v): v is string => !!v);
     const stateByVehicle = new Map<string, TelemetryStateRow>();
+    const agreementByVehicle = new Map<string, { status: "completed" | "pending" }>();
+
     if (vehicleIds.length) {
-      const { data: states } = await supabase
-        .from("vehicle_telemetry_state")
-        .select("vehicle_id, latitude, longitude, speed, heading, altitude, address, provider, provider_device_id, gps_timestamp, received_at, is_historic")
-        .in("vehicle_id", vehicleIds);
+      const [{ data: states }, { data: agreements }] = await Promise.all([
+        supabase
+          .from("vehicle_telemetry_state")
+          .select("vehicle_id, latitude, longitude, speed, heading, altitude, address, provider, provider_device_id, gps_timestamp, received_at, is_historic")
+          .in("vehicle_id", vehicleIds),
+        supabase
+          .from("legal_agreements")
+          .select("vehicle_id, status, driver_signature, owner_signature")
+          .in("vehicle_id", vehicleIds),
+      ]);
+
       for (const st of (states as unknown as TelemetryStateRow[]) ?? []) {
         stateByVehicle.set(st.vehicle_id, st);
+      }
+
+      for (const ag of agreements ?? []) {
+        if (!ag.vehicle_id) continue;
+        const isCompleted =
+          ag.status === "completed" ||
+          ag.status === "active" ||
+          ag.status === "signed" ||
+          (Boolean(ag.driver_signature) && Boolean(ag.owner_signature));
+        agreementByVehicle.set(ag.vehicle_id, {
+          status: isCompleted ? "completed" : "pending",
+        });
       }
     }
 
     const mappedDevices: FleetDevice[] = rows.map((r) => {
-      const lastPos = ((r.health_details as { last_position?: Record<string, number> } | null)
-        ?.last_position) ?? {};
+      const hd = (r.health_details as Record<string, unknown> | null) ?? {};
+      const lastPos = (hd.last_position as Record<string, number> | undefined) ?? {};
       const st = r.vehicle_id ? stateByVehicle.get(r.vehicle_id) : undefined;
+      const ag = r.vehicle_id ? agreementByVehicle.get(r.vehicle_id) : undefined;
+      const agreementStatus = ag ? ag.status : "none";
+      const isTrackingGated = agreementStatus === "pending";
+      const detectedDriver = (hd.detected_driver as string) || (hd.driver_name as string) || null;
+
       return {
         deviceRowId: r.id,
         serialNumber: r.serial_number,
@@ -127,7 +157,10 @@ export function useFleetDeviceLocations() {
         make: r.vehicles?.make ?? "Unassigned",
         model: r.vehicles?.model ?? r.serial_number,
         licensePlate: r.vehicles?.license_plate ?? r.serial_number,
-        address: st?.address ?? (lastPos as { address?: string }).address ?? null,
+        address: st?.address ?? (lastPos as { address?: string }).address ?? (hd.address as string) ?? null,
+        agreementStatus,
+        isTrackingGated,
+        driverName: detectedDriver,
       };
     });
 
@@ -244,7 +277,19 @@ export function useFleetDeviceLocations() {
     return () => { supabase.removeChannel(channel); };
   }, [load]);
 
-  return { devices, loading, syncing, error, lastLoadedAt, reload: load, syncNow };
+  /** Run continuous SAREKON scanner: registry addition, liveness test, USA-only linking, driver publishing & agreement checks */
+  const scanSarekonAndLinkUSA = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const data = await scanSarekonFleet();
+      await load();
+      return data;
+    } finally {
+      setSyncing(false);
+    }
+  }, [load]);
+
+  return { devices, loading, syncing, error, lastLoadedAt, reload: load, syncNow, scanSarekonAndLinkUSA };
 }
 
 /** Split the fleet into reporting vs. silent based on a last-seen threshold. */

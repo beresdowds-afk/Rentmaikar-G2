@@ -24,7 +24,7 @@ export const useInAppMessages = (limit = 100) => {
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!user?.id) {
+    if (!user?.id || typeof (supabase as any)?.from !== 'function') {
       setMessages([]);
       setIsLoading(false);
       return;
@@ -46,7 +46,7 @@ export const useInAppMessages = (limit = 100) => {
 
   // Live updates so a pushed message appears without a refresh.
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || typeof (supabase as any)?.channel !== 'function') return;
     const channel = supabase
       .channel(`in-app-messages-${user.id}`)
       .on(

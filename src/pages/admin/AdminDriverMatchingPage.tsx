@@ -212,11 +212,20 @@ const AdminDriverMatchingPage = () => {
                         <TableCell>{partyLabel(m.owner)}</TableCell>
                         <TableCell>
                           <Badge variant={stageVariant(m.status)}>{MATCH_STAGE_LABEL[m.status]}</Badge>
-                          {m.status === "accredited" || m.status === "picked_up" ? (
-                            <div className="text-muted-foreground mt-1 text-xs">
-                              Referees: {m.referee_count}
-                            </div>
-                          ) : null}
+                          <div className="flex items-center gap-1.5 mt-1">
+                            {m.vehicle_enabled ? (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                Vehicle Enabled
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                                Vehicle Disabled
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-muted-foreground mt-0.5 text-xs">
+                            Referees: {m.referee_count ?? 0}/3
+                          </div>
                         </TableCell>
                         <TableCell className="space-x-2 whitespace-nowrap text-right">
                           {m.status === "assigned" ? (
@@ -252,8 +261,15 @@ const AdminDriverMatchingPage = () => {
                           {m.status === "accredited" ? (
                             <Button
                               size="sm"
-                              disabled={busyId === m.id}
-                              onClick={() => run(m.id, () => markMatchPickedUp(m.id), "Vehicle pickup logged")}
+                              disabled={busyId === m.id || !m.vehicle_enabled}
+                              title={!m.vehicle_enabled ? "Driver must submit referee contacts before vehicle can be enabled for pickup" : ""}
+                              onClick={() => {
+                                if (!m.vehicle_enabled) {
+                                  toast.error("Provisioned vehicle is disabled. Driver must submit referee details before pickup can be completed.");
+                                  return;
+                                }
+                                run(m.id, () => markMatchPickedUp(m.id), "Vehicle pickup logged");
+                              }}
                             >
                               <KeyRound className="mr-1 h-3.5 w-3.5" /> Log pickup
                             </Button>

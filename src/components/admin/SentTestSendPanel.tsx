@@ -33,6 +33,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { sent } from "@/integrations/sent/client";
 import { DEFAULT_SENT_TEMPLATES } from "@/integrations/sent/templates";
 import { SentChannel, SentMessageRequest, SentMessageResponse, SentDiagnosticsResult, SentTemplate } from "@/integrations/sent/types";
@@ -49,6 +50,7 @@ interface MessageLogItem {
 }
 
 export function SentTestSendPanel() {
+  const { user } = useAuth();
   const [channel, setChannel] = useState<SentChannel>("sms");
   const [to, setTo] = useState("+12025550143");
   const [messageType, setMessageType] = useState<"text" | "template">("text");
@@ -73,6 +75,7 @@ export function SentTestSendPanel() {
 
   // Quick preset phone numbers
   const presets = [
+    { label: "🇳🇬 Olusola Adebayo (+2348139051772)", number: "+2348139051772" },
     { label: "🇺🇸 US Driver (+1)", number: "+12025550143" },
     { label: "🇳🇬 Nigeria Driver (+234)", number: "+2348012345678" },
     { label: "🇬🇧 UK / Global (+44)", number: "+447700900077" },
@@ -120,7 +123,7 @@ export function SentTestSendPanel() {
         sandbox: sandboxMode,
         metadata: {
           source: "admin_test_panel",
-          admin_user: "adebayoolusola39@gmail.com",
+          admin_user: user?.email || "eastfortemain@gmail.com",
         },
       };
 

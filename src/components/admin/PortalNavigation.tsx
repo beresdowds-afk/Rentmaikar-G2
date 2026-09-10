@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 
 
-export type PortalType = 'crm' | 'erp' | 'support' | 'marketing' | 'docs';
+export type PortalType = 'crm' | 'erp' | 'support' | 'content-editor' | 'marketing' | 'docs' | 'content';
 
 export interface PortalTab {
   value: string;
@@ -38,12 +38,20 @@ export const crmTabs: PortalTab[] = [
   { value: "defaults", label: "Payment Defaults", icon: <Wallet className="h-4 w-4" /> },
   { value: "legal-agreements", label: "Legal Agreements", icon: <FileText className="h-4 w-4" />, dataTour: "admin-agreements" },
   { value: "rent-to-own", label: "Rent to Own", icon: <Home className="h-4 w-4" />, dataTour: "admin-rto" },
-  { value: "content", label: "Content CMS", icon: <HelpCircle className="h-4 w-4" /> },
   { value: "subscriptions", label: "Subscriptions", icon: <CreditCard className="h-4 w-4" /> },
   { value: "training", label: "Driver Training", icon: <GraduationCap className="h-4 w-4" /> },
   { value: "roadside-partners", label: "Roadside Partners", icon: <Truck className="h-4 w-4" /> },
   { value: "billing", label: "Invoices & Receipts", icon: <FileText className="h-4 w-4" /> },
   { value: "proxy-billing", label: "Proxy Billing", icon: <UsersRound className="h-4 w-4" /> },
+];
+
+export const contentEditorTabs: PortalTab[] = [
+  { value: "content", label: "Overview", icon: <HelpCircle className="h-4 w-4" /> },
+  { value: "faq", label: "FAQ Management", icon: <HelpCircle className="h-4 w-4" /> },
+  { value: "policies", label: "Policy Versions", icon: <FileText className="h-4 w-4" /> },
+  { value: "legal-templates", label: "Legal Agreements", icon: <FileText className="h-4 w-4" /> },
+  { value: "tour-guides", label: "Tour Guides", icon: <GraduationCap className="h-4 w-4" /> },
+  { value: "message-templates", label: "Message Templates", icon: <MessageSquare className="h-4 w-4" /> },
 ];
 
 export const erpTabs: PortalTab[] = [
@@ -187,6 +195,8 @@ export const PortalNavigation = ({
         case 'crm': return crmTabs;
         case 'erp': return erpTabs;
         case 'support': return supportTabs;
+        case 'content-editor':
+        case 'content': return contentEditorTabs;
         case 'marketing': return marketingTabs;
         case 'docs': return docsTabs;
       }
@@ -199,6 +209,8 @@ export const PortalNavigation = ({
       case 'crm': return <UsersRound className="h-4 w-4" />;
       case 'erp': return <Building2 className="h-4 w-4" />;
       case 'support': return <Headphones className="h-4 w-4" />;
+      case 'content-editor':
+      case 'content': return <HelpCircle className="h-4 w-4" />;
       case 'marketing': return <Share2 className="h-4 w-4" />;
       case 'docs': return <BookOpen className="h-4 w-4" />;
     }
@@ -209,6 +221,8 @@ export const PortalNavigation = ({
       case 'crm': return 'CRM';
       case 'erp': return 'ERP';
       case 'support': return 'Support';
+      case 'content-editor':
+      case 'content': return 'Content Editor';
       case 'marketing': return 'Marketing';
       case 'docs': return 'Docs';
     }
@@ -219,6 +233,8 @@ export const PortalNavigation = ({
       case 'crm': return 'Customer relationships & agreements';
       case 'erp': return 'Operations, assets & fleet management';
       case 'support': return 'Communications & task management';
+      case 'content-editor':
+      case 'content': return 'FAQs, legal templates, policies & guides';
       case 'marketing': return 'Social media & campaign management';
       case 'docs': return 'Communication system documentation';
     }
@@ -226,7 +242,7 @@ export const PortalNavigation = ({
 
   const currentTabs = getTabsForPortal(activePortal);
   const currentTabLabel = currentTabs.find(t => t.value === activeTab)?.label || 'Select...';
-  const visiblePortals = (['crm', 'erp', 'support', 'marketing', 'docs'] as PortalType[])
+  const visiblePortals = (['crm', 'erp', 'support', 'content-editor', 'marketing', 'docs'] as PortalType[])
     .filter(p => !excludedPortalSet.has(p));
 
   return (
@@ -241,14 +257,15 @@ export const PortalNavigation = ({
           const lastTab = last[portal];
           const lastTabMeta = tabs.find(t => t.value === lastTab);
           const portalLabel = getPortalLabel(portal);
+          const isPortalActive = activePortal === portal || (portal === 'content-editor' && activePortal === 'content');
           return (
             <DropdownMenu key={portal}>
               <DropdownMenuTrigger asChild>
                 <Button
-                  variant={activePortal === portal ? 'default' : 'outline'}
+                  variant={isPortalActive ? 'default' : 'outline'}
                   className={cn(
                     "gap-2 min-w-[120px] min-h-11",
-                    activePortal === portal && "ring-2 ring-primary/20"
+                    isPortalActive && "ring-2 ring-primary/20"
                   )}
                   aria-label={`Open ${portalLabel} portal menu`}
                 >
@@ -275,7 +292,7 @@ export const PortalNavigation = ({
                   role="presentation"
                 >
                   {tabs.map((tab) => {
-                    const isActive = activePortal === portal && activeTab === tab.value;
+                    const isActive = isPortalActive && activeTab === tab.value;
                     const isLast = !isActive && lastTab === tab.value;
                     return (
                       <DropdownMenuItem
@@ -319,23 +336,6 @@ export const PortalNavigation = ({
             </DropdownMenu>
           );
         })}
-
-        {/* Content Editor Portal Direct Launcher */}
-        <Button
-          variant={activePortal === 'crm' && activeTab === 'content' ? 'default' : 'outline'}
-          className={cn(
-            "gap-2 min-w-[120px] min-h-11 border-primary/30",
-            activePortal === 'crm' && activeTab === 'content' && "ring-2 ring-primary/20 bg-primary text-primary-foreground font-medium"
-          )}
-          onClick={() => {
-            onPortalChange('crm');
-            onTabChange('content');
-          }}
-          aria-label="Open Content Editor Portal"
-        >
-          <HelpCircle className="h-4 w-4" />
-          Content Editor
-        </Button>
       </nav>
 
       {/* Current Selection Indicator */}

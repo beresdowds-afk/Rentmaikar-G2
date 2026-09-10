@@ -13,6 +13,7 @@ import { useRegion } from "@/contexts/RegionContext";
 import { usePublicVehicle, useCategoryPrices } from "@/hooks/usePublicVehicles";
 import BookingRequestDialog from "@/components/catalogue/BookingRequestDialog";
 import VehicleSubmissionHistorySection from "@/components/vehicles/VehicleSubmissionHistorySection";
+import { buildVehicleRentalJsonLd } from "@/lib/seo/vehicleJsonLd";
 
 
 const categoryForYear = (year?: number | null): "budget" | "standard" | "premium" => {
@@ -54,16 +55,14 @@ const VehicleDetails = () => {
         path={`/vehicle/${id ?? ""}`}
         jsonLd={
           vehicle
-            ? {
-                "@context": "https://schema.org",
-                "@type": "Vehicle",
-                name: title,
-                vehicleModelDate: vehicle.year ?? undefined,
-                color: vehicle.color ?? undefined,
-                brand: vehicle.make ?? undefined,
-                model: vehicle.model ?? undefined,
-                url: `https://rentmaikar.com/vehicle/${vehicle.id}`,
-              }
+            ? buildVehicleRentalJsonLd({
+                vehicle,
+                category,
+                price,
+                currencySymbol,
+                region,
+                location,
+              })
             : undefined
         }
       />

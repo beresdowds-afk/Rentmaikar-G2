@@ -69,6 +69,8 @@ import { PhoneOtpProviderSettings } from "@/components/admin/PhoneOtpProviderSet
 import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 import { RefereeRequirementSettings } from "@/components/admin/RefereeRequirementSettings";
 
+import { SectionErrorBoundary } from "@/components/admin/SectionErrorBoundary";
+import { useDecoupledAdminPortal } from "@/hooks/useDecoupledAdminPortal";
 import { PortalNavigation, type PortalType } from "@/components/admin/PortalNavigation";
 import { AdminNotificationsBell } from "@/components/admin/AdminNotificationsBell";
 
@@ -138,26 +140,14 @@ const AdminDashboard = () => {
   const { paymentDefaults } = usePaymentDefaults();
   const { approvals: pendingItems, refresh: refreshApprovals } = usePendingApprovals();
   const [approvingId, setApprovingId] = useState<string | null>(null);
-  const [portalViewRaw, setPortalViewRaw] = usePersistedTab('support', 'portal');
-  const portalView = portalViewRaw as PortalType;
-  const setPortalView = setPortalViewRaw as (v: PortalType) => void;
-  const [activeTab, setActiveTab] = usePersistedTab('task-portal');
+  const {
+    portalView,
+    activeTab,
+    setPortalView,
+    setActiveTab,
+    navigateTo,
+  } = useDecoupledAdminPortal('support', 'task-portal', 'admin');
   const { isOpen: isTourOpen, completeTour, resetTour } = useAdminOnboardingTour();
-
-  // Synchronize portalView and activeTab so every button and tab is completely functional and independent
-  useEffect(() => {
-    const portalForActiveTab = getPortalForTab(activeTab);
-    if (portalForActiveTab && portalForActiveTab !== portalView) {
-      setPortalView(portalForActiveTab);
-    }
-  }, [activeTab, portalView, setPortalView]);
-
-  useEffect(() => {
-    const portalForActiveTab = getPortalForTab(activeTab);
-    if (portalForActiveTab && portalForActiveTab !== portalView) {
-      setActiveTab(getDefaultTabForPortal(portalView));
-    }
-  }, [portalView, activeTab, setActiveTab]);
 
   // Calculate converted values from live financial records
   const incomeNgnInUsd = convertToUSD(financials.income.ngn, 'NGN');
@@ -592,38 +582,40 @@ const AdminDashboard = () => {
           <PortalAnalyticsCards 
             activePortal={portalView} 
             onNavigate={(portal, tab) => {
-              setPortalView(portal);
-              setActiveTab(tab);
+              navigateTo(portal, tab);
             }}
           />
 
           {/* Support Portal */}
           {portalView === 'support' && (
-            <div className="space-y-6">
-              {activeTab === 'task-portal' && <AdminTaskPortal />}
-              {activeTab === 'inbox' && (
-                <ErrorBoundary key="inbox">
-                  <MessagingCenter />
-                </ErrorBoundary>
-              )}
-              {activeTab === 'call-center' && (
-                <ErrorBoundary key="call-center">
-                  <CallCenterPage />
-                </ErrorBoundary>
-              )}
-              {activeTab === 'contacts' && <AdminContactSettings />}
-              {activeTab === 'support-tasks' && <AdminSupportTaskManagement />}
-              {activeTab === 'insurance' && <InsuranceSupportDashboard />}
-              {activeTab === 'nigeria-verification' && <NigeriaDriverVerification />}
-              {activeTab === 'police-reports' && <PoliceReportVerification />}
-              {activeTab === 'payment-accounts' && <PaymentAccountsSupportDashboard />}
-              {activeTab === 'expiry-notifications' && <ExpiryNotificationsWidget />}
-            </div>
+            <SectionErrorBoundary section="SUPPORT" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'task-portal' && <AdminTaskPortal />}
+                {activeTab === 'inbox' && (
+                  <ErrorBoundary key="inbox">
+                    <MessagingCenter />
+                  </ErrorBoundary>
+                )}
+                {activeTab === 'call-center' && (
+                  <ErrorBoundary key="call-center">
+                    <CallCenterPage />
+                  </ErrorBoundary>
+                )}
+                {activeTab === 'contacts' && <AdminContactSettings />}
+                {activeTab === 'support-tasks' && <AdminSupportTaskManagement />}
+                {activeTab === 'insurance' && <InsuranceSupportDashboard />}
+                {activeTab === 'nigeria-verification' && <NigeriaDriverVerification />}
+                {activeTab === 'police-reports' && <PoliceReportVerification />}
+                {activeTab === 'payment-accounts' && <PaymentAccountsSupportDashboard />}
+                {activeTab === 'expiry-notifications' && <ExpiryNotificationsWidget />}
+              </div>
+            </SectionErrorBoundary>
           )}
 
           {/* CRM Portal */}
           {portalView === 'crm' && (
-            <div className="space-y-6">
+            <SectionErrorBoundary section="CRM" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
               {activeTab === 'applications' && <ApplicationManagement />}
               {activeTab === 'attestation-review' && <NegativeAttestationReviewPanel />}
               {activeTab === 'accounts' && <UserAccountsView />}
@@ -678,8 +670,7 @@ const AdminDashboard = () => {
                               title="View application details"
                               aria-label={`View application for ${item.name}`}
                               onClick={() => {
-                                setPortalView('crm');
-                                setActiveTab('applications');
+                                navigateTo('crm', 'applications');
                                 toast.info(`Viewing application for ${item.name}`);
                               }}
                             >
@@ -750,43 +741,19 @@ const AdminDashboard = () => {
               )}
               {activeTab === 'legal-agreements' && <LegalAgreementsManagement />}
               {activeTab === 'rent-to-own' && <RentToOwnManagement />}
-              {activeTab === 'content' && (
-                <Tabs defaultValue="faq" className="space-y-4">
-                  <TabsList>
-                    <TabsTrigger value="faq">FAQ Management</TabsTrigger>
-                    <TabsTrigger value="policies">Policy Versions</TabsTrigger>
-                    <TabsTrigger value="legal-templates">Legal Agreements</TabsTrigger>
-                    <TabsTrigger value="tour-guides">Tour Guides</TabsTrigger>
-                    <TabsTrigger value="message-templates">Message Templates</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="faq">
-                    <FAQManagement />
-                  </TabsContent>
-                  <TabsContent value="policies">
-                    <PolicyManagement />
-                  </TabsContent>
-                  <TabsContent value="legal-templates">
-                    <LegalAgreementTemplateManagement />
-                  </TabsContent>
-                  <TabsContent value="tour-guides">
-                    <TourStepConfigPage />
-                  </TabsContent>
-                  <TabsContent value="message-templates">
-                    <TwilioTemplateManager />
-                  </TabsContent>
-                </Tabs>
-              )}
               {activeTab === 'subscriptions' && <SubscriptionManagement />}
               {activeTab === 'training' && <TrainingModuleManagement />}
               {activeTab === 'roadside-partners' && <RoadsidePartnerManagement />}
               {activeTab === 'billing' && <BillingDashboard />}
               {activeTab === 'proxy-billing' && <ProxyBillingPortal />}
             </div>
-          )}
+          </SectionErrorBoundary>
+        )}
 
           {/* ERP Portal */}
           {portalView === 'erp' && (
-            <div className="space-y-6">
+            <SectionErrorBoundary section="ERP" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
               {activeTab === 'tracking' && (
                 <Card className="p-6">
                   <h3 className="text-lg font-semibold mb-4">Live Vehicle Tracking</h3>
@@ -914,30 +881,48 @@ const AdminDashboard = () => {
               {activeTab === 'settings' && <RegionalOperationsManagement />}
               {activeTab === 'region-autobuild' && <RegionAutoBuildWorker />}
             </div>
+          </SectionErrorBoundary>
+        )}
+
+          {/* Content Editor Portal */}
+          {(portalView === 'content-editor' || portalView === 'content') && (
+            <SectionErrorBoundary section="CONTENT EDITOR" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {(activeTab === 'faq' || activeTab === 'content') && <FAQManagement />}
+                {activeTab === 'policies' && <PolicyManagement />}
+                {activeTab === 'legal-templates' && <LegalAgreementTemplateManagement />}
+                {activeTab === 'tour-guides' && <TourStepConfigPage />}
+                {activeTab === 'message-templates' && <TwilioTemplateManager />}
+              </div>
+            </SectionErrorBoundary>
           )}
 
           {/* Marketing Portal */}
           {portalView === 'marketing' && (
-            <div className="space-y-6">
-              {activeTab === 'campaigns' && <SocialMediaManagement />}
-              {['facebook', 'instagram', 'linkedin', 'google'].includes(activeTab) && (
-                <>
-                  <SocialChannelIntegrations />
-                  <SocialMediaManagement />
-                </>
-              )}
-            </div>
+            <SectionErrorBoundary section="MARKETING" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'campaigns' && <SocialMediaManagement />}
+                {['facebook', 'instagram', 'linkedin', 'google'].includes(activeTab) && (
+                  <>
+                    <SocialChannelIntegrations />
+                    <SocialMediaManagement />
+                  </>
+                )}
+              </div>
+            </SectionErrorBoundary>
           )}
 
           {/* Docs Portal */}
           {portalView === 'docs' && (
-            <div className="space-y-6">
-              {activeTab === 'platform-features' && <PlatformFeaturesReport />}
-              {activeTab === 'messaging-docs' && <MessagingDocs />}
-              {activeTab === 'email-docs' && <EmailDocs />}
-              {activeTab === 'voip-docs' && <VoIPDocs />}
-              {activeTab === 'glossary' && <PlatformGlossary />}
-            </div>
+            <SectionErrorBoundary section="DOCS" onSwitchPortal={setPortalView}>
+              <div className="space-y-6">
+                {activeTab === 'platform-features' && <PlatformFeaturesReport />}
+                {activeTab === 'messaging-docs' && <MessagingDocs />}
+                {activeTab === 'email-docs' && <EmailDocs />}
+                {activeTab === 'voip-docs' && <VoIPDocs />}
+                {activeTab === 'glossary' && <PlatformGlossary />}
+              </div>
+            </SectionErrorBoundary>
           )}
         </div>
       </main>

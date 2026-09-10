@@ -55,10 +55,17 @@ export const UserTypeProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
+const DEFAULT_USER_TYPE_CONTEXT: UserTypeContextType = {
+  userType: null,
+  setUserType: () => {},
+  isDriver: false,
+  isOwner: false,
+  isAdmin: false,
+  isAdminAssistant: false,
+  hasSelectedType: false,
+};
+
 export const useUserType = () => {
   const context = useContext(UserTypeContext);
-  if (!context) {
-    throw new Error("useUserType must be used within a UserTypeProvider");
-  }
-  return context;
+  return context ?? DEFAULT_USER_TYPE_CONTEXT;
 };

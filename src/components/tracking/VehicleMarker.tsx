@@ -10,6 +10,9 @@ interface VehicleMarkerProps {
     model?: string; 
     licensePlate?: string;
     driverName?: string;
+    agreementStatus?: 'completed' | 'pending' | 'none';
+    isTrackingGated?: boolean;
+    address?: string | null;
   };
   onDisable?: (vehicleId: string) => void;
   onEnable?: (vehicleId: string) => void;
@@ -74,9 +77,31 @@ const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => 
             </div>
           )}
 
+          {vehicle.agreementStatus === 'completed' && (
+            <div className="mb-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Agreement Verified · Live Tracking Active
+              </span>
+            </div>
+          )}
+
+          {vehicle.isTrackingGated && (
+            <div className="mb-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800 border border-amber-300">
+                Awaiting Agreement · Live Location Gated
+              </span>
+            </div>
+          )}
+
           {vehicle.driverName && (
-            <div className="text-sm mb-2">
-              Driver: <span className="font-medium">{vehicle.driverName}</span>
+            <div className="text-sm mb-1">
+              Driver: <span className="font-medium text-primary">{vehicle.driverName}</span>
+            </div>
+          )}
+
+          {vehicle.address && (
+            <div className="text-xs text-muted-foreground mb-2 line-clamp-2">
+              {vehicle.address}
             </div>
           )}
 

@@ -42,6 +42,7 @@ export interface DriverVehicleMatch {
   cancelled_at: string | null;
   cancel_reason: string | null;
   referee_count: number;
+  vehicle_enabled?: boolean;
   vehicle: MatchVehicle | null;
   driver: MatchParty | null;
   owner: MatchParty | null;
