@@ -17,6 +17,7 @@ import {
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { invalidateProviderConfig } from "../_shared/provider-config.ts";
 import { logIngestRun } from "../_shared/telemetry-ingest-core.ts";
+import { runSarekonAutoScan, autoDetectAgreementsAndNotify } from "../_shared/sarekon-auto-scanner.ts";
 
 
 const PROVIDER = "sarekon";
@@ -32,6 +33,12 @@ const Body = z.object({
     "sync",
     "sync_devices",
     "sync_telemetry",
+    "scan_and_sync",
+    "scan_fleet",
+    "continuous_scan",
+    "auto_link_usa",
+    "check_agreements",
+    "driver_vehicles",
     "refresh_commands",
     "sync_status",
     "send_command",
@@ -62,7 +69,6 @@ const Body = z.object({
     "deal_unwind",
     "fleet_audit_log",
     "fleet_permissions",
-
   ]),
   dvd_id: z.string().min(1).max(128).optional(),
   device_row_id: z.string().uuid().optional(),
@@ -705,9 +711,39 @@ Deno.serve(async (req) => {
       return json({ ok: r.ok, provider: PROVIDER, diagnosis: diagnose(r), response: r.ok ? r.body : undefined });
     }
 
+    if (action === "scan_and_sync" || action === "scan_fleet" || action === "continuous_scan") {
+      const scanResult = await runSarekonAutoScan(supa, { enforceUsaOnly: true });
+      return json({ ok: scanResult.ok, ...scanResult });
+    }
+
+    if (action === "check_agreements") {
+      const agreementsResult = await autoDetectAgreementsAndNotify(supa);
+      return json({ ok: true, ...agreementsResult });
+    }
+
+    if (action === "auto_link_usa") {
+      const scanResult = await runSarekonAutoScan(supa, { enforceUsaOnly: true });
+      return json({
+        ok: scanResult.ok,
+        usa_vehicles_linked: scanResult.usa_vehicles_linked,
+        total_scanned: scanResult.total_scanned,
+        active_count: scanResult.active_count,
+      });
+    }
+
+    if (action === "driver_vehicles") {
+      const scanResult = await runSarekonAutoScan(supa, { enforceUsaOnly: true });
+      return json({
+        ok: scanResult.ok,
+        driver_vehicles: scanResult.driver_vehicles_published,
+        count: scanResult.driver_vehicles_published.length,
+      });
+    }
+
     if (action === "sync" || action === "sync_devices" || action === "sync_telemetry") {
-      // devices  -> registry/asset metadata only (no telemetry rows written)
-      // telemetry-> registry positions + mqtt_telemetry_logs feed
+      // Execute the comprehensive scan, liveness test, USA-only linking, driver vehicle publishing and agreement checks
+      const scanResult = await runSarekonAutoScan(supa, { enforceUsaOnly: true });
+
       const writeTelemetry = action !== "sync_devices";
       const scopeLabel = action === "sync_devices" ? "device" : action === "sync_telemetry" ? "telemetry" : "full";
       const startedMs = Date.now();

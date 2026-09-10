@@ -93,6 +93,8 @@ serve(async (req) => {
         type: body.type,
         reason: body.reason,
         notes: body.notes,
+        renewal_count: 0,
+        max_renewals: 3,
         geofence_lat: body.geofence_lat,
         geofence_lng: body.geofence_lng,
         geofence_radius_m: 20,

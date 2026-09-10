@@ -23,6 +23,10 @@ project_id = "jrsydiofzceoeddjogov"
     verify_jwt = false
   [functions.emqx-monitoring]
     verify_jwt = false
+  [functions.create-call-in]
+    verify_jwt = false
+  [functions.renew-call-in]
+    verify_jwt = false
   [functions.enforce-call-in-geofence]
     verify_jwt = false
   [functions.expire-call-ins]

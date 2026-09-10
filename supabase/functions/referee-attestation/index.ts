@@ -63,20 +63,56 @@ Deno.serve(async (req) => {
     }).eq("id", r.id);
 
     if (response === "negative") {
-      // Flag the application for manual review
+      // 1. Flag the application for manual review
       await supa.from("applications").update({
         referees_verification_status: "action_required",
       }).eq("id", r.application_id);
 
-      // Notify the driver (inbox)
+      // 2. Bad report by the referee is a basis for vehicle lockdown and recall
+      const reasonText = comments ? `Referee adverse report: ${comments}` : "Referee declined to attest";
+      try {
+        const { data: lockdownRes, error: lockdownErr } = await supa.rpc("lockdown_and_recall_vehicle", {
+          _driver_id: r.user_id,
+          _reason: reasonText,
+          _referee_name: r.full_name,
+        });
+
+        if (lockdownErr) {
+          console.error("[referee-attestation] Vehicle lockdown RPC error:", lockdownErr);
+        } else if (lockdownRes?.vehicle_id) {
+          console.log("[referee-attestation] Vehicle locked down and recalled:", lockdownRes);
+          // Send remote immobilizer command to the vehicle IoT device if linked
+          const { data: dev } = await supa
+            .from("iot_devices")
+            .select("serial_number, id")
+            .eq("vehicle_id", lockdownRes.vehicle_id)
+            .maybeSingle();
+
+          if (dev?.serial_number) {
+            await supa.functions.invoke("telemetry-dispatch", {
+              body: {
+                action: "send_command",
+                command: "immobilize",
+                device_id: dev.serial_number,
+                vehicle_id: lockdownRes.vehicle_id,
+                payload: { reason: "referee_bad_report", referee: r.full_name },
+              },
+            }).catch((err: any) => console.warn("[referee-attestation] Telemetry dispatch warning:", err));
+          }
+        }
+      } catch (err) {
+        console.error("[referee-attestation] Exception during vehicle lockdown/recall:", err);
+      }
+
+      // 3. Notify the driver (inbox)
       await supa.from("inbox_messages").insert({
         user_id: r.user_id, direction: "inbound", channel: "system",
-        subject: "Referee attestation flagged",
-        body: `Referee #${r.referee_index + 1} (${r.full_name}) returned a negative attestation. An administrator will review your application and may request updates to your referee list.`,
+        subject: "Referee attestation flagged — Vehicle lockdown & recall notice",
+        body: `Referee #${r.referee_index + 1} (${r.full_name}) returned an adverse attestation. Any provisioned vehicle has been immobilized and recalled for safety. An administrator is reviewing your record.`,
         status: "unread",
       }).then(() => {}, () => {});
 
-      // Notify all admins & admin assistants
+      // 4. Notify all admins & admin assistants
       const { data: admins } = await supa.from("user_roles")
         .select("user_id, role")
         .in("role", ["admin", "admin_assistant"] as any);
@@ -84,8 +120,8 @@ Deno.serve(async (req) => {
       if (admins?.length) {
         const rows = admins.map((a: any) => ({
           user_id: a.user_id, direction: "inbound", channel: "system",
-          subject: "Manual review: negative referee attestation",
-          body: `Referee ${r.full_name} returned a NEGATIVE attestation for application ${r.application_id}. Please review and decide whether to reject the registration or request updated referees.\n\nComments: ${comments ?? "(none provided)"}`,
+          subject: "CRITICAL: Negative referee attestation — Vehicle lockdown & recall initiated",
+          body: `Referee ${r.full_name} returned a NEGATIVE attestation for application ${r.application_id} (Driver: ${r.user_id}). Automatic vehicle lockdown and recall have been triggered.\n\nComments: ${comments ?? "(none provided)"}`,
           status: "unread",
         }));
         await supa.from("inbox_messages").insert(rows).then(() => {}, () => {});

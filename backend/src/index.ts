@@ -1,4 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
+import path from "path";
+import fs from "fs";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
@@ -10,6 +12,13 @@ import { bridgeRouter } from "./routes/bridge";
 import { renderPortalHtml } from "./portal/portalHtml";
 import { bridgeManager } from "./services/bridgeManager";
 import { platformHealthService } from "./services/platformHealth";
+import { generateServerSitemap } from "./services/sitemapGenerator";
+import {
+  RENTMAIKAR_LOGO_BUFFER,
+  RENTMAIKAR_FAVICON_PNG_BUFFER,
+  RENTMAIKAR_FAVICON_ICO_BUFFER,
+  RENTMAIKAR_APPLE_ICON_BUFFER,
+} from "./assets/logo";
 
 dotenv.config();
 
@@ -58,7 +67,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const referer = req.headers.referer as string | undefined;
   const path = req.path;
 
-  // Always allow portal management routes, bridge fallback routes, and core health checks
+  // Always allow portal management routes, bridge fallback routes, core health checks, and brand assets
   const isManagementOrBridgeRoute =
     path.startsWith("/portal") ||
     path.startsWith("/admin") ||
@@ -66,7 +75,20 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     path.startsWith("/api/bridge") ||
     path === "/api/health" ||
     path === "/api/health/diagnostics" ||
-    path === "/api/domains";
+    path === "/api/domains" ||
+    path === "/favicon.ico" ||
+    path === "/favicon.png" ||
+    path === "/apple-touch-icon.png" ||
+    path === "/apple-touch-icon-precomposed.png" ||
+    path === "/rentmaikar-logo.jpg" ||
+    path === "/logo.jpg" ||
+    path === "/logo.png" ||
+    path === "/icon.svg" ||
+    path === "/robots.txt" ||
+    path === "/sitemap.xml" ||
+    path === "/sitemap" ||
+    path === "/api/sitemap" ||
+    path === "/";
 
   const config = bridgeManager.getConfig();
 
@@ -173,6 +195,81 @@ app.use(morgan("combined"));
 // Webhooks need the raw body to verify signatures, so mount before express.json()
 app.use("/api/webhooks", express.raw({ type: "application/json" }), webhooksRouter);
 app.use(express.json());
+
+// -----------------------------------------------------------------
+// 2.5 Brand Assets & Favicons (for browsers on staging.rentmaikar.com)
+// -----------------------------------------------------------------
+
+// Static asset serving if public directory exists
+const publicDir = path.join(__dirname, "../public");
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir, { maxAge: "1d" }));
+}
+
+// Guaranteed in-memory fallback handlers for zero-failure container resilience
+app.get(["/favicon.ico"], (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "image/x-icon");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(RENTMAIKAR_FAVICON_ICO_BUFFER);
+});
+
+app.get(["/favicon.png"], (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(RENTMAIKAR_FAVICON_PNG_BUFFER);
+});
+
+app.get(["/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"], (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(RENTMAIKAR_APPLE_ICON_BUFFER);
+});
+
+app.get(["/rentmaikar-logo.jpg", "/logo.jpg"], (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(RENTMAIKAR_LOGO_BUFFER);
+});
+
+app.get(["/logo.png"], (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(RENTMAIKAR_FAVICON_PNG_BUFFER);
+});
+
+// -----------------------------------------------------------------
+// 2.7 Server-Side XML Sitemap Generator (for search engines & SEO)
+// -----------------------------------------------------------------
+app.get(["/sitemap.xml", "/sitemap", "/api/sitemap"], async (req: Request, res: Response) => {
+  try {
+    const forceFresh = req.query.fresh === "true" || req.query.fresh === "1";
+    const { xml, count, cached } = await generateServerSitemap(forceFresh);
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400");
+    res.setHeader("X-Sitemap-Entries", String(count));
+    res.setHeader("X-Sitemap-Cached", String(cached));
+    res.send(xml);
+  } catch (err: any) {
+    console.error("[Sitemap] Generation error:", err);
+    res.status(500).setHeader("Content-Type", "text/plain").send("Failed to generate sitemap");
+  }
+});
+
+// Root handler for staging.rentmaikar.com
+app.get("/", (req: Request, res: Response) => {
+  if (req.accepts("html") && !req.xhr) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.send(renderPortalHtml());
+  }
+  res.json({
+    status: "ok",
+    service: "RentMaikar Backend API Gateway & Microservices",
+    domain: DOMAIN_MAPPING.backendDomain,
+    portal: `${DOMAIN_MAPPING.backendUrl}/portal`,
+    health: `${DOMAIN_MAPPING.backendUrl}/api/health`,
+    bridge_active: bridgeManager.isDirectConnectionEnabled(),
+  });
+});
 
 // -----------------------------------------------------------------
 // 3. Dedicated Backend Admin & Platform Portal (Domiciled in Backend)

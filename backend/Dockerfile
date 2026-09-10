@@ -11,6 +11,7 @@ RUN npm install
 
 # Copy source files and compile TypeScript
 COPY src/ ./src/
+COPY public/ ./public/
 RUN npm run build
 
 # =============================================================
@@ -27,8 +28,9 @@ ENV PORT=5000
 COPY package.json ./
 RUN npm install --only=production
 
-# Copy compiled JavaScript output
+# Copy compiled JavaScript output and static brand assets
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
 
 # Non-root user for container security
 USER node

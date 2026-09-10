@@ -6,6 +6,8 @@
  * or build tools, guaranteeing offline and container resilience.
  */
 
+import { RENTMAIKAR_LOGO_DATA_URL } from "../assets/logo";
+
 export function renderPortalHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -13,6 +15,21 @@ export function renderPortalHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RentMaikar Backend Portal | Admin & Platform Bridge</title>
+  
+  <!-- RentMaikar Browser Favicon & Touch Icons -->
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="shortcut icon" href="/favicon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="mask-icon" href="/favicon.png" color="#1B365D">
+  <meta name="theme-color" content="#0b0f17">
+  
+  <!-- Open Graph Meta for staging.rentmaikar.com -->
+  <meta property="og:site_name" content="RentMaikar">
+  <meta property="og:title" content="RentMaikar Backend Portal | Admin & Platform Bridge">
+  <meta property="og:description" content="Secure administration, telematics microservices, and bridge gateway for RentMaikar fleet infrastructure.">
+  <meta property="og:image" content="/rentmaikar-logo.jpg">
+  <meta property="og:type" content="website">
   <style>
     :root {
       --bg: #0b0f17;
@@ -68,7 +85,37 @@ export function renderPortalHtml(): string {
     .brand-group {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
+    }
+
+    .brand-logo-img {
+      height: 38px;
+      width: auto;
+      max-width: 140px;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 3px 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      display: inline-block;
+      vertical-align: middle;
+      transition: transform 0.2s;
+    }
+    .brand-logo-img:hover {
+      transform: scale(1.02);
+    }
+
+    .auth-logo-img {
+      height: 58px;
+      width: auto;
+      max-width: 200px;
+      object-fit: contain;
+      border-radius: 10px;
+      background: #ffffff;
+      padding: 6px 14px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      margin-bottom: 8px;
+      display: inline-block;
     }
 
     .brand-badge {
@@ -565,6 +612,11 @@ export function renderPortalHtml(): string {
   <div id="auth-view" style="display: none;">
     <div class="auth-card">
       <div style="text-align: center; margin-bottom: 24px;">
+        <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+          <a href="/portal" title="RentMaikar Home">
+            <img src="/rentmaikar-logo.jpg" onerror="this.src='${RENTMAIKAR_LOGO_DATA_URL}'" alt="RentMaikar Logo" class="auth-logo-img">
+          </a>
+        </div>
         <span class="brand-badge">RentMaikar Backend</span>
         <h1 style="font-size: 22px; font-weight: 700; margin-top: 12px;">Admin & Platform Portal</h1>
         <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">staging.rentmaikar.com</p>
@@ -620,11 +672,13 @@ export function renderPortalHtml(): string {
     <!-- Navigation Header -->
     <header>
       <div class="brand-group">
-        <span class="brand-badge">staging.rentmaikar.com</span>
-        <div>
-          <div class="brand-title">RentMaikar Backend Portal</div>
-          <div class="brand-subtitle">Platform Health & Gateway Connection Bridge</div>
-        </div>
+        <a href="/portal" style="display: flex; align-items: center; gap: 14px; text-decoration: none; color: inherit;" title="RentMaikar Backend Portal">
+          <img src="/rentmaikar-logo.jpg" onerror="this.src='${RENTMAIKAR_LOGO_DATA_URL}'" alt="RentMaikar Logo" class="brand-logo-img">
+          <div>
+            <div class="brand-title">RentMaikar Backend Portal</div>
+            <div class="brand-subtitle">staging.rentmaikar.com • Platform Health & Gateway Bridge</div>
+          </div>
+        </a>
       </div>
 
       <div class="header-actions">
