@@ -3,6 +3,14 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--build-arg'
+      - 'VITE_SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
+      - '--build-arg'
+      - 'VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p'
+      - '--build-arg'
+      - 'VITE_SUPABASE_ANON_KEY=sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p'
+      - '--build-arg'
+      - 'VITE_API_BASE_URL=https://staging.rentmaikar.com/api'
       - '-t'
       - 'gcr.io/$PROJECT_ID/rentmaikar:$COMMIT_SHA'
       - '-t'
@@ -21,7 +29,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'rentmaikar'
+      - 'rentmaikar-g2'
       - '--image'
       - 'gcr.io/$PROJECT_ID/rentmaikar:$COMMIT_SHA'
       - '--region'
