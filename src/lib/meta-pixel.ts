@@ -6,8 +6,8 @@
 // - PII (email, phone, name) is hashed server-side before hitting Meta.
 
 const PIXEL_ID = (import.meta as any).env?.VITE_META_PIXEL_ID as string | undefined;
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL as string | undefined;
-const SUPABASE_ANON = (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co";
+const SUPABASE_ANON = (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
 const CONSENT_KEYS = ["rentmaikar_message_consent", "rentmaikar_cookie_consent"];
 
 declare global {
