@@ -50,6 +50,27 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mode === "development" && componentTagger(),
+    {
+      name: "server-side-sitemap-generator",
+      configureServer(server: any) {
+        server.middlewares.use(async (req: any, res: any, next: any) => {
+          if (req.url === "/sitemap.xml" || req.url === "/sitemap") {
+            try {
+              const { fetchVehicleSitemapEntries, formatXmlSitemap, STATIC_SITEMAP_ROUTES } = await import("./src/lib/seo/sitemapEngine");
+              const dynamic = await fetchVehicleSitemapEntries();
+              const xml = formatXmlSitemap([...STATIC_SITEMAP_ROUTES, ...dynamic]);
+              res.setHeader("Content-Type", "application/xml; charset=utf-8");
+              res.setHeader("Cache-Control", "public, max-age=3600");
+              res.end(xml);
+              return;
+            } catch (e) {
+              console.error("Vite sitemap middleware error:", e);
+            }
+          }
+          next();
+        });
+      },
+    },
     visualizer({
       filename: "dist/stats.html",
       title: "RentMaikar Bundle Analysis & Dependency Report",
