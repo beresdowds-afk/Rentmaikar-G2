@@ -16,14 +16,14 @@ export const ROLE_HOME: Record<string, string> = {
   iot_support: '/portal/iot',
   vehicle_support: '/portal/vehicle',
   insurance_support: '/admin',
-  owner: '/owner-dashboard',
-  driver: '/driver-dashboard',
+  owner: '/owner/dashboard',
+  driver: '/driver/dashboard',
   customer: '/',
 };
 
 export const ROLE_ONBOARDING: Record<string, string> = {
-  driver: '/driver-onboarding',
-  owner: '/owner-onboarding',
+  driver: '/driver/onboarding',
+  owner: '/owner/onboarding',
   admin: '/admin',
   admin_assistant: '/admin',
 };

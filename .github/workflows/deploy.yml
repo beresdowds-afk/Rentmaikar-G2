@@ -37,26 +37,28 @@ jobs:
     needs: validate
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
-        if: ${{ secrets.GCP_SA_KEY != '' }}
+        if: env.GCP_SA_KEY != ''
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ env.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-        if: ${{ secrets.GCP_SA_KEY != '' }}
+        if: env.GCP_SA_KEY != ''
 
       - name: Authorize Docker with GCP
-        if: ${{ secrets.GCP_SA_KEY != '' }}
+        if: env.GCP_SA_KEY != ''
         run: gcloud auth configure-docker --quiet
 
       - name: Build and Push Docker Image
-        if: ${{ secrets.GCP_SA_KEY != '' }}
+        if: env.GCP_SA_KEY != ''
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}"
           docker build \
@@ -68,7 +70,7 @@ jobs:
           docker push gcr.io/${PROJECT_ID}/rentmaikar:latest
 
       - name: Deploy to Cloud Run
-        if: ${{ secrets.GCP_SA_KEY != '' }}
+        if: env.GCP_SA_KEY != ''
         run: |
           gcloud run deploy rentmaikar-g2 \
             --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar:${{ github.sha }} \

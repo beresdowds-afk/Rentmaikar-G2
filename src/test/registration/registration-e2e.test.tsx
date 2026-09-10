@@ -35,8 +35,13 @@ const insert = vi.fn();
 const rpc = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
-    from: () => ({
-      insert: (...args: unknown[]) => insert(...args),
+    from: (table?: string) => ({
+      insert: (...args: unknown[]) => {
+        if (!table || table === "applications") {
+          return insert(...args);
+        }
+        return Promise.resolve({ data: null, error: null });
+      },
       select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
     }),
     rpc: (...args: unknown[]) => rpc(...args),
