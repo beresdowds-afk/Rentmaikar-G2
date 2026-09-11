@@ -81,7 +81,7 @@ const Privacy = () => {
           <li><strong>Verify Identity:</strong> Confirm user identities, validate driver's licenses, and prevent fraud</li>
           <li><strong>Process Payments:</strong> Handle rental payments through PayPal and manage financial transactions</li>
           <li><strong>Vehicle Tracking:</strong> Provide real-time location tracking for safety, security, and fleet management</li>
-          <li><strong>Safety Features:</strong> Enable accident detection, emergency alerts, and remote vehicle deactivation</li>
+          <li><strong>Safety & Disruption Controls:</strong> Enable accident detection, emergency alerts, and safety-first service disruption (remote ignition restriction strictly when vehicle is confirmed stationary and parked) under authorized contractual conditions</li>
           <li><strong>Driver Training & Insurance:</strong> Track mandatory training completion and refresh status to determine eligibility for group insurance coverage</li>
           <li><strong>Communications:</strong> Send notifications about rentals, payments, inspections, training deadlines, and Platform updates</li>
           <li><strong>Compliance:</strong> Meet legal obligations and respond to law enforcement requests</li>
@@ -329,7 +329,7 @@ const Privacy = () => {
           <li><strong>Verify Identity:</strong> Confirm user identities using NIN, BVN, and driver's license verification</li>
           <li><strong>Process Payments:</strong> Handle rental payments through Paystack and manage financial transactions in Naira</li>
           <li><strong>Vehicle Tracking:</strong> Provide real-time location tracking for safety, security, and fleet management</li>
-          <li><strong>Safety Features:</strong> Enable accident detection, emergency alerts, and remote vehicle deactivation</li>
+          <li><strong>Safety & Disruption Controls:</strong> Enable accident detection, emergency alerts, and safety-first service disruption (remote ignition restriction strictly when vehicle is confirmed stationary and parked) under authorized contractual conditions</li>
           <li><strong>Driver Training & Insurance:</strong> Track mandatory training completion and refresh status to determine eligibility for group insurance coverage</li>
           <li><strong>Communications:</strong> Send notifications about rentals, payments, inspections, training deadlines, and Platform updates via SMS, WhatsApp, and email</li>
           <li><strong>Compliance:</strong> Meet legal obligations and respond to requests from regulatory authorities (NITDA, Police, FRSC)</li>

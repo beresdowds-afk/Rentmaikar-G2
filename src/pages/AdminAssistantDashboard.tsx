@@ -90,6 +90,7 @@ import { MessagingDocs } from "@/components/admin/docs/MessagingDocs";
 import { EmailDocs } from "@/components/admin/docs/EmailDocs";
 import { VoIPDocs } from "@/components/admin/docs/VoIPDocs";
 import PlatformGlossary from "@/components/admin/docs/PlatformGlossary";
+import { ServiceDisruptionDocs } from "@/components/admin/docs/ServiceDisruptionDocs";
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
 import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
 import RegionalOperationsManagement from "@/components/admin/RegionalOperationsManagement";
@@ -691,6 +692,7 @@ const AdminAssistantDashboard = () => {
                 {activeTab === 'police-reports' && <PoliceReportVerification />}
                 {activeTab === 'payment-accounts' && <PaymentAccountsSupportDashboard />}
                 {activeTab === 'expiry-notifications' && <ExpiryNotificationsWidget />}
+                {activeTab === 'service-disruption-docs' && <ServiceDisruptionDocs />}
               </div>
             </SectionErrorBoundary>
           )}
@@ -792,10 +794,10 @@ const AdminAssistantDashboard = () => {
                       <p><strong>Payment Default Protocol:</strong></p>
                       <ul className="list-disc list-inside text-muted-foreground space-y-1">
                         <li>Auto-debit runs daily at 12:01 AM</li>
-                        <li><strong>Weekly Plans:</strong> 72-hour lockdown with 3 notifications at 24-hour intervals</li>
-                        <li><strong>Daily Plans:</strong> 36-hour lockdown with 3 notifications at 12-hour intervals</li>
+                        <li><strong>Weekly Plans:</strong> 72-hour service disruption with 3 notifications at 24-hour intervals</li>
+                        <li><strong>Daily Plans:</strong> 36-hour service disruption with 3 notifications at 12-hour intervals</li>
                         <li>Daily plans become forbidden after any payment default</li>
-                        <li>Deactivation only when vehicle is parked (speed &lt; 2 mph)</li>
+                        <li>Service disruption (remote starter restriction) only when vehicle is parked (speed &lt; 2 mph, engine off)</li>
                       </ul>
                     </div>
                   </Card>
@@ -994,6 +996,7 @@ const AdminAssistantDashboard = () => {
           {activeTabAllowed && portalView === 'docs' && (
             <SectionErrorBoundary section="DOCS" onSwitchPortal={setPortalView}>
               <div className="space-y-6">
+                {activeTab === 'service-disruption-docs' && <ServiceDisruptionDocs />}
                 {activeTab === 'platform-features' && <PlatformFeaturesReport />}
                 {activeTab === 'messaging-docs' && <MessagingDocs />}
                 {activeTab === 'email-docs' && <EmailDocs />}

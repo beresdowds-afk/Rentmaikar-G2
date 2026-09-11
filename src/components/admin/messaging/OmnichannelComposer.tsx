@@ -323,8 +323,14 @@ export const OmnichannelComposer = ({
       daily_rate: '50.00',
       payment_frequency: 'weekly',
       vehicle: 'your assigned vehicle',
-      vehicle_plate: 'RM-2026',
-      pickup_location: 'Rentmaikar Fleet Hub',
+      vehicle_make: (effectiveRecipient as any).vehicle_make || 'Toyota',
+      vehicle_model: (effectiveRecipient as any).vehicle_model || 'Camry',
+      vehicle_year: (effectiveRecipient as any).vehicle_year || '2024',
+      license_plate: (effectiveRecipient as any).license_plate || 'RM-2026',
+      vehicle_plate: (effectiveRecipient as any).license_plate || 'RM-2026',
+      pickup_location: (effectiveRecipient as any).pickup_location || 'Rentmaikar Fleet Hub',
+      due_date: (effectiveRecipient as any).due_date || new Date(Date.now() + 7 * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      amount_due: `${currency}350.00`,
       booking_start: 'tomorrow',
       booking_end: 'next week',
       return_time: '12:00 PM',
@@ -332,6 +338,8 @@ export const OmnichannelComposer = ({
       portal_link: 'https://rentmaikar.com/portal',
       referee_name: 'Referee',
       applicant_name: effectiveRecipient.name || 'Applicant',
+      owner_name: effectiveRecipient.name || 'Valued Owner',
+      individual_portal_link: (effectiveRecipient as any).portal_link || (typeof window !== 'undefined' ? `${window.location.origin}/owner/portal-access` : 'https://rentmaikar.com/owner/portal-access'),
       ticket_id: '1042',
       support_message: 'Our fleet team has reviewed your request.',
     };
@@ -516,15 +524,30 @@ export const OmnichannelComposer = ({
     uploadedAttachments: OutboundAttachment[],
   ): Promise<{ success: boolean; error?: string; conversationId?: string }> => {
     try {
+      const isNg = (contact.phone || '').startsWith('+234');
+      const currency = isNg ? '₦' : '$';
       const contactPlaceholders = {
         user_name: contact.full_name || 'Valued Customer',
         user_first_name: (contact.full_name || '').split(' ')[0] || 'there',
+        first_name: (contact.full_name || '').split(' ')[0] || 'there',
+        owner_name: contact.full_name || 'Valued Owner',
+        recipient_name: contact.full_name || 'Valued Recipient',
         user_email: contact.email || 'customer@rentmaikar.com',
         user_phone: contact.phone || '+15550199000',
         support_email: EMAIL_CONFIG[emailSenderAlias as keyof typeof EMAIL_CONFIG] || EMAIL_CONFIG.support,
-        support_phone: '+1 (608) 384-3932',
+        support_phone: isNg ? '+234 800 RENTMAIKAR' : '+1 (608) 384-3932',
         company_name: 'Rentmaikar',
         current_date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        vehicle_make: (contact as any).vehicle_make || 'Toyota',
+        vehicle_model: (contact as any).vehicle_model || 'Camry',
+        vehicle_year: (contact as any).vehicle_year || '2024',
+        license_plate: (contact as any).license_plate || 'RM-2026',
+        vehicle_plate: (contact as any).license_plate || 'RM-2026',
+        pickup_location: (contact as any).pickup_location || 'Rentmaikar Fleet Hub',
+        due_date: (contact as any).due_date || new Date(Date.now() + 7 * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        amount_due: `${currency}350.00`,
+        individual_portal_link: (contact as any).portal_link || (typeof window !== 'undefined' ? `${window.location.origin}/owner/portal-access` : 'https://rentmaikar.com/owner/portal-access'),
+        portal_link: (contact as any).portal_link || (typeof window !== 'undefined' ? `${window.location.origin}/portal` : 'https://rentmaikar.com/portal'),
       };
 
       let body = renderPlaceholders(messageContent, contactPlaceholders, { keepUnknown: false });

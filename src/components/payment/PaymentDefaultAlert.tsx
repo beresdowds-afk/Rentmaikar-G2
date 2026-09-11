@@ -63,7 +63,7 @@ export function PaymentDefaultAlert({
             </AlertTitle>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-xs">
-                {isDaily ? '36h lockdown' : '72h lockdown'}
+                {isDaily ? '36h service disruption' : '72h service disruption'}
               </Badge>
               <Badge 
                 variant={status.severity === 'critical' ? 'destructive' : 'secondary'}
@@ -98,7 +98,7 @@ export function PaymentDefaultAlert({
               <Progress value={progress} className="h-2" />
               {hoursUntilLockdown > 0 && (
                 <p className="text-xs text-orange-500">
-                  {hoursUntilLockdown}h until vehicle lockdown eligible
+                  {hoursUntilLockdown}h until service disruption eligible (when parked)
                 </p>
               )}
             </div>

@@ -26,6 +26,21 @@ export interface MessageUseCase {
 
 export const MESSAGE_USE_CASES: MessageUseCase[] = [
   {
+    id: 'owner_vehicle_compliance_portal',
+    label: 'Owner Vehicle & Profile Compliance Notice',
+    group: 'Owner Compliance & Verification',
+    keywords: ['owner', 'portal', 'vehicle', 'pickup', 'withdraw', 'phone', 'compliance'],
+    drafts: {
+      sms: 'Rentmaikar: Hello [OWNER NAME]. Please visit your owner portal: [INDIVIDUAL PORTAL LINK] to complete the required fields for each of your listed vehicles and update or verify your phone number. A verified phone number is required to enable personal withdrawals from your vehicle earnings. Please also update the pickup location for each vehicle, as this is required for the vehicle to be listed in the Rentmaikar catalog. For your security, do not share your portal link with anyone. If you have already provided the requested information, please disregard this message. We apologize for any inconvenience. For assistance, contact Rentmaikar Support.',
+      whatsapp:
+        'Hello [OWNER NAME],\n\nThis is Rentmaikar Support regarding your registered owner account.\n\nPlease visit your individual owner portal:\n[INDIVIDUAL PORTAL LINK]\n\nKindly complete the required fields for each of your listed vehicles and update or verify your registered phone number.\n\nA verified phone number is required to enable personal withdrawals from your vehicle earnings.\n\nPlease also make sure that the pickup location for each vehicle is updated. A pickup location is required before a vehicle can be listed in the Rentmaikar catalog.\n\n🔒 Security: Your portal link is intended only for you. Please do not share or forward it to any third party.\n\nIf you have already supplied all the requested information, please disregard this message.\n\nWe apologize for any inconvenience these updates may cause and appreciate your cooperation.\n\nIf you require assistance, please contact Rentmaikar Support.',
+      email: {
+        subject: 'Update Regarding Your Rentmaikar Owner Account and Vehicle Information',
+        body: 'Dear [OWNER NAME],\n\nWe are contacting you regarding the information associated with your Rentmaikar owner account.\n\nPlease visit your owner portal using your individual link below:\n\n[INDIVIDUAL PORTAL LINK]\n\nPlease review and complete the required information for each vehicle currently listed on your account, and update or verify your registered phone number.\n\nA verified phone number is required to enable you to make personal withdrawals from your vehicle earnings.\n\nIn addition, please ensure that the pickup location for each vehicle is accurately provided. A pickup location is a required vehicle detail before that vehicle can be listed in the Rentmaikar catalog.\n\nSecurity notice: Your portal link is intended for you only. Please do not forward, share, or disclose your individual portal link to any third party.\n\nIf you have already supplied all of the requested information, no further action is required and you may disregard this message.\n\nWe acknowledge that completing these updates may cause some inconvenience, and we sincerely apologize for any disruption. These requirements are intended to ensure that your owner and vehicle information is complete and that applicable account functions can operate correctly.\n\nIf you need assistance, please contact Rentmaikar Support.\n\nRegards,\nRentmaikar Support\nTHE SMART PLATFORM FOR RIDESHARE VEHICLE RENTALS AND MANAGEMENT',
+      },
+    },
+  },
+  {
     id: 'payment_reminder',
     label: 'Payment reminder',
     group: 'Payments',

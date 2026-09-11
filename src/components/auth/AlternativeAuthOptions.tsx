@@ -49,8 +49,9 @@ export function AlternativeAuthOptions({
 
       await logVerificationEvent({ stage: 'oauth', step: 'google_sign_in', outcome: 'started', provider: 'google', correlationId });
 
+      const redirectTarget = `${window.location.origin}/auth`;
       const result = await lovable.auth.signInWithOAuth('google', {
-        redirect_uri: window.location.origin,
+        redirect_uri: redirectTarget,
         extraParams: {
           // Minimum scopes per Google OAuth policy:
           // - openid       → Google Subject ID (sub) + verified email status (email_verified)

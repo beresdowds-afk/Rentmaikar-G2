@@ -26,6 +26,7 @@ import rentmaikarLogo from '@/assets/rentmaikar-logo.jpg';
 import { buildAgreementValues, renderAgreementTemplate } from '@/lib/agreement-template';
 import SignaturePad from '@/components/legal/SignaturePad';
 import UserAgreementsList from '@/components/legal/UserAgreementsList';
+import { ServiceDisruptionOnboardingCard } from '@/components/onboarding/ServiceDisruptionOnboardingCard';
 
 type AgreementRegion = 'USA' | 'Nigeria' | (string & {});
 
@@ -344,6 +345,13 @@ const OnboardingLegalAgreement = () => {
 
                 {!loading && template && !receipt && (
                   <>
+                    <ServiceDisruptionOnboardingCard
+                      role="driver"
+                      region={region}
+                      interactive={false}
+                      className="mb-2"
+                    />
+
                     <ScrollArea className="h-[380px] rounded-md border bg-card p-4">
                       <div ref={contentRef}>
                         <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">

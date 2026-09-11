@@ -8,6 +8,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, Car, Shield, CreditCard, ArrowRight, Loader2, AlertTriangle, RefreshCw, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
 import { classifyOnboardingError, routeForStage, type ClassifiedOnboardingError } from '@/lib/onboarding-error';
+import { ServiceDisruptionOnboardingCard } from '@/components/onboarding/ServiceDisruptionOnboardingCard';
 
 const steps = [
   { icon: Car, title: 'Browse available vehicles', desc: 'Find a car that matches your rideshare goals in your city.' },
@@ -130,6 +131,8 @@ const DriverOnboarding = () => {
               </AlertDescription>
             </Alert>
           )}
+
+          <ServiceDisruptionOnboardingCard role="driver" interactive={true} />
 
           <Button className="w-full" onClick={finish} disabled={submitting} aria-busy={submitting}>
             {submitting ? (

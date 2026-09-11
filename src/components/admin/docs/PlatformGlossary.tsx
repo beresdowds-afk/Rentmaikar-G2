@@ -50,7 +50,7 @@ const ENTRIES: GlossaryEntry[] = [
   { term: "Weekly Frequency", category: "Payments", definition: "Standard payment cadence with no surcharge. Loses eligibility on default." },
   { term: "Security Deposit", category: "Payments", definition: "Mandatory refundable deposit collected at registration to cover damages, fines, or defaults." },
   { term: "Late Fee", category: "Payments", definition: "Automatic 10% fine applied when scheduled payments miss the due window." },
-  { term: "Lockdown", category: "Payments", definition: "Automated vehicle immobilization triggered 24h after a daily default or 36h after a weekly default." },
+  { term: "Service Disruption / Lockdown", category: "Payments", definition: "Automated remote vehicle ignition restriction triggered 36h after a daily default or 72h after a weekly default, only when parked." },
   { term: "PSP", acronym: "PSP", category: "Payments", definition: "Payment Service Provider. USA uses PayPal; Nigeria uses Paystack. Providers are strictly region-locked." },
   { term: "Paystack", category: "Payments", region: "Nigeria", definition: "Primary Nigeria payment gateway for cards, bank transfers, and USSD." },
   { term: "PayPal", category: "Payments", region: "USA", definition: "Primary USA payment gateway for card and PayPal-balance payments." },
@@ -58,15 +58,15 @@ const ENTRIES: GlossaryEntry[] = [
   { term: "Pre-Due Reminder", category: "Payments", definition: "Notifications sent every 12 hours starting 72h before a payment is due to reduce defaults." },
 
   // IoT & Vehicles
-  { term: "IoT", acronym: "IoT", category: "IoT & Vehicles", definition: "Internet of Things. Rentmaikar installs telemetry hardware in each vehicle for GPS, ignition, speed, and immobilization control." },
+  { term: "IoT", acronym: "IoT", category: "IoT & Vehicles", definition: "Internet of Things. Rentmaikar installs telemetry hardware in each vehicle for GPS, ignition, speed, and service disruption control." },
   { term: "MQTT", acronym: "MQTT", category: "IoT & Vehicles", definition: "Lightweight messaging protocol used to communicate with vehicle IoT devices. Topics: rentmaikar/vehicle/{id}/telemetry (30s) and command (50m)." },
   { term: "EMQX", category: "IoT & Vehicles", definition: "The managed MQTT broker used by Rentmaikar for vehicle telemetry." },
   { term: "Hologram", category: "IoT & Vehicles", definition: "Cellular SIM provider for IoT device connectivity." },
   { term: "Traccar", category: "IoT & Vehicles", definition: "Open-source GPS tracking platform integrated as one of the telemetry backends." },
-  { term: "Immobilization", category: "IoT & Vehicles", definition: "Remote command that disables vehicle ignition. Only issued when speed=0 AND ignition=OFF for safety." },
+  { term: "Service Disruption (Immobilization)", category: "IoT & Vehicles", definition: "Remote command that restricts vehicle starter/ignition. Strictly issued ONLY when speed=0 AND ignition=OFF for public and driver safety." },
   { term: "Telemetry", category: "IoT & Vehicles", definition: "Real-time vehicle data stream: GPS location, speed, ignition state, battery, and geofence status." },
   { term: "Geofence", category: "IoT & Vehicles", definition: "Virtual boundary around a location. USA drivers get a 25-mile catalogue radius; Nigeria uses home-city bounds." },
-  { term: "Recall", category: "IoT & Vehicles", definition: "Automated request for the driver to return a vehicle, typically triggered by IoT failure or compliance issue." },
+  { term: "Vehicle Call-In / Recall", category: "IoT & Vehicles", definition: "Mandatory official directive requiring the driver to check in, submit to inspection, or return the vehicle to a designated hub within 24h." },
   { term: "Weekly Inspection", category: "IoT & Vehicles", definition: "Owner-reviewed report with 10 specific vehicle photos on a 30-day cycle synced with rental agreements." },
   { term: "Vehicle Categories", category: "IoT & Vehicles", definition: "Three pricing tiers based on manufacture year, with region-specific ceilings." },
 

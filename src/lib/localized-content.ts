@@ -178,7 +178,7 @@ const usaFeaturesContent: FeaturesContent = {
     {
       icon: "tracking",
       title: "24-Hour Vehicle Tracking & Monitoring",
-      description: "Every rental vehicle is tracked around the clock — location, speed, ignition, geofence alerts and remote lockdown on defaults.",
+      description: "Every rental vehicle is tracked around the clock — location, speed, ignition, geofence alerts and remote service disruption on defaults.",
     },
     {
       icon: "support",
@@ -328,7 +328,7 @@ const nigeriaFeaturesContent: FeaturesContent = {
     {
       icon: "tracking",
       title: "24-Hour Vehicle Tracking & Monitoring",
-      description: "Every rental vehicle is tracked around the clock — location, speed, geofence alerts and remote lockdown on default.",
+      description: "Every rental vehicle is tracked around the clock — location, speed, geofence alerts and remote service disruption on default.",
     },
     {
       icon: "support",

@@ -138,13 +138,13 @@ Rentmaikar Hub Team`,
   },
   {
     id: "vehicle_lockdown",
-    name: "Vehicle Immobilizer / Lockdown Notice",
+    name: "Vehicle Service Disruption / Lockdown Notice",
     category: "fleet",
     defaultSenderAlias: "support",
     defaultSubject: "Notice: Vehicle Ignition Access Temporarily Suspended",
     defaultBody: `Hi {{first_name}},
 
-Please be advised that ignition access for {{vehicle_name}} ({{plate_number}}) has been temporarily locked via our fleet telematics system.
+Please be advised that ignition access for {{vehicle_name}} ({{plate_number}}) has been temporarily suspended via our fleet telematics system.
 
 Reason: {{lockdown_reason}}
 
@@ -156,7 +156,7 @@ For urgent emergency assistance, call our telematics desk at +1 (608) 384-3932 (
 
 Rentmaikar Operations Security`,
     parameters: ["first_name", "vehicle_name", "plate_number", "lockdown_reason"],
-    description: "Telematics ignition lockdown notification with cause and immediate resolution steps.",
+    description: "Telematics service disruption notification with cause and immediate resolution steps.",
     priority: "urgent",
   },
   {

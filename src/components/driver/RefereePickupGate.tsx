@@ -144,10 +144,10 @@ export function RefereePickupGate() {
           <div className="p-3.5 rounded-lg border border-amber-500/30 bg-background text-xs space-y-1 text-muted-foreground">
             <p className="font-semibold text-foreground flex items-center gap-1.5">
               <ShieldCheck className="h-4 w-4 text-amber-500" />
-              Referee Verification &amp; Security Lockdown Policy
+              Referee Verification &amp; Service Disruption Policy
             </p>
             <p>
-              Referee contact details are verified prior to final handover. Any adverse or negative report submitted by a referee is a basis for vehicle security lockdown and immediate recall.
+              Referee contact details are verified prior to final handover. Any adverse or negative report submitted by a referee is a basis for vehicle service disruption (remote ignition restriction when parked) and immediate vehicle call-in and recall.
             </p>
           </div>
           {referees.map((r, idx) => (

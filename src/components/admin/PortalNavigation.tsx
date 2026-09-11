@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Building2, UsersRound, Users, Headphones, LayoutGrid, Phone, MessageSquare, UserCircle, HandshakeIcon, ClipboardList, Home, Car, MapPin, Cpu, Package, BarChart3, Tag, Wrench, WifiOff, Ban, Camera, Wallet, KeyRound, Settings, HelpCircle, FileText, UserPlus, Shield, ShieldCheck, Share2, Facebook, Instagram, Linkedin, Chrome, CreditCard, TrendingUp, Webhook, Code, Bell, Flag, GraduationCap, Truck, BookOpen, Mail, Wifi, Activity, Clock, Radio, Globe, Star, Calendar, Satellite, Signal, UserX, Inbox, AlertTriangle } from "lucide-react";
+import { ChevronDown, Building2, UsersRound, Users, Headphones, LayoutGrid, Phone, MessageSquare, UserCircle, HandshakeIcon, ClipboardList, Home, Car, MapPin, Cpu, Package, BarChart3, Tag, Wrench, WifiOff, Ban, Camera, Wallet, KeyRound, Settings, HelpCircle, FileText, UserPlus, Shield, ShieldCheck, ShieldAlert, Share2, Facebook, Instagram, Linkedin, Chrome, CreditCard, TrendingUp, Webhook, Code, Bell, Flag, GraduationCap, Truck, BookOpen, Mail, Wifi, Activity, Clock, Radio, Globe, Star, Calendar, Satellite, Signal, UserX, Inbox, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -104,6 +104,7 @@ export const supportTabs: PortalTab[] = [
   { value: "police-reports", label: "🇳🇬 Police Reports", icon: <FileText className="h-4 w-4" /> },
   { value: "payment-accounts", label: "Payment & Accounts", icon: <CreditCard className="h-4 w-4" /> },
   { value: "expiry-notifications", label: "Expiry Alerts", icon: <Bell className="h-4 w-4" /> },
+  { value: "service-disruption-docs", label: "Disruption & Call-In Protocols", icon: <ShieldAlert className="h-4 w-4" /> },
 ];
 
 export const marketingTabs: PortalTab[] = [
@@ -115,6 +116,7 @@ export const marketingTabs: PortalTab[] = [
 ];
 
 export const docsTabs: PortalTab[] = [
+  { value: "service-disruption-docs", label: "Service Disruption & Protocols", icon: <ShieldAlert className="h-4 w-4" /> },
   { value: "platform-features", label: "Features Report", icon: <FileText className="h-4 w-4" /> },
   { value: "glossary", label: "Platform Glossary", icon: <BookOpen className="h-4 w-4" /> },
   { value: "messaging-docs", label: "SMS & WhatsApp", icon: <MessageSquare className="h-4 w-4" /> },

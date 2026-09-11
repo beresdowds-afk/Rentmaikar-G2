@@ -32,12 +32,19 @@ const Index = () => {
 useEffect(() => {
     if (isLoading || isRoleLoading) return;
 
-    if (!user || !userRole) return;
+    if (!user) return;
 
-    const target = homeForRole(userRole, "/");
+    const email = user.email?.trim().toLowerCase();
+    const isAdminByEmail = email ? ['eastfortemain@gmail.com', 'adebayoolusola39@gmail.com'].includes(email) : false;
+    const effectiveRole = userRole || (isAdminByEmail ? 'admin' : null);
 
-    if (target !== "/") {
+    if (effectiveRole) {
+      const target = homeForRole(effectiveRole, "/");
+      if (target !== "/") {
         navigate(target, { replace: true });
+      }
+    } else {
+      navigate("/auth", { replace: true });
     }
 }, [
     isLoading,

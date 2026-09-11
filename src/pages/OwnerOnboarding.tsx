@@ -8,6 +8,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, Car, FileText, DollarSign, ArrowRight, Loader2, AlertTriangle, RefreshCw, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
 import { classifyOnboardingError, routeForStage, type ClassifiedOnboardingError } from '@/lib/onboarding-error';
+import { ServiceDisruptionOnboardingCard } from '@/components/onboarding/ServiceDisruptionOnboardingCard';
 
 const steps = [
   { icon: Car, title: 'List your first vehicle', desc: 'Add photos, pricing, and specs so drivers can find your car.' },
@@ -129,6 +130,8 @@ const OwnerOnboarding = () => {
               </AlertDescription>
             </Alert>
           )}
+
+          <ServiceDisruptionOnboardingCard role="owner" interactive={true} />
 
           <Button className="w-full" onClick={finish} disabled={submitting} aria-busy={submitting}>
             {submitting ? (

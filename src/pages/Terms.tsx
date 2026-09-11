@@ -96,25 +96,27 @@ const Terms = () => {
           <li>Daily or weekly payment frequencies available based on agreement</li>
           <li>Payments are due by 11:59 PM on the scheduled due date</li>
           <li>Late payments incur a 24-hour grace period before penalties apply</li>
-          <li>Continued non-payment may result in remote vehicle deactivation via IoT</li>
+          <li>Continued non-payment may result in service disruption (temporary remote ignition restriction when parked) via IoT telematics, vehicle call-in, and recovery</li>
           <li>Repeated payment defaults may result in account suspension and loss of daily payment privileges</li>
         </ul>
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">7. IoT Tracking & Remote Deactivation</h2>
+        <h2 className="text-2xl font-semibold">7. IoT Tracking, Service Disruption & Call-In Policy</h2>
         <p className="text-muted-foreground">
-          All vehicles listed on Rentmaikar are required to have IoT tracking devices installed:
+          All vehicles listed on Rentmaikar are required to have IoT tracking and telematics devices installed:
         </p>
         <ul className="list-disc pl-6 text-muted-foreground space-y-2">
-          <li><strong>Real-time GPS Tracking:</strong> Continuous location monitoring for safety and security</li>
+          <li><strong>Real-time GPS Tracking:</strong> Continuous location monitoring for safety, fleet management, and security</li>
           <li><strong>Accident Detection:</strong> Automatic detection of collisions with instant alerts to Owners and Administrators</li>
-          <li><strong>Remote Deactivation:</strong> Vehicles may be remotely disabled in cases of payment default, unauthorized use, theft, or safety concerns</li>
-          <li><strong>Telemetry Data:</strong> Speed, battery level, and signal strength are monitored</li>
+          <li><strong>Safety-First Service Disruption:</strong> Service disruption (remote ignition restriction) only occurs when telemetry confirms the vehicle is stationary (speed &lt; 2 mph, engine/ignition off). It is never initiated while a vehicle is in motion on an active roadway.</li>
+          <li><strong>Conditions for Service Disruption:</strong> Service disruption may be initiated for: (a) payment defaults exceeding authorized grace windows (36 hours for daily plans, 72 hours for weekly plans); (b) failure to respond to official call-ins; (c) unapproved geographic boundary crossings; (d) adverse referee/guarantor fraud reports; (e) suspicion of theft; or (f) urgent mechanical safety recalls.</li>
+          <li><strong>Mandatory Call-In Rules:</strong> Rentmaikar or the Owner may issue an official Call-In Notice requiring the Driver to check in via phone/app, present the vehicle for physical inspection, or return the vehicle to a designated hub within 24 hours. Failure to comply within 24 hours will automatically trigger service disruption and field recovery.</li>
+          <li><strong>Telemetry Data:</strong> Speed, battery level, ignition status, and signal strength are monitored</li>
           <li><strong>Geofencing:</strong> Vehicles may be restricted to approved geographic areas</li>
         </ul>
         <p className="text-muted-foreground">
-          By using the Platform, Drivers consent to continuous vehicle tracking and acknowledge the possibility of remote deactivation.
+          By using the Platform, Drivers consent to continuous vehicle tracking and acknowledge the possibility of service disruption and vehicle call-in under the specified conditions.
         </p>
       </section>
 
@@ -319,26 +321,28 @@ const Terms = () => {
           <li>Daily or weekly payment frequencies available based on agreement</li>
           <li>Payments are due by 11:59 PM WAT on the scheduled due date</li>
           <li>Late payments incur a 24-hour grace period before penalties apply</li>
-          <li>Continued non-payment may result in remote vehicle deactivation via IoT</li>
+          <li>Continued non-payment may result in service disruption (temporary remote ignition restriction when parked) via IoT telematics, vehicle call-in, and recovery</li>
           <li>Repeated payment defaults may result in account suspension and loss of daily payment privileges</li>
           <li>Bank transfer and card payment options available</li>
         </ul>
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">7. IoT Tracking & Remote Deactivation</h2>
+        <h2 className="text-2xl font-semibold">7. IoT Tracking, Service Disruption & Call-In Policy</h2>
         <p className="text-muted-foreground">
-          All vehicles listed on Rentmaikar are required to have IoT tracking devices installed:
+          All vehicles listed on Rentmaikar are required to have IoT tracking and telematics devices installed:
         </p>
         <ul className="list-disc pl-6 text-muted-foreground space-y-2">
-          <li><strong>Real-time GPS Tracking:</strong> Continuous location monitoring for safety and security</li>
+          <li><strong>Real-time GPS Tracking:</strong> Continuous location monitoring for safety, fleet management, and security</li>
           <li><strong>Accident Detection:</strong> Automatic detection of collisions with instant alerts to Owners and Administrators</li>
-          <li><strong>Remote Deactivation:</strong> Vehicles may be remotely disabled in cases of payment default, unauthorized use, theft, or safety concerns</li>
-          <li><strong>Telemetry Data:</strong> Speed, battery level, and signal strength are monitored</li>
+          <li><strong>Safety-First Service Disruption:</strong> Service disruption (remote ignition restriction) only occurs when telemetry confirms the vehicle is stationary (speed &lt; 2 mph, engine/ignition off). It is never initiated while a vehicle is in motion on an active roadway.</li>
+          <li><strong>Conditions for Service Disruption:</strong> Service disruption may be initiated for: (a) payment defaults exceeding authorized grace windows (36 hours for daily plans, 72 hours for weekly plans); (b) failure to respond to official call-ins; (c) unapproved state/interstate boundary crossings; (d) adverse referee/guarantor fraud reports; (e) suspicion of theft; or (f) urgent mechanical safety recalls.</li>
+          <li><strong>Mandatory Call-In Rules:</strong> Rentmaikar or the Owner may issue an official Call-In Notice requiring the Driver to check in via phone/app, present the vehicle for physical inspection, or return the vehicle to a designated hub within 24 hours. Failure to comply within 24 hours will automatically trigger service disruption and field recovery.</li>
+          <li><strong>Telemetry Data:</strong> Speed, battery level, ignition status, and signal strength are monitored</li>
           <li><strong>Geofencing:</strong> Vehicles are restricted to approved cities and states</li>
         </ul>
         <p className="text-muted-foreground">
-          By using the Platform, Drivers consent to continuous vehicle tracking and acknowledge the possibility of remote deactivation.
+          By using the Platform, Drivers consent to continuous vehicle tracking and acknowledge the possibility of service disruption and vehicle call-in under the specified conditions.
         </p>
       </section>
 

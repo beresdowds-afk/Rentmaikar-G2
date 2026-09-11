@@ -128,7 +128,7 @@ const HowItWorksPage = () => {
         icon: Radar,
         title: "3. Install IoT Tracker & Go Live",
         description:
-          "Rentmaikar-approved IoT tracker enables 24-hour monitoring, geofence alerts and remote lockdown on default. Your listing goes live once installed.",
+          "Rentmaikar-approved IoT tracker enables 24-hour monitoring, geofence alerts and remote service disruption on default. Your listing goes live once installed.",
         requires: [
           "IoT device fitment (purchased from us or approved supplier)",
           "Payout account set up (bank / PayPal)",

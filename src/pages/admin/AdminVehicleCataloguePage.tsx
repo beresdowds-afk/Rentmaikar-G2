@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/table";
 import { IoTLivenessCommandBar } from "@/components/admin/IoTLivenessCommandBar";
 import { IoTAuditLogFeed } from "@/components/admin/IoTAuditLogFeed";
+import { ServiceDisruptionDialog } from "@/components/admin/ServiceDisruptionDialog";
 import {
   Car,
   Search,
@@ -57,6 +58,15 @@ import {
   Plus,
   Download,
   CameraOff,
+  ShieldAlert,
+  AlertTriangle,
+  CheckCircle2,
+  RotateCcw,
+  FileText,
+  PhoneCall,
+  ShieldCheck,
+  Radio,
+  Info,
 } from "lucide-react";
 
 import { toast } from "sonner";
@@ -76,6 +86,61 @@ interface VehicleRow {
   owner_id: string;
   is_public: boolean | null;
   photo_urls: string[] | null;
+  lockdown_reason?: string | null;
+  disabled_at?: string | null;
+  disabled_reason?: string | null;
+  is_enabled?: boolean | null;
+}
+
+export interface VehicleRecallInfo {
+  id: string;
+  vehicle_id: string;
+  recall_reason: string | null;
+  recall_type: string | null;
+  status: string | null;
+  created_at: string;
+}
+
+export function getVehicleDisruptionInfo(v: VehicleRow, recallMap?: Map<string, VehicleRecallInfo>) {
+  const recall = recallMap?.get(v.id);
+  if (recall) {
+    return {
+      isDisrupted: true,
+      reason: recall.recall_reason || "Active vehicle recall / call-in in progress",
+      source: "recall" as const,
+      date: recall.created_at,
+    };
+  }
+
+  if (v.lockdown_reason && v.lockdown_reason.trim()) {
+    return {
+      isDisrupted: true,
+      reason: v.lockdown_reason,
+      source: "lockdown_reason" as const,
+      date: v.disabled_at,
+    };
+  }
+
+  const s = (v.status || "").toLowerCase();
+  if (s === "lockdown" || s === "disrupted" || s === "service_disruption" || s === "locked") {
+    return {
+      isDisrupted: true,
+      reason: v.disabled_reason || "Starter restriction engaged (default or call-in expired)",
+      source: "status" as const,
+      date: v.disabled_at,
+    };
+  }
+
+  if (v.disabled_reason && /(lockdown|disrupt|default|starter|immobiliz|recall)/i.test(v.disabled_reason)) {
+    return {
+      isDisrupted: true,
+      reason: v.disabled_reason,
+      source: "disabled" as const,
+      date: v.disabled_at,
+    };
+  }
+
+  return { isDisrupted: false, reason: null, source: null, date: null };
 }
 
 const categoryForYear = (year?: number | null): "budget" | "standard" | "premium" => {
@@ -110,6 +175,9 @@ const statusColors: Record<string, string> = {
   pending: "bg-warning/10 text-warning border-warning/20",
   inactive: "bg-muted text-muted-foreground border-border",
   maintenance: "bg-destructive/10 text-destructive border-destructive/20",
+  service_disruption: "bg-destructive/15 text-destructive border-destructive/30",
+  disrupted: "bg-destructive/15 text-destructive border-destructive/30",
+  lockdown: "bg-destructive/15 text-destructive border-destructive/30",
 };
 
 const PAGE_SIZE = 15;
@@ -123,6 +191,7 @@ const quickChips: QuickChip[] = [
   { id: "usa", label: "🇺🇸 USA", match: (v) => inferCountry(v) === "USA" },
   { id: "ng", label: "🇳🇬 Nigeria", match: (v) => inferCountry(v) === "Nigeria" },
   { id: "active", label: "Active", match: (v) => v.status === "active" },
+  { id: "disrupted", label: "🚨 Service Disrupted", match: (v) => getVehicleDisruptionInfo(v).isDisrupted },
   { id: "pending", label: "Pending", match: (v) => (v.status || "pending") === "pending" },
   { id: "maintenance", label: "Maintenance", match: (v) => v.status === "maintenance" },
   { id: "no_photos", label: "📷 Missing owner photos", match: (v) => !hasVerifiedPhotos(v) },
@@ -147,6 +216,13 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
   const [countryFilter, setCountryFilter] = useState("all");
   const [makeFilter, setMakeFilter] = useState("");
   const [page, setPage] = useState(1);
+
+  // Service Disruption management state
+  const [disruptionVehicle, setDisruptionVehicle] = useState<VehicleRow | null>(null);
+  const [disruptionReason, setDisruptionReason] = useState("36h Payment Default");
+  const [disruptionCustomNote, setDisruptionCustomNote] = useState("");
+  const [isStationaryEnforced, setIsStationaryEnforced] = useState(true);
+  const [isUpdatingDisruption, setIsUpdatingDisruption] = useState(false);
 
   const [recommendVehicle, setRecommendVehicle] = useState<VehicleRow | null>(null);
   const [selectedDriverId, setSelectedDriverId] = useState<string>("");
@@ -174,10 +250,26 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("vehicles")
-        .select("id, make, model, year, color, license_plate, vin, status, pickup_city, pickup_location, owner_id, is_public, photo_urls")
+        .select("id, make, model, year, color, license_plate, vin, status, pickup_city, pickup_location, owner_id, is_public, photo_urls, lockdown_reason, disabled_at, disabled_reason, is_enabled")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as VehicleRow[];
+    },
+  });
+
+  const { data: recallMap, refetch: refetchRecalls } = useQuery({
+    queryKey: ["admin-catalogue-recalls"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("vehicle_recalls")
+        .select("id, vehicle_id, recall_reason, recall_type, status, created_at")
+        .in("status", ["pending", "acknowledged", "in_progress"]);
+      if (error) return new Map<string, VehicleRecallInfo>();
+      const map = new Map<string, VehicleRecallInfo>();
+      (data || []).forEach((r) => {
+        if (r.vehicle_id) map.set(r.vehicle_id, r as VehicleRecallInfo);
+      });
+      return map;
     },
   });
 
@@ -263,19 +355,136 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
     return (vehicles ?? []).filter((v) => {
       const country = inferCountry(v);
       if (countryFilter !== "all" && country !== countryFilter) return false;
-      if (statusFilter !== "all" && (v.status || "pending") !== statusFilter) return false;
+      if (statusFilter === "service_disruption") {
+        if (!getVehicleDisruptionInfo(v, recallMap).isDisrupted) return false;
+      } else if (statusFilter !== "all" && (v.status || "pending") !== statusFilter) {
+        return false;
+      }
       if (makeFilter && v.make !== makeFilter) return false;
       for (const id of activeChips) {
-        const chip = quickChips.find((c) => c.id === id);
-        if (chip && !chip.match(v)) return false;
+        if (id === "disrupted") {
+          if (!getVehicleDisruptionInfo(v, recallMap).isDisrupted) return false;
+        } else {
+          const chip = quickChips.find((c) => c.id === id);
+          if (chip && !chip.match(v)) return false;
+        }
       }
       if (q) {
-        const hay = `${v.make} ${v.model} ${v.year} ${v.license_plate} ${v.vin ?? ""} ${v.pickup_city ?? ""} ${v.pickup_location ?? ""}`.toLowerCase();
+        const hay = `${v.make} ${v.model} ${v.year} ${v.license_plate} ${v.vin ?? ""} ${v.pickup_city ?? ""} ${v.pickup_location ?? ""} ${v.lockdown_reason ?? ""} ${v.disabled_reason ?? ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
       return true;
     });
-  }, [vehicles, q, statusFilter, countryFilter, makeFilter, activeChips]);
+  }, [vehicles, q, statusFilter, countryFilter, makeFilter, activeChips, recallMap]);
+
+  const fleetMetrics = useMemo(() => {
+    const list = vehicles ?? [];
+    let disrupted = 0;
+    let activeListed = 0;
+    let maintenance = 0;
+    let missingDevice = 0;
+
+    list.forEach((v) => {
+      if (getVehicleDisruptionInfo(v, recallMap).isDisrupted) disrupted++;
+      if (v.status === "active" && v.is_public) activeListed++;
+      if (v.status === "maintenance") maintenance++;
+      if (!deviceMap?.has(v.id)) missingDevice++;
+    });
+
+    return {
+      total: list.length,
+      disrupted,
+      activeListed,
+      maintenance,
+      missingDevice,
+    };
+  }, [vehicles, recallMap, deviceMap]);
+
+  const handleResolveDisruption = async (v: VehicleRow) => {
+    setIsUpdatingDisruption(true);
+    try {
+      const { error } = await supabase
+        .from("vehicles")
+        .update({
+          lockdown_reason: null,
+          disabled_at: null,
+          disabled_reason: null,
+          status: "active",
+          is_enabled: true,
+        })
+        .eq("id", v.id);
+
+      if (error) throw error;
+
+      await supabase.from("admin_audit_log").insert({
+        admin_id: user?.id ?? null,
+        target_id: v.id,
+        action: "service_disruption_resolved",
+        details: {
+          vehicle_plate: v.license_plate,
+          action_taken: "Remote starter restriction cleared. Service restored.",
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      toast.success(`Service restored for ${v.license_plate}`, {
+        description: "Starter restriction released. Vehicle is now operational.",
+      });
+
+      refetchVehicles();
+      refetchRecalls();
+      setDisruptionVehicle(null);
+    } catch (err: any) {
+      toast.error("Failed to restore service", { description: err.message });
+    } finally {
+      setIsUpdatingDisruption(false);
+    }
+  };
+
+  const handleApplyDisruption = async (v: VehicleRow) => {
+    setIsUpdatingDisruption(true);
+    const reasonText =
+      disruptionReason === "Other"
+        ? disruptionCustomNote || "Service disruption applied by operations"
+        : `${disruptionReason}${disruptionCustomNote ? `: ${disruptionCustomNote}` : ""}`;
+    try {
+      const { error } = await supabase
+        .from("vehicles")
+        .update({
+          lockdown_reason: reasonText,
+          disabled_at: new Date().toISOString(),
+          disabled_reason: reasonText,
+          status: "service_disruption",
+        })
+        .eq("id", v.id);
+
+      if (error) throw error;
+
+      await supabase.from("admin_audit_log").insert({
+        admin_id: user?.id ?? null,
+        target_id: v.id,
+        action: "service_disruption_applied",
+        details: {
+          vehicle_plate: v.license_plate,
+          reason: reasonText,
+          stationary_enforced: isStationaryEnforced,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      toast.success(`Service disruption applied to ${v.license_plate}`, {
+        description: "Starter restriction armed. Enforced when vehicle is parked (Speed: 0 mph).",
+      });
+
+      refetchVehicles();
+      refetchRecalls();
+      setDisruptionVehicle(null);
+    } catch (err: any) {
+      toast.error("Failed to apply service disruption", { description: err.message });
+    } finally {
+      setIsUpdatingDisruption(false);
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -533,6 +742,86 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
         </TabsList>
 
         <TabsContent value="catalogue" className="space-y-4">
+          {/* Operational Fleet Status & Service Disruption Ribbon */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card
+              className="cursor-pointer border-border hover:border-primary/50 transition shadow-sm"
+              onClick={() => { setStatusFilter("all"); setActiveChips([]); }}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground font-medium">Total Fleet</span>
+                  <Car className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="text-2xl font-bold mt-1">{fleetMetrics.total}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Vehicles catalogued</div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className="cursor-pointer border-border hover:border-primary/50 transition shadow-sm"
+              onClick={() => { setStatusFilter("active"); }}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground font-medium">Active &amp; Listed</span>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div className="text-2xl font-bold mt-1 text-emerald-600">{fleetMetrics.activeListed}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Available for dispatch</div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className={`cursor-pointer transition shadow-sm ${
+                activeChips.includes("disrupted") || statusFilter === "service_disruption"
+                  ? "border-destructive bg-destructive/10 ring-2 ring-destructive"
+                  : fleetMetrics.disrupted > 0
+                  ? "border-destructive/40 bg-destructive/5 hover:bg-destructive/10"
+                  : "border-border"
+              }`}
+              onClick={() => {
+                if (activeChips.includes("disrupted") || statusFilter === "service_disruption") {
+                  setActiveChips((prev) => prev.filter((x) => x !== "disrupted"));
+                  setStatusFilter("all");
+                } else {
+                  toggleChip("disrupted");
+                  setStatusFilter("service_disruption");
+                }
+              }}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-destructive flex items-center gap-1">
+                    <ShieldAlert className={`h-3.5 w-3.5 ${fleetMetrics.disrupted > 0 ? "animate-pulse" : ""}`} />
+                    Service Disruption
+                  </span>
+                  <Badge variant={fleetMetrics.disrupted > 0 ? "destructive" : "outline"} className="text-[10px] px-1.5 py-0">
+                    {fleetMetrics.disrupted > 0 ? "Restricted" : "Clear"}
+                  </Badge>
+                </div>
+                <div className="text-2xl font-bold mt-1 text-destructive">{fleetMetrics.disrupted}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {fleetMetrics.disrupted > 0 ? "Click to filter affected" : "All starters released"}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card
+              className="cursor-pointer border-border hover:border-primary/50 transition shadow-sm"
+              onClick={() => toggleChip("no_photos")}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground font-medium">Needs Attention</span>
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                </div>
+                <div className="text-2xl font-bold mt-1 text-amber-600">{fleetMetrics.missingDevice + photolessVehicles.length}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Missing IoT / Photos</div>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card>
             <CardContent className="pt-6 space-y-4">
               {/* Single search bar */}
@@ -596,6 +885,9 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                   <SelectContent>
                     <SelectItem value="all">All Statuses</SelectItem>
                     <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="service_disruption" className="text-destructive font-semibold">
+                      🚨 Service Disrupted ({fleetMetrics.disrupted})
+                    </SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="inactive">Inactive</SelectItem>
                     <SelectItem value="maintenance">Maintenance</SelectItem>
@@ -688,8 +980,16 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                         {paged.map((v) => {
                           const country = inferCountry(v);
                           const dev = deviceMap?.get(v.id);
+                          const disruptionInfo = getVehicleDisruptionInfo(v, recallMap);
                           return (
-                            <TableRow key={v.id}>
+                            <TableRow
+                              key={v.id}
+                              className={
+                                disruptionInfo.isDisrupted
+                                  ? "bg-destructive/[0.04] dark:bg-destructive/[0.08] border-l-4 border-l-destructive"
+                                  : undefined
+                              }
+                            >
                               <TableCell>
                                 <div className="font-medium">{v.year} {v.make} {v.model}</div>
                                 <div className="text-xs text-muted-foreground capitalize">{v.color || "—"}</div>
@@ -701,9 +1001,28 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                               <TableCell>{v.pickup_city || v.pickup_location || "—"}</TableCell>
                               <TableCell>{country}</TableCell>
                               <TableCell>
-                                <Badge variant="outline" className={statusColors[v.status || "pending"]}>
-                                  {v.status || "pending"}
-                                </Badge>
+                                {disruptionInfo.isDisrupted ? (
+                                  <div className="space-y-1">
+                                    <Badge
+                                      variant="destructive"
+                                      className="bg-destructive/15 text-destructive border-destructive/30 hover:bg-destructive/25 gap-1.5 cursor-pointer font-semibold whitespace-nowrap"
+                                      onClick={() => setDisruptionVehicle(v)}
+                                    >
+                                      <ShieldAlert className="h-3 w-3 animate-pulse text-destructive" />
+                                      Service Disrupted
+                                    </Badge>
+                                    <div
+                                      className="text-[10px] text-muted-foreground line-clamp-1 max-w-[140px]"
+                                      title={disruptionInfo.reason || "Starter restricted"}
+                                    >
+                                      {disruptionInfo.reason || "Starter restricted"}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <Badge variant="outline" className={statusColors[v.status || "pending"]}>
+                                    {v.status || "pending"}
+                                  </Badge>
+                                )}
                               </TableCell>
                               <TableCell>
                                 {dev ? (
@@ -736,7 +1055,27 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                                   </span>
                                 </div>
                               </TableCell>
-                              <TableCell className="text-right space-x-2">
+                              <TableCell className="text-right space-x-2 whitespace-nowrap">
+                                {disruptionInfo.isDisrupted ? (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="gap-1 h-8 text-xs font-semibold"
+                                    onClick={() => setDisruptionVehicle(v)}
+                                  >
+                                    <ShieldAlert className="h-3.5 w-3.5" /> Manage Disruption
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="gap-1 h-8 text-xs text-muted-foreground hover:text-destructive"
+                                    onClick={() => setDisruptionVehicle(v)}
+                                    title="Issue Call-in or Service Disruption"
+                                  >
+                                    <PhoneCall className="h-3.5 w-3.5" /> Call-In
+                                  </Button>
+                                )}
                                 <Button size="sm" variant="ghost" className="gap-1" onClick={() => setPreviewVehicle(v)}>
                                   <Eye className="h-3 w-3" /> Preview
                                 </Button>
@@ -1030,6 +1369,27 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
     />
   );
 
+  const activeDisruptionInfo = disruptionVehicle ? getVehicleDisruptionInfo(disruptionVehicle, recallMap) : null;
+  const disruptionDialog = (
+    <ServiceDisruptionDialog
+      vehicle={disruptionVehicle}
+      isDisrupted={Boolean(activeDisruptionInfo?.isDisrupted)}
+      disruptionReasonText={activeDisruptionInfo?.reason}
+      disruptionDate={activeDisruptionInfo?.date}
+      isOpen={Boolean(disruptionVehicle)}
+      onClose={() => setDisruptionVehicle(null)}
+      onResolve={handleResolveDisruption}
+      onApply={handleApplyDisruption}
+      isUpdating={isUpdatingDisruption}
+      reason={disruptionReason}
+      setReason={setDisruptionReason}
+      customNote={disruptionCustomNote}
+      setCustomNote={setDisruptionCustomNote}
+      stationaryEnforced={isStationaryEnforced}
+      setStationaryEnforced={setIsStationaryEnforced}
+    />
+  );
+
   if (embedded) {
     return (
       <>
@@ -1037,6 +1397,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
         {dialog}
         {previewDialog}
         {addDialog}
+        {disruptionDialog}
       </>
     );
   }
@@ -1048,7 +1409,8 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
       <Footer />
       {dialog}
       {previewDialog}
-        {addDialog}
+      {addDialog}
+      {disruptionDialog}
     </div>
   );
 }

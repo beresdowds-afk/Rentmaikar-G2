@@ -285,9 +285,9 @@ Pay immediately to avoid lockdown.`,
                 <Ban className="h-5 w-5 text-destructive-foreground" />
               </div>
               <div>
-                <p className="font-medium text-destructive">Vehicle Lockdown</p>
+                <p className="font-medium text-destructive">Service Disruption (Lockdown)</p>
                 <p className="text-sm text-muted-foreground">
-                  After {config.LOCKDOWN_AFTER_HOURS}h, vehicle can be remotely disabled when parked
+                  After {config.LOCKDOWN_AFTER_HOURS}h, vehicle starter is remotely restricted strictly when parked
                 </p>
               </div>
             </div>
@@ -301,7 +301,8 @@ Pay immediately to avoid lockdown.`,
             Important Information
           </h4>
           <ul className="text-sm text-muted-foreground space-y-1">
-            <li>• Vehicle lockdown only occurs when the vehicle is safely parked (speed &lt; 2 mph)</li>
+            <li>• Service disruption (remote ignition restriction) only occurs when the vehicle is safely parked (speed &lt; 2 mph, engine off)</li>
+            <li>• Mandatory Call-in Notice: Failure to check in or present vehicle within 24h also triggers service disruption</li>
             <li>• Pay immediately upon receiving any notification to avoid escalation</li>
             <li>• Contact support if you're experiencing payment difficulties</li>
             {selectedFrequency === 'daily' && (

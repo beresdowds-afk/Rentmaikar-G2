@@ -257,7 +257,7 @@ export function PaymentOptionsSelector({
                   <span className="font-medium">Weekly Payment</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Pay once per week - no additional fees. 72-hour lockdown policy.
+                  Pay once per week - no additional fees. 72-hour service disruption policy.
                 </p>
               </Label>
               <Badge className="bg-green-500 hover:bg-green-600">Recommended</Badge>
@@ -291,7 +291,7 @@ export function PaymentOptionsSelector({
                 <p className="text-xs text-muted-foreground mt-1">
                   {dailyEligibility.isForbidden 
                     ? 'Unavailable due to previous payment default'
-                    : 'Pay daily with minimum 2-day down payment. 36-hour lockdown policy.'
+                    : 'Pay daily with minimum 2-day down payment. 36-hour service disruption policy.'
                   }
                 </p>
               </Label>
@@ -332,7 +332,7 @@ export function PaymentOptionsSelector({
               </p>
               <div className="flex items-center gap-2 mt-2 text-xs text-orange-500">
                 <Clock className="h-3 w-3" />
-                <span>36-hour lockdown policy with 3 notifications at 12-hour intervals</span>
+                <span>36-hour service disruption policy with 3 notifications at 12-hour intervals</span>
               </div>
             </AlertDescription>
           </Alert>

@@ -49,6 +49,13 @@ Start: {{contract_start_date}} {{contract_start_time}} — End: {{contract_end_d
 
 2. PAYMENTS
 Basic rental price: {{currency}} {{basic_rental_price}}
+Payments are due strictly according to the agreed schedule (daily or weekly). Failure to settle within authorized grace periods (36 hours for daily plans, 72 hours for weekly plans) constitutes an immediate default.
+
+3. TELEMATICS, SERVICE DISRUPTION & VEHICLE CALL-IN
+The DRIVER acknowledges and explicitly consents that the vehicle is equipped with active GPS tracking and remote telematics control.
+- Service Disruption (Remote Ignition Restriction): In the event of payment default beyond grace windows, failure to respond to official call-ins, unapproved boundary crossing, adverse referee fraud report, or vehicle safety hazard, the platform or OWNER may initiate service disruption (remote starter restriction).
+- Stationary Safety Protocol: Service disruption shall strictly and only be engaged when telematics verify that the vehicle is stationary (speed < 2 mph, engine/ignition turned off). Under no circumstances will service disruption be initiated while the vehicle is in motion on a roadway.
+- Vehicle Call-In & Inspection: The platform or OWNER may issue a formal Call-In Notice requiring the DRIVER to check in, present the vehicle for physical inspection, or return it to a designated hub within 24 hours. Failure to comply with a call-in within 24 hours authorizes immediate service disruption and field recovery.
 
 EXECUTION
 Owner, Driver and the {{platform_entity}} Administrator sign this agreement electronically on the RentMaiKar platform.`;
