@@ -20,29 +20,44 @@ const ADMIN_TARGETS: Record<string, { path: string; portal?: string; tab?: strin
   payments: { path: '/admin/payments' },
   rentals: { path: '/admin/rental-reconciliation' },
   user_subscriptions: { path: '/admin', portal: 'crm', tab: 'subscriptions' },
+  subscriptions: { path: '/admin', portal: 'crm', tab: 'subscriptions' },
   legal_agreements: { path: '/admin', portal: 'crm', tab: 'legal-agreements' },
   rent_to_own_agreements: { path: '/admin', portal: 'crm', tab: 'rent-to-own' },
   price_negotiations: { path: '/admin', portal: 'crm', tab: 'negotiations' },
   vehicle_booking_requests: { path: '/admin', portal: 'crm', tab: 'approvals' },
+  booking_requests: { path: '/admin', portal: 'crm', tab: 'approvals' },
   vehicles: { path: '/admin/vehicle-queue' },
   owner_payouts: { path: '/admin/treasury' },
+  payouts: { path: '/admin/treasury' },
   withdrawal_authorizations: { path: '/admin/treasury' },
+  withdrawals: { path: '/admin/treasury' },
+  driver_call_ins: { path: '/admin', portal: 'operations', tab: 'call-ins' },
+  call_ins: { path: '/admin', portal: 'operations', tab: 'call-ins' },
+  incidents: { path: '/admin', portal: 'operations', tab: 'incidents' },
+  support_tasks: { path: '/admin', portal: 'operations', tab: 'tasks' },
 };
 
 /** Where non-staff recipients (drivers / owners) should land. */
 const SELF_TARGETS: Record<string, Record<'driver' | 'owner', string | undefined>> = {
-  applications: { driver: '/driver-dashboard', owner: '/owner-dashboard' },
-  invoices: { driver: '/driver-dashboard?tab=billing', owner: '/owner-dashboard?tab=earnings' },
-  payments: { driver: '/driver-dashboard?tab=billing', owner: '/owner-dashboard?tab=earnings' },
-  rentals: { driver: '/driver-dashboard?tab=rentals', owner: '/owner-dashboard?tab=vehicles' },
-  user_subscriptions: { driver: '/subscriptions', owner: '/subscriptions' },
-  legal_agreements: { driver: '/driver-dashboard?tab=agreements', owner: '/owner-dashboard?tab=agreements' },
-  rent_to_own_agreements: { driver: '/driver-dashboard?tab=rentals', owner: '/owner-dashboard?tab=vehicles' },
-  price_negotiations: { driver: '/driver-dashboard?tab=negotiations', owner: '/owner-dashboard?tab=negotiations' },
-  vehicle_booking_requests: { driver: '/driver-dashboard?tab=bookings', owner: '/owner-dashboard?tab=bookings' },
-  vehicles: { driver: undefined, owner: '/owner-dashboard?tab=vehicles' },
-  owner_payouts: { driver: undefined, owner: '/owner-dashboard?tab=earnings' },
-  withdrawal_authorizations: { driver: undefined, owner: '/owner-dashboard?tab=earnings' },
+  applications: { driver: '/driver/dashboard?tab=overview', owner: '/owner/dashboard?tab=overview' },
+  invoices: { driver: '/driver/dashboard?tab=payments', owner: '/owner/dashboard?tab=earnings' },
+  payments: { driver: '/driver/dashboard?tab=payments', owner: '/owner/dashboard?tab=earnings' },
+  rentals: { driver: '/driver/dashboard?tab=overview', owner: '/owner/dashboard?tab=vehicles' },
+  user_subscriptions: { driver: '/driver/dashboard?tab=subscriptions', owner: '/owner/dashboard?tab=settings' },
+  subscriptions: { driver: '/driver/dashboard?tab=subscriptions', owner: '/owner/dashboard?tab=settings' },
+  legal_agreements: { driver: '/driver/dashboard?tab=agreements', owner: '/owner/dashboard?tab=agreements' },
+  rent_to_own_agreements: { driver: '/driver/dashboard?tab=lease-to-own', owner: '/owner/dashboard?tab=rent-to-own' },
+  price_negotiations: { driver: '/driver/dashboard?tab=negotiate', owner: '/owner/dashboard?tab=pricing' },
+  vehicle_booking_requests: { driver: '/driver/dashboard?tab=overview', owner: '/owner/dashboard?tab=vehicles' },
+  booking_requests: { driver: '/driver/dashboard?tab=overview', owner: '/owner/dashboard?tab=vehicles' },
+  vehicles: { driver: '/catalogue/budget', owner: '/owner/dashboard?tab=vehicles' },
+  owner_payouts: { driver: '/driver/dashboard?tab=payments', owner: '/owner/dashboard?tab=earnings' },
+  payouts: { driver: '/driver/dashboard?tab=payments', owner: '/owner/dashboard?tab=earnings' },
+  withdrawal_authorizations: { driver: '/driver/dashboard?tab=payments', owner: '/owner/dashboard?tab=withdrawals' },
+  withdrawals: { driver: '/driver/dashboard?tab=payments', owner: '/owner/dashboard?tab=withdrawals' },
+  driver_call_ins: { driver: '/driver/dashboard?tab=call-history', owner: '/owner/dashboard?tab=call-history' },
+  call_ins: { driver: '/driver/dashboard?tab=call-history', owner: '/owner/dashboard?tab=call-history' },
+  incidents: { driver: '/driver/dashboard?tab=incidents', owner: '/owner/dashboard?tab=vehicles' },
 };
 
 const withParams = (path: string, params: Record<string, string | undefined>) => {
@@ -56,6 +71,31 @@ const withParams = (path: string, params: Record<string, string | undefined>) =>
 };
 
 /**
+ * Strips production or current origin from an absolute deep link URL
+ * so that SPA client-side routing stays within the active app instance.
+ */
+export function toRelativeDeepLink(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  try {
+    if (trimmed.startsWith('https://rentmaikar.com') || trimmed.startsWith('http://rentmaikar.com')) {
+      const parsed = new URL(trimmed);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    if (typeof window !== 'undefined' && trimmed.startsWith(window.location.origin)) {
+      const parsed = new URL(trimmed);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    // Already relative or unparseable
+  }
+
+  return trimmed;
+}
+
+/**
  * Builds the deep link for a notification, or `null` when the recipient has no
  * screen that can show the referenced record.
  */
@@ -65,10 +105,11 @@ export function notificationDeepLink(
   role: string | null | undefined,
 ): string | null {
   const meta = (metadata ?? {}) as NotificationMetadata;
-  const table = meta.table ?? kind.replace(/_(created|status)$/, '');
+  const rawTable = meta.table ?? kind.replace(/_(created|status)$/, '');
+  const table = rawTable.toLowerCase().trim();
   const recordId = meta.record_id;
 
-  const isStaff = role === 'admin' || role === 'admin_assistant';
+  const isStaff = role === 'admin' || role === 'admin_assistant' || role === 'superadmin' || role === 'legal_support';
 
   if (isStaff) {
     const target = ADMIN_TARGETS[table];

@@ -93,6 +93,25 @@ export default function DriverDashboard() {
   const { country, currency } = useRegion();
   const { user, userRole } = useAuth();
   const [activeTab, setActiveTab] = usePersistedTab('overview');
+
+  useEffect(() => {
+    const tabMap: Record<string, string> = {
+      billing: 'payments',
+      invoices: 'payments',
+      rentals: 'overview',
+      bookings: 'overview',
+      negotiations: 'negotiate',
+      pricing: 'negotiate',
+      rto: 'lease-to-own',
+      'rent-to-own': 'lease-to-own',
+      calls: 'call-history',
+      call_ins: 'call-history',
+      driver_call_ins: 'call-history',
+    };
+    if (tabMap[activeTab]) {
+      setActiveTab(tabMap[activeTab]);
+    }
+  }, [activeTab, setActiveTab]);
   const [showFullDashboard, setShowFullDashboard] = useState(true);
   const isAdminView = userRole === 'admin';
   const [showPaymentModal, setShowPaymentModal] = useState(false);

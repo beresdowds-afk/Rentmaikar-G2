@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { EnablePushButton } from '@/components/notifications/EnablePushButton';
 import { useInAppMessages } from '@/hooks/useInAppMessages';
+import { toRelativeDeepLink } from '@/lib/notification-links';
 
 /** The user-facing in-app message inbox (web + PWA). */
 export default function MessagesPage() {
@@ -87,7 +88,10 @@ export default function MessagesPage() {
                         {formatDistanceToNow(new Date(m.created_at), { addSuffix: true })}
                       </span>
                       {m.link_url && (
-                        <Link to={m.link_url} className="inline-flex items-center gap-1 text-primary">
+                        <Link
+                          to={toRelativeDeepLink(m.link_url) || m.link_url}
+                          className="inline-flex items-center gap-1 text-primary"
+                        >
                           Open <ExternalLink className="h-3 w-3" />
                         </Link>
                       )}

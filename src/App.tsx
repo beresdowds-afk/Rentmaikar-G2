@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useNavigate, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { RegionProvider } from "@/contexts/RegionContext";
 import { UserTypeProvider } from "@/contexts/UserTypeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
@@ -155,6 +155,11 @@ const PageLoader = () => (
   </SuspenseProgressTracker>
 );
 
+const DeepLinkRedirect = ({ to }: { to: string }) => {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}${location.hash}`} replace />;
+};
+
 const App = () => (
   
           <ErrorBoundary>
@@ -246,8 +251,10 @@ const App = () => (
                     } 
                   />
                   <Route path="/driver/dashboard" element={<DriverDashboard />} />
+                  <Route path="/driver-dashboard" element={<DeepLinkRedirect to="/driver/dashboard" />} />
                   <Route path="/driver/onboarding" element={<DriverOnboarding />} />
                   <Route path="/owner/dashboard" element={<OwnerDashboard />} />
+                  <Route path="/owner-dashboard" element={<DeepLinkRedirect to="/owner/dashboard" />} />
                   <Route path="/owner/portal-access" element={<OwnerPortalAccessPage />} />
                   <Route path="/owner/onboarding" element={<OwnerOnboarding />} />
                   <Route path="/onboarding/legal-agreement" element={<OnboardingLegalAgreement />} />

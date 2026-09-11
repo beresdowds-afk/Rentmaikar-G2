@@ -112,6 +112,26 @@ export default function OwnerDashboard() {
 
   const isAdminView = userRole === 'admin';
   const [activeTab, setActiveTab] = usePersistedTab('overview');
+
+  useEffect(() => {
+    const tabMap: Record<string, string> = {
+      billing: 'earnings',
+      invoices: 'earnings',
+      payouts: 'earnings',
+      bookings: 'vehicles',
+      negotiations: 'pricing',
+      rto: 'rent-to-own',
+      'lease-to-own': 'rent-to-own',
+      calls: 'call-history',
+      call_ins: 'call-history',
+      driver_call_ins: 'call-history',
+      tracking: 'iot-device',
+      iot: 'iot-device',
+    };
+    if (tabMap[activeTab]) {
+      setActiveTab(tabMap[activeTab]);
+    }
+  }, [activeTab, setActiveTab]);
   const [showFullDashboard, setShowFullDashboard] = useState(true);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
