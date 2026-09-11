@@ -1,14 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Resend } from "https://esm.sh/resend@2.0.0";
 import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
+import { resendSendEmail } from "../_shared/resend-gateway.ts";
+import { formatSenderEmail } from "../_shared/email-config.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 
 // Reminder tiers (days before expiry) for the compulsory monthly renewal cycle
 const REMINDER_TIERS = [14, 7, 3, 1] as const;
@@ -356,8 +355,8 @@ async function sendRenewalWarningEmail(params: EmailParams) {
 
   const recipients = [driverEmail, ownerEmail].filter(Boolean) as string[];
   if (recipients.length > 0) {
-    await resend.emails.send({
-      from: "RentMaiKar Agreements <agreements@resend.dev>",
+    await resendSendEmail({
+      from: formatSenderEmail("legal"),
       to: recipients,
       subject: `⚠️ Action Required: Agreement Expiring in ${daysUntilExpiry} Days`,
       html,
@@ -411,8 +410,8 @@ async function sendRenewalCreatedEmail(params: RenewalCreatedParams) {
 
   const recipients = [driverEmail, ownerEmail].filter(Boolean) as string[];
   if (recipients.length > 0) {
-    await resend.emails.send({
-      from: "RentMaiKar Agreements <agreements@resend.dev>",
+    await resendSendEmail({
+      from: formatSenderEmail("legal"),
       to: recipients,
       subject: `📋 Agreement Renewal #${renewalNumber} — Action Required`,
       html,
@@ -456,8 +455,8 @@ async function sendExpiredBlockEmail(params: ExpiredBlockParams) {
 
   const recipients = [driverEmail, ownerEmail].filter(Boolean) as string[];
   if (recipients.length > 0) {
-    await resend.emails.send({
-      from: "RentMaiKar Agreements <agreements@resend.dev>",
+    await resendSendEmail({
+      from: formatSenderEmail("legal"),
       to: recipients,
       subject: "🚨 URGENT: Rental Agreement Expired — Immediate Signature Required",
       html,

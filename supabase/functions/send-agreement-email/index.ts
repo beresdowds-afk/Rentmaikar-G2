@@ -1,9 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { Resend } from "https://esm.sh/resend@2.0.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireServiceRole } from "../_shared/auth-guards.ts";
-
-const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
+import { resendSendEmail } from "../_shared/resend-gateway.ts";
+import { formatSenderEmail } from "../_shared/email-config.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -214,23 +213,31 @@ const handler = async (req: Request): Promise<Response> => {
       .replace("{{NEXT_STEPS}}", "<li><strong>Next Step:</strong> Coordinate with the driver for vehicle handover</li>");
 
     // Send email to driver
-    const driverEmailResponse = await resend.emails.send({
-      from: "RentMaiKar <agreements@resend.dev>",
+    const driverRes = await resendSendEmail({
+      from: formatSenderEmail("legal"),
       to: [driverEmail],
       subject: `Vehicle Rental Agreement Executed - ${vehicleInfo}`,
       html: driverEmailHtml,
     });
-
+    const driverEmailResponse = await driverRes.json().catch(() => ({}));
+    if (!driverRes.ok) {
+      console.error("Driver email error:", driverEmailResponse);
+      throw new Error(driverEmailResponse?.message || "Failed to send driver agreement email");
+    }
     console.log("Driver email sent:", driverEmailResponse);
 
     // Send email to owner
-    const ownerEmailResponse = await resend.emails.send({
-      from: "RentMaiKar <agreements@resend.dev>",
+    const ownerRes = await resendSendEmail({
+      from: formatSenderEmail("legal"),
       to: [ownerEmail],
       subject: `Vehicle Rental Agreement Executed - ${vehicleInfo}`,
       html: ownerEmailHtml,
     });
-
+    const ownerEmailResponse = await ownerRes.json().catch(() => ({}));
+    if (!ownerRes.ok) {
+      console.error("Owner email error:", ownerEmailResponse);
+      throw new Error(ownerEmailResponse?.message || "Failed to send owner agreement email");
+    }
     console.log("Owner email sent:", ownerEmailResponse);
 
     // Update agreement with email sent timestamp

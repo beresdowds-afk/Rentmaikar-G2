@@ -1,7 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Resend } from "https://esm.sh/resend@2.0.0";
 import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
+import { resendSendEmail } from "../_shared/resend-gateway.ts";
+import { formatSenderEmail } from "../_shared/email-config.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -222,7 +223,7 @@ const handler = async (req: Request): Promise<Response> => {
     });
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const resend = resendApiKey ? new Resend(resendApiKey) : null;
+    const hasEmailTransport = !!resendApiKey;
 
     const today = new Date();
     const formatDate = (d: Date) => d.toISOString().split('T')[0];
@@ -445,10 +446,10 @@ const handler = async (req: Request): Promise<Response> => {
         : `RentMaiKar: Your ${item.type}${vehicleText} expires on ${item.expiry_date} (${item.days_until_expiry} days). Please renew to avoid service interruptions.`;
 
       // === SEND EMAIL ===
-      if (primaryEmail && resend) {
+      if (primaryEmail && hasEmailTransport) {
         try {
-          await resend.emails.send({
-            from: "RentMaiKar <noreply@rentmaikar.com>",
+          const emailRes = await resendSendEmail({
+            from: formatSenderEmail("notifications"),
             to: [primaryEmail],
             subject,
             html: `
@@ -459,7 +460,11 @@ const handler = async (req: Request): Promise<Response> => {
               <p>Please ensure you renew it before the expiry date to avoid any service interruptions.</p>
               <p>Best regards,<br>RentMaiKar Team</p>
             `,
-          });
+          }, resendApiKey);
+          if (!emailRes.ok) {
+            const errData = await emailRes.json().catch(() => ({}));
+            throw new Error(errData?.message || `Email send failed [${emailRes.status}]`);
+          }
           
           await supabase.from('expiry_notifications').insert({
             document_id: ['license', 'police_report'].includes(item.type) ? item.id : null,
@@ -524,10 +529,10 @@ const handler = async (req: Request): Promise<Response> => {
 
       // === ADMIN NOTIFICATIONS ===
       for (const admin of adminProfiles || []) {
-        if (admin.email && resend) {
+        if (admin.email && hasEmailTransport) {
           try {
-            await resend.emails.send({
-              from: "RentMaiKar <noreply@rentmaikar.com>",
+            const adminEmailRes = await resendSendEmail({
+              from: formatSenderEmail("notifications"),
               to: [admin.email],
               subject: `[Admin] ${subject}`,
               html: `
@@ -537,7 +542,11 @@ const handler = async (req: Request): Promise<Response> => {
                 <p><strong>Flow:</strong> ${flowType} | <strong>Urgency:</strong> ${urgency}</p>
                 ${item.days_until_expiry <= 5 ? '<p style="color:red;">⚠️ Account restriction pending.</p>' : ''}
               `,
-            });
+            }, resendApiKey);
+            if (!adminEmailRes.ok) {
+              const errData = await adminEmailRes.json().catch(() => ({}));
+              throw new Error(errData?.message || `Admin email send failed [${adminEmailRes.status}]`);
+            }
             await supabase.from('expiry_notifications').insert({
               document_id: ['license', 'police_report'].includes(item.type) ? item.id : null,
               vehicle_id: item.vehicle_id,

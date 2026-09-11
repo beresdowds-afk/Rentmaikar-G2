@@ -85,9 +85,8 @@ async function shouldUseResendFallback(
 // (optional secret) overrides the queued sender if a different verified sender is needed.
 async function sendViaResend(payload: Record<string, unknown>): Promise<void> {
   const resendKey = Deno.env.get('RESEND_API_KEY')
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!resendKey || !apiKey) {
-    throw new Error('Resend fallback not configured (missing RESEND_API_KEY or LOVABLE_API_KEY)')
+  if (!resendKey) {
+    throw new Error('Resend fallback not configured (missing RESEND_API_KEY)')
   }
 
   const res = await resendSendEmail({
@@ -199,13 +198,14 @@ Deno.serve(async (req) => {
 
 async function handleRequest(req: Request): Promise<Response> {
   const apiKey = Deno.env.get('LOVABLE_API_KEY')
+  const resendKey = Deno.env.get('RESEND_API_KEY')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-  if (!apiKey || !supabaseUrl || !supabaseServiceKey) {
-    console.error('Missing required environment variables')
+  if (!supabaseUrl || !supabaseServiceKey || (!apiKey && !resendKey)) {
+    console.error('Missing required environment variables (need SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and either RESEND_API_KEY or LOVABLE_API_KEY)')
     return new Response(
-      JSON.stringify({ error: 'Server configuration error' }),
+      JSON.stringify({ error: 'Server configuration error: missing email provider credentials' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
@@ -217,12 +217,14 @@ async function handleRequest(req: Request): Promise<Response> {
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-  // Decide the sending provider for this run: Resend gateway until the
-  // notify.rentmaikar.com NS delegation is confirmed propagated.
-  const useResendFallback = await shouldUseResendFallback(supabase)
+  // Decide the sending provider for this run: Resend gateway if Lovable key is absent,
+  // or until the notify.rentmaikar.com NS delegation is confirmed propagated.
+  const useResendFallback = !apiKey || (await shouldUseResendFallback(supabase))
   console.log('Email provider selected', {
     provider: useResendFallback ? 'resend-gateway' : 'lovable-managed',
-    reason: useResendFallback
+    reason: !apiKey
+      ? 'Direct RESEND_API_KEY mode (LOVABLE_API_KEY not set)'
+      : useResendFallback
       ? `${SENDER_DOMAIN} NS delegation not yet propagated`
       : `${SENDER_DOMAIN} delegated to Lovable nameservers`,
   })

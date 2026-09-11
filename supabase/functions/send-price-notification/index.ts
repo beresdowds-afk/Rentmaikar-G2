@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { requireServiceRole } from "../_shared/auth-guards.ts";
 import { resendSendEmail } from "../_shared/resend-gateway.ts";
+import { formatSenderEmail } from "../_shared/email-config.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -364,7 +365,7 @@ const handler = async (req: Request): Promise<Response> => {
     console.log(`Sending ${body.notificationType} notification to ${body.email}`);
 
     const emailResponse = await resendSendEmail({
-        from: "Rentmaikar <onboarding@resend.dev>",
+        from: formatSenderEmail("negotiations"),
         to: [body.email],
         subject: subject,
         html: emailHtml,
