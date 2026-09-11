@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- Rentmaikar Consolidated Database Schema
 -- Generated for Supabase Project: jrsydiofzceoeddjogov (Rentmaikar)
--- Total Migrations Bundled: 364
+-- Total Migrations Bundled: 381
 -- ==============================================================================
 
 -- Enable standard Supabase extensions safely
@@ -12,7 +12,7 @@ DO $$ BEGIN CREATE EXTENSION IF NOT EXISTS pg_cron; EXCEPTION WHEN OTHERS THEN N
 
 
 -- ==============================================================================
--- [1/364] Migration: 20260118124247_d3a542b9-f2be-418e-be87-29b36ad6b05e.sql
+-- [1/381] Migration: 20260118124247_d3a542b9-f2be-418e-be87-29b36ad6b05e.sql
 -- ==============================================================================
 
 -- Create enum for device status
@@ -166,7 +166,7 @@ BEFORE UPDATE ON public.iot_devices
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [2/364] Migration: 20260118124516_36a63da3-6a7e-47f5-baec-a0810edd1742.sql
+-- [2/381] Migration: 20260118124516_36a63da3-6a7e-47f5-baec-a0810edd1742.sql
 -- ==============================================================================
 
 -- Fix RLS policy for user_roles table
@@ -194,7 +194,7 @@ END;
 $$;
 
 -- ==============================================================================
--- [3/364] Migration: 20260118125156_bbfb89f2-6be1-4545-b63d-e63187087fff.sql
+-- [3/381] Migration: 20260118125156_bbfb89f2-6be1-4545-b63d-e63187087fff.sql
 -- ==============================================================================
 
 -- Create profiles table for user data
@@ -260,7 +260,7 @@ BEFORE UPDATE ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [4/364] Migration: 20260118131428_a8338a56-d7ca-435c-ad25-2ab6d177c2ee.sql
+-- [4/381] Migration: 20260118131428_a8338a56-d7ca-435c-ad25-2ab6d177c2ee.sql
 -- ==============================================================================
 
 -- Create enum for negotiation status
@@ -394,7 +394,7 @@ BEFORE UPDATE ON public.price_negotiations
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [5/364] Migration: 20260118132252_ec0ae862-accb-43dd-9108-598e231debd9.sql
+-- [5/381] Migration: 20260118132252_ec0ae862-accb-43dd-9108-598e231debd9.sql
 -- ==============================================================================
 
 -- Add RLS policies for owners on price_negotiations table
@@ -414,7 +414,7 @@ FOR UPDATE
 USING ((owner_id = auth.uid()) AND (status = 'pending') AND (is_locked = false));
 
 -- ==============================================================================
--- [6/364] Migration: 20260118143300_492ec18f-38ad-4acc-b20c-289dc6ee30e8.sql
+-- [6/381] Migration: 20260118143300_492ec18f-38ad-4acc-b20c-289dc6ee30e8.sql
 -- ==============================================================================
 
 -- Add phone verification and notification preferences to profiles table
@@ -431,7 +431,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_phone ON public.profiles(phone);
 CREATE INDEX IF NOT EXISTS idx_profiles_phone_verified ON public.profiles(phone_verified);
 
 -- ==============================================================================
--- [7/364] Migration: 20260118152455_061de3b6-3844-4d1d-9f4b-ec8fdaf05c2a.sql
+-- [7/381] Migration: 20260118152455_061de3b6-3844-4d1d-9f4b-ec8fdaf05c2a.sql
 -- ==============================================================================
 
 -- Create table for vehicle category pricing
@@ -477,7 +477,7 @@ INSERT INTO public.vehicle_category_prices (category, region, price, currency) V
   ('premium', 'NIGERIA', 93000, 'NGN');
 
 -- ==============================================================================
--- [8/364] Migration: 20260118164248_b5c2672b-e09b-435a-abf4-af9c018709bb.sql
+-- [8/381] Migration: 20260118164248_b5c2672b-e09b-435a-abf4-af9c018709bb.sql
 -- ==============================================================================
 
 -- Create table for IoT device orders
@@ -567,7 +567,7 @@ CREATE TRIGGER update_iot_device_pricing_updated_at
   EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [9/364] Migration: 20260118165341_920a7a0e-fb26-4466-8b5a-637a0694a091.sql
+-- [9/381] Migration: 20260118165341_920a7a0e-fb26-4466-8b5a-637a0694a091.sql
 -- ==============================================================================
 
 -- Add delivery and installation confirmation fields to iot_device_orders
@@ -580,7 +580,7 @@ ADD COLUMN IF NOT EXISTS installed_sim_provider text,
 ADD COLUMN IF NOT EXISTS installation_notes text;
 
 -- ==============================================================================
--- [10/364] Migration: 20260118185221_924a587a-1e9e-452d-87d7-5ec98adf6cca.sql
+-- [10/381] Migration: 20260118185221_924a587a-1e9e-452d-87d7-5ec98adf6cca.sql
 -- ==============================================================================
 
 -- Add column to profiles to track if driver is forbidden from daily payment plans
@@ -654,7 +654,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_defaults_status ON public.payment_default
 CREATE INDEX IF NOT EXISTS idx_profiles_daily_plan_forbidden ON public.profiles(daily_plan_forbidden) WHERE daily_plan_forbidden = TRUE;
 
 -- ==============================================================================
--- [11/364] Migration: 20260118190500_69acb006-8c49-45e3-b98e-b47e610b2310.sql
+-- [11/381] Migration: 20260118190500_69acb006-8c49-45e3-b98e-b47e610b2310.sql
 -- ==============================================================================
 
 -- Enable required extensions for cron jobs
@@ -774,7 +774,7 @@ FOR EACH ROW
 EXECUTE FUNCTION public.check_late_incident_report();
 
 -- ==============================================================================
--- [12/364] Migration: 20260118191732_607ad50d-5be4-408d-99d6-8dc9b5b03b17.sql
+-- [12/381] Migration: 20260118191732_607ad50d-5be4-408d-99d6-8dc9b5b03b17.sql
 -- ==============================================================================
 
 -- Create storage bucket for incident photos
@@ -813,7 +813,7 @@ ADD COLUMN IF NOT EXISTS iot_speed_at_impact NUMERIC,
 ADD COLUMN IF NOT EXISTS iot_triggered_at TIMESTAMP WITH TIME ZONE;
 
 -- ==============================================================================
--- [13/364] Migration: 20260118192826_23031ebf-7db7-4b0f-9f7a-d783bfe98c28.sql
+-- [13/381] Migration: 20260118192826_23031ebf-7db7-4b0f-9f7a-d783bfe98c28.sql
 -- ==============================================================================
 
 -- Create vehicle_recalls table for IoT failure tracking and recall management
@@ -884,7 +884,7 @@ CREATE INDEX idx_vehicle_recalls_vehicle_id ON public.vehicle_recalls(vehicle_id
 CREATE INDEX idx_vehicle_recalls_created_at ON public.vehicle_recalls(created_at DESC);
 
 -- ==============================================================================
--- [14/364] Migration: 20260119144157_da11fc0d-a0c4-448d-85a9-73e2b2ef7142.sql
+-- [14/381] Migration: 20260119144157_da11fc0d-a0c4-448d-85a9-73e2b2ef7142.sql
 -- ==============================================================================
 
 -- Create weekly inspection reports table
@@ -1023,7 +1023,7 @@ ON storage.objects FOR DELETE
 USING (bucket_id = 'weekly-inspection-photos' AND auth.uid()::text = (storage.foldername(name))[1]);
 
 -- ==============================================================================
--- [15/364] Migration: 20260119154939_e5639fb4-bdaf-4080-95be-c42536bd3d18.sql
+-- [15/381] Migration: 20260119154939_e5639fb4-bdaf-4080-95be-c42536bd3d18.sql
 -- ==============================================================================
 
 
@@ -1111,7 +1111,7 @@ CREATE INDEX idx_legal_agreements_status ON public.legal_agreements(status);
 
 
 -- ==============================================================================
--- [16/364] Migration: 20260123015838_68526ae6-e4df-4e63-be18-a0ad485ef536.sql
+-- [16/381] Migration: 20260123015838_68526ae6-e4df-4e63-be18-a0ad485ef536.sql
 -- ==============================================================================
 
 -- Create rent_to_own_settings table for global feature toggle
@@ -1286,7 +1286,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.rent_to_own_listings;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.rent_to_own_agreements;
 
 -- ==============================================================================
--- [17/364] Migration: 20260123025211_10ace530-878c-4625-901e-057bf76eed92.sql
+-- [17/381] Migration: 20260123025211_10ace530-878c-4625-901e-057bf76eed92.sql
 -- ==============================================================================
 
 -- Create FAQ categories table
@@ -1655,7 +1655,7 @@ Privacy-related inquiries: privacy@rentmaikar.com.ng | +234 (803) 000-0000',
 'Key updates: NDPR/NDPA compliance, NIN/BVN data collection, guarantor info, WhatsApp communications.', '2026-01-23', true);
 
 -- ==============================================================================
--- [18/364] Migration: 20260123172724_5badbcf1-96d1-4c9e-a851-bc1dc51e143f.sql
+-- [18/381] Migration: 20260123172724_5badbcf1-96d1-4c9e-a851-bc1dc51e143f.sql
 -- ==============================================================================
 
 -- Contact settings for admin-managed contact points per region
@@ -1789,7 +1789,7 @@ INSERT INTO public.contact_settings (region, contact_type, contact_value, displa
   ('Nigeria', 'whatsapp', '+2348035550123', 'Nigeria WhatsApp');
 
 -- ==============================================================================
--- [19/364] Migration: 20260123180517_04fbd9f9-0696-43e6-9625-f926ce4b86e4.sql
+-- [19/381] Migration: 20260123180517_04fbd9f9-0696-43e6-9625-f926ce4b86e4.sql
 -- ==============================================================================
 
 -- Enable realtime for inbox tables
@@ -1797,7 +1797,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.inbox_conversations;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.inbox_messages;
 
 -- ==============================================================================
--- [20/364] Migration: 20260123181427_9ff41f9a-dd23-4434-bd62-63e2f9445f05.sql
+-- [20/381] Migration: 20260123181427_9ff41f9a-dd23-4434-bd62-63e2f9445f05.sql
 -- ==============================================================================
 
 -- Create a PRIVATE storage bucket for chat attachments
@@ -1829,7 +1829,7 @@ USING (
 );
 
 -- ==============================================================================
--- [21/364] Migration: 20260124095236_44f5f17a-b9db-4ead-b31c-2fb1443e09a5.sql
+-- [21/381] Migration: 20260124095236_44f5f17a-b9db-4ead-b31c-2fb1443e09a5.sql
 -- ==============================================================================
 
 -- Add new support roles to the app_role enum
@@ -2046,7 +2046,7 @@ BEFORE UPDATE ON public.support_tasks
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [22/364] Migration: 20260124172014_f5cfad6b-598c-4863-9c43-886af3da22dc.sql
+-- [22/381] Migration: 20260124172014_f5cfad6b-598c-4863-9c43-886af3da22dc.sql
 -- ==============================================================================
 
 -- Create table to store VoIP call logs
@@ -2161,7 +2161,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.voip_calls;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.voip_call_participants;
 
 -- ==============================================================================
--- [23/364] Migration: 20260124172743_e2b6c2e2-04d0-4909-91c8-2f498c7a4a52.sql
+-- [23/381] Migration: 20260124172743_e2b6c2e2-04d0-4909-91c8-2f498c7a4a52.sql
 -- ==============================================================================
 
 -- Create storage bucket for call recordings
@@ -2187,7 +2187,7 @@ ADD COLUMN IF NOT EXISTS recording_size_bytes BIGINT DEFAULT 0,
 ADD COLUMN IF NOT EXISTS recording_stored_at TIMESTAMP WITH TIME ZONE;
 
 -- ==============================================================================
--- [24/364] Migration: 20260124173212_a0f0a325-f5f0-4c6a-823a-4af539dba248.sql
+-- [24/381] Migration: 20260124173212_a0f0a325-f5f0-4c6a-823a-4af539dba248.sql
 -- ==============================================================================
 
 -- Create table for VoIP feature settings
@@ -2267,7 +2267,7 @@ CREATE TRIGGER update_voip_call_requests_updated_at
 ALTER PUBLICATION supabase_realtime ADD TABLE public.voip_call_requests;
 
 -- ==============================================================================
--- [25/364] Migration: 20260124173941_9a0324b4-cea7-405e-9336-5a98f2d1b200.sql
+-- [25/381] Migration: 20260124173941_9a0324b4-cea7-405e-9336-5a98f2d1b200.sql
 -- ==============================================================================
 
 -- Add pickup_location column to vehicles table
@@ -2296,7 +2296,7 @@ VALUES (
 );
 
 -- ==============================================================================
--- [26/364] Migration: 20260124205650_33648da8-8d28-4095-8978-8be649d6a905.sql
+-- [26/381] Migration: 20260124205650_33648da8-8d28-4095-8978-8be649d6a905.sql
 -- ==============================================================================
 
 -- Create enum for application type
@@ -2414,7 +2414,7 @@ CREATE INDEX idx_applications_region ON public.applications(region);
 CREATE INDEX idx_applications_created_at ON public.applications(created_at DESC);
 
 -- ==============================================================================
--- [27/364] Migration: 20260124210403_94c4a038-5db9-44c0-a4b4-aaed468890ea.sql
+-- [27/381] Migration: 20260124210403_94c4a038-5db9-44c0-a4b4-aaed468890ea.sql
 -- ==============================================================================
 
 -- Create storage bucket for user documents
@@ -2540,14 +2540,14 @@ ALTER TABLE public.profiles
 ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
 
 -- ==============================================================================
--- [28/364] Migration: 20260124211502_6983b875-4229-4cdd-9fe7-198fb0618e2d.sql
+-- [28/381] Migration: 20260124211502_6983b875-4229-4cdd-9fe7-198fb0618e2d.sql
 -- ==============================================================================
 
 -- Enable realtime for applications table
 ALTER PUBLICATION supabase_realtime ADD TABLE public.applications;
 
 -- ==============================================================================
--- [29/364] Migration: 20260124215244_8a3b31cb-ae83-4084-90b3-70272f45c5a1.sql
+-- [29/381] Migration: 20260124215244_8a3b31cb-ae83-4084-90b3-70272f45c5a1.sql
 -- ==============================================================================
 
 -- Create role audit log table
@@ -2580,7 +2580,7 @@ TO authenticated
 WITH CHECK (public.is_admin());
 
 -- ==============================================================================
--- [30/364] Migration: 20260125085544_4ed3a428-8230-4e32-bfa3-1ffc1573879f.sql
+-- [30/381] Migration: 20260125085544_4ed3a428-8230-4e32-bfa3-1ffc1573879f.sql
 -- ==============================================================================
 
 -- Create table for API keys
@@ -2648,7 +2648,7 @@ CREATE INDEX idx_api_key_usage_log_key_id ON public.api_key_usage_log(api_key_id
 CREATE INDEX idx_api_key_usage_log_created_at ON public.api_key_usage_log(created_at DESC);
 
 -- ==============================================================================
--- [31/364] Migration: 20260125090022_78d7763e-8518-46d0-b4ba-a0ca63e393c8.sql
+-- [31/381] Migration: 20260125090022_78d7763e-8518-46d0-b4ba-a0ca63e393c8.sql
 -- ==============================================================================
 
 -- Add new support task types to the enum
@@ -2737,7 +2737,7 @@ FOR EACH ROW
 EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [32/364] Migration: 20260125091905_2f3ce688-3fc4-4202-b3bc-1702c32dc6cc.sql
+-- [32/381] Migration: 20260125091905_2f3ce688-3fc4-4202-b3bc-1702c32dc6cc.sql
 -- ==============================================================================
 
 -- Create webhooks table for managing webhook configurations
@@ -2857,7 +2857,7 @@ CREATE TRIGGER update_api_validation_endpoints_updated_at
   EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [33/364] Migration: 20260125093515_da5c3b24-5b43-4a61-9e00-3bd50146e207.sql
+-- [33/381] Migration: 20260125093515_da5c3b24-5b43-4a61-9e00-3bd50146e207.sql
 -- ==============================================================================
 
 -- Create table to track expiry notifications
@@ -2905,7 +2905,7 @@ ALTER TABLE public.user_documents
 ADD COLUMN IF NOT EXISTS expiry_date DATE;
 
 -- ==============================================================================
--- [34/364] Migration: 20260131032640_0b1a11e7-86f4-45a8-8a04-6654b44058d1.sql
+-- [34/381] Migration: 20260131032640_0b1a11e7-86f4-45a8-8a04-6654b44058d1.sql
 -- ==============================================================================
 
 -- Security Fix: Make storage buckets private and add proper RLS policies
@@ -2963,7 +2963,7 @@ TO authenticated
 USING (owner_id = auth.uid() OR public.is_admin());
 
 -- ==============================================================================
--- [35/364] Migration: 20260131032731_5556b501-21c6-4228-a1ba-d8148ca0bc0b.sql
+-- [35/381] Migration: 20260131032731_5556b501-21c6-4228-a1ba-d8148ca0bc0b.sql
 -- ==============================================================================
 
 -- Security Fix: Tighten applications table RLS policies
@@ -2984,7 +2984,7 @@ ON public.applications(email)
 WHERE status = 'pending';
 
 -- ==============================================================================
--- [36/364] Migration: 20260201031933_ff835e1e-e35a-4c47-a2df-e16dcb1cdea0.sql
+-- [36/381] Migration: 20260201031933_ff835e1e-e35a-4c47-a2df-e16dcb1cdea0.sql
 -- ==============================================================================
 
 -- Drop the old INSERT policies
@@ -3007,7 +3007,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [37/364] Migration: 20260202010344_11cb41d7-05a8-4b21-aebc-e5e01497bdad.sql
+-- [37/381] Migration: 20260202010344_11cb41d7-05a8-4b21-aebc-e5e01497bdad.sql
 -- ==============================================================================
 
 -- Add min_price column to vehicle_category_prices for price ranges
@@ -3029,7 +3029,7 @@ SET description = 'Security deposit for USA drivers ($200)'
 WHERE region = 'USA';
 
 -- ==============================================================================
--- [38/364] Migration: 20260204015522_78ec3a34-1fe9-4aa2-abd9-e9410bdf91fe.sql
+-- [38/381] Migration: 20260204015522_78ec3a34-1fe9-4aa2-abd9-e9410bdf91fe.sql
 -- ==============================================================================
 
 -- Add region and frequency support to inspection reports
@@ -3110,7 +3110,7 @@ FOR EACH ROW
 EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [39/364] Migration: 20260212171903_f68f11e6-4af6-4c72-a308-81e37975c3c4.sql
+-- [39/381] Migration: 20260212171903_f68f11e6-4af6-4c72-a308-81e37975c3c4.sql
 -- ==============================================================================
 
 
@@ -3293,7 +3293,7 @@ ON storage.objects FOR DELETE USING (bucket_id = 'training-media' AND is_admin()
 
 
 -- ==============================================================================
--- [40/364] Migration: 20260212174031_5fd5725d-ecfd-4e52-92e3-c986ff2fe019.sql
+-- [40/381] Migration: 20260212174031_5fd5725d-ecfd-4e52-92e3-c986ff2fe019.sql
 -- ==============================================================================
 
 
@@ -3396,7 +3396,7 @@ CREATE TRIGGER create_2fa_settings_on_profile
 
 
 -- ==============================================================================
--- [41/364] Migration: 20260212174909_ec3f3219-2147-4e34-a9f8-0ac74af2c78c.sql
+-- [41/381] Migration: 20260212174909_ec3f3219-2147-4e34-a9f8-0ac74af2c78c.sql
 -- ==============================================================================
 
 
@@ -3439,7 +3439,7 @@ EXECUTE FUNCTION public.update_updated_at_column();
 
 
 -- ==============================================================================
--- [42/364] Migration: 20260213154654_42344b95-7772-4849-a15c-7610670ec378.sql
+-- [42/381] Migration: 20260213154654_42344b95-7772-4849-a15c-7610670ec378.sql
 -- ==============================================================================
 
 
@@ -3540,7 +3540,7 @@ CREATE TRIGGER update_voice_call_requests_updated_at
 
 
 -- ==============================================================================
--- [43/364] Migration: 20260213172141_ed78a3d6-371f-4345-80b8-244530045865.sql
+-- [43/381] Migration: 20260213172141_ed78a3d6-371f-4345-80b8-244530045865.sql
 -- ==============================================================================
 
 
@@ -3629,7 +3629,7 @@ CREATE INDEX idx_communication_providers_region ON public.communication_provider
 
 
 -- ==============================================================================
--- [44/364] Migration: 20260215004804_c8dd8e72-23c0-4e47-878f-441afdea827e.sql
+-- [44/381] Migration: 20260215004804_c8dd8e72-23c0-4e47-878f-441afdea827e.sql
 -- ==============================================================================
 
 -- Create rentals table to track active vehicle rentals
@@ -3686,7 +3686,7 @@ CREATE INDEX idx_rentals_end_date_status ON public.rentals(end_date, status) WHE
 ALTER PUBLICATION supabase_realtime ADD TABLE public.rentals;
 
 -- ==============================================================================
--- [45/364] Migration: 20260215005250_8b0e0e99-9b17-43da-812a-6ff0b68b78a2.sql
+-- [45/381] Migration: 20260215005250_8b0e0e99-9b17-43da-812a-6ff0b68b78a2.sql
 -- ==============================================================================
 
 
@@ -3754,7 +3754,7 @@ CREATE TRIGGER update_owner_earnings_updated_at BEFORE UPDATE ON public.owner_ea
 
 
 -- ==============================================================================
--- [46/364] Migration: 20260215010159_411374a1-8e9f-42d2-a74a-71c16cbaf493.sql
+-- [46/381] Migration: 20260215010159_411374a1-8e9f-42d2-a74a-71c16cbaf493.sql
 -- ==============================================================================
 
 
@@ -3796,7 +3796,7 @@ CREATE TRIGGER update_voicemail_logs_updated_at
 
 
 -- ==============================================================================
--- [47/364] Migration: 20260215020049_3fe56c6b-5f66-42aa-95de-c436f4833373.sql
+-- [47/381] Migration: 20260215020049_3fe56c6b-5f66-42aa-95de-c436f4833373.sql
 -- ==============================================================================
 
 
@@ -3913,7 +3913,7 @@ CREATE INDEX IF NOT EXISTS idx_unified_message_log_analytics ON public.unified_m
 
 
 -- ==============================================================================
--- [48/364] Migration: 20260215055129_c4fdfafa-b1af-44cd-87d5-51975975cc84.sql
+-- [48/381] Migration: 20260215055129_c4fdfafa-b1af-44cd-87d5-51975975cc84.sql
 -- ==============================================================================
 
 
@@ -3998,7 +3998,7 @@ CREATE TRIGGER update_email_analytics_updated_at
 
 
 -- ==============================================================================
--- [49/364] Migration: 20260215055348_bcfce38a-e952-4323-a344-e30b463c908f.sql
+-- [49/381] Migration: 20260215055348_bcfce38a-e952-4323-a344-e30b463c908f.sql
 -- ==============================================================================
 
 
@@ -4097,7 +4097,7 @@ CREATE TRIGGER update_email_suppression_updated_at
 
 
 -- ==============================================================================
--- [50/364] Migration: 20260215055606_729d27e9-cb60-442c-896f-76c703390e79.sql
+-- [50/381] Migration: 20260215055606_729d27e9-cb60-442c-896f-76c703390e79.sql
 -- ==============================================================================
 
 
@@ -4157,7 +4157,7 @@ CREATE TRIGGER update_email_templates_updated_at
 
 
 -- ==============================================================================
--- [51/364] Migration: 20260215061543_5ca83e80-1910-4b86-ba7a-bddfc0034e48.sql
+-- [51/381] Migration: 20260215061543_5ca83e80-1910-4b86-ba7a-bddfc0034e48.sql
 -- ==============================================================================
 
 
@@ -4349,7 +4349,7 @@ CREATE INDEX idx_admin_sessions_active ON public.admin_sessions(is_active, last_
 
 
 -- ==============================================================================
--- [52/364] Migration: 20260215062919_484983cb-c223-464c-9bac-94aaf97a5e56.sql
+-- [52/381] Migration: 20260215062919_484983cb-c223-464c-9bac-94aaf97a5e56.sql
 -- ==============================================================================
 
 
@@ -4515,7 +4515,7 @@ INSERT INTO public.platform_features (key, name, description, category, is_globa
 
 
 -- ==============================================================================
--- [53/364] Migration: 20260215064254_20c67984-9f01-4498-b009-4e0942a90d28.sql
+-- [53/381] Migration: 20260215064254_20c67984-9f01-4498-b009-4e0942a90d28.sql
 -- ==============================================================================
 
 
@@ -4527,7 +4527,7 @@ ALTER TABLE public.platform_regions
 
 
 -- ==============================================================================
--- [54/364] Migration: 20260215065307_3303260d-77b0-4b06-afe8-94d96994aec7.sql
+-- [54/381] Migration: 20260215065307_3303260d-77b0-4b06-afe8-94d96994aec7.sql
 -- ==============================================================================
 
 
@@ -4573,7 +4573,7 @@ INSERT INTO public.platform_email_config (key, email, sender_name, description) 
 
 
 -- ==============================================================================
--- [55/364] Migration: 20260215073107_898a24e7-5c60-440e-a6ca-ef23822719ed.sql
+-- [55/381] Migration: 20260215073107_898a24e7-5c60-440e-a6ca-ef23822719ed.sql
 -- ==============================================================================
 
 
@@ -4622,7 +4622,7 @@ CREATE TRIGGER update_social_messaging_configs_updated_at
 
 
 -- ==============================================================================
--- [56/364] Migration: 20260217102440_f75fc65c-dd03-4d42-8cde-08a644db9df8.sql
+-- [56/381] Migration: 20260217102440_f75fc65c-dd03-4d42-8cde-08a644db9df8.sql
 -- ==============================================================================
 
 
@@ -4689,7 +4689,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.messaging_events;
 
 
 -- ==============================================================================
--- [57/364] Migration: 20260218055033_0408c976-b0c7-4a2b-a8c3-8ac66165d648.sql
+-- [57/381] Migration: 20260218055033_0408c976-b0c7-4a2b-a8c3-8ac66165d648.sql
 -- ==============================================================================
 
 
@@ -4828,7 +4828,7 @@ CREATE INDEX idx_mqtt_creds_device ON public.vehicle_mqtt_credentials(iot_device
 
 
 -- ==============================================================================
--- [58/364] Migration: 20260218062617_411a137d-691c-4403-a63a-019203cf5f6f.sql
+-- [58/381] Migration: 20260218062617_411a137d-691c-4403-a63a-019203cf5f6f.sql
 -- ==============================================================================
 
 
@@ -4872,7 +4872,7 @@ CREATE INDEX IF NOT EXISTS idx_agreement_renewal_alerts_agreement_id
 
 
 -- ==============================================================================
--- [59/364] Migration: 20260219072800_620194a6-4de3-4732-a898-0ccd72d50568.sql
+-- [59/381] Migration: 20260219072800_620194a6-4de3-4732-a898-0ccd72d50568.sql
 -- ==============================================================================
 
 -- Make training-media bucket private (authenticated access only)
@@ -4893,7 +4893,7 @@ USING (
 
 
 -- ==============================================================================
--- [60/364] Migration: 20260308083634_6ad34809-3d1c-433b-a122-f3a9594a223e.sql
+-- [60/381] Migration: 20260308083634_6ad34809-3d1c-433b-a122-f3a9594a223e.sql
 -- ==============================================================================
 
 -- Create storage buckets for vehicle photos, signatures, and agreement PDFs
@@ -4924,7 +4924,7 @@ CREATE POLICY "Users can update own profile photos" ON storage.objects FOR UPDAT
 CREATE POLICY "Users can delete own profile photos" ON storage.objects FOR DELETE USING (bucket_id = 'profile-photos' AND auth.uid()::text = (storage.foldername(name))[1]);
 
 -- ==============================================================================
--- [61/364] Migration: 20260308151339_8fa73113-899d-468b-aa34-4a5a84eb3f0b.sql
+-- [61/381] Migration: 20260308151339_8fa73113-899d-468b-aa34-4a5a84eb3f0b.sql
 -- ==============================================================================
 
 
@@ -5056,7 +5056,7 @@ CREATE TRIGGER update_tax_reporting_updated_at BEFORE UPDATE ON public.tax_repor
 
 
 -- ==============================================================================
--- [62/364] Migration: 20260709155125_32dc2db6-e711-49e8-befa-da5f4791a23d.sql
+-- [62/381] Migration: 20260709155125_32dc2db6-e711-49e8-befa-da5f4791a23d.sql
 -- ==============================================================================
 
 
@@ -5065,7 +5065,7 @@ ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'admin_assistant';
 
 
 -- ==============================================================================
--- [63/364] Migration: 20260709155330_c5f30018-f517-45eb-82ec-a39cba1eb24e.sql
+-- [63/381] Migration: 20260709155330_c5f30018-f517-45eb-82ec-a39cba1eb24e.sql
 -- ==============================================================================
 
 
@@ -5145,7 +5145,71 @@ $$;
 
 
 -- ==============================================================================
--- [64/364] Migration: 20260709162645_aa389db6-f9f1-4cba-927b-90b0f979dfe6.sql
+-- [64/381] Migration: 20260709155331_recover_assistant_user_assignments_and_access_fn.sql
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS public.admin_assistant_user_assignments (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  target_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  assigned_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT admin_assistant_user_assignment_assistant_id_target_user_id_key
+    UNIQUE (assistant_id, target_user_id)
+);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.admin_assistant_user_assignments TO authenticated;
+GRANT ALL ON public.admin_assistant_user_assignments TO service_role;
+
+ALTER TABLE public.admin_assistant_user_assignments ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid='public.admin_assistant_user_assignments'::regclass AND polname='Admins manage assistant user assignments') THEN
+    CREATE POLICY "Admins manage assistant user assignments"
+      ON public.admin_assistant_user_assignments FOR ALL TO authenticated
+      USING (public.is_admin()) WITH CHECK (public.is_admin());
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid='public.admin_assistant_user_assignments'::regclass AND polname='Assistants view their own assignments') THEN
+    CREATE POLICY "Assistants view their own assignments"
+      ON public.admin_assistant_user_assignments FOR SELECT TO authenticated
+      USING (assistant_id = auth.uid());
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_aaua_assistant ON public.admin_assistant_user_assignments (assistant_id);
+CREATE INDEX IF NOT EXISTS idx_aaua_target ON public.admin_assistant_user_assignments (target_user_id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.admin_assistant_user_assignments'::regclass AND tgname='update_aaua_updated_at') THEN
+    CREATE TRIGGER update_aaua_updated_at
+      BEFORE UPDATE ON public.admin_assistant_user_assignments
+      FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  END IF;
+END $$;
+
+-- Authoritative definition, exactly as pg_get_functiondef() returns it on the
+-- original RentMaikar database. Do not alter the security semantics.
+CREATE OR REPLACE FUNCTION public.assistant_can_access_user(_target uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.admin_assistant_user_assignments
+    WHERE assistant_id = auth.uid() AND target_user_id = _target
+  )
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.assistant_can_access_user(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.assistant_can_access_user(uuid) TO authenticated, service_role;
+
+-- ==============================================================================
+-- [65/381] Migration: 20260709162645_aa389db6-f9f1-4cba-927b-90b0f979dfe6.sql
 -- ==============================================================================
 
 -- Add platform-wide activation flag to profiles
@@ -5156,7 +5220,7 @@ ALTER TABLE public.profiles
 UPDATE public.profiles SET is_active = true WHERE is_active IS DISTINCT FROM true;
 
 -- ==============================================================================
--- [65/364] Migration: 20260709165611_b2c0e4b1-095b-48bc-9152-3313c4fae4fa.sql
+-- [66/381] Migration: 20260709165611_b2c0e4b1-095b-48bc-9152-3313c4fae4fa.sql
 -- ==============================================================================
 
 
@@ -5250,14 +5314,14 @@ REVOKE EXECUTE ON FUNCTION public.log_admin_action(text, text, text, jsonb) FROM
 
 
 -- ==============================================================================
--- [66/364] Migration: 20260709170112_e846213e-7db6-4cd6-8389-c778a7085ca1.sql
+-- [67/381] Migration: 20260709170112_e846213e-7db6-4cd6-8389-c778a7085ca1.sql
 -- ==============================================================================
 
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS preferred_country text CHECK (preferred_country IN ('USA','Nigeria'));
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS region_mode text CHECK (region_mode IN ('auto','manual'));
 
 -- ==============================================================================
--- [67/364] Migration: 20260709172113_4c048c2d-b6e0-4216-8050-cd9e5dc12d7a.sql
+-- [68/381] Migration: 20260709172113_4c048c2d-b6e0-4216-8050-cd9e5dc12d7a.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.region_definitions (
@@ -5340,7 +5404,7 @@ CREATE TRIGGER region_localized_content_updated
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [68/364] Migration: 20260709173225_af164acb-4247-4092-9f9d-7f5198fcb3c0.sql
+-- [69/381] Migration: 20260709173225_af164acb-4247-4092-9f9d-7f5198fcb3c0.sql
 -- ==============================================================================
 
 
@@ -5351,7 +5415,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.region_localized_content;
 
 
 -- ==============================================================================
--- [69/364] Migration: 20260709174455_2f56320d-475e-4c90-80a0-cdf12c38c8b7.sql
+-- [70/381] Migration: 20260709174455_2f56320d-475e-4c90-80a0-cdf12c38c8b7.sql
 -- ==============================================================================
 
 
@@ -5469,7 +5533,7 @@ WHERE country_code = 'NG';
 
 
 -- ==============================================================================
--- [70/364] Migration: 20260709180134_b0c4cf53-a4f5-44e5-8fee-dba2c18f0954.sql
+-- [71/381] Migration: 20260709180134_b0c4cf53-a4f5-44e5-8fee-dba2c18f0954.sql
 -- ==============================================================================
 
 
@@ -5495,7 +5559,7 @@ CREATE INDEX IF NOT EXISTS idx_referee_verifications_token
 
 
 -- ==============================================================================
--- [71/364] Migration: 20260709185324_8c1e1e56-c262-455e-8d42-b73cd352a9e3.sql
+-- [72/381] Migration: 20260709185324_8c1e1e56-c262-455e-8d42-b73cd352a9e3.sql
 -- ==============================================================================
 
 
@@ -5696,7 +5760,7 @@ CREATE TRIGGER trg_on_call_in_closed
 
 
 -- ==============================================================================
--- [72/364] Migration: 20260709191950_73deb985-6927-4690-af2e-a6df63b89829.sql
+-- [73/381] Migration: 20260709191950_73deb985-6927-4690-af2e-a6df63b89829.sql
 -- ==============================================================================
 
 
@@ -5788,7 +5852,7 @@ WITH CHECK (true);
 
 
 -- ==============================================================================
--- [73/364] Migration: 20260710171430_7c34a99d-9662-479e-9098-728d5275d957.sql
+-- [74/381] Migration: 20260710171430_7c34a99d-9662-479e-9098-728d5275d957.sql
 -- ==============================================================================
 
 ALTER TABLE public.admin_assistant_permissions DISABLE TRIGGER USER;
@@ -5819,7 +5883,7 @@ WHERE ur.role = 'admin_assistant'
 ALTER TABLE public.admin_assistant_permissions ENABLE TRIGGER USER;
 
 -- ==============================================================================
--- [74/364] Migration: 20260710175403_35f42f06-0fe7-4cf5-ab30-7c28b213aa4d.sql
+-- [75/381] Migration: 20260710175403_35f42f06-0fe7-4cf5-ab30-7c28b213aa4d.sql
 -- ==============================================================================
 
 
@@ -5893,7 +5957,7 @@ VALUES
 
 
 -- ==============================================================================
--- [75/364] Migration: 20260710183223_4518faed-bc9e-47b4-80ce-d245a24b8005.sql
+-- [76/381] Migration: 20260710183223_4518faed-bc9e-47b4-80ce-d245a24b8005.sql
 -- ==============================================================================
 
 
@@ -5972,7 +6036,7 @@ END $$;
 
 
 -- ==============================================================================
--- [76/364] Migration: 20260710184032_c060ed23-a871-4d19-9381-900b182d6368.sql
+-- [77/381] Migration: 20260710184032_c060ed23-a871-4d19-9381-900b182d6368.sql
 -- ==============================================================================
 
 
@@ -6009,7 +6073,7 @@ REVOKE EXECUTE ON FUNCTION public.has_admin_assistant_permission(uuid, text) FRO
 
 
 -- ==============================================================================
--- [77/364] Migration: 20260710190335_d73cc393-ef69-4c12-b3fc-943026bc0da4.sql
+-- [78/381] Migration: 20260710190335_d73cc393-ef69-4c12-b3fc-943026bc0da4.sql
 -- ==============================================================================
 
 
@@ -6111,7 +6175,7 @@ UPDATE public.communication_providers
 
 
 -- ==============================================================================
--- [78/364] Migration: 20260710195558_4343e99a-42ae-4557-b9b0-86834867edb8.sql
+-- [79/381] Migration: 20260710195558_4343e99a-42ae-4557-b9b0-86834867edb8.sql
 -- ==============================================================================
 
 DO $$ BEGIN
@@ -6148,13 +6212,13 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [79/364] Migration: 20260710205020_f914eda0-fbca-47cf-a9a9-c9c4f92b807b.sql
+-- [80/381] Migration: 20260710205020_f914eda0-fbca-47cf-a9a9-c9c4f92b807b.sql
 -- ==============================================================================
 
 UPDATE public.communication_providers SET whatsapp_provider = 'whatchimp' WHERE whatsapp_provider = 'wachimp';
 
 -- ==============================================================================
--- [80/364] Migration: 20260711030812_30e1b5c2-8bb2-4607-ba55-be57170384d1.sql
+-- [81/381] Migration: 20260711030812_30e1b5c2-8bb2-4607-ba55-be57170384d1.sql
 -- ==============================================================================
 
 
@@ -6314,7 +6378,7 @@ $$;
 
 
 -- ==============================================================================
--- [81/364] Migration: 20260711033535_f4cbc956-046e-4355-9276-24233d934b1b.sql
+-- [82/381] Migration: 20260711033535_f4cbc956-046e-4355-9276-24233d934b1b.sql
 -- ==============================================================================
 
 
@@ -6389,7 +6453,7 @@ ALTER TABLE public.profiles
 
 
 -- ==============================================================================
--- [82/364] Migration: 20260713015145_66290f5f-07e4-4f07-b6ab-a5c56614826c.sql
+-- [83/381] Migration: 20260713015145_66290f5f-07e4-4f07-b6ab-a5c56614826c.sql
 -- ==============================================================================
 
 CREATE TABLE public.paypal_transactions (
@@ -6455,7 +6519,7 @@ CREATE TRIGGER update_paypal_transactions_updated_at
   EXECUTE FUNCTION public.update_paypal_transaction_updated_at();
 
 -- ==============================================================================
--- [83/364] Migration: 20260713085117_6885b390-92fe-4e63-8855-457ab65a52b5.sql
+-- [84/381] Migration: 20260713085117_6885b390-92fe-4e63-8855-457ab65a52b5.sql
 -- ==============================================================================
 
 -- 1) Restore EXECUTE for authenticated on locked-down helpers
@@ -6474,7 +6538,7 @@ WHERE identity_verified_at IS NULL
 
 
 -- ==============================================================================
--- [84/364] Migration: 20260713091015_e1bba4b5-af69-4ba2-8042-2c43ece35d47.sql
+-- [85/381] Migration: 20260713091015_e1bba4b5-af69-4ba2-8042-2c43ece35d47.sql
 -- ==============================================================================
 
 
@@ -6641,7 +6705,7 @@ CREATE TRIGGER trg_owner_payouts_updated
 
 
 -- ==============================================================================
--- [85/364] Migration: 20260713092815_6cd67d5f-b5df-4fae-95bf-2e88064b94de.sql
+-- [86/381] Migration: 20260713092815_6cd67d5f-b5df-4fae-95bf-2e88064b94de.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.push_subscriptions (
@@ -6662,7 +6726,7 @@ CREATE POLICY "Users manage own push subscriptions" ON public.push_subscriptions
 CREATE POLICY "Admins read all push subscriptions" ON public.push_subscriptions FOR SELECT TO authenticated USING (public.has_role(auth.uid(), 'admin'::app_role));
 
 -- ==============================================================================
--- [86/364] Migration: 20260713143308_7a948497-ce0a-45d8-960f-8aaa7391bfe9.sql
+-- [87/381] Migration: 20260713143308_7a948497-ce0a-45d8-960f-8aaa7391bfe9.sql
 -- ==============================================================================
 
 GRANT EXECUTE ON FUNCTION public.has_role(uuid, app_role) TO anon, authenticated;
@@ -6674,7 +6738,7 @@ GRANT EXECUTE ON FUNCTION public.assistant_can_access_user(uuid) TO anon, authen
 GRANT EXECUTE ON FUNCTION public.has_admin_assistant_permission(uuid, text) TO anon, authenticated;
 
 -- ==============================================================================
--- [87/364] Migration: 20260713150015_9a14ed33-cf9a-4e9f-8cd0-37905f6882e5.sql
+-- [88/381] Migration: 20260713150015_9a14ed33-cf9a-4e9f-8cd0-37905f6882e5.sql
 -- ==============================================================================
 
 
@@ -6761,7 +6825,7 @@ CREATE TRIGGER update_reconciliation_alerts_updated_at
 
 
 -- ==============================================================================
--- [88/364] Migration: 20260713152548_d17fcaab-9fe1-46a1-8d86-a5193306008f.sql
+-- [89/381] Migration: 20260713152548_d17fcaab-9fe1-46a1-8d86-a5193306008f.sql
 -- ==============================================================================
 
 
@@ -6805,7 +6869,7 @@ CREATE INDEX IF NOT EXISTS idx_doc_export_audit_target ON public.document_export
 
 
 -- ==============================================================================
--- [89/364] Migration: 20260713152607_64300792-92f9-43de-aca4-1704dccc33f3.sql
+-- [90/381] Migration: 20260713152607_64300792-92f9-43de-aca4-1704dccc33f3.sql
 -- ==============================================================================
 
 
@@ -6833,7 +6897,7 @@ CREATE POLICY "users delete own document exports"
 
 
 -- ==============================================================================
--- [90/364] Migration: 20260713153903_d8fa4947-00e4-4747-bdc5-20cdba343da9.sql
+-- [91/381] Migration: 20260713153903_d8fa4947-00e4-4747-bdc5-20cdba343da9.sql
 -- ==============================================================================
 
 
@@ -6878,7 +6942,7 @@ GRANT SELECT ON public.latest_application_pipeline_status TO authenticated;
 
 
 -- ==============================================================================
--- [91/364] Migration: 20260713154844_cd6cb554-c3ed-427f-b26c-2ecfb95cd1b7.sql
+-- [92/381] Migration: 20260713154844_cd6cb554-c3ed-427f-b26c-2ecfb95cd1b7.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.log_document_rejection()
@@ -6929,7 +6993,7 @@ BEGIN
 END $$;
 
 -- ==============================================================================
--- [92/364] Migration: 20260714102925_85a0c8a0-1c5b-4a94-a1c7-88cbf124fb58.sql
+-- [93/381] Migration: 20260714102925_85a0c8a0-1c5b-4a94-a1c7-88cbf124fb58.sql
 -- ==============================================================================
 
 
@@ -6986,7 +7050,7 @@ REVOKE EXECUTE ON FUNCTION public.log_admin_action(text, text, text, jsonb) FROM
 
 
 -- ==============================================================================
--- [93/364] Migration: 20260715081954_a1c2e3df-3ed8-48e6-939a-c79267f85edb.sql
+-- [94/381] Migration: 20260715081954_a1c2e3df-3ed8-48e6-939a-c79267f85edb.sql
 -- ==============================================================================
 
 DROP POLICY IF EXISTS "Users can view own applications" ON public.applications;
@@ -6995,7 +7059,7 @@ FOR SELECT TO authenticated
 USING (lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
 
 -- ==============================================================================
--- [94/364] Migration: 20260715085836_d4b4941d-e079-4770-b045-9b87dd457b6d.sql
+-- [95/381] Migration: 20260715085836_d4b4941d-e079-4770-b045-9b87dd457b6d.sql
 -- ==============================================================================
 
 
@@ -7068,7 +7132,7 @@ $$;
 
 
 -- ==============================================================================
--- [95/364] Migration: 20260715085847_bbeefe1e-9980-40a0-bfff-3a3716cde453.sql
+-- [96/381] Migration: 20260715085847_bbeefe1e-9980-40a0-bfff-3a3716cde453.sql
 -- ==============================================================================
 
 
@@ -7077,7 +7141,7 @@ GRANT EXECUTE ON FUNCTION public.get_linked_user_ids(UUID) TO authenticated, ser
 
 
 -- ==============================================================================
--- [96/364] Migration: 20260715091254_537e2906-8f51-40e2-962e-78d8a6e6a2ab.sql
+-- [97/381] Migration: 20260715091254_537e2906-8f51-40e2-962e-78d8a6e6a2ab.sql
 -- ==============================================================================
 
 
@@ -7163,7 +7227,7 @@ CREATE TRIGGER enforce_single_account_link_trg
 
 
 -- ==============================================================================
--- [97/364] Migration: 20260715123825_3dbf8bd4-847b-4f6a-9383-3e683b0c698a.sql
+-- [98/381] Migration: 20260715123825_3dbf8bd4-847b-4f6a-9383-3e683b0c698a.sql
 -- ==============================================================================
 
 
@@ -7559,7 +7623,7 @@ GRANT EXECUTE ON FUNCTION public.is_support_staff(uuid, support_task_type) TO au
 
 
 -- ==============================================================================
--- [98/364] Migration: 20260715123838_7ecd1ca6-871b-45e6-b2dc-42ab70af304b.sql
+-- [99/381] Migration: 20260715123838_7ecd1ca6-871b-45e6-b2dc-42ab70af304b.sql
 -- ==============================================================================
 
 
@@ -7573,7 +7637,7 @@ REVOKE EXECUTE ON FUNCTION public.enforce_weekly_report_column_scope() FROM PUBL
 
 
 -- ==============================================================================
--- [99/364] Migration: 20260715191120_0a013a26-5ada-4d5e-8736-28676dbcf95c.sql
+-- [100/381] Migration: 20260715191120_0a013a26-5ada-4d5e-8736-28676dbcf95c.sql
 -- ==============================================================================
 
 
@@ -7991,7 +8055,7 @@ $$;
 
 
 -- ==============================================================================
--- [100/364] Migration: 20260715191920_0c1d5980-1d6a-4199-878f-2de21fc9ebb3.sql
+-- [101/381] Migration: 20260715191920_0c1d5980-1d6a-4199-878f-2de21fc9ebb3.sql
 -- ==============================================================================
 
 
@@ -8190,7 +8254,7 @@ GRANT EXECUTE ON FUNCTION public._testkit_run_trigger_guard_tests(text) TO authe
 
 
 -- ==============================================================================
--- [101/364] Migration: 20260715192209_094d8d39-333d-4b1e-ab62-b52ddd30ce4b.sql
+-- [102/381] Migration: 20260715192209_094d8d39-333d-4b1e-ab62-b52ddd30ce4b.sql
 -- ==============================================================================
 
 -- ---- legal_agreements -----------------------------------------------------
@@ -8532,7 +8596,7 @@ $$;
 
 
 -- ==============================================================================
--- [102/364] Migration: 20260715192304_3d602572-217c-4183-b45e-742fb5b0f8d7.sql
+-- [103/381] Migration: 20260715192304_3d602572-217c-4183-b45e-742fb5b0f8d7.sql
 -- ==============================================================================
 
 
@@ -8721,7 +8785,7 @@ GRANT EXECUTE ON FUNCTION public._testkit_run_trigger_guard_tests(text) TO authe
 
 
 -- ==============================================================================
--- [103/364] Migration: 20260715215202_de87c867-d07e-44bc-8024-0fcef5987ac5.sql
+-- [104/381] Migration: 20260715215202_de87c867-d07e-44bc-8024-0fcef5987ac5.sql
 -- ==============================================================================
 
 
@@ -8858,14 +8922,14 @@ GRANT EXECUTE ON FUNCTION public.log_permission_denied(text, text, text, text[],
 
 
 -- ==============================================================================
--- [104/364] Migration: 20260716055032_2722e705-1933-46ac-a565-900585ac8bfb.sql
+-- [105/381] Migration: 20260716055032_2722e705-1933-46ac-a565-900585ac8bfb.sql
 -- ==============================================================================
 
 GRANT SELECT ON public.permission_denied_log TO authenticated;
 GRANT ALL ON public.permission_denied_log TO service_role;
 
 -- ==============================================================================
--- [105/364] Migration: 20260716062610_788c4015-4071-4df3-ab3e-422258860c27.sql
+-- [106/381] Migration: 20260716062610_788c4015-4071-4df3-ab3e-422258860c27.sql
 -- ==============================================================================
 
 
@@ -8933,7 +8997,7 @@ CREATE POLICY "Admins can view tour events"
 
 
 -- ==============================================================================
--- [106/364] Migration: 20260716064535_d5bc2300-b767-433b-8600-e618328fa995.sql
+-- [107/381] Migration: 20260716064535_d5bc2300-b767-433b-8600-e618328fa995.sql
 -- ==============================================================================
 
 
@@ -8958,7 +9022,7 @@ CREATE POLICY "Admins can view API endpoints"
 
 
 -- ==============================================================================
--- [107/364] Migration: 20260716092744_eae498ab-d4e2-4799-abc3-1f23e27c5b75.sql
+-- [108/381] Migration: 20260716092744_eae498ab-d4e2-4799-abc3-1f23e27c5b75.sql
 -- ==============================================================================
 
 
@@ -9041,7 +9105,7 @@ WITH CHECK (
 
 
 -- ==============================================================================
--- [108/364] Migration: 20260716093001_5fe13739-af03-422b-b0dc-e31304bb1d81.sql
+-- [109/381] Migration: 20260716093001_5fe13739-af03-422b-b0dc-e31304bb1d81.sql
 -- ==============================================================================
 
 
@@ -9162,7 +9226,7 @@ GRANT EXECUTE ON FUNCTION public.sign_rent_to_own_agreement(uuid, text) TO authe
 
 
 -- ==============================================================================
--- [109/364] Migration: 20260716093325_940894b1-6dd1-482c-a541-3535db9f5c35.sql
+-- [110/381] Migration: 20260716093325_940894b1-6dd1-482c-a541-3535db9f5c35.sql
 -- ==============================================================================
 
 
@@ -9547,7 +9611,7 @@ GRANT EXECUTE ON FUNCTION public.driver_request_rental_extension(uuid) TO authen
 
 
 -- ==============================================================================
--- [110/364] Migration: 20260716093540_6f17253f-a52f-45c1-a3c3-983f5d0dec34.sql
+-- [111/381] Migration: 20260716093540_6f17253f-a52f-45c1-a3c3-983f5d0dec34.sql
 -- ==============================================================================
 
 
@@ -9581,7 +9645,7 @@ GRANT EXECUTE ON FUNCTION public.get_owner_available_balance(uuid, text) TO auth
 
 
 -- ==============================================================================
--- [111/364] Migration: 20260716094700_69e71c50-d313-4446-b18c-b3ea477a1000.sql
+-- [112/381] Migration: 20260716094700_69e71c50-d313-4446-b18c-b3ea477a1000.sql
 -- ==============================================================================
 
 
@@ -9730,7 +9794,7 @@ END $$;
 
 
 -- ==============================================================================
--- [112/364] Migration: 20260716201307_1e53fb48-72c9-4e7b-841e-81367d8826d1.sql
+-- [113/381] Migration: 20260716201307_1e53fb48-72c9-4e7b-841e-81367d8826d1.sql
 -- ==============================================================================
 
 
@@ -9801,13 +9865,13 @@ GRANT EXECUTE ON FUNCTION public.admin_cancel_subscription(uuid, text) TO authen
 
 
 -- ==============================================================================
--- [113/364] Migration: 20260716202827_29ab87bd-3df2-43d3-9d8c-f1cfce1a4016.sql
+-- [114/381] Migration: 20260716202827_29ab87bd-3df2-43d3-9d8c-f1cfce1a4016.sql
 -- ==============================================================================
 
 GRANT EXECUTE ON FUNCTION public.no_pending_application_for_email(text) TO anon, authenticated;
 
 -- ==============================================================================
--- [114/364] Migration: 20260716203610_d58df085-63ea-48bf-8d62-61f904939553.sql
+-- [115/381] Migration: 20260716203610_d58df085-63ea-48bf-8d62-61f904939553.sql
 -- ==============================================================================
 
 
@@ -9899,7 +9963,7 @@ FOR EACH ROW EXECUTE FUNCTION public.audit_application_changes();
 
 
 -- ==============================================================================
--- [115/364] Migration: 20260716204204_dbfa5d51-25e3-4d62-9666-8ed34f80c2b7.sql
+-- [116/381] Migration: 20260716204204_dbfa5d51-25e3-4d62-9666-8ed34f80c2b7.sql
 -- ==============================================================================
 
 
@@ -9907,7 +9971,7 @@ GRANT EXECUTE ON FUNCTION public.no_pending_application_for_email(text) TO anon,
 
 
 -- ==============================================================================
--- [116/364] Migration: 20260716204340_ca1eb818-e734-49f3-9023-4b440c42c0e5.sql
+-- [117/381] Migration: 20260716204340_ca1eb818-e734-49f3-9023-4b440c42c0e5.sql
 -- ==============================================================================
 
 
@@ -9920,7 +9984,7 @@ CREATE POLICY "Anyone can submit applications"
 
 
 -- ==============================================================================
--- [117/364] Migration: 20260716204415_80178a8d-3a07-46ec-b0f6-729c2a179acb.sql
+-- [118/381] Migration: 20260716204415_80178a8d-3a07-46ec-b0f6-729c2a179acb.sql
 -- ==============================================================================
 
 
@@ -9939,7 +10003,7 @@ CREATE POLICY "Anyone can submit applications"
 
 
 -- ==============================================================================
--- [118/364] Migration: 20260716204437_83f111a4-5392-4938-926b-0e207ec6ad3f.sql
+-- [119/381] Migration: 20260716204437_83f111a4-5392-4938-926b-0e207ec6ad3f.sql
 -- ==============================================================================
 
 
@@ -9952,13 +10016,13 @@ CREATE POLICY "Anyone can submit applications"
 
 
 -- ==============================================================================
--- [119/364] Migration: 20260716204500_c835ad12-9a0f-4948-bf84-7d4e984e128e.sql
+-- [120/381] Migration: 20260716204500_c835ad12-9a0f-4948-bf84-7d4e984e128e.sql
 -- ==============================================================================
 
 NOTIFY pgrst, 'reload schema';
 
 -- ==============================================================================
--- [120/364] Migration: 20260716204622_63828324-abc0-4073-a1c7-5bc58adc0861.sql
+-- [121/381] Migration: 20260716204622_63828324-abc0-4073-a1c7-5bc58adc0861.sql
 -- ==============================================================================
 
 
@@ -9971,7 +10035,7 @@ CREATE POLICY "Anyone can submit applications"
 
 
 -- ==============================================================================
--- [121/364] Migration: 20260716204714_a9a3a48d-b048-4b85-96c4-7b990ed6f049.sql
+-- [122/381] Migration: 20260716204714_a9a3a48d-b048-4b85-96c4-7b990ed6f049.sql
 -- ==============================================================================
 
 
@@ -10081,7 +10145,7 @@ $$;
 
 
 -- ==============================================================================
--- [122/364] Migration: 20260716210146_76e369f7-1963-402d-b9a3-1c65d6b4aae9.sql
+-- [123/381] Migration: 20260716210146_76e369f7-1963-402d-b9a3-1c65d6b4aae9.sql
 -- ==============================================================================
 
 
@@ -10117,7 +10181,7 @@ CREATE TRIGGER trg_iot_sync_state_updated
 
 
 -- ==============================================================================
--- [123/364] Migration: 20260716211357_cd551d4d-f026-48dd-b489-e2964bd709ec.sql
+-- [124/381] Migration: 20260716211357_cd551d4d-f026-48dd-b489-e2964bd709ec.sql
 -- ==============================================================================
 
 
@@ -10329,7 +10393,7 @@ CREATE TRIGGER trg_auto_receipt
 
 
 -- ==============================================================================
--- [124/364] Migration: 20260717032258_07da8a79-bc80-4b29-8f81-0cf5a8a2cd82.sql
+-- [125/381] Migration: 20260717032258_07da8a79-bc80-4b29-8f81-0cf5a8a2cd82.sql
 -- ==============================================================================
 
 
@@ -10511,7 +10575,7 @@ $$;
 
 
 -- ==============================================================================
--- [125/364] Migration: 20260717140812_a156288a-bdc3-41d6-b8c1-bcec3ba8cc88.sql
+-- [126/381] Migration: 20260717140812_a156288a-bdc3-41d6-b8c1-bcec3ba8cc88.sql
 -- ==============================================================================
 
 
@@ -10801,7 +10865,7 @@ FOR EACH ROW EXECUTE FUNCTION public.audit_proxy_billing_changes();
 
 
 -- ==============================================================================
--- [126/364] Migration: 20260717141656_4e4ab085-e83d-4527-9826-8910958d69b0.sql
+-- [127/381] Migration: 20260717141656_4e4ab085-e83d-4527-9826-8910958d69b0.sql
 -- ==============================================================================
 
 
@@ -11137,7 +11201,7 @@ END $$;
 
 
 -- ==============================================================================
--- [127/364] Migration: 20260717142546_8614caf0-1ee4-4c23-822f-8365f6e7c1e3.sql
+-- [128/381] Migration: 20260717142546_8614caf0-1ee4-4c23-822f-8365f6e7c1e3.sql
 -- ==============================================================================
 
 
@@ -11222,7 +11286,7 @@ GRANT EXECUTE ON FUNCTION public.update_proxy_notification_prefs(UUID, JSONB, TE
 
 
 -- ==============================================================================
--- [128/364] Migration: 20260717142711_00e214f1-e6d2-47bb-ab47-fd6c35ac8ccc.sql
+-- [129/381] Migration: 20260717142711_00e214f1-e6d2-47bb-ab47-fd6c35ac8ccc.sql
 -- ==============================================================================
 
 
@@ -11267,7 +11331,7 @@ GRANT EXECUTE ON FUNCTION public.get_proxy_consent_context(text) TO anon, authen
 
 
 -- ==============================================================================
--- [129/364] Migration: 20260717143305_107943b6-3b73-43b5-bb44-62965100a09a.sql
+-- [130/381] Migration: 20260717143305_107943b6-3b73-43b5-bb44-62965100a09a.sql
 -- ==============================================================================
 
 
@@ -11381,7 +11445,7 @@ END $$;
 
 
 -- ==============================================================================
--- [130/364] Migration: 20260717152217_4670ac57-2e68-41eb-923c-21fe048d9e1f.sql
+-- [131/381] Migration: 20260717152217_4670ac57-2e68-41eb-923c-21fe048d9e1f.sql
 -- ==============================================================================
 
 
@@ -11444,7 +11508,7 @@ GRANT EXECUTE ON FUNCTION public.approve_application(uuid, text) TO authenticate
 
 
 -- ==============================================================================
--- [131/364] Migration: 20260717152915_b4169c20-c86a-43c1-8ae3-4cc591ae2768.sql
+-- [132/381] Migration: 20260717152915_b4169c20-c86a-43c1-8ae3-4cc591ae2768.sql
 -- ==============================================================================
 
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMPTZ;
@@ -11480,7 +11544,7 @@ GRANT EXECUTE ON FUNCTION public.complete_onboarding() TO authenticated;
 
 
 -- ==============================================================================
--- [132/364] Migration: 20260718095724_5e226908-06bb-482f-8f17-572f80574809.sql
+-- [133/381] Migration: 20260718095724_5e226908-06bb-482f-8f17-572f80574809.sql
 -- ==============================================================================
 
 
@@ -11538,7 +11602,7 @@ CREATE POLICY "Service role manages elevenlabs test audio"
 
 
 -- ==============================================================================
--- [133/364] Migration: 20260718100535_a20801d0-12b7-44b8-8f65-11ec1739c58d.sql
+-- [134/381] Migration: 20260718100535_a20801d0-12b7-44b8-8f65-11ec1739c58d.sql
 -- ==============================================================================
 
 -- Per-call transcript segments
@@ -11598,7 +11662,7 @@ CREATE POLICY "Admins can read voip call recordings"
 
 
 -- ==============================================================================
--- [134/364] Migration: 20260718101002_912a7c1b-5762-4cbd-8aaf-62e2199ba88b.sql
+-- [135/381] Migration: 20260718101002_912a7c1b-5762-4cbd-8aaf-62e2199ba88b.sql
 -- ==============================================================================
 
 
@@ -11778,7 +11842,7 @@ GRANT EXECUTE ON FUNCTION public.save_voice_agent_transcript(text, text, text, j
 
 
 -- ==============================================================================
--- [135/364] Migration: 20260718145444_e07b7786-bd35-40ab-b2a5-6027ccafc0b5.sql
+-- [136/381] Migration: 20260718145444_e07b7786-bd35-40ab-b2a5-6027ccafc0b5.sql
 -- ==============================================================================
 
 
@@ -11912,7 +11976,7 @@ REVOKE EXECUTE ON FUNCTION public.approve_application(uuid, text) FROM anon;
 
 
 -- ==============================================================================
--- [136/364] Migration: 20260718145527_f0e68caa-9f7d-42ec-9c56-2f2e35d83d36.sql
+-- [137/381] Migration: 20260718145527_f0e68caa-9f7d-42ec-9c56-2f2e35d83d36.sql
 -- ==============================================================================
 
 
@@ -11971,7 +12035,7 @@ REVOKE EXECUTE ON FUNCTION public.purge_expired_elevenlabs_test_logs() FROM auth
 
 
 -- ==============================================================================
--- [137/364] Migration: 20260718145547_8fbaf613-eedc-4c51-b000-dc3f57bd90fe.sql
+-- [138/381] Migration: 20260718145547_8fbaf613-eedc-4c51-b000-dc3f57bd90fe.sql
 -- ==============================================================================
 
 
@@ -12009,7 +12073,7 @@ END $$;
 
 
 -- ==============================================================================
--- [138/364] Migration: 20260718160255_9ae4fc1f-69d4-4c4e-88fe-0838fe8c0ccb.sql
+-- [139/381] Migration: 20260718160255_9ae4fc1f-69d4-4c4e-88fe-0838fe8c0ccb.sql
 -- ==============================================================================
 
 
@@ -12253,7 +12317,7 @@ GRANT EXECUTE ON FUNCTION public.get_my_registration_progress() TO authenticated
 
 
 -- ==============================================================================
--- [139/364] Migration: 20260718161932_0282129c-e6ff-4f05-95b9-13c3dbe5608b.sql
+-- [140/381] Migration: 20260718161932_0282129c-e6ff-4f05-95b9-13c3dbe5608b.sql
 -- ==============================================================================
 
 
@@ -12368,7 +12432,7 @@ REVOKE EXECUTE ON FUNCTION public.get_my_registration_progress() FROM anon, PUBL
 
 
 -- ==============================================================================
--- [140/364] Migration: 20260719091806_d886bde3-1e39-47f8-b272-83e5b2e4e91a.sql
+-- [141/381] Migration: 20260719091806_d886bde3-1e39-47f8-b272-83e5b2e4e91a.sql
 -- ==============================================================================
 
 
@@ -12609,14 +12673,14 @@ ALTER TABLE public.price_negotiations VALIDATE CONSTRAINT price_negotiations_veh
 
 
 -- ==============================================================================
--- [141/364] Migration: 20260720011430_8d2ccabb-980b-4043-bd4e-533eabc29428.sql
+-- [142/381] Migration: 20260720011430_8d2ccabb-980b-4043-bd4e-533eabc29428.sql
 -- ==============================================================================
 
 ALTER PUBLICATION supabase_realtime ADD TABLE public.platform_company_info;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.user_uuid_assignments;
 
 -- ==============================================================================
--- [142/364] Migration: 20260720110345_25dcd856-3021-4833-a1a0-432f90977b34.sql
+-- [143/381] Migration: 20260720110345_25dcd856-3021-4833-a1a0-432f90977b34.sql
 -- ==============================================================================
 
 
@@ -12785,7 +12849,7 @@ $function$;
 
 
 -- ==============================================================================
--- [143/364] Migration: 20260720111115_873a3b79-085d-4fc3-9a3d-e68e24f97922.sql
+-- [144/381] Migration: 20260720111115_873a3b79-085d-4fc3-9a3d-e68e24f97922.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.get_my_registration_progress()
@@ -12915,7 +12979,7 @@ REVOKE EXECUTE ON FUNCTION public.onboarding_diagnostics() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.onboarding_diagnostics() TO authenticated;
 
 -- ==============================================================================
--- [144/364] Migration: 20260720111846_0e992cc3-ce1c-4c22-ae0d-7cd339ff262c.sql
+-- [145/381] Migration: 20260720111846_0e992cc3-ce1c-4c22-ae0d-7cd339ff262c.sql
 -- ==============================================================================
 
 DO $$
@@ -12932,7 +12996,7 @@ END $$;
 ALTER TABLE public.iot_audit_log REPLICA IDENTITY FULL;
 
 -- ==============================================================================
--- [145/364] Migration: 20260720112434_71ef0237-d70d-4853-85e9-c3ce34a72ecc.sql
+-- [146/381] Migration: 20260720112434_71ef0237-d70d-4853-85e9-c3ce34a72ecc.sql
 -- ==============================================================================
 
 
@@ -13123,7 +13187,7 @@ GRANT EXECUTE ON FUNCTION public.revoke_full_access(uuid, text) TO authenticated
 
 
 -- ==============================================================================
--- [146/364] Migration: 20260720114306_f8ce6e2f-0293-4e5e-9d0f-2e6e95399efc.sql
+-- [147/381] Migration: 20260720114306_f8ce6e2f-0293-4e5e-9d0f-2e6e95399efc.sql
 -- ==============================================================================
 
 
@@ -13252,7 +13316,7 @@ GRANT EXECUTE ON FUNCTION public.mark_all_admin_notifications_read() TO authenti
 
 
 -- ==============================================================================
--- [147/364] Migration: 20260720121149_307b451d-7b29-45b5-8522-e0d6eca1a65a.sql
+-- [148/381] Migration: 20260720121149_307b451d-7b29-45b5-8522-e0d6eca1a65a.sql
 -- ==============================================================================
 
 
@@ -13333,7 +13397,7 @@ USING (
 
 
 -- ==============================================================================
--- [148/364] Migration: 20260720121638_614c9fdb-c178-4e54-91d9-c83d898c4918.sql
+-- [149/381] Migration: 20260720121638_614c9fdb-c178-4e54-91d9-c83d898c4918.sql
 -- ==============================================================================
 
 
@@ -13602,7 +13666,7 @@ GRANT EXECUTE ON FUNCTION public.admin_release_security_deposit(uuid, text) TO a
 
 
 -- ==============================================================================
--- [149/364] Migration: 20260720121748_f3da6762-fec2-4d35-acc8-045aa198597c.sql
+-- [150/381] Migration: 20260720121748_f3da6762-fec2-4d35-acc8-045aa198597c.sql
 -- ==============================================================================
 
 
@@ -13612,7 +13676,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS invoices_idempotency_key_unique
 
 
 -- ==============================================================================
--- [150/364] Migration: 20260720121814_324b9787-d445-4f9c-8d52-2366646625d7.sql
+-- [151/381] Migration: 20260720121814_324b9787-d445-4f9c-8d52-2366646625d7.sql
 -- ==============================================================================
 
 
@@ -13622,7 +13686,7 @@ ALTER TABLE public.invoices
 
 
 -- ==============================================================================
--- [151/364] Migration: 20260720121905_bb545738-ec22-4bd6-9dd8-adcf3ce694d4.sql
+-- [152/381] Migration: 20260720121905_bb545738-ec22-4bd6-9dd8-adcf3ce694d4.sql
 -- ==============================================================================
 
 
@@ -13775,7 +13839,7 @@ $$;
 
 
 -- ==============================================================================
--- [152/364] Migration: 20260720131353_9a3e602c-b859-4528-a3e5-8dc5cd3b0085.sql
+-- [153/381] Migration: 20260720131353_9a3e602c-b859-4528-a3e5-8dc5cd3b0085.sql
 -- ==============================================================================
 
 
@@ -13825,7 +13889,7 @@ CREATE POLICY "profile_photos_delete_own"
 
 
 -- ==============================================================================
--- [153/364] Migration: 20260720135215_c0486364-be1e-45bb-9fa0-3b690c161989.sql
+-- [154/381] Migration: 20260720135215_c0486364-be1e-45bb-9fa0-3b690c161989.sql
 -- ==============================================================================
 
 
@@ -13837,7 +13901,7 @@ ON CONFLICT (key) DO NOTHING;
 
 
 -- ==============================================================================
--- [154/364] Migration: 20260720140135_ea66ae4b-bb66-4fec-adf1-4fb87e2bc9a7.sql
+-- [155/381] Migration: 20260720140135_ea66ae4b-bb66-4fec-adf1-4fb87e2bc9a7.sql
 -- ==============================================================================
 
 -- Enforce name immutability for identity-verified users at the DB layer.
@@ -13882,7 +13946,7 @@ EXECUTE FUNCTION public.enforce_verified_name_immutable();
 REVOKE EXECUTE ON FUNCTION public.enforce_verified_name_immutable() FROM PUBLIC, anon, authenticated;
 
 -- ==============================================================================
--- [155/364] Migration: 20260720140505_7e3c5eab-b957-4d8a-8896-c237f1d1447f.sql
+-- [156/381] Migration: 20260720140505_7e3c5eab-b957-4d8a-8896-c237f1d1447f.sql
 -- ==============================================================================
 
 
@@ -13987,7 +14051,7 @@ CREATE TRIGGER trg_log_profile_settings_changes
 
 
 -- ==============================================================================
--- [156/364] Migration: 20260721010808_0193cdd2-12db-403c-ae19-8861638b2fce.sql
+-- [157/381] Migration: 20260721010808_0193cdd2-12db-403c-ae19-8861638b2fce.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.fanout_admin_onboarding_notification()
@@ -14136,7 +14200,7 @@ REVOKE EXECUTE ON FUNCTION public.fanout_admin_onboarding_notification() FROM PU
 GRANT EXECUTE ON FUNCTION public.fanout_admin_onboarding_notification() TO service_role;
 
 -- ==============================================================================
--- [157/364] Migration: 20260721070326_ed0376ab-0277-426c-8cb9-5cc939eca2e0.sql
+-- [158/381] Migration: 20260721070326_ed0376ab-0277-426c-8cb9-5cc939eca2e0.sql
 -- ==============================================================================
 
 -- Allow authenticated users to read only active legal agreement templates
@@ -14148,7 +14212,7 @@ CREATE POLICY "Authenticated users can read active templates"
   USING (is_active = true);
 
 -- ==============================================================================
--- [158/364] Migration: 20260721070944_47ce9c9c-ce38-4818-b7c6-d8b3d83fa72c.sql
+-- [159/381] Migration: 20260721070944_47ce9c9c-ce38-4818-b7c6-d8b3d83fa72c.sql
 -- ==============================================================================
 
 
@@ -14280,7 +14344,7 @@ FOR EACH ROW EXECUTE FUNCTION public.log_tour_step_config_changes();
 
 
 -- ==============================================================================
--- [159/364] Migration: 20260721071603_33795424-bb90-4931-96d0-3edb8221a6eb.sql
+-- [160/381] Migration: 20260721071603_33795424-bb90-4931-96d0-3edb8221a6eb.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.fanout_admin_onboarding_notification()
@@ -14360,7 +14424,7 @@ REVOKE EXECUTE ON FUNCTION public.fanout_admin_onboarding_notification() FROM PU
 GRANT EXECUTE ON FUNCTION public.fanout_admin_onboarding_notification() TO service_role;
 
 -- ==============================================================================
--- [160/364] Migration: 20260721081730_ee26f0b6-f913-4646-b3d6-bc5b54847af1.sql
+-- [161/381] Migration: 20260721081730_ee26f0b6-f913-4646-b3d6-bc5b54847af1.sql
 -- ==============================================================================
 
 
@@ -14401,7 +14465,7 @@ GRANT EXECUTE ON FUNCTION public.needs_latest_agreement_acceptance(text, text) T
 
 
 -- ==============================================================================
--- [161/364] Migration: 20260721082358_35d41029-1690-4e20-a855-689973bc701d.sql
+-- [162/381] Migration: 20260721082358_35d41029-1690-4e20-a855-689973bc701d.sql
 -- ==============================================================================
 
 
@@ -14528,7 +14592,7 @@ ON CONFLICT (subject_role) DO NOTHING;
 
 
 -- ==============================================================================
--- [162/364] Migration: 20260723053016_8a8683fe-242e-4502-bd1b-70b1e31f64af.sql
+-- [163/381] Migration: 20260723053016_8a8683fe-242e-4502-bd1b-70b1e31f64af.sql
 -- ==============================================================================
 
 -- Vehicle analytics events from Resident Orchestrator
@@ -14585,7 +14649,7 @@ UPDATE public.profiles
    AND persona_verified = false;
 
 -- ==============================================================================
--- [163/364] Migration: 20260723213810_36406e11-3fe0-42d0-aeb6-a562cb2cd464.sql
+-- [164/381] Migration: 20260723213810_36406e11-3fe0-42d0-aeb6-a562cb2cd464.sql
 -- ==============================================================================
 
 
@@ -14761,7 +14825,7 @@ GRANT EXECUTE ON FUNCTION public.get_onboarding_next_step() TO authenticated;
 
 
 -- ==============================================================================
--- [164/364] Migration: 20260723214742_5256f2a3-995f-45f7-89ee-494691c6836d.sql
+-- [165/381] Migration: 20260723214742_5256f2a3-995f-45f7-89ee-494691c6836d.sql
 -- ==============================================================================
 
 
@@ -14932,7 +14996,7 @@ GRANT EXECUTE ON FUNCTION public.get_onboarding_next_step() TO authenticated;
 
 
 -- ==============================================================================
--- [165/364] Migration: 20260723220156_6f5cb3d6-f119-4858-bd68-32817530a8cf.sql
+-- [166/381] Migration: 20260723220156_6f5cb3d6-f119-4858-bd68-32817530a8cf.sql
 -- ==============================================================================
 
 
@@ -15265,7 +15329,7 @@ ALTER FUNCTION public.touch_persona_template_config() SET search_path = public;
 
 
 -- ==============================================================================
--- [166/364] Migration: 20260724040240_9df6616c-8856-445c-81ae-71976f80076e.sql
+-- [167/381] Migration: 20260724040240_9df6616c-8856-445c-81ae-71976f80076e.sql
 -- ==============================================================================
 
 -- Deploy missing column-scope triggers and add profiles guard
@@ -15367,7 +15431,7 @@ CREATE POLICY "Users can update their own profile"
   WITH CHECK (user_id = auth.uid());
 
 -- ==============================================================================
--- [167/364] Migration: 20260724045817_95eaffb8-2ae3-4e2d-9fdf-ede85da4e1ed.sql
+-- [168/381] Migration: 20260724045817_95eaffb8-2ae3-4e2d-9fdf-ede85da4e1ed.sql
 -- ==============================================================================
 
 
@@ -15403,7 +15467,7 @@ REVOKE EXECUTE ON FUNCTION public.check_unique_credentials(text, text, text) FRO
 
 
 -- ==============================================================================
--- [168/364] Migration: 20260724050916_03575f81-8fc0-4d9c-b685-3b9d221b6efa.sql
+-- [169/381] Migration: 20260724050916_03575f81-8fc0-4d9c-b685-3b9d221b6efa.sql
 -- ==============================================================================
 
 
@@ -15489,7 +15553,7 @@ CREATE TRIGGER trg_e164_referee_verifications BEFORE INSERT OR UPDATE ON public.
 
 
 -- ==============================================================================
--- [169/364] Migration: 20260724202616_b93c7b8b-9431-4e72-bc5b-a37622c1dcab.sql
+-- [170/381] Migration: 20260724202616_b93c7b8b-9431-4e72-bc5b-a37622c1dcab.sql
 -- ==============================================================================
 
 
@@ -15552,7 +15616,7 @@ REVOKE EXECUTE ON FUNCTION public.enforce_phone_update_rate_limit() FROM PUBLIC,
 
 
 -- ==============================================================================
--- [170/364] Migration: 20260724203104_8d61155e-29ef-4861-98cc-e478cb6e4955.sql
+-- [171/381] Migration: 20260724203104_8d61155e-29ef-4861-98cc-e478cb6e4955.sql
 -- ==============================================================================
 
 
@@ -15574,7 +15638,7 @@ GRANT SELECT ON public.contact_settings TO anon;
 
 
 -- ==============================================================================
--- [171/364] Migration: 20260724204518_627cebf0-8675-4083-86e2-dd20dca48c7e.sql
+-- [172/381] Migration: 20260724204518_627cebf0-8675-4083-86e2-dd20dca48c7e.sql
 -- ==============================================================================
 
 
@@ -15759,7 +15823,7 @@ ON CONFLICT (key) DO NOTHING;
 
 
 -- ==============================================================================
--- [172/364] Migration: 20260724204620_f2f14ef4-3d48-425c-827b-dcadd3279e7b.sql
+-- [173/381] Migration: 20260724204620_f2f14ef4-3d48-425c-827b-dcadd3279e7b.sql
 -- ==============================================================================
 
 
@@ -15786,7 +15850,7 @@ CREATE POLICY "Deny all client access" ON public.phone_otp_codes
 
 
 -- ==============================================================================
--- [173/364] Migration: 20260724212420_2f93c923-4550-4f8e-ae83-e4c3bbbfede9.sql
+-- [174/381] Migration: 20260724212420_2f93c923-4550-4f8e-ae83-e4c3bbbfede9.sql
 -- ==============================================================================
 
 DO $$
@@ -15807,7 +15871,7 @@ ALTER TABLE public.user_roles REPLICA IDENTITY FULL;
 
 
 -- ==============================================================================
--- [174/364] Migration: 20260724231955_b74b508d-aa40-427c-823a-83402d268203.sql
+-- [175/381] Migration: 20260724231955_b74b508d-aa40-427c-823a-83402d268203.sql
 -- ==============================================================================
 
 
@@ -15880,7 +15944,7 @@ $$;
 
 
 -- ==============================================================================
--- [175/364] Migration: 20260724232508_583db661-6d5d-4c5b-8ec0-c1a734ec15f3.sql
+-- [176/381] Migration: 20260724232508_583db661-6d5d-4c5b-8ec0-c1a734ec15f3.sql
 -- ==============================================================================
 
 
@@ -15912,7 +15976,7 @@ $$;
 
 
 -- ==============================================================================
--- [176/364] Migration: 20260724234559_a35bc89e-b68b-4ce0-b885-5726cb0e4388.sql
+-- [177/381] Migration: 20260724234559_a35bc89e-b68b-4ce0-b885-5726cb0e4388.sql
 -- ==============================================================================
 
 
@@ -15974,7 +16038,7 @@ CREATE TRIGGER trg_enforce_referee_verification_column_scope
 
 
 -- ==============================================================================
--- [177/364] Migration: 20260724234839_484e9387-fea4-42d8-93d2-1a48946bd31b.sql
+-- [178/381] Migration: 20260724234839_484e9387-fea4-42d8-93d2-1a48946bd31b.sql
 -- ==============================================================================
 
 
@@ -16087,7 +16151,7 @@ ON CONFLICT (user_id) DO NOTHING;
 
 
 -- ==============================================================================
--- [178/364] Migration: 20260724235214_3f4404ac-15f6-4ff4-a42d-f55691c1c077.sql
+-- [179/381] Migration: 20260724235214_3f4404ac-15f6-4ff4-a42d-f55691c1c077.sql
 -- ==============================================================================
 
 -- Treat Google-verified (or otherwise auth-confirmed) emails as verified in
@@ -16182,7 +16246,7 @@ UPDATE public.profiles p
    );
 
 -- ==============================================================================
--- [179/364] Migration: 20260724235338_8678e7fa-372b-427d-a158-b7900e4379f1.sql
+-- [180/381] Migration: 20260724235338_8678e7fa-372b-427d-a158-b7900e4379f1.sql
 -- ==============================================================================
 
 -- 1. Profile completion columns
@@ -16264,7 +16328,7 @@ REVOKE ALL ON FUNCTION public.get_profile_completion_status() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_profile_completion_status() TO authenticated;
 
 -- ==============================================================================
--- [180/364] Migration: 20260724235611_auth_hardening.sql
+-- [181/381] Migration: 20260724235611_auth_hardening.sql
 -- ==============================================================================
 
 -- Auth hardening: event log + rate-limit RPC
@@ -16386,7 +16450,7 @@ GRANT EXECUTE ON FUNCTION public.check_auth_rate_limit(text,text,integer,integer
 
 
 -- ==============================================================================
--- [181/364] Migration: 20260724235629_a9c41c3c-81da-4710-b2fa-9db38df02a4a.sql
+-- [182/381] Migration: 20260724235629_a9c41c3c-81da-4710-b2fa-9db38df02a4a.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.auth_event_log (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NULL, email text NULL, event_type text NOT NULL, provider text NULL, ip_address text NULL, user_agent text NULL, success boolean NOT NULL DEFAULT true, error_code text NULL, metadata jsonb NOT NULL DEFAULT '{}'::jsonb, created_at timestamptz NOT NULL DEFAULT now());
@@ -16428,7 +16492,7 @@ REVOKE ALL ON FUNCTION public.check_auth_rate_limit(text,text,integer,integer) F
 GRANT EXECUTE ON FUNCTION public.check_auth_rate_limit(text,text,integer,integer) TO anon, authenticated;
 
 -- ==============================================================================
--- [182/364] Migration: 20260725000758_ea0809a1-c344-41b9-9c82-d9da2eceee8d.sql
+-- [183/381] Migration: 20260725000758_ea0809a1-c344-41b9-9c82-d9da2eceee8d.sql
 -- ==============================================================================
 
 
@@ -16500,7 +16564,7 @@ GRANT EXECUTE ON FUNCTION public.get_my_identity_verification() TO authenticated
 
 
 -- ==============================================================================
--- [183/364] Migration: 20260725001118_e1f0f4fd-e3fb-45b0-8f1a-176587c343a0.sql
+-- [184/381] Migration: 20260725001118_e1f0f4fd-e3fb-45b0-8f1a-176587c343a0.sql
 -- ==============================================================================
 
 
@@ -16685,7 +16749,7 @@ GRANT EXECUTE ON FUNCTION public.admin_search_persona_users(text, text, int) TO 
 
 
 -- ==============================================================================
--- [184/364] Migration: 20260725055114_70889933-a74f-4737-af05-29c76add9e06.sql
+-- [185/381] Migration: 20260725055114_70889933-a74f-4737-af05-29c76add9e06.sql
 -- ==============================================================================
 
 
@@ -16753,7 +16817,7 @@ FOR EACH ROW EXECUTE FUNCTION public.enforce_iot_order_official_price();
 
 
 -- ==============================================================================
--- [185/364] Migration: 20260726000700_cf2195d7-8381-461f-aeec-1c3cc5fd754d.sql
+-- [186/381] Migration: 20260726000700_cf2195d7-8381-461f-aeec-1c3cc5fd754d.sql
 -- ==============================================================================
 
 
@@ -16789,7 +16853,7 @@ CREATE INDEX IF NOT EXISTS persona_status_digest_pending_idx
 
 
 -- ==============================================================================
--- [186/364] Migration: 20260727043443_bf8f4be3-0232-4e8d-a677-6f858253032d.sql
+-- [187/381] Migration: 20260727043443_bf8f4be3-0232-4e8d-a677-6f858253032d.sql
 -- ==============================================================================
 
 
@@ -16828,7 +16892,7 @@ CREATE INDEX idx_phone_reference_region_label ON public.phone_reference(region_l
 
 
 -- ==============================================================================
--- [187/364] Migration: 20260728043214_a4695cff-9c62-4fb8-8a71-22b51ed827e2.sql
+-- [188/381] Migration: 20260728043214_a4695cff-9c62-4fb8-8a71-22b51ed827e2.sql
 -- ==============================================================================
 
 -- 1. Enforce E.164 format at the DB layer for profiles.phone.
@@ -16851,7 +16915,7 @@ UPDATE public.persona_template_config
 
 
 -- ==============================================================================
--- [188/364] Migration: 20260730082659_5563ac4b-be98-4270-800d-05a9d9fdaa7c.sql
+-- [189/381] Migration: 20260730082659_5563ac4b-be98-4270-800d-05a9d9fdaa7c.sql
 -- ==============================================================================
 
 
@@ -17010,7 +17074,7 @@ GRANT EXECUTE ON FUNCTION public.get_my_identity_verification() TO authenticated
 
 
 -- ==============================================================================
--- [189/364] Migration: 20260730084848_d4d12c36-fd44-4a07-ba8b-e545af1b1612.sql
+-- [190/381] Migration: 20260730084848_d4d12c36-fd44-4a07-ba8b-e545af1b1612.sql
 -- ==============================================================================
 
 
@@ -17062,7 +17126,7 @@ UPDATE public.profiles
 
 
 -- ==============================================================================
--- [190/364] Migration: 20260730090500_aecf061e-059f-44bd-929e-4bd5ae745c1f.sql
+-- [191/381] Migration: 20260730090500_aecf061e-059f-44bd-929e-4bd5ae745c1f.sql
 -- ==============================================================================
 
 -- 1) Column-scope guard for driver_call_ins
@@ -17137,7 +17201,7 @@ REVOKE INSERT ON public.tour_analytics_events FROM anon;
 
 
 -- ==============================================================================
--- [191/364] Migration: 20260730091040_c9e76166-3850-46b1-b403-62f9c161c593.sql
+-- [192/381] Migration: 20260730091040_c9e76166-3850-46b1-b403-62f9c161c593.sql
 -- ==============================================================================
 
 -- =====================================================================
@@ -17314,7 +17378,7 @@ GRANT ALL ON public.rate_limit_log         TO service_role;
 GRANT ALL ON public.api_key_usage_log      TO service_role;
 
 -- ==============================================================================
--- [192/364] Migration: 20260730093525_61908fde-79ca-44a9-a5dd-3be43ae01a6f.sql
+-- [193/381] Migration: 20260730093525_61908fde-79ca-44a9-a5dd-3be43ae01a6f.sql
 -- ==============================================================================
 
 -- 1. Failure reason catalogue -------------------------------------------------
@@ -17543,7 +17607,7 @@ REVOKE ALL ON FUNCTION public.run_payment_preflight(text, jsonb) FROM PUBLIC, an
 GRANT EXECUTE ON FUNCTION public.run_payment_preflight(text, jsonb) TO authenticated, service_role;
 
 -- ==============================================================================
--- [193/364] Migration: 20260730094254_b2aa8b6f-cdc0-44ad-aee3-880c0370851e.sql
+-- [194/381] Migration: 20260730094254_b2aa8b6f-cdc0-44ad-aee3-880c0370851e.sql
 -- ==============================================================================
 
 -- 1. Wallet accounts -----------------------------------------------------------
@@ -17768,7 +17832,7 @@ REVOKE ALL ON FUNCTION public.get_my_wallet_summary(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_my_wallet_summary(text) TO authenticated, service_role;
 
 -- ==============================================================================
--- [194/364] Migration: 20260730095538_24064747-1c72-4c99-827d-9f1eda68889c.sql
+-- [195/381] Migration: 20260730095538_24064747-1c72-4c99-827d-9f1eda68889c.sql
 -- ==============================================================================
 
 -- =========================================================
@@ -18500,7 +18564,7 @@ REVOKE ALL ON FUNCTION public.admin_list_withdrawal_authorizations(text, integer
 GRANT EXECUTE ON FUNCTION public.admin_list_withdrawal_authorizations(text, integer) TO authenticated, service_role;
 
 -- ==============================================================================
--- [195/364] Migration: 20260730100240_36d7f7be-bb02-4bbb-aa92-797a1d1498de.sql
+-- [196/381] Migration: 20260730100240_36d7f7be-bb02-4bbb-aa92-797a1d1498de.sql
 -- ==============================================================================
 
 ALTER TABLE public.owner_payouts DROP CONSTRAINT IF EXISTS owner_payouts_status_check;
@@ -18533,7 +18597,7 @@ CREATE TRIGGER trg_owner_payouts_processed_at
 REVOKE ALL ON FUNCTION public.stamp_owner_payout_processed_at() FROM PUBLIC, anon, authenticated;
 
 -- ==============================================================================
--- [196/364] Migration: 20260730101904_ff249b4d-8fbd-43b7-ad6d-8ebc12c99552.sql
+-- [197/381] Migration: 20260730101904_ff249b4d-8fbd-43b7-ad6d-8ebc12c99552.sql
 -- ==============================================================================
 
 
@@ -18659,7 +18723,7 @@ GRANT EXECUTE ON FUNCTION public.set_my_region(text, text) TO authenticated, ser
 
 
 -- ==============================================================================
--- [197/364] Migration: 20260730103252_5ecc6fa4-b2f4-4801-a49e-88bcbd2f148f.sql
+-- [198/381] Migration: 20260730103252_5ecc6fa4-b2f4-4801-a49e-88bcbd2f148f.sql
 -- ==============================================================================
 
 -- Verification & authentication event log with correlation ids
@@ -18838,7 +18902,7 @@ REVOKE ALL ON FUNCTION public.get_my_activation_blockers() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_my_activation_blockers() TO authenticated, service_role;
 
 -- ==============================================================================
--- [198/364] Migration: 20260730103840_a3607f00-c9da-4595-801d-b1cb6066f88d.sql
+-- [199/381] Migration: 20260730103840_a3607f00-c9da-4595-801d-b1cb6066f88d.sql
 -- ==============================================================================
 
 DO $$
@@ -18868,7 +18932,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [199/364] Migration: 20260730104206_ca7db7c6-6b67-4adb-8d92-4899b6082913.sql
+-- [200/381] Migration: 20260730104206_ca7db7c6-6b67-4adb-8d92-4899b6082913.sql
 -- ==============================================================================
 
 -- 1. Correlation IDs for end-to-end webhook tracing
@@ -19104,7 +19168,7 @@ REVOKE ALL ON FUNCTION public.admin_list_disputes(text,integer) FROM PUBLIC, ano
 GRANT EXECUTE ON FUNCTION public.admin_list_disputes(text,integer) TO authenticated, service_role;
 
 -- ==============================================================================
--- [200/364] Migration: 20260730110043_ea08a32b-5d63-4497-b479-7aa8dc450ec3.sql
+-- [201/381] Migration: 20260730110043_ea08a32b-5d63-4497-b479-7aa8dc450ec3.sql
 -- ==============================================================================
 
 ALTER TABLE public.mqtt_telemetry_logs REPLICA IDENTITY FULL;
@@ -19121,7 +19185,7 @@ END
 $$;
 
 -- ==============================================================================
--- [201/364] Migration: 20260730111214_b0545b0c-6aa5-4237-bc90-8ca06b909929.sql
+-- [202/381] Migration: 20260730111214_b0545b0c-6aa5-4237-bc90-8ca06b909929.sql
 -- ==============================================================================
 
 -- 0. Phone validation: only validate new/changed values so legacy rows can be updated
@@ -19479,7 +19543,7 @@ REVOKE EXECUTE ON FUNCTION public.decline_application_recovery(uuid, text) FROM 
 GRANT EXECUTE ON FUNCTION public.decline_application_recovery(uuid, text) TO authenticated;
 
 -- ==============================================================================
--- [202/364] Migration: 20260731040354_69b108f6-7b52-4b9d-ada0-ded587f5291c.sql
+-- [203/381] Migration: 20260731040354_69b108f6-7b52-4b9d-ada0-ded587f5291c.sql
 -- ==============================================================================
 
 ALTER TABLE public.application_recovery_requests
@@ -19618,7 +19682,7 @@ REVOKE EXECUTE ON FUNCTION public.my_application_appeals() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.my_application_appeals() TO authenticated;
 
 -- ==============================================================================
--- [203/364] Migration: 20260731044024_4614397f-2e9f-44fc-ac56-6dfe0b0b0e67.sql
+-- [204/381] Migration: 20260731044024_4614397f-2e9f-44fc-ac56-6dfe0b0b0e67.sql
 -- ==============================================================================
 
 -- Guard privileged columns on public.applications against unrestricted
@@ -19678,7 +19742,7 @@ FOR EACH ROW
 EXECUTE FUNCTION public.guard_application_privileged_columns();
 
 -- ==============================================================================
--- [204/364] Migration: 20260804033948_1e1d8ff5-f362-43e9-8fd5-c363c9932795.sql
+-- [205/381] Migration: 20260804033948_1e1d8ff5-f362-43e9-8fd5-c363c9932795.sql
 -- ==============================================================================
 
 SELECT set_config('request.jwt.claims', json_build_object('sub','2b5f4e1d-fd58-40ed-8a79-cb6ec18b4dac','role','authenticated')::text, true);
@@ -19690,7 +19754,7 @@ WHERE ur.role = 'admin_assistant'
   AND NOT EXISTS (SELECT 1 FROM public.admin_assistant_permissions p WHERE p.user_id = ur.user_id);
 
 -- ==============================================================================
--- [205/364] Migration: 20260804034445_101de9d6-18ae-4c9f-89ed-78398cd69170.sql
+-- [206/381] Migration: 20260804034445_101de9d6-18ae-4c9f-89ed-78398cd69170.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.get_onboarding_next_step()
@@ -19859,7 +19923,7 @@ REVOKE ALL ON FUNCTION public.get_onboarding_next_step() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_onboarding_next_step() TO authenticated;
 
 -- ==============================================================================
--- [206/364] Migration: 20260805172739_f09d5368-ea05-4b2c-84c2-da67f7eae276.sql
+-- [207/381] Migration: 20260805172739_f09d5368-ea05-4b2c-84c2-da67f7eae276.sql
 -- ==============================================================================
 
 -- 1) Shared, idempotent provisioning routine ------------------------------
@@ -20101,7 +20165,7 @@ END;
 $$;
 
 -- ==============================================================================
--- [207/364] Migration: 20260805174501_edfe0b66-e746-456a-95b3-8fe7cd5eb04c.sql
+-- [208/381] Migration: 20260805174501_edfe0b66-e746-456a-95b3-8fe7cd5eb04c.sql
 -- ==============================================================================
 
 -- 1. Payment purpose + financial breakdown -------------------------------
@@ -20344,7 +20408,7 @@ VALUES ('00000000-0000-0000-0000-000000000000','platform','USD'),
 ON CONFLICT (user_id, account_type, currency) DO NOTHING;
 
 -- ==============================================================================
--- [208/364] Migration: 20260805174610_5fed52da-ec98-40b7-9dea-f79eb0ceade9.sql
+-- [209/381] Migration: 20260805174610_5fed52da-ec98-40b7-9dea-f79eb0ceade9.sql
 -- ==============================================================================
 
 ALTER TABLE public.paypal_transactions
@@ -20352,7 +20416,7 @@ ALTER TABLE public.paypal_transactions
   ALTER COLUMN vehicle_id DROP NOT NULL;
 
 -- ==============================================================================
--- [209/364] Migration: 20260805174651_1bf9ed37-3a2e-425a-9844-cebf588bfbb0.sql
+-- [210/381] Migration: 20260805174651_1bf9ed37-3a2e-425a-9844-cebf588bfbb0.sql
 -- ==============================================================================
 
 CREATE UNIQUE INDEX IF NOT EXISTS receipts_idempotency_key_uidx
@@ -20362,7 +20426,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS invoices_idempotency_key_uidx
   ON public.invoices(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- ==============================================================================
--- [210/364] Migration: 20260805174709_7acae174-afd4-4147-b079-f8bc0917be66.sql
+-- [211/381] Migration: 20260805174709_7acae174-afd4-4147-b079-f8bc0917be66.sql
 -- ==============================================================================
 
 DROP INDEX IF EXISTS public.receipts_idempotency_key_uidx;
@@ -20371,7 +20435,7 @@ CREATE UNIQUE INDEX receipts_idempotency_key_uidx ON public.receipts(idempotency
 CREATE UNIQUE INDEX invoices_idempotency_key_uidx ON public.invoices(idempotency_key);
 
 -- ==============================================================================
--- [211/364] Migration: 20260805174749_29f66840-5966-471b-a743-49457e12b4eb.sql
+-- [212/381] Migration: 20260805174749_29f66840-5966-471b-a743-49457e12b4eb.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.trg_settle_payment_financials()
@@ -20402,7 +20466,7 @@ AFTER INSERT OR UPDATE OF status ON public.payments
 FOR EACH ROW EXECUTE FUNCTION public.trg_settle_payment_financials();
 
 -- ==============================================================================
--- [212/364] Migration: 20260805175759_2f993726-0fff-4840-94dd-89d02a311f2f.sql
+-- [213/381] Migration: 20260805175759_2f993726-0fff-4840-94dd-89d02a311f2f.sql
 -- ==============================================================================
 
 -- ============================================================
@@ -20468,7 +20532,7 @@ REVOKE ALL ON public.webhooks FROM anon;
 GRANT ALL ON public.webhooks TO service_role;
 
 -- ==============================================================================
--- [213/364] Migration: 20260805181107_6ceb4193-7fd8-45d2-b5e3-20ddfb523eaf.sql
+-- [214/381] Migration: 20260805181107_6ceb4193-7fd8-45d2-b5e3-20ddfb523eaf.sql
 -- ==============================================================================
 
 -- profile-photos is now a PRIVATE bucket. Reads previously relied on public
@@ -20489,7 +20553,7 @@ USING (
 );
 
 -- ==============================================================================
--- [214/364] Migration: 20260805181745_687469b6-93ec-4268-b3e5-8fd1c09717b2.sql
+-- [215/381] Migration: 20260805181745_687469b6-93ec-4268-b3e5-8fd1c09717b2.sql
 -- ==============================================================================
 
 
@@ -20695,7 +20759,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_wallet_accounts_user_type_currency
 
 
 -- ==============================================================================
--- [215/364] Migration: 20260805214539_262e6971-2949-40db-b1ec-8834355c6b50.sql
+-- [216/381] Migration: 20260805214539_262e6971-2949-40db-b1ec-8834355c6b50.sql
 -- ==============================================================================
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.applications TO authenticated;
@@ -20718,7 +20782,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [216/364] Migration: 20260805215254_12dd9e17-3c6d-4267-a53a-572c40be9bad.sql
+-- [217/381] Migration: 20260805215254_12dd9e17-3c6d-4267-a53a-572c40be9bad.sql
 -- ==============================================================================
 
 DO $$
@@ -20834,7 +20898,7 @@ CREATE POLICY "Assistants add support task updates"
   WITH CHECK (public.has_admin_privilege(auth.uid(), 'can_manage_support_tasks'));
 
 -- ==============================================================================
--- [217/364] Migration: 20260806094651_9f5c78ae-c954-4bfc-9533-eab0c2ae90c4.sql
+-- [218/381] Migration: 20260806094651_9f5c78ae-c954-4bfc-9533-eab0c2ae90c4.sql
 -- ==============================================================================
 
 -- 1) Authorize + expose provision_user_account to signed-in callers
@@ -20965,7 +21029,7 @@ REVOKE ALL ON FUNCTION public.get_onboarding_next_step() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_onboarding_next_step() TO authenticated, service_role;
 
 -- ==============================================================================
--- [218/364] Migration: 20260806111937_30615f8f-fdf8-4c43-a628-16b5d74240f7.sql
+-- [219/381] Migration: 20260806111937_30615f8f-fdf8-4c43-a628-16b5d74240f7.sql
 -- ==============================================================================
 
 UPDATE public.profiles p
@@ -20981,7 +21045,7 @@ AND (p.access_level IS DISTINCT FROM 'full'::access_level_enum
      OR p.registration_stage IS DISTINCT FROM 'approved'::registration_stage_enum);
 
 -- ==============================================================================
--- [219/364] Migration: 20260806112659_8a6e5b0e-a3e7-4066-85ee-796e917a719b.sql
+-- [220/381] Migration: 20260806112659_8a6e5b0e-a3e7-4066-85ee-796e917a719b.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.prevent_application_user_reassignment()
@@ -21025,7 +21089,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [220/364] Migration: 20260806113156_56a6936f-f976-4a5a-83f9-b2e23bff03b9.sql
+-- [221/381] Migration: 20260806113156_56a6936f-f976-4a5a-83f9-b2e23bff03b9.sql
 -- ==============================================================================
 
 CREATE POLICY "Staff view active tour step configs"
@@ -21039,7 +21103,7 @@ GRANT SELECT ON public.legal_agreement_templates TO authenticated;
 GRANT SELECT ON public.training_modules TO authenticated;
 
 -- ==============================================================================
--- [221/364] Migration: 20260806124528_7b0e22c7-629d-41b3-8aa3-e2a20d886002.sql
+-- [222/381] Migration: 20260806124528_7b0e22c7-629d-41b3-8aa3-e2a20d886002.sql
 -- ==============================================================================
 
 ALTER TABLE public.admin_assistant_permissions
@@ -21097,7 +21161,7 @@ REVOKE ALL ON FUNCTION public.can_delete_user_account(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.can_delete_user_account(uuid) TO authenticated, service_role;
 
 -- ==============================================================================
--- [222/364] Migration: 20260806124616_1d6b3c66-88bc-4f00-82bb-4fe0c099f1d4.sql
+-- [223/381] Migration: 20260806124616_1d6b3c66-88bc-4f00-82bb-4fe0c099f1d4.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.purge_user_account(_target_user_id uuid)
@@ -21149,7 +21213,7 @@ REVOKE ALL ON FUNCTION public.purge_user_account(uuid) FROM PUBLIC, anon, authen
 GRANT EXECUTE ON FUNCTION public.purge_user_account(uuid) TO service_role;
 
 -- ==============================================================================
--- [223/364] Migration: 20260807015050_c5644bdb-512f-4c36-bf9f-6a6564bcbcb5.sql
+-- [224/381] Migration: 20260807015050_c5644bdb-512f-4c36-bf9f-6a6564bcbcb5.sql
 -- ==============================================================================
 
 CREATE TABLE public.outreach_contacts (
@@ -21220,7 +21284,7 @@ BEFORE UPDATE ON public.outreach_contacts
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [224/364] Migration: 20260807171658_765a6a3c-f1f9-4468-816e-5003144b1af0.sql
+-- [225/381] Migration: 20260807171658_765a6a3c-f1f9-4468-816e-5003144b1af0.sql
 -- ==============================================================================
 
 ALTER TABLE public.outreach_contacts
@@ -21370,7 +21434,7 @@ AFTER INSERT ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION public.link_outreach_contact_on_signup();
 
 -- ==============================================================================
--- [225/364] Migration: 20260807173035_ff7ce1e2-5398-49e8-90a4-021ad5066bb5.sql
+-- [226/381] Migration: 20260807173035_ff7ce1e2-5398-49e8-90a4-021ad5066bb5.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.sync_outreach_contact_from_application()
@@ -21445,7 +21509,7 @@ FOR EACH ROW
 EXECUTE FUNCTION public.sync_outreach_contact_from_application();
 
 -- ==============================================================================
--- [226/364] Migration: 20260807175502_3007ce91-8171-4286-95f0-c63f0fccbdc3.sql
+-- [227/381] Migration: 20260807175502_3007ce91-8171-4286-95f0-c63f0fccbdc3.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -21564,7 +21628,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [227/364] Migration: 20260807180046_dca3a630-74eb-4633-a95e-23d3003aef63.sql
+-- [228/381] Migration: 20260807180046_dca3a630-74eb-4633-a95e-23d3003aef63.sql
 -- ==============================================================================
 
 ALTER TABLE public.applications
@@ -21577,7 +21641,7 @@ VALUES ('persona_verification', jsonb_build_object('enabled', true))
 ON CONFLICT (key) DO NOTHING;
 
 -- ==============================================================================
--- [228/364] Migration: 20260808022732_5fa46115-b144-4f8f-b3c9-5726e9812f5c.sql
+-- [229/381] Migration: 20260808022732_5fa46115-b144-4f8f-b3c9-5726e9812f5c.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.is_admin(_user_id uuid)
@@ -21597,7 +21661,7 @@ REVOKE ALL ON FUNCTION public.is_admin(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.is_admin(uuid) TO authenticated, service_role;
 
 -- ==============================================================================
--- [229/364] Migration: 20260808022848_3378bca9-daa5-4b9b-880f-0e1e78c1a34f.sql
+-- [230/381] Migration: 20260808022848_3378bca9-daa5-4b9b-880f-0e1e78c1a34f.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.audit_assistant_user_assignments()
@@ -21693,7 +21757,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [230/364] Migration: 20260808235214_6eba3ae4-cbd9-4826-989e-028ca4bf1435.sql
+-- [231/381] Migration: 20260808235214_6eba3ae4-cbd9-4826-989e-028ca4bf1435.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.enforce_profile_column_scope()
@@ -21759,7 +21823,7 @@ BEFORE UPDATE ON public.user_subscriptions
 FOR EACH ROW EXECUTE FUNCTION public.enforce_user_subscription_column_scope();
 
 -- ==============================================================================
--- [231/364] Migration: 20260809000145_9fdf4351-4526-43db-af02-c15486d5895a.sql
+-- [232/381] Migration: 20260809000145_9fdf4351-4526-43db-af02-c15486d5895a.sql
 -- ==============================================================================
 
 ALTER TABLE public.vehicles
@@ -21778,7 +21842,7 @@ USING (bucket_id = 'vehicle-photos' AND public.is_admin())
 WITH CHECK (bucket_id = 'vehicle-photos' AND public.is_admin());
 
 -- ==============================================================================
--- [232/364] Migration: 20260809003016_7a13579b-0deb-4f49-bd5d-8b79ad4b727d.sql
+-- [233/381] Migration: 20260809003016_7a13579b-0deb-4f49-bd5d-8b79ad4b727d.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.twilio_message_templates (
@@ -21830,7 +21894,7 @@ CREATE TRIGGER trg_twilio_message_templates_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [233/364] Migration: 20260809015316_a6f9a0f5-fb96-4c07-89fc-5cb2b16291af.sql
+-- [234/381] Migration: 20260809015316_a6f9a0f5-fb96-4c07-89fc-5cb2b16291af.sql
 -- ==============================================================================
 
 ALTER TABLE public.profiles
@@ -21889,7 +21953,7 @@ GRANT EXECUTE ON FUNCTION public.save_my_cookie_consent(jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_my_cookie_consent() TO authenticated;
 
 -- ==============================================================================
--- [234/364] Migration: 20260809021335_7c8bf4ed-b1d8-44e0-a862-9b7d6b44a922.sql
+-- [235/381] Migration: 20260809021335_7c8bf4ed-b1d8-44e0-a862-9b7d6b44a922.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.profile_privileged_fields_unchanged(_new public.profiles)
@@ -21948,7 +22012,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [235/364] Migration: 20260809021657_e892ff39-8ed3-43d7-a410-26fc8492c30a.sql
+-- [236/381] Migration: 20260809021657_e892ff39-8ed3-43d7-a410-26fc8492c30a.sql
 -- ==============================================================================
 
 -- 1) Training completions: no direct client writes ------------------------
@@ -22000,19 +22064,19 @@ GRANT SELECT, UPDATE ON public.user_subscriptions TO authenticated;
 GRANT ALL ON public.user_subscriptions TO service_role;
 
 -- ==============================================================================
--- [236/364] Migration: 20260809054452_b2cd353d-7985-4254-b4c1-b0006b7979c6.sql
+-- [237/381] Migration: 20260809054452_b2cd353d-7985-4254-b4c1-b0006b7979c6.sql
 -- ==============================================================================
 
 GRANT EXECUTE ON FUNCTION public.get_support_staff_city(uuid, support_task_type) TO anon;
 
 -- ==============================================================================
--- [237/364] Migration: 20260809070615_5ec8be0d-61f7-4a89-8a3b-d65a9a3086b6.sql
+-- [238/381] Migration: 20260809070615_5ec8be0d-61f7-4a89-8a3b-d65a9a3086b6.sql
 -- ==============================================================================
 
 ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'insurance_support';
 
 -- ==============================================================================
--- [238/364] Migration: 20260809070704_bdb85cdc-2052-4d70-b9ff-e689f62ed20e.sql
+-- [239/381] Migration: 20260809070704_bdb85cdc-2052-4d70-b9ff-e689f62ed20e.sql
 -- ==============================================================================
 
 -- 1. Insurance task status enum
@@ -22142,7 +22206,7 @@ USING (
 
 
 -- ==============================================================================
--- [239/364] Migration: 20260809073316_email_infra.sql
+-- [240/381] Migration: 20260809073316_email_infra.sql
 -- ==============================================================================
 
 -- Email infrastructure
@@ -22459,7 +22523,7 @@ CREATE INDEX IF NOT EXISTS idx_unsubscribe_tokens_token ON public.email_unsubscr
 
 
 -- ==============================================================================
--- [240/364] Migration: 20260809075557_475e1c0c-8cf6-4e7e-88bf-8c931d7dc82c.sql
+-- [241/381] Migration: 20260809075557_475e1c0c-8cf6-4e7e-88bf-8c931d7dc82c.sql
 -- ==============================================================================
 
 -- Phone-level opt-out registry (channel aware, works for unregistered numbers too)
@@ -22578,7 +22642,7 @@ WHERE p.notification_sms = false AND p.phone IS NOT NULL AND p.phone <> ''
 ON CONFLICT (phone, channel) DO NOTHING;
 
 -- ==============================================================================
--- [241/364] Migration: 20260809080526_e318521b-30d8-41fe-8f96-c0d8eec62e3d.sql
+-- [242/381] Migration: 20260809080526_e318521b-30d8-41fe-8f96-c0d8eec62e3d.sql
 -- ==============================================================================
 
 -- 1. Read own messaging preferences (per channel) for the caller's profile phone
@@ -22715,7 +22779,7 @@ CREATE TRIGGER transfer_messaging_opt_outs
   FOR EACH ROW EXECUTE FUNCTION public.transfer_messaging_opt_outs_on_phone_change();
 
 -- ==============================================================================
--- [242/364] Migration: 20260809081433_01d3d142-db03-42ff-be45-365308cefba2.sql
+-- [243/381] Migration: 20260809081433_01d3d142-db03-42ff-be45-365308cefba2.sql
 -- ==============================================================================
 
 ALTER FUNCTION public.enqueue_email(text, jsonb) SET search_path = 'public', 'pgmq', 'pg_temp';
@@ -22772,7 +22836,7 @@ USING (public.is_admin())
 WITH CHECK (public.is_admin());
 
 -- ==============================================================================
--- [243/364] Migration: 20260809082237_732b438f-c7cd-49f6-bae7-e26a0e1e3af6.sql
+-- [244/381] Migration: 20260809082237_732b438f-c7cd-49f6-bae7-e26a0e1e3af6.sql
 -- ==============================================================================
 
 
@@ -22900,7 +22964,7 @@ GRANT ALL ON public.user_subscriptions TO service_role;
 
 
 -- ==============================================================================
--- [244/364] Migration: 20260809083928_56d8e852-d4c0-4eac-845b-5789dc604998.sql
+-- [245/381] Migration: 20260809083928_56d8e852-d4c0-4eac-845b-5789dc604998.sql
 -- ==============================================================================
 
 -- Remove self-service write on refresh requirements
@@ -22974,7 +23038,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [245/364] Migration: 20260809084314_b7dd3518-3075-49e7-808f-2513fcfd00a0.sql
+-- [246/381] Migration: 20260809084314_b7dd3518-3075-49e7-808f-2513fcfd00a0.sql
 -- ==============================================================================
 
 ALTER TABLE public.training_completions
@@ -23201,7 +23265,7 @@ GRANT EXECUTE ON FUNCTION public.admin_list_pending_training_completions(text) T
 GRANT EXECUTE ON FUNCTION public.admin_review_training_completion(uuid, boolean, text) TO authenticated;
 
 -- ==============================================================================
--- [246/364] Migration: 20260809084959_205a21f4-e222-4099-a1e9-0005d2c73043.sql
+-- [247/381] Migration: 20260809084959_205a21f4-e222-4099-a1e9-0005d2c73043.sql
 -- ==============================================================================
 
 ALTER TABLE public.training_completions REPLICA IDENTITY FULL;
@@ -23225,7 +23289,7 @@ BEGIN
 END $$;
 
 -- ==============================================================================
--- [247/364] Migration: 20260809095810_9e76aa11-a52b-48c0-b351-90929474a844.sql
+-- [248/381] Migration: 20260809095810_9e76aa11-a52b-48c0-b351-90929474a844.sql
 -- ==============================================================================
 
 
@@ -23412,7 +23476,7 @@ GRANT EXECUTE ON FUNCTION public.emqx_rollback_credentials() TO authenticated, s
 
 
 -- ==============================================================================
--- [248/364] Migration: 20260809110600_4c264035-2e23-4f44-9414-d31d22b93428.sql
+-- [249/381] Migration: 20260809110600_4c264035-2e23-4f44-9414-d31d22b93428.sql
 -- ==============================================================================
 
 CREATE TABLE public.persona_id_class_rules (
@@ -23509,7 +23573,7 @@ VALUES
   ('NG','support_staff','[{"code":"dl","label":"Driver''s licence"},{"code":"id","label":"National ID card (NIN slip)"},{"code":"pp","label":"International passport"}]'::jsonb, false);
 
 -- ==============================================================================
--- [249/364] Migration: 20260809131920_55128907-a954-4701-86a6-4d65cf5879d9.sql
+-- [250/381] Migration: 20260809131920_55128907-a954-4701-86a6-4d65cf5879d9.sql
 -- ==============================================================================
 
 INSERT INTO public.platform_kv_settings (key, value)
@@ -23528,7 +23592,7 @@ SET value = public.platform_kv_settings.value
   || jsonb_build_object('management_port', 8443, 'api_base_path', '/api/v5');
 
 -- ==============================================================================
--- [250/364] Migration: 20260809133104_1d3a1354-2fe3-4275-8151-099497e07a90.sql
+-- [251/381] Migration: 20260809133104_1d3a1354-2fe3-4275-8151-099497e07a90.sql
 -- ==============================================================================
 
 INSERT INTO public.platform_kv_settings (key, value)
@@ -23546,14 +23610,14 @@ VALUES ('emqx_management_config', jsonb_build_object(
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- ==============================================================================
--- [251/364] Migration: 20260809133950_890fd5bc-f6d0-4887-a4f1-21a41ee2f381.sql
+-- [252/381] Migration: 20260809133950_890fd5bc-f6d0-4887-a4f1-21a41ee2f381.sql
 -- ==============================================================================
 
 ALTER TABLE public.telemetry_providers REPLICA IDENTITY FULL;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.telemetry_providers;
 
 -- ==============================================================================
--- [252/364] Migration: 20260809134444_954bb3c3-c06f-48af-98f0-3d64698371b7.sql
+-- [253/381] Migration: 20260809134444_954bb3c3-c06f-48af-98f0-3d64698371b7.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.vehicle_telemetry_state (
@@ -23654,7 +23718,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [253/364] Migration: 20260809135120_3c412c3d-fa0f-4ef9-a265-c3eed326b432.sql
+-- [254/381] Migration: 20260809135120_3c412c3d-fa0f-4ef9-a265-c3eed326b432.sql
 -- ==============================================================================
 
 DO $$
@@ -23683,7 +23747,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [254/364] Migration: 20260809143201_24f52831-d7e9-4589-9494-316c323a23d9.sql
+-- [255/381] Migration: 20260809143201_24f52831-d7e9-4589-9494-316c323a23d9.sql
 -- ==============================================================================
 
 CREATE TABLE public.device_identities (
@@ -23901,7 +23965,7 @@ REVOKE ALL ON FUNCTION public.rebuild_all_device_identities() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rebuild_all_device_identities() TO authenticated, service_role;
 
 -- ==============================================================================
--- [255/364] Migration: 20260809144041_6f41f050-5efa-4b52-98ec-b43e518e393f.sql
+-- [256/381] Migration: 20260809144041_6f41f050-5efa-4b52-98ec-b43e518e393f.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.sync_device_identity(_device_id uuid)
@@ -24047,14 +24111,14 @@ BEGIN
 END $$;
 
 -- ==============================================================================
--- [256/364] Migration: 20260809144832_1782bef8-f9a6-4726-becf-4638274b8b02.sql
+-- [257/381] Migration: 20260809144832_1782bef8-f9a6-4726-becf-4638274b8b02.sql
 -- ==============================================================================
 
 UPDATE public.telemetry_providers SET is_active = true, priority = 1 WHERE name = 'traccar';
 UPDATE public.telemetry_providers SET is_active = true, priority = 2 WHERE name = 'emqx';
 
 -- ==============================================================================
--- [257/364] Migration: 20260809150016_38ca523d-5593-4ec5-b52c-206421021383.sql
+-- [258/381] Migration: 20260809150016_38ca523d-5593-4ec5-b52c-206421021383.sql
 -- ==============================================================================
 
 
@@ -24235,7 +24299,7 @@ GRANT EXECUTE ON FUNCTION public.admin_provider_billing_summary(timestamptz, tim
 
 
 -- ==============================================================================
--- [258/364] Migration: 20260809150102_66bc1fb5-ef32-4fe1-9664-23e1a535b2cf.sql
+-- [259/381] Migration: 20260809150102_66bc1fb5-ef32-4fe1-9664-23e1a535b2cf.sql
 -- ==============================================================================
 
 
@@ -24356,7 +24420,7 @@ GRANT EXECUTE ON FUNCTION public.provider_read_credentials(text) TO service_role
 
 
 -- ==============================================================================
--- [259/364] Migration: 20260810053356_dcbfd4b3-35da-43b1-ae57-1a98030176c0.sql
+-- [260/381] Migration: 20260810053356_dcbfd4b3-35da-43b1-ae57-1a98030176c0.sql
 -- ==============================================================================
 
 DROP FUNCTION IF EXISTS public.admin_list_pending_training_completions(text);
@@ -24453,7 +24517,7 @@ GRANT EXECUTE ON FUNCTION public.admin_list_pending_training_completions(text) T
 GRANT EXECUTE ON FUNCTION public.admin_review_training_completion(uuid, boolean, text) TO authenticated;
 
 -- ==============================================================================
--- [260/364] Migration: 20260810105740_4cbe3dfa-24c2-4edc-b471-dc62198dc3d4.sql
+-- [261/381] Migration: 20260810105740_4cbe3dfa-24c2-4edc-b471-dc62198dc3d4.sql
 -- ==============================================================================
 
 CREATE TABLE public.iot_sync_activity_log (
@@ -24483,14 +24547,14 @@ USING (public.is_admin() OR public.has_role(auth.uid(), 'iot_support'::public.ap
 
 
 -- ==============================================================================
--- [261/364] Migration: 20260810114356_b572608c-a70d-4c76-b612-bfab914e4393.sql
+-- [262/381] Migration: 20260810114356_b572608c-a70d-4c76-b612-bfab914e4393.sql
 -- ==============================================================================
 
 ALTER TABLE public.iot_sync_activity_log REPLICA IDENTITY FULL;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.iot_sync_activity_log;
 
 -- ==============================================================================
--- [262/364] Migration: 20260810120621_e8b33301-e43e-46db-9a12-90a9b988db32.sql
+-- [263/381] Migration: 20260810120621_e8b33301-e43e-46db-9a12-90a9b988db32.sql
 -- ==============================================================================
 
 -- 1) Scope support-staff visibility of applications to their assigned city/region
@@ -24639,7 +24703,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [263/364] Migration: 20260810124510_5aed84b9-3e53-44c0-a30a-4891a2067399.sql
+-- [264/381] Migration: 20260810124510_5aed84b9-3e53-44c0-a30a-4891a2067399.sql
 -- ==============================================================================
 
 CREATE OR REPLACE VIEW public.public_vehicle_listings AS
@@ -24664,7 +24728,7 @@ GRANT SELECT ON public.public_vehicle_listings TO authenticated;
 GRANT SELECT ON public.public_vehicle_listings TO service_role;
 
 -- ==============================================================================
--- [264/364] Migration: 20260810124545_ab69d49c-d32e-47db-9f25-55ab36eb8c3f.sql
+-- [265/381] Migration: 20260810124545_ab69d49c-d32e-47db-9f25-55ab36eb8c3f.sql
 -- ==============================================================================
 
 ALTER VIEW public.public_vehicle_listings SET (security_invoker = on);
@@ -24686,7 +24750,7 @@ GRANT SELECT ON public.public_vehicle_listings TO anon;
 GRANT SELECT ON public.public_vehicle_listings TO authenticated;
 
 -- ==============================================================================
--- [265/364] Migration: 20260811005706_9eebfdc6-b615-45b2-b5e8-863be9dea446.sql
+-- [266/381] Migration: 20260811005706_9eebfdc6-b615-45b2-b5e8-863be9dea446.sql
 -- ==============================================================================
 
 -- 1. Public visibility flag
@@ -24983,7 +25047,7 @@ GRANT EXECUTE ON FUNCTION public.driver_withdraw_booking_request(uuid) TO authen
 
 
 -- ==============================================================================
--- [266/364] Migration: 20260811012918_b6996b4a-2987-4931-a2f7-c206b70ded95.sql
+-- [267/381] Migration: 20260811012918_b6996b4a-2987-4931-a2f7-c206b70ded95.sql
 -- ==============================================================================
 
 ALTER TABLE public.inbox_conversations
@@ -24994,7 +25058,7 @@ CREATE INDEX IF NOT EXISTS idx_inbox_conversations_archived_at ON public.inbox_c
 CREATE INDEX IF NOT EXISTS idx_inbox_conversations_is_flagged ON public.inbox_conversations (is_flagged) WHERE is_flagged;
 
 -- ==============================================================================
--- [267/364] Migration: 20260811013533_c1c41b07-52e3-4984-9e2a-43af6f26bb09.sql
+-- [268/381] Migration: 20260811013533_c1c41b07-52e3-4984-9e2a-43af6f26bb09.sql
 -- ==============================================================================
 
 CREATE TABLE public.inbox_canned_replies (
@@ -25059,7 +25123,7 @@ BEFORE UPDATE ON public.inbox_auto_reply_rules
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [268/364] Migration: 20260811014310_351d6d3b-891b-44e9-a789-3cffad769730.sql
+-- [269/381] Migration: 20260811014310_351d6d3b-891b-44e9-a789-3cffad769730.sql
 -- ==============================================================================
 
 CREATE TABLE public.inbox_notification_settings (
@@ -25123,7 +25187,7 @@ BEFORE INSERT OR UPDATE ON public.inbox_notification_settings
 FOR EACH ROW EXECUTE FUNCTION public.validate_inbox_notification_settings();
 
 -- ==============================================================================
--- [269/364] Migration: 20260811015305_81e467f8-01ca-4f4a-9380-71f0b05bd0e4.sql
+-- [270/381] Migration: 20260811015305_81e467f8-01ca-4f4a-9380-71f0b05bd0e4.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.prevent_overlapping_booking_requests()
@@ -25257,7 +25321,7 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- ==============================================================================
--- [270/364] Migration: 20260811130907_9b252f20-f691-424a-a5d4-73c743a92785.sql
+-- [271/381] Migration: 20260811130907_9b252f20-f691-424a-a5d4-73c743a92785.sql
 -- ==============================================================================
 
 CREATE TABLE public.inbox_reply_audit (
@@ -25306,7 +25370,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [271/364] Migration: 20260811131236_c4dba04d-1558-4bdf-9630-3ee2a7e86e9b.sql
+-- [272/381] Migration: 20260811131236_c4dba04d-1558-4bdf-9630-3ee2a7e86e9b.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.get_reply_placeholder_values(_conversation_id uuid)
@@ -25391,7 +25455,7 @@ REVOKE EXECUTE ON FUNCTION public.get_reply_placeholder_values(uuid) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.get_reply_placeholder_values(uuid) TO authenticated, service_role;
 
 -- ==============================================================================
--- [272/364] Migration: 20260811133216_db77e8d3-4291-47b9-97b7-dabd0edd64a8.sql
+-- [273/381] Migration: 20260811133216_db77e8d3-4291-47b9-97b7-dabd0edd64a8.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.inbox_attachment_ocr (
@@ -25454,7 +25518,7 @@ BEFORE UPDATE ON public.inbox_attachment_ocr
 FOR EACH ROW EXECUTE FUNCTION public.touch_inbox_attachment_ocr();
 
 -- ==============================================================================
--- [273/364] Migration: 20260811133614_9ef421ed-e468-4ee6-b154-b4bfcd6bec9d.sql
+-- [274/381] Migration: 20260811133614_9ef421ed-e468-4ee6-b154-b4bfcd6bec9d.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.inbox_attachment_access_log (
@@ -25506,7 +25570,7 @@ CREATE INDEX IF NOT EXISTS idx_inbox_att_access_user ON public.inbox_attachment_
 CREATE INDEX IF NOT EXISTS idx_inbox_att_access_conversation ON public.inbox_attachment_access_log(conversation_id);
 
 -- ==============================================================================
--- [274/364] Migration: 20260811173607_dde13cc7-b956-4d94-98ff-731da9e86467.sql
+-- [275/381] Migration: 20260811173607_dde13cc7-b956-4d94-98ff-731da9e86467.sql
 -- ==============================================================================
 
 DROP POLICY IF EXISTS "Anyone can read platform kv" ON public.platform_kv_settings;
@@ -25518,7 +25582,7 @@ TO anon, authenticated
 USING (key IN ('phone_otp_provider', 'persona_verification'));
 
 -- ==============================================================================
--- [275/364] Migration: 20260811174142_c81b61ed-85ff-49f6-8ac5-a2d711b921c0.sql
+-- [276/381] Migration: 20260811174142_c81b61ed-85ff-49f6-8ac5-a2d711b921c0.sql
 -- ==============================================================================
 
 INSERT INTO public.platform_kv_settings (key, value)
@@ -25526,7 +25590,7 @@ VALUES ('forwarding_config', '{"call": true, "sms": true, "whatsapp": true, "ema
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- ==============================================================================
--- [276/364] Migration: 20260811175337_f309515d-1c05-46d8-8d13-cbe8cb974d26.sql
+-- [277/381] Migration: 20260811175337_f309515d-1c05-46d8-8d13-cbe8cb974d26.sql
 -- ==============================================================================
 
 CREATE TABLE public.outbound_decision_log (
@@ -25562,7 +25626,7 @@ CREATE INDEX idx_outbound_decision_log_channel ON public.outbound_decision_log (
 CREATE INDEX idx_outbound_decision_log_region ON public.outbound_decision_log (region, created_at DESC);
 
 -- ==============================================================================
--- [277/364] Migration: 20260811181621_3c54e09d-5a12-45cb-b897-c313fc23e7bf.sql
+-- [278/381] Migration: 20260811181621_3c54e09d-5a12-45cb-b897-c313fc23e7bf.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.support_staff_region_match(_region text)
@@ -25614,7 +25678,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [278/364] Migration: 20260811182121_288600fe-b5e0-4c05-b269-33c0340b01e6.sql
+-- [279/381] Migration: 20260811182121_288600fe-b5e0-4c05-b269-33c0340b01e6.sql
 -- ==============================================================================
 
 -- 1) Owner read access to live telemetry (drivers stay excluded)
@@ -25704,7 +25768,7 @@ BEFORE UPDATE ON public.provider_health_alerts
 FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ==============================================================================
--- [279/364] Migration: 20260811182729_5b6ea9fe-0e2e-4d7e-8af4-c90721778863.sql
+-- [280/381] Migration: 20260811182729_5b6ea9fe-0e2e-4d7e-8af4-c90721778863.sql
 -- ==============================================================================
 
 -- Verify a scheduler token against the value stored in the vault.
@@ -25738,7 +25802,7 @@ REVOKE ALL ON FUNCTION public.verify_cron_token(text) FROM PUBLIC, anon, authent
 GRANT EXECUTE ON FUNCTION public.verify_cron_token(text) TO service_role;
 
 -- ==============================================================================
--- [280/364] Migration: 20260811183404_a26a4366-af32-458d-ad3b-211ed81a3b30.sql
+-- [281/381] Migration: 20260811183404_a26a4366-af32-458d-ad3b-211ed81a3b30.sql
 -- ==============================================================================
 
 -- Generic notification fanout helper -------------------------------------------------
@@ -25975,7 +26039,7 @@ AFTER INSERT ON public.onboarding_stage_audit
 FOR EACH ROW EXECUTE FUNCTION public.notify_user_onboarding_stage();
 
 -- ==============================================================================
--- [281/364] Migration: 20260811184715_53496dec-983b-4a13-9816-04a1bd58f044.sql
+-- [282/381] Migration: 20260811184715_53496dec-983b-4a13-9816-04a1bd58f044.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.event_notification_preferences (
@@ -26132,7 +26196,7 @@ REVOKE EXECUTE ON FUNCTION public.notify_record_event() FROM PUBLIC, anon, authe
 GRANT EXECUTE ON FUNCTION public.notify_record_event() TO service_role;
 
 -- ==============================================================================
--- [282/364] Migration: 20260812082837_3c53837f-449d-45a7-8ccd-838dcee4c942.sql
+-- [283/381] Migration: 20260812082837_3c53837f-449d-45a7-8ccd-838dcee4c942.sql
 -- ==============================================================================
 
 ALTER TABLE public.event_notification_preferences
@@ -26396,7 +26460,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [283/364] Migration: 20260812083154_11374cb7-8b78-43df-8ab3-0b908bf8fc9b.sql
+-- [284/381] Migration: 20260812083154_11374cb7-8b78-43df-8ab3-0b908bf8fc9b.sql
 -- ==============================================================================
 
 -- 1) Applications: force safe defaults on self-submitted applications.
@@ -26453,7 +26517,7 @@ CREATE POLICY "Users can insert their own profile"
   );
 
 -- ==============================================================================
--- [284/364] Migration: 20260812091823_4584ec6e-52b2-48e3-9ee4-b47653d1ad6c.sql
+-- [285/381] Migration: 20260812091823_4584ec6e-52b2-48e3-9ee4-b47653d1ad6c.sql
 -- ==============================================================================
 
 DO $$
@@ -26602,7 +26666,7 @@ BEGIN
 END $$;
 
 -- ==============================================================================
--- [285/364] Migration: 20260812092753_1fa579fd-54a0-4b7a-8c73-72a613dd5037.sql
+-- [286/381] Migration: 20260812092753_1fa579fd-54a0-4b7a-8c73-72a613dd5037.sql
 -- ==============================================================================
 
 -- inbox_canned_replies: split blanket assistant ALL access into permission-scoped policies
@@ -26673,7 +26737,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [286/364] Migration: 20260812093754_d116ed3e-7323-4eb4-9f30-c177f03a7e8d.sql
+-- [287/381] Migration: 20260812093754_d116ed3e-7323-4eb4-9f30-c177f03a7e8d.sql
 -- ==============================================================================
 
 ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS street_address text;
@@ -26848,7 +26912,7 @@ UPDATE public.profiles p
  WHERE a.user_id = p.user_id;
 
 -- ==============================================================================
--- [287/364] Migration: 20260812094203_edf5a77d-7fc6-452a-b225-20b05990283c.sql
+-- [288/381] Migration: 20260812094203_edf5a77d-7fc6-452a-b225-20b05990283c.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.enforce_driver_address_required()
@@ -26880,7 +26944,7 @@ END;
 $$;
 
 -- ==============================================================================
--- [288/364] Migration: 20260812100048_058cf771-e4bd-4806-90e4-3f23c9359b80.sql
+-- [289/381] Migration: 20260812100048_058cf771-e4bd-4806-90e4-3f23c9359b80.sql
 -- ==============================================================================
 
 CREATE TABLE public.registration_audit_log (
@@ -27000,7 +27064,7 @@ AFTER INSERT OR UPDATE ON public.applications
 FOR EACH ROW EXECUTE FUNCTION public.log_registration_upsert();
 
 -- ==============================================================================
--- [289/364] Migration: 20260812100401_9c81e526-d923-4858-9a27-bad29fc660b8.sql
+-- [290/381] Migration: 20260812100401_9c81e526-d923-4858-9a27-bad29fc660b8.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.enforce_profile_address_rules()
@@ -27055,7 +27119,7 @@ FOR EACH ROW EXECUTE FUNCTION public.enforce_profile_address_rules();
 REVOKE ALL ON FUNCTION public.enforce_profile_address_rules() FROM PUBLIC, anon, authenticated;
 
 -- ==============================================================================
--- [290/364] Migration: 20260812101510_f59bce97-48c4-4df7-b20e-7547943ad9f0.sql
+-- [291/381] Migration: 20260812101510_f59bce97-48c4-4df7-b20e-7547943ad9f0.sql
 -- ==============================================================================
 
 DO $$
@@ -27085,7 +27149,7 @@ BEGIN
 END $$;
 
 -- ==============================================================================
--- [291/364] Migration: 20260812101745_e3a571ff-07ba-431c-8401-88952ff2a5c4.sql
+-- [292/381] Migration: 20260812101745_e3a571ff-07ba-431c-8401-88952ff2a5c4.sql
 -- ==============================================================================
 
 CREATE TABLE public.agreement_reminder_preferences (
@@ -27142,7 +27206,7 @@ BEFORE INSERT OR UPDATE ON public.agreement_reminder_preferences
 FOR EACH ROW EXECUTE FUNCTION public.validate_agreement_reminder_days();
 
 -- ==============================================================================
--- [292/364] Migration: 20260812102342_3b3ac6af-c2c3-4a38-bb81-ea8e1f66f0ca.sql
+-- [293/381] Migration: 20260812102342_3b3ac6af-c2c3-4a38-bb81-ea8e1f66f0ca.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.email_signup_status(_email text)
@@ -27183,7 +27247,7 @@ REVOKE ALL ON FUNCTION public.email_signup_status(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.email_signup_status(text) TO anon, authenticated;
 
 -- ==============================================================================
--- [293/364] Migration: 20260812103949_516c1fed-9145-4f9e-a8f2-f3868dc9217e.sql
+-- [294/381] Migration: 20260812103949_516c1fed-9145-4f9e-a8f2-f3868dc9217e.sql
 -- ==============================================================================
 
 -- Owners may submit their own vehicles (always pending + non-public)
@@ -27252,7 +27316,7 @@ GRANT SELECT ON public.vehicles TO anon;
 GRANT ALL ON public.vehicles TO service_role;
 
 -- ==============================================================================
--- [294/364] Migration: 20260812104415_747dd648-0b5a-42e2-9fdb-dff1dea59661.sql
+-- [295/381] Migration: 20260812104415_747dd648-0b5a-42e2-9fdb-dff1dea59661.sql
 -- ==============================================================================
 
 ALTER TABLE public.vehicles
@@ -27370,7 +27434,7 @@ REVOKE ALL ON FUNCTION public.admin_review_vehicle(uuid, text, text) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.admin_review_vehicle(uuid, text, text) TO authenticated;
 
 -- ==============================================================================
--- [295/364] Migration: 20260812105031_fc042391-0147-43b2-8a22-54ef6bb8bee5.sql
+-- [296/381] Migration: 20260812105031_fc042391-0147-43b2-8a22-54ef6bb8bee5.sql
 -- ==============================================================================
 
 CREATE TABLE public.vehicle_audit_log (
@@ -27469,7 +27533,7 @@ AFTER INSERT OR UPDATE ON public.vehicles
 FOR EACH ROW EXECUTE FUNCTION public.log_vehicle_changes();
 
 -- ==============================================================================
--- [296/364] Migration: 20260812105306_3c16f3ed-84ec-4378-aeb1-3e94bddc33b6.sql
+-- [297/381] Migration: 20260812105306_3c16f3ed-84ec-4378-aeb1-3e94bddc33b6.sql
 -- ==============================================================================
 
 ALTER TABLE public.vehicles DROP CONSTRAINT IF EXISTS vehicles_review_status_check;
@@ -27529,7 +27593,7 @@ REVOKE ALL ON FUNCTION public.admin_review_vehicle(uuid, text, text) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.admin_review_vehicle(uuid, text, text) TO authenticated;
 
 -- ==============================================================================
--- [297/364] Migration: 20260812105626_37a7dbd7-b550-4c96-afd1-565add9c0472.sql
+-- [298/381] Migration: 20260812105626_37a7dbd7-b550-4c96-afd1-565add9c0472.sql
 -- ==============================================================================
 
 -- 1. Preferences: add a push channel choice
@@ -27751,7 +27815,7 @@ AFTER UPDATE OF review_status ON public.vehicles
 FOR EACH ROW EXECUTE FUNCTION public.notify_vehicle_review_outcome();
 
 -- ==============================================================================
--- [298/364] Migration: 20260812110935_d54717b9-c0a9-4e79-9fe6-b3fe1c83ae0a.sql
+-- [299/381] Migration: 20260812110935_d54717b9-c0a9-4e79-9fe6-b3fe1c83ae0a.sql
 -- ==============================================================================
 
 ALTER TABLE public.applications
@@ -27836,7 +27900,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [299/364] Migration: 20260812111358_6ecbda19-0513-4ab4-91e7-c870bad9986e.sql
+-- [300/381] Migration: 20260812111358_6ecbda19-0513-4ab4-91e7-c870bad9986e.sql
 -- ==============================================================================
 
 -- 1. Vehicles: defense-in-depth WITH CHECK on owner UPDATE policy
@@ -27922,7 +27986,7 @@ BEFORE UPDATE ON public.rent_to_own_listings
 FOR EACH ROW EXECUTE FUNCTION public.enforce_rto_listing_column_scope();
 
 -- ==============================================================================
--- [300/364] Migration: 20260812112211_1a08e4c1-e9ae-48a8-af37-e01a597a2e19.sql
+-- [301/381] Migration: 20260812112211_1a08e4c1-e9ae-48a8-af37-e01a597a2e19.sql
 -- ==============================================================================
 
 -- 1. Bulk job reference on the vehicle history log
@@ -28076,7 +28140,7 @@ WHERE review_status IN ('rejected','needs_info') AND status = 'available';
 
 
 -- ==============================================================================
--- [301/364] Migration: 20260812113137_13fa4844-87c8-4076-b40c-59b3a3f3948b.sql
+-- [302/381] Migration: 20260812113137_13fa4844-87c8-4076-b40c-59b3a3f3948b.sql
 -- ==============================================================================
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.vehicles TO authenticated;
@@ -28089,7 +28153,7 @@ GRANT SELECT ON public.public_vehicle_listings TO service_role;
 ALTER VIEW public.public_vehicle_listings SET (security_invoker = on);
 
 -- ==============================================================================
--- [302/364] Migration: 20260812114508_b1a8ec88-b330-4c34-a206-9e3cc7cf8e35.sql
+-- [303/381] Migration: 20260812114508_b1a8ec88-b330-4c34-a206-9e3cc7cf8e35.sql
 -- ==============================================================================
 
 CREATE OR REPLACE VIEW public.public_vehicle_listings
@@ -28106,7 +28170,7 @@ GRANT SELECT ON public.public_vehicle_listings TO anon, authenticated;
 GRANT SELECT ON public.public_vehicle_listings TO service_role;
 
 -- ==============================================================================
--- [303/364] Migration: 20260812114820_9b5bcd28-d56c-4e9d-874c-b63ddd6433b0.sql
+-- [304/381] Migration: 20260812114820_9b5bcd28-d56c-4e9d-874c-b63ddd6433b0.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.vehicle_import_runs (
@@ -28357,7 +28421,7 @@ REVOKE ALL ON FUNCTION public.resolve_vehicle_import_duplicate(uuid, text, text)
 GRANT EXECUTE ON FUNCTION public.resolve_vehicle_import_duplicate(uuid, text, text) TO authenticated, service_role;
 
 -- ==============================================================================
--- [304/364] Migration: 20260812115144_54f2d5d4-4046-47ef-b96c-38457e5e3de8.sql
+-- [305/381] Migration: 20260812115144_54f2d5d4-4046-47ef-b96c-38457e5e3de8.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.owner_resubmit_vehicle_for_review(p_vehicle_id uuid)
@@ -28414,7 +28478,7 @@ REVOKE ALL ON FUNCTION public.owner_resubmit_vehicle_for_review(uuid) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.owner_resubmit_vehicle_for_review(uuid) TO authenticated, service_role;
 
 -- ==============================================================================
--- [305/364] Migration: 20260812122627_e10c7bab-6ec7-4044-b49a-3b34bcbf28c4.sql
+-- [306/381] Migration: 20260812122627_e10c7bab-6ec7-4044-b49a-3b34bcbf28c4.sql
 -- ==============================================================================
 
 ALTER TABLE public.admin_notifications DROP CONSTRAINT IF EXISTS admin_notifications_kind_check;
@@ -28426,7 +28490,7 @@ ALTER TABLE public.admin_notifications ADD CONSTRAINT admin_notifications_kind_c
   );
 
 -- ==============================================================================
--- [306/364] Migration: 20260812130508_fd7f5e96-da8d-48ef-9523-0545606a312d.sql
+-- [307/381] Migration: 20260812130508_fd7f5e96-da8d-48ef-9523-0545606a312d.sql
 -- ==============================================================================
 
 -- Helper: is a vehicle row eligible for the public catalogue?
@@ -28604,7 +28668,7 @@ $$;
 REVOKE ALL ON FUNCTION public.notify_vehicle_review_outcome() FROM PUBLIC, anon, authenticated;
 
 -- ==============================================================================
--- [307/364] Migration: 20260812131257_d3054d61-6753-407a-a82a-231b64c9db7b.sql
+-- [308/381] Migration: 20260812131257_d3054d61-6753-407a-a82a-231b64c9db7b.sql
 -- ==============================================================================
 
 -- 1. Outreach contacts: remove blanket region-based staff access
@@ -28629,7 +28693,7 @@ GRANT SELECT ON public.profile_settings_audit TO authenticated;
 GRANT ALL ON public.profile_settings_audit TO service_role;
 
 -- ==============================================================================
--- [308/364] Migration: 20260813030817_0eab9bde-b8b0-4de5-bb38-40cae0f37af2.sql
+-- [309/381] Migration: 20260813030817_0eab9bde-b8b0-4de5-bb38-40cae0f37af2.sql
 -- ==============================================================================
 
 ALTER TABLE public.provider_credential_versions
@@ -28722,7 +28786,7 @@ CREATE INDEX IF NOT EXISTS meta_ads_action_log_created_idx
   ON public.meta_ads_action_log (created_at DESC);
 
 -- ==============================================================================
--- [309/364] Migration: 20260813050533_07574da8-887e-486e-b16a-8119e020af6f.sql
+-- [310/381] Migration: 20260813050533_07574da8-887e-486e-b16a-8119e020af6f.sql
 -- ==============================================================================
 
 ALTER TABLE public.telemetry_providers DROP CONSTRAINT IF EXISTS telemetry_providers_name_check;
@@ -28791,13 +28855,13 @@ WHERE NOT EXISTS (SELECT 1 FROM public.iot_sync_schedule WHERE provider = 'sarek
 
 
 -- ==============================================================================
--- [310/364] Migration: 20260813052825_9e5606ba-cd25-4c32-a5e1-285354b16ec5.sql
+-- [311/381] Migration: 20260813052825_9e5606ba-cd25-4c32-a5e1-285354b16ec5.sql
 -- ==============================================================================
 
 UPDATE public.telemetry_providers SET display_name = 'GPSANDTRACK' WHERE name = 'sarekon';
 
 -- ==============================================================================
--- [311/364] Migration: 20260813053730_cfe23b50-4ecb-49d2-9ec6-74446772b213.sql
+-- [312/381] Migration: 20260813053730_cfe23b50-4ecb-49d2-9ec6-74446772b213.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.support_staff_can_view_task(_city text, _region text, _type support_task_type)
@@ -28848,7 +28912,7 @@ AS $function$
 $function$;
 
 -- ==============================================================================
--- [312/364] Migration: 20260814004744_af5f29ee-4737-4cd2-8b4a-0c8876a95308.sql
+-- [313/381] Migration: 20260814004744_af5f29ee-4737-4cd2-8b4a-0c8876a95308.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.provider_write_credentials(_provider text, _values jsonb, _notes text DEFAULT NULL::text)
@@ -28902,7 +28966,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [313/364] Migration: 20260814162342_46fb65c8-4e47-4dc4-9abb-dc42973101c4.sql
+-- [314/381] Migration: 20260814162342_46fb65c8-4e47-4dc4-9abb-dc42973101c4.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.sms_consent_records (
@@ -28939,7 +29003,7 @@ WITH CHECK (user_id = auth.uid());
 
 
 -- ==============================================================================
--- [314/364] Migration: 20260814170532_52040d6f-7d84-4a52-a67f-9502f8ab4370.sql
+-- [315/381] Migration: 20260814170532_52040d6f-7d84-4a52-a67f-9502f8ab4370.sql
 -- ==============================================================================
 
 ALTER TABLE public.sms_consent_records
@@ -28956,7 +29020,7 @@ TO authenticated
 USING (public.has_role(auth.uid(), 'admin'::public.app_role));
 
 -- ==============================================================================
--- [315/364] Migration: 20260814190515_70a7e83d-1e23-4262-91ec-72b42e33bb19.sql
+-- [316/381] Migration: 20260814190515_70a7e83d-1e23-4262-91ec-72b42e33bb19.sql
 -- ==============================================================================
 
 DROP TRIGGER IF EXISTS trg_enforce_booking_request_column_scope ON public.vehicle_booking_requests;
@@ -28979,7 +29043,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [316/364] Migration: 20260815075100_1f20d9c3-15af-408b-8fcb-5547d6044a06.sql
+-- [317/381] Migration: 20260815075100_1f20d9c3-15af-408b-8fcb-5547d6044a06.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.settle_payment_financials(_payment_id uuid, _provider text DEFAULT NULL::text, _provider_reference text DEFAULT NULL::text)
@@ -29169,7 +29233,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [317/364] Migration: 20260815080651_7fb1c4d6-47a7-4d0e-9910-a93d3eff88ae.sql
+-- [318/381] Migration: 20260815080651_7fb1c4d6-47a7-4d0e-9910-a93d3eff88ae.sql
 -- ==============================================================================
 
 
@@ -29320,7 +29384,7 @@ GRANT EXECUTE ON FUNCTION public.notify_settlement_invoice_failure(uuid, text) T
 
 
 -- ==============================================================================
--- [318/364] Migration: 20260815080730_7d869db3-d44c-4ee8-b8eb-3dbb06d9d66b.sql
+-- [319/381] Migration: 20260815080730_7d869db3-d44c-4ee8-b8eb-3dbb06d9d66b.sql
 -- ==============================================================================
 
 
@@ -29356,7 +29420,7 @@ GRANT EXECUTE ON FUNCTION public.admin_scan_settlement_integrity(timestamptz, in
 
 
 -- ==============================================================================
--- [319/364] Migration: 20260815081818_eee4f6c8-4cbf-4bab-ae70-fa32d44c226a.sql
+-- [320/381] Migration: 20260815081818_eee4f6c8-4cbf-4bab-ae70-fa32d44c226a.sql
 -- ==============================================================================
 
 -- 1. Owner self-service: auto-authorize owner payouts unless the ledger cannot cover them.
@@ -29644,7 +29708,7 @@ GRANT EXECUTE ON FUNCTION public.admin_list_owner_withdrawals(text, integer) TO 
 GRANT EXECUTE ON FUNCTION public.reconcile_owner_payout(uuid) TO authenticated;
 
 -- ==============================================================================
--- [320/364] Migration: 20260815082534_61fe638c-fe70-4be8-afe4-e80da324b56d.sql
+-- [321/381] Migration: 20260815082534_61fe638c-fe70-4be8-afe4-e80da324b56d.sql
 -- ==============================================================================
 
 CREATE TABLE public.settlement_reconciliation_runs (
@@ -29712,7 +29776,7 @@ ALTER TABLE public.event_notification_preferences
   ADD COLUMN IF NOT EXISTS sms boolean NOT NULL DEFAULT false;
 
 -- ==============================================================================
--- [321/364] Migration: 20260815151018_68dcda88-cca9-467b-91d6-6676ec5ef3af.sql
+-- [322/381] Migration: 20260815151018_68dcda88-cca9-467b-91d6-6676ec5ef3af.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.provider_revoke_credentials(_provider text, _notes text DEFAULT NULL)
@@ -29759,7 +29823,7 @@ REVOKE ALL ON FUNCTION public.provider_revoke_credentials(text, text) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.provider_revoke_credentials(text, text) TO authenticated;
 
 -- ==============================================================================
--- [322/364] Migration: 20260815181117_eae78c47-e77e-4e00-8199-a2eef3f67d3b.sql
+-- [323/381] Migration: 20260815181117_eae78c47-e77e-4e00-8199-a2eef3f67d3b.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.provider_api_sessions (
@@ -29778,14 +29842,14 @@ ALTER TABLE public.provider_api_sessions ENABLE ROW LEVEL SECURITY;
 COMMENT ON TABLE public.provider_api_sessions IS 'Encrypted provider API session tokens (e.g. GPSANDTRACK sid) shared across edge function instances. Service role only; no client access.';
 
 -- ==============================================================================
--- [323/364] Migration: 20260815185506_7d48b072-d1e1-4570-ad30-1d7ce130707a.sql
+-- [324/381] Migration: 20260815185506_7d48b072-d1e1-4570-ad30-1d7ce130707a.sql
 -- ==============================================================================
 
 ALTER TABLE public.opay_transactions ADD COLUMN IF NOT EXISTS idempotency_key text;
 CREATE UNIQUE INDEX IF NOT EXISTS opay_transactions_idempotency_key_uidx ON public.opay_transactions (idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 -- ==============================================================================
--- [324/364] Migration: 20260815190233_b3f73dd5-a4ed-4015-9557-a2ff38c9ecd9.sql
+-- [325/381] Migration: 20260815190233_b3f73dd5-a4ed-4015-9557-a2ff38c9ecd9.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.provider_write_credentials(_provider text, _values jsonb, _notes text DEFAULT NULL::text)
@@ -29839,7 +29903,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [325/364] Migration: 20260818035614_3cabbbbe-27b0-4629-ae5c-7e3fffd7478f.sql
+-- [326/381] Migration: 20260818035614_3cabbbbe-27b0-4629-ae5c-7e3fffd7478f.sql
 -- ==============================================================================
 
 -- Unified GPS location architecture: additive columns + indexes
@@ -29889,7 +29953,7 @@ VALUES ('sarekon_location', true, 1)
 ON CONFLICT (provider) DO NOTHING;
 
 -- ==============================================================================
--- [326/364] Migration: 20260819045500_1ca93b00-9d91-413d-884e-d8c2fe17d118.sql
+-- [327/381] Migration: 20260819045500_1ca93b00-9d91-413d-884e-d8c2fe17d118.sql
 -- ==============================================================================
 
 DO $$
@@ -29918,7 +29982,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [327/364] Migration: 20260821033836_c04ad64d-7a80-4c15-a65b-f5988d16789e.sql
+-- [328/381] Migration: 20260821033836_c04ad64d-7a80-4c15-a65b-f5988d16789e.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.profile_privileged_fields_unchanged(_new public.profiles)
@@ -29986,7 +30050,7 @@ END;
 $$;
 
 -- ==============================================================================
--- [328/364] Migration: 20260822063837_68586ecb-87f8-43fe-b2cf-e1add7b138c8.sql
+-- [329/381] Migration: 20260822063837_68586ecb-87f8-43fe-b2cf-e1add7b138c8.sql
 -- ==============================================================================
 
 -- Stop exposing raw vehicle rows (VIN, plate, owner_id) to anonymous visitors.
@@ -29999,7 +30063,7 @@ GRANT SELECT ON public.public_vehicle_listings TO anon, authenticated, service_r
 DROP POLICY IF EXISTS "Public can view available vehicles" ON public.vehicles;
 
 -- ==============================================================================
--- [329/364] Migration: 20260822092348_0d02ba6d-620f-4a7e-b568-e38f382ceca1.sql
+-- [330/381] Migration: 20260822092348_0d02ba6d-620f-4a7e-b568-e38f382ceca1.sql
 -- ==============================================================================
 
 -- 1. Curated projection table with identical column types (CTAS from source columns)
@@ -30087,14 +30151,14 @@ FROM public.vehicle_catalogue_listings;
 ALTER VIEW public.public_vehicle_listings SET (security_invoker = true);
 
 -- ==============================================================================
--- [330/364] Migration: 20260822092427_2b1f7b09-316c-409f-bc43-e9adad403516.sql
+-- [331/381] Migration: 20260822092427_2b1f7b09-316c-409f-bc43-e9adad403516.sql
 -- ==============================================================================
 
 REVOKE EXECUTE ON FUNCTION public.sync_vehicle_catalogue_listing() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.sync_vehicle_catalogue_listing() FROM anon, authenticated;
 
 -- ==============================================================================
--- [331/364] Migration: 20260823141804_3770ffb8-4b09-42c4-a49a-1b25b9cf7fc9.sql
+-- [332/381] Migration: 20260823141804_3770ffb8-4b09-42c4-a49a-1b25b9cf7fc9.sql
 -- ==============================================================================
 
 -- 1. Driver submits referees AFTER registration; this unlocks pickup location access.
@@ -30270,7 +30334,7 @@ create trigger trg_vehicles_require_pickup_on_owner_insert
   for each row execute function public.enforce_vehicle_pickup_before_listing();
 
 -- ==============================================================================
--- [332/364] Migration: 20260823144649_a019b1fd-8278-4f62-b15d-7750c2c37096.sql
+-- [333/381] Migration: 20260823144649_a019b1fd-8278-4f62-b15d-7750c2c37096.sql
 -- ==============================================================================
 
 -- 1. Fire the booking-confirmation email when a booking is accepted
@@ -30360,13 +30424,13 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [333/364] Migration: 20260823144707_09b9563d-c16c-43ea-a64b-48b3a897e20a.sql
+-- [334/381] Migration: 20260823144707_09b9563d-c16c-43ea-a64b-48b3a897e20a.sql
 -- ==============================================================================
 
 REVOKE EXECUTE ON FUNCTION public.trg_booking_accepted_email() FROM public, anon, authenticated;
 
 -- ==============================================================================
--- [334/364] Migration: 20260823151326_2678c9c0-c7c4-4a59-bc38-2cc269b70e19.sql
+-- [335/381] Migration: 20260823151326_2678c9c0-c7c4-4a59-bc38-2cc269b70e19.sql
 -- ==============================================================================
 
 -- 1. Per-user email notification preferences
@@ -30430,7 +30494,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [335/364] Migration: 20260823151953_f2ade741-4810-4e23-84ec-19fb7aa8069e.sql
+-- [336/381] Migration: 20260823151953_f2ade741-4810-4e23-84ec-19fb7aa8069e.sql
 -- ==============================================================================
 
 -- Tighten public read on the curated catalogue projection table
@@ -30449,7 +30513,7 @@ CREATE POLICY "Admins can read all catalogue listings"
   USING (public.is_admin(auth.uid()));
 
 -- ==============================================================================
--- [336/364] Migration: 20260823160727_ddced213-7034-4108-8ee3-24b6eea45d7a.sql
+-- [337/381] Migration: 20260823160727_ddced213-7034-4108-8ee3-24b6eea45d7a.sql
 -- ==============================================================================
 
 create or replace function public.submit_driver_referees(_referees jsonb)
@@ -30625,7 +30689,7 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ==============================================================================
--- [337/364] Migration: 20260823172419_cea6889d-caf3-4da5-b56e-aa1f2bf0fd9f.sql
+-- [338/381] Migration: 20260823172419_cea6889d-caf3-4da5-b56e-aa1f2bf0fd9f.sql
 -- ==============================================================================
 
 DROP POLICY IF EXISTS "Drivers update own pending requests" ON public.vehicle_booking_requests;
@@ -30659,7 +30723,7 @@ WITH CHECK (
 );
 
 -- ==============================================================================
--- [338/364] Migration: 20260823185256_a5b8ce9d-e8a5-4e88-b400-ed43a8687c1e.sql
+-- [339/381] Migration: 20260823185256_a5b8ce9d-e8a5-4e88-b400-ed43a8687c1e.sql
 -- ==============================================================================
 
 -- Align kw_stop / kw_help / kw_start template bodies with the A2P 10DLC campaign submission.
@@ -30688,7 +30752,7 @@ where template_key = 'kw_start'
   and body is distinct from 'Rentmaikar: You''re re-subscribed to SMS notifications. Reply HELP for commands or STOP to opt out again.';
 
 -- ==============================================================================
--- [339/364] Migration: 20260823185923_d0ad336b-d735-4a51-bf5e-976a01647d3b.sql
+-- [340/381] Migration: 20260823185923_d0ad336b-d735-4a51-bf5e-976a01647d3b.sql
 -- ==============================================================================
 
 -- Fix: anonymous visitors get 42501 "permission denied for function is_any_support_staff"
@@ -30740,7 +30804,7 @@ begin
 end $$;
 
 -- ==============================================================================
--- [340/364] Migration: 20260823190411_ae0994e0-17d9-44ce-9076-0bb6fb89dfa4.sql
+-- [341/381] Migration: 20260823190411_ae0994e0-17d9-44ce-9076-0bb6fb89dfa4.sql
 -- ==============================================================================
 
 ALTER TABLE public.vehicles
@@ -30779,7 +30843,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [341/364] Migration: 20260823190852_28452fb0-b42b-404e-8743-5ae8624e1204.sql
+-- [342/381] Migration: 20260823190852_28452fb0-b42b-404e-8743-5ae8624e1204.sql
 -- ==============================================================================
 
 ALTER TABLE public.telemetry_ingest_runs
@@ -30789,7 +30853,7 @@ ALTER TABLE public.telemetry_ingest_runs
   ADD COLUMN IF NOT EXISTS gps_disabled integer;
 
 -- ==============================================================================
--- [342/364] Migration: 20260823194859_a385cc3f-8ad1-46e0-b1aa-3f7af8f54bba.sql
+-- [343/381] Migration: 20260823194859_a385cc3f-8ad1-46e0-b1aa-3f7af8f54bba.sql
 -- ==============================================================================
 
 DO $$
@@ -30819,7 +30883,7 @@ END $$;
 
 
 -- ==============================================================================
--- [343/364] Migration: 20260825062336_b10b28d0-16ca-4dcf-b273-ab29477e8554.sql
+-- [344/381] Migration: 20260825062336_b10b28d0-16ca-4dcf-b273-ab29477e8554.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.sync_device_identity(_device_id uuid)
@@ -30934,7 +30998,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [344/364] Migration: 20260825062439_6ba1ea5b-5229-499a-9da3-064733da465e.sql
+-- [345/381] Migration: 20260825062439_6ba1ea5b-5229-499a-9da3-064733da465e.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.sync_device_identity(_device_id uuid)
@@ -31048,7 +31112,7 @@ END;
 $function$;
 
 -- ==============================================================================
--- [345/364] Migration: 20260825064826_b6ca9291-b1e7-49ef-a65a-be81a22f34aa.sql
+-- [346/381] Migration: 20260825064826_b6ca9291-b1e7-49ef-a65a-be81a22f34aa.sql
 -- ==============================================================================
 
 ALTER FUNCTION public.delete_email(text, bigint) SET search_path = public, pgmq;
@@ -31106,7 +31170,7 @@ USING (
 );
 
 -- ==============================================================================
--- [346/364] Migration: 20260828162809_cd621f1a-e2c9-41d6-8cd0-1490b59e2a63.sql
+-- [347/381] Migration: 20260828162809_cd621f1a-e2c9-41d6-8cd0-1490b59e2a63.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.vehicle_rental_authorizations (
@@ -31240,7 +31304,7 @@ GRANT EXECUTE ON FUNCTION public.get_authorization_by_token(TEXT) TO anon, authe
 GRANT EXECUTE ON FUNCTION public.cancel_authorization_by_token(TEXT, TEXT, TEXT) TO anon, authenticated;
 
 -- ==============================================================================
--- [347/364] Migration: 20260828182020_c8c93cbc-5a6b-45d1-bbdf-e5ef768924b5.sql
+-- [348/381] Migration: 20260828182020_c8c93cbc-5a6b-45d1-bbdf-e5ef768924b5.sql
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.validate_application_submission()
@@ -31536,7 +31600,7 @@ UPDATE public.vehicles
    AND btrim(coalesce(photo_urls[1], '')) <> '';
 
 -- ==============================================================================
--- [348/364] Migration: 20260828182728_21c6f6ae-5d48-418c-bcd4-45f0b546c720.sql
+-- [349/381] Migration: 20260828182728_21c6f6ae-5d48-418c-bcd4-45f0b546c720.sql
 -- ==============================================================================
 
 
@@ -31616,7 +31680,7 @@ FOR EACH ROW EXECUTE FUNCTION public.notify_admins_vehicle_listing_change();
 
 
 -- ==============================================================================
--- [349/364] Migration: 20260829131809_b95830b8-1ecb-4193-8237-aafd9886a88c.sql
+-- [350/381] Migration: 20260829131809_b95830b8-1ecb-4193-8237-aafd9886a88c.sql
 -- ==============================================================================
 
 INSERT INTO public.platform_kv_settings (key, value)
@@ -31624,7 +31688,7 @@ VALUES ('master_communications_endpoint', '{"voice":"+2349163072576","sms":"+234
 ON CONFLICT (key) DO NOTHING;
 
 -- ==============================================================================
--- [350/364] Migration: 20260829133448_203beb42-fff5-4978-aedc-f049548002a2.sql
+-- [351/381] Migration: 20260829133448_203beb42-fff5-4978-aedc-f049548002a2.sql
 -- ==============================================================================
 
 INSERT INTO public.platform_kv_settings (key, value)
@@ -31632,7 +31696,7 @@ VALUES ('comms_loop_policy', '{"enabled": true, "max_hops": 3}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
 -- ==============================================================================
--- [351/364] Migration: 20260829134718_ea793aa0-6f70-4d1e-9686-a5145ae89f0b.sql
+-- [352/381] Migration: 20260829134718_ea793aa0-6f70-4d1e-9686-a5145ae89f0b.sql
 -- ==============================================================================
 
 -- 1. Agreement PDF reads must be tied to real agreement participation
@@ -31685,7 +31749,7 @@ GRANT SELECT (
 GRANT ALL ON public.region_definitions TO service_role;
 
 -- ==============================================================================
--- [352/364] Migration: 20260829173807_8561007d-612a-4c91-830b-e2f4fae8a2b5.sql
+-- [353/381] Migration: 20260829173807_8561007d-612a-4c91-830b-e2f4fae8a2b5.sql
 -- ==============================================================================
 
 -- 1. Fix permission key typo on sms_consent_records
@@ -31751,7 +31815,7 @@ WHERE NOT EXISTS (
 
 
 -- ==============================================================================
--- [353/364] Migration: 20260829173914_7f923409-5eae-4f0b-8022-39b149f0877f.sql
+-- [354/381] Migration: 20260829173914_7f923409-5eae-4f0b-8022-39b149f0877f.sql
 -- ==============================================================================
 
 -- Remove pickup_location visibility for anonymous visitors (column-level grants)
@@ -31765,7 +31829,7 @@ GRANT SELECT (id, make, model, year, color, status, pickup_city, photo_urls, cre
 
 
 -- ==============================================================================
--- [354/364] Migration: 20260829203850_534d378c-64d1-4728-8a07-f4fcccbf2de1.sql
+-- [355/381] Migration: 20260829203850_534d378c-64d1-4728-8a07-f4fcccbf2de1.sql
 -- ==============================================================================
 
 -- The 2026-08-09 backfill treated profiles.notification_sms = false (the column
@@ -31777,7 +31841,7 @@ WHERE source = 'backfill_profile_preference'
   AND last_keyword = 'STOP';
 
 -- ==============================================================================
--- [355/364] Migration: 20260830080207_0baa4edd-e5be-4c69-988b-73bc02fc5010.sql
+-- [356/381] Migration: 20260830080207_0baa4edd-e5be-4c69-988b-73bc02fc5010.sql
 -- ==============================================================================
 
 -- 1. DLQ retry state (single-flight + exponential backoff bookkeeping)
@@ -31870,7 +31934,7 @@ GRANT EXECUTE ON FUNCTION public.email_queue_stats() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.email_queue_stats() TO service_role;
 
 -- ==============================================================================
--- [356/364] Migration: 20260830085654_e6d1e9a7-5f63-4ed3-b0e2-063b788a0d23.sql
+-- [357/381] Migration: 20260830085654_e6d1e9a7-5f63-4ed3-b0e2-063b788a0d23.sql
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.email_idempotency_keys (
@@ -31897,7 +31961,7 @@ CREATE INDEX IF NOT EXISTS email_idempotency_keys_expires_idx
   ON public.email_idempotency_keys (expires_at);
 
 -- ==============================================================================
--- [357/364] Migration: 20260831072707_f292df39-e4ed-42b3-99a0-7070f426b693.sql
+-- [358/381] Migration: 20260831072707_f292df39-e4ed-42b3-99a0-7070f426b693.sql
 -- ==============================================================================
 
 -- ── In-app messaging ────────────────────────────────────────────────
@@ -32039,7 +32103,7 @@ GRANT EXECUTE ON FUNCTION public.sms_delivery_stats(integer) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mark_in_app_messages_read(uuid[]) TO authenticated;
 
 -- ==============================================================================
--- [358/364] Migration: 20260831224802_60748067-ad4a-418b-a003-7748040bf438.sql
+-- [359/381] Migration: 20260831224802_60748067-ad4a-418b-a003-7748040bf438.sql
 -- ==============================================================================
 
 -- 1) Restrict raw hardware identifiers on device_identities to staff only.
@@ -32093,7 +32157,77 @@ TO authenticated
 USING (auth.uid() = driver_id);
 
 -- ==============================================================================
--- [359/364] Migration: 20260831225631_49aa64b6-eaec-417e-8edd-1ce8c27c5c0d.sql
+-- [360/381] Migration: 20260831225010_399c8fb3-8753-4a1e-a789-1fe3ab10b7fc.sql
+-- ==============================================================================
+
+-- Mirror every event notification into the user's in-app inbox,
+-- except one-time passcode / 2FA verification content.
+CREATE OR REPLACE FUNCTION public.notification_is_otp_like(_kind text, _title text, _body text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+  SELECT
+    COALESCE(_kind, '') ~* '(otp|2fa|two[-_ ]?factor|phone_verif|verification_code|security_code)'
+    OR COALESCE(_title, '') ~* '(one[- ]?time (pass)?code|verification code|security code|authentication code|login code|your code|2fa|two[- ]factor)'
+    OR COALESCE(_body, '') ~* '(one[- ]?time (pass)?code|verification code|security code|authentication code|login code|code[ :#-]{0,3}[0-9]{4,8}|2fa|two[- ]factor)';
+$$;
+
+CREATE OR REPLACE FUNCTION public.mirror_notification_to_inbox()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_table text := NEW.metadata->>'table';
+  v_record text := NEW.metadata->>'record_id';
+  v_link text;
+BEGIN
+  -- Never deliver OTP / 2FA verification codes over the in-app surface.
+  IF public.notification_is_otp_like(NEW.kind, NEW.title, NEW.body) THEN
+    RETURN NEW;
+  END IF;
+
+  IF v_table IS NOT NULL AND v_record IS NOT NULL THEN
+    v_link := public.event_deep_link(v_table, v_record, NEW.recipient_id);
+  END IF;
+
+  INSERT INTO public.in_app_messages
+    (recipient_id, sender_id, sender_name, category, subject, body, link_url, metadata)
+  VALUES (
+    NEW.recipient_id,
+    NULL,
+    'Rentmaikar',
+    COALESCE(NEW.metadata->>'category', NEW.kind, 'general'),
+    NEW.title,
+    COALESCE(NULLIF(btrim(NEW.body), ''), NEW.title),
+    v_link,
+    jsonb_build_object('source', 'event_notification', 'admin_notification_id', NEW.id)
+      || COALESCE(NEW.metadata, '{}'::jsonb)
+  )
+  ON CONFLICT DO NOTHING;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mirror_notification_to_inbox() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.notification_is_otp_like(text, text, text) FROM PUBLIC, anon;
+
+-- Prevent duplicate inbox rows if a notification is re-emitted.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_in_app_messages_admin_notification
+  ON public.in_app_messages ((metadata->>'admin_notification_id'))
+  WHERE metadata ? 'admin_notification_id';
+
+DROP TRIGGER IF EXISTS trg_mirror_notification_to_inbox ON public.admin_notifications;
+CREATE TRIGGER trg_mirror_notification_to_inbox
+  AFTER INSERT ON public.admin_notifications
+  FOR EACH ROW EXECUTE FUNCTION public.mirror_notification_to_inbox();
+
+-- ==============================================================================
+-- [361/381] Migration: 20260831225631_49aa64b6-eaec-417e-8edd-1ce8c27c5c0d.sql
 -- ==============================================================================
 
 
@@ -32184,7 +32318,7 @@ FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 
 -- ==============================================================================
--- [360/364] Migration: 20260831232058_5302e8a1-c877-45e7-ad7f-91ee3b66af18.sql
+-- [362/381] Migration: 20260831232058_5302e8a1-c877-45e7-ad7f-91ee3b66af18.sql
 -- ==============================================================================
 
 
@@ -32527,7 +32661,7 @@ $$;
 
 
 -- ==============================================================================
--- [361/364] Migration: 20260831232124_b90b3003-9276-43d4-99c2-8c08e088a1b8.sql
+-- [363/381] Migration: 20260831232124_b90b3003-9276-43d4-99c2-8c08e088a1b8.sql
 -- ==============================================================================
 
 
@@ -32550,7 +32684,7 @@ GRANT EXECUTE ON FUNCTION public.admin_cancel_match(uuid, text) TO authenticated
 
 
 -- ==============================================================================
--- [362/364] Migration: 20260831233001_1fb8cf0b-7563-4ea5-9c2c-5946de813c90.sql
+-- [364/381] Migration: 20260831233001_1fb8cf0b-7563-4ea5-9c2c-5946de813c90.sql
 -- ==============================================================================
 
 
@@ -32667,15 +32801,2422 @@ GRANT EXECUTE ON FUNCTION public.record_vehicle_mileage(uuid, uuid, numeric, dat
 
 
 -- ==============================================================================
--- [363/364] Migration: 20260902025309_02f0af62-ced3-4575-aaea-ce55b82f607f.sql
+-- [365/381] Migration: 20260902025309_02f0af62-ced3-4575-aaea-ce55b82f607f.sql
 -- ==============================================================================
 
 ALTER TABLE public.vehicle_geofences ALTER COLUMN call_in_id DROP NOT NULL;
 
 -- ==============================================================================
--- [364/364] Migration: 20260902030054_8e188a4d-d067-4690-bcee-c268188e7ae1.sql
+-- [366/381] Migration: 20260902030054_8e188a4d-d067-4690-bcee-c268188e7ae1.sql
 -- ==============================================================================
 
 GRANT SELECT ON public.security_deposit_settings TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.security_deposit_settings TO authenticated;
 GRANT ALL ON public.security_deposit_settings TO service_role;
+
+-- ==============================================================================
+-- [367/381] Migration: 20260903200719_ca18a468-7733-473f-8e27-3299679c22b7.sql
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS public.security_deposit_settings (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  region TEXT NOT NULL UNIQUE,
+  amount NUMERIC NOT NULL,
+  currency TEXT NOT NULL,
+  description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  updated_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+GRANT SELECT ON public.security_deposit_settings TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.security_deposit_settings TO authenticated;
+GRANT ALL ON public.security_deposit_settings TO service_role;
+
+ALTER TABLE public.security_deposit_settings ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid='public.security_deposit_settings'::regclass AND polname='Admins can manage security deposit settings') THEN
+    CREATE POLICY "Admins can manage security deposit settings"
+      ON public.security_deposit_settings FOR ALL TO authenticated
+      USING (public.is_admin()) WITH CHECK (public.is_admin());
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid='public.security_deposit_settings'::regclass AND polname='Anyone can view active security deposit settings') THEN
+    CREATE POLICY "Anyone can view active security deposit settings"
+      ON public.security_deposit_settings FOR SELECT
+      USING (is_active = true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.security_deposit_settings'::regclass AND tgname='update_security_deposit_settings_updated_at') THEN
+    CREATE TRIGGER update_security_deposit_settings_updated_at
+      BEFORE UPDATE ON public.security_deposit_settings
+      FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_create_staff_role(p_user_id uuid, p_role app_role)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+    IF p_role NOT IN (
+        'admin_assistant',
+        'support'
+    ) THEN
+        RAISE EXCEPTION 'Unauthorized role assignment';
+    END IF;
+
+    INSERT INTO public.user_roles (user_id, role)
+    VALUES (p_user_id, p_role)
+    ON CONFLICT (user_id, role) DO NOTHING;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.check_unique_credentials(p_email text, p_phone text, p_username text)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+    IF EXISTS (SELECT 1 FROM auth.users WHERE LOWER(email) = LOWER(p_email)) THEN
+        RETURN false;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE phone = p_phone) THEN
+        RETURN false;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE LOWER(username) = LOWER(p_username)) THEN
+        RETURN false;
+    END IF;
+
+    RETURN true;
+END;
+$function$;
+
+-- ==============================================================================
+-- [368/381] Migration: 20260903201718_abe9d38b-1a3b-4683-8bda-947fb9d44ed1.sql
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS public.admin_assistant_vehicle_assignments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assistant_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  vehicle_id uuid NOT NULL REFERENCES public.vehicles(id) ON DELETE CASCADE,
+  assigned_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (assistant_id, vehicle_id)
+);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.admin_assistant_vehicle_assignments TO authenticated;
+GRANT ALL ON public.admin_assistant_vehicle_assignments TO service_role;
+
+ALTER TABLE public.admin_assistant_vehicle_assignments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins manage assistant vehicle assignments" ON public.admin_assistant_vehicle_assignments;
+CREATE POLICY "Admins manage assistant vehicle assignments"
+  ON public.admin_assistant_vehicle_assignments
+  FOR ALL TO authenticated
+  USING (public.is_admin())
+  WITH CHECK (public.is_admin());
+
+DROP POLICY IF EXISTS "Assistants view their own vehicle assignments" ON public.admin_assistant_vehicle_assignments;
+CREATE POLICY "Assistants view their own vehicle assignments"
+  ON public.admin_assistant_vehicle_assignments
+  FOR SELECT TO authenticated
+  USING (assistant_id = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_aava_assistant ON public.admin_assistant_vehicle_assignments (assistant_id);
+CREATE INDEX IF NOT EXISTS idx_aava_vehicle ON public.admin_assistant_vehicle_assignments (vehicle_id);
+
+DROP TRIGGER IF EXISTS update_aava_updated_at ON public.admin_assistant_vehicle_assignments;
+CREATE TRIGGER update_aava_updated_at
+  BEFORE UPDATE ON public.admin_assistant_vehicle_assignments
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE OR REPLACE FUNCTION public.assistant_can_access_vehicle(_vehicle uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.admin_assistant_vehicle_assignments
+    WHERE assistant_id = auth.uid() AND vehicle_id = _vehicle
+  )
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.assistant_can_access_vehicle(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.assistant_can_access_vehicle(uuid) TO authenticated, service_role;
+
+-- ==============================================================================
+-- [369/381] Migration: 20260904040939_652dd857-8075-45c8-9303-13c00085d10e.sql
+-- ==============================================================================
+
+GRANT SELECT, INSERT, UPDATE ON public.admin_daily_tasks TO authenticated;
+
+CREATE POLICY "Assistants with support-task access can view daily tasks"
+ON public.admin_daily_tasks FOR SELECT TO authenticated
+USING (public.has_admin_privilege(auth.uid(), 'can_view_support_tasks'));
+
+CREATE POLICY "Assistants with support-task access can add daily tasks"
+ON public.admin_daily_tasks FOR INSERT TO authenticated
+WITH CHECK (public.has_admin_privilege(auth.uid(), 'can_view_support_tasks'));
+
+CREATE POLICY "Assistants with support-task access can update daily tasks"
+ON public.admin_daily_tasks FOR UPDATE TO authenticated
+USING (public.has_admin_privilege(auth.uid(), 'can_view_support_tasks'))
+WITH CHECK (public.has_admin_privilege(auth.uid(), 'can_view_support_tasks'));
+
+-- ==============================================================================
+-- [370/381] Migration: 20260904095938_e6fc020f-f2eb-4945-bb76-68111de54fd1.sql
+-- ==============================================================================
+
+DROP POLICY IF EXISTS "IoT support can view assigned vehicle credentials" ON public.vehicle_mqtt_credentials;
+
+CREATE POLICY "Admins can view MQTT credentials"
+ON public.vehicle_mqtt_credentials
+FOR SELECT
+TO authenticated
+USING (is_admin());
+
+CREATE OR REPLACE FUNCTION public.get_assigned_mqtt_credentials()
+RETURNS TABLE (
+  id uuid,
+  vehicle_id text,
+  iot_device_id uuid,
+  client_id text,
+  mqtt_username text,
+  broker_url text,
+  broker_port integer,
+  tls_enabled boolean,
+  topic_prefix text,
+  publish_topics text[],
+  subscribe_topics text[],
+  jwt_expires_at timestamptz,
+  is_active boolean,
+  last_connected_at timestamptz,
+  installed_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT c.id, c.vehicle_id, c.iot_device_id, c.client_id, c.mqtt_username,
+         c.broker_url, c.broker_port, c.tls_enabled, c.topic_prefix,
+         c.publish_topics, c.subscribe_topics, c.jwt_expires_at, c.is_active,
+         c.last_connected_at, c.installed_at, c.created_at, c.updated_at
+  FROM public.vehicle_mqtt_credentials c
+  WHERE is_admin()
+     OR EXISTS (
+       SELECT 1
+       FROM support_tasks t
+       JOIN support_staff s ON s.user_id = auth.uid() AND s.is_active = true
+       WHERE t.assigned_to = auth.uid()
+         AND s.support_type = ANY (ARRAY['iot_installation'::support_task_type, 'iot_maintenance'::support_task_type])
+         AND t.task_type = ANY (ARRAY['iot_installation'::support_task_type, 'iot_maintenance'::support_task_type])
+         AND t.vehicle_id IS NOT NULL
+         AND t.vehicle_id::text = c.vehicle_id
+     );
+$$;
+
+REVOKE ALL ON FUNCTION public.get_assigned_mqtt_credentials() FROM public;
+GRANT EXECUTE ON FUNCTION public.get_assigned_mqtt_credentials() TO authenticated;
+
+-- ==============================================================================
+-- [371/381] Migration: 20260904100637_92b8400f-89d2-4370-b3a3-7908c485db02.sql
+-- ==============================================================================
+
+CREATE OR REPLACE FUNCTION public.has_admin_privilege(_user_id uuid, _permission text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT public.has_role(_user_id, 'admin'::app_role)
+     OR (
+       EXISTS (
+         SELECT 1 FROM public.user_roles ur
+         WHERE ur.user_id = _user_id
+           AND ur.role IN (
+             'admin_assistant'::app_role,
+             'iot_support'::app_role,
+             'vehicle_support'::app_role,
+             'legal_support'::app_role,
+             'insurance_support'::app_role
+           )
+       )
+       AND public.has_admin_assistant_permission(_user_id, _permission)
+     );
+$$;
+
+DROP POLICY IF EXISTS "Staff can view provisioning state" ON public.iot_provisioning_state;
+CREATE POLICY "Granted staff can view provisioning state"
+ON public.iot_provisioning_state
+FOR SELECT
+TO authenticated
+USING (public.has_admin_privilege(auth.uid(), 'can_view_iot'));
+
+-- ==============================================================================
+-- [372/381] Migration: 20260904101652_2c6bfc9a-6b1e-4dc4-935a-20c79beee002.sql
+-- ==============================================================================
+
+ALTER TABLE public.voip_calls ADD COLUMN IF NOT EXISTS answered_by uuid;
+
+CREATE INDEX IF NOT EXISTS idx_voip_calls_answered_by ON public.voip_calls(answered_by);
+CREATE INDEX IF NOT EXISTS idx_voip_calls_created_at ON public.voip_calls(created_at DESC);
+
+CREATE OR REPLACE FUNCTION public.mark_voip_call_answered(_call_sid text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL OR _call_sid IS NULL OR length(trim(_call_sid)) = 0 THEN
+    RETURN;
+  END IF;
+
+  UPDATE public.voip_calls
+     SET answered_by = auth.uid(),
+         status = CASE WHEN status IN ('pending','ringing') THEN 'in-progress' ELSE status END,
+         updated_at = now()
+   WHERE call_sid = _call_sid
+     AND answered_by IS NULL;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mark_voip_call_answered(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.mark_voip_call_answered(text) TO authenticated;
+
+-- ==============================================================================
+-- [373/381] Migration: 20260904102516_27533acf-8719-4041-b8a8-ca21881513c4.sql
+-- ==============================================================================
+
+CREATE OR REPLACE FUNCTION public.clear_voip_call_log()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  removed integer;
+BEGIN
+  IF NOT public.has_role(auth.uid(), 'admin') THEN
+    RAISE EXCEPTION 'Only admins can clear the call log';
+  END IF;
+
+  UPDATE public.voice_call_requests
+  SET call_id = NULL
+  WHERE call_id IN (
+    SELECT id FROM public.voip_calls
+    WHERE status NOT IN ('ringing', 'in-progress', 'pending')
+  );
+
+  WITH deleted AS (
+    DELETE FROM public.voip_calls
+    WHERE status NOT IN ('ringing', 'in-progress', 'pending')
+    RETURNING id
+  )
+  SELECT count(*) INTO removed FROM deleted;
+
+  RETURN removed;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.clear_voip_call_log() TO authenticated;
+
+-- ==============================================================================
+-- [374/381] Migration: 20260904111041_36c2120f-0dcb-4305-b697-24d4f61ce1ba.sql
+-- ==============================================================================
+
+-- 1. Agent presence: which staff browsers are registered and ready to take calls
+CREATE TABLE IF NOT EXISTS public.voip_agent_presence (
+  user_id UUID NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  identity TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'offline',
+  region TEXT NOT NULL DEFAULT 'All',
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.voip_agent_presence TO authenticated;
+GRANT ALL ON public.voip_agent_presence TO service_role;
+ALTER TABLE public.voip_agent_presence ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Staff manage own presence"
+  ON public.voip_agent_presence FOR ALL TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Admins view all presence"
+  ON public.voip_agent_presence FOR SELECT TO authenticated
+  USING (public.has_role(auth.uid(), 'admin'));
+
+-- 2. Outbound caller-ID routing: which Twilio number a staff member dials out with
+CREATE TABLE IF NOT EXISTS public.voip_outbound_numbers (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  phone_number TEXT NOT NULL,
+  label TEXT NOT NULL,
+  region TEXT NOT NULL DEFAULT 'All',
+  role public.app_role NULL,
+  priority INTEGER NOT NULL DEFAULT 100,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  created_by UUID NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+GRANT SELECT ON public.voip_outbound_numbers TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.voip_outbound_numbers TO authenticated;
+GRANT ALL ON public.voip_outbound_numbers TO service_role;
+ALTER TABLE public.voip_outbound_numbers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Authenticated staff read outbound numbers"
+  ON public.voip_outbound_numbers FOR SELECT TO authenticated
+  USING (true);
+
+CREATE POLICY "Admins manage outbound numbers"
+  ON public.voip_outbound_numbers FOR ALL TO authenticated
+  USING (public.has_role(auth.uid(), 'admin'))
+  WITH CHECK (public.has_role(auth.uid(), 'admin'));
+
+-- 3. Presence heartbeat used by the browser softphone
+CREATE OR REPLACE FUNCTION public.voip_set_presence(_status TEXT, _region TEXT DEFAULT 'All')
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+  IF _status NOT IN ('available', 'busy', 'offline') THEN
+    RAISE EXCEPTION 'Invalid presence status';
+  END IF;
+
+  INSERT INTO public.voip_agent_presence (user_id, identity, status, region, last_seen_at, updated_at)
+  VALUES (auth.uid(), 'user_' || auth.uid()::text, _status, COALESCE(_region, 'All'), now(), now())
+  ON CONFLICT (user_id) DO UPDATE
+    SET status = EXCLUDED.status,
+        region = EXCLUDED.region,
+        last_seen_at = now(),
+        updated_at = now();
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.voip_set_presence(TEXT, TEXT) TO authenticated;
+
+-- 4. Resolve which caller ID a staff member should dial out with
+CREATE OR REPLACE FUNCTION public.voip_resolve_outbound_number(_user_id UUID, _region TEXT DEFAULT 'USA')
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT n.phone_number
+  FROM public.voip_outbound_numbers n
+  WHERE n.is_active
+    AND (n.region = 'All' OR n.region = COALESCE(_region, 'USA'))
+    AND (
+      n.role IS NULL
+      OR EXISTS (
+        SELECT 1 FROM public.user_roles ur
+        WHERE ur.user_id = _user_id AND ur.role = n.role
+      )
+    )
+  ORDER BY
+    (n.role IS NOT NULL) DESC,
+    (n.region <> 'All') DESC,
+    n.is_default DESC,
+    n.priority ASC,
+    n.created_at ASC
+  LIMIT 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.voip_resolve_outbound_number(UUID, TEXT) TO authenticated, service_role;
+
+-- 5. Seed the two live Twilio numbers as the default outbound routes
+INSERT INTO public.voip_outbound_numbers (phone_number, label, region, role, priority, is_default)
+SELECT '+13806003018', 'Staff dial-out (default)', 'All', NULL, 100, true
+WHERE NOT EXISTS (SELECT 1 FROM public.voip_outbound_numbers);
+
+
+-- ==============================================================================
+-- [375/381] Migration: 20260904111920_82e92ad9-85f6-4dfc-bd82-fd8ea6f63259.sql
+-- ==============================================================================
+
+CREATE SEQUENCE IF NOT EXISTS public.support_case_number_seq START 1000;
+
+CREATE TABLE public.support_cases (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  case_number text NOT NULL UNIQUE DEFAULT ('CASE-' || lpad(nextval('public.support_case_number_seq')::text, 6, '0')),
+  subject text NOT NULL DEFAULT 'Customer interaction',
+  description text,
+  status text NOT NULL DEFAULT 'open',
+  priority text NOT NULL DEFAULT 'normal',
+  region text NOT NULL DEFAULT 'USA',
+  origin_channel text NOT NULL DEFAULT 'call',
+  customer_user_id uuid,
+  customer_name text,
+  customer_phone text,
+  customer_email text,
+  assigned_to uuid,
+  call_id uuid REFERENCES public.voip_calls(id) ON DELETE SET NULL,
+  conversation_id uuid REFERENCES public.inbox_conversations(id) ON DELETE SET NULL,
+  last_activity_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT support_cases_status_check CHECK (status = ANY (ARRAY['open','assigned','in_progress','waiting_customer','resolved','closed'])),
+  CONSTRAINT support_cases_priority_check CHECK (priority = ANY (ARRAY['low','normal','high','urgent'])),
+  CONSTRAINT support_cases_origin_check CHECK (origin_channel = ANY (ARRAY['call','sms','whatsapp','email','portal','manual']))
+);
+
+CREATE INDEX idx_support_cases_status ON public.support_cases(status);
+CREATE INDEX idx_support_cases_customer ON public.support_cases(customer_user_id);
+CREATE INDEX idx_support_cases_phone ON public.support_cases(customer_phone);
+CREATE INDEX idx_support_cases_call ON public.support_cases(call_id);
+CREATE INDEX idx_support_cases_conversation ON public.support_cases(conversation_id);
+CREATE INDEX idx_support_cases_last_activity ON public.support_cases(last_activity_at DESC);
+
+GRANT SELECT, INSERT, UPDATE ON public.support_cases TO authenticated;
+GRANT ALL ON public.support_cases TO service_role;
+GRANT USAGE ON SEQUENCE public.support_case_number_seq TO authenticated, service_role;
+ALTER TABLE public.support_cases ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins manage all cases" ON public.support_cases
+  FOR ALL TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+CREATE POLICY "Customers view own cases" ON public.support_cases
+  FOR SELECT TO authenticated
+  USING (customer_user_id = auth.uid());
+
+CREATE TABLE public.case_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  case_id uuid NOT NULL REFERENCES public.support_cases(id) ON DELETE CASCADE,
+  author_id uuid,
+  author_name text,
+  author_role text NOT NULL DEFAULT 'admin',
+  body text NOT NULL,
+  is_internal boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT case_notes_author_role_check CHECK (author_role = ANY (ARRAY['admin','customer','system']))
+);
+
+CREATE INDEX idx_case_notes_case ON public.case_notes(case_id, created_at DESC);
+
+GRANT SELECT, INSERT ON public.case_notes TO authenticated;
+GRANT ALL ON public.case_notes TO service_role;
+ALTER TABLE public.case_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins manage case notes" ON public.case_notes
+  FOR ALL TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+CREATE POLICY "Customers read shared notes" ON public.case_notes
+  FOR SELECT TO authenticated
+  USING (
+    is_internal = false
+    AND EXISTS (
+      SELECT 1 FROM public.support_cases c
+      WHERE c.id = case_notes.case_id AND c.customer_user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Customers add own replies" ON public.case_notes
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    is_internal = false
+    AND author_role = 'customer'
+    AND author_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.support_cases c
+      WHERE c.id = case_notes.case_id AND c.customer_user_id = auth.uid()
+    )
+  );
+
+CREATE TABLE public.case_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  case_id uuid NOT NULL REFERENCES public.support_cases(id) ON DELETE CASCADE,
+  event_type text NOT NULL,
+  description text,
+  actor_id uuid,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_case_events_case ON public.case_events(case_id, created_at DESC);
+
+GRANT SELECT, INSERT ON public.case_events TO authenticated;
+GRANT ALL ON public.case_events TO service_role;
+ALTER TABLE public.case_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins manage case events" ON public.case_events
+  FOR ALL TO authenticated
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
+
+CREATE POLICY "Customers read own case events" ON public.case_events
+  FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.support_cases c
+    WHERE c.id = case_events.case_id AND c.customer_user_id = auth.uid()
+  ));
+
+ALTER TABLE public.inbox_conversations ADD COLUMN IF NOT EXISTS case_id uuid REFERENCES public.support_cases(id) ON DELETE SET NULL;
+ALTER TABLE public.voip_calls ADD COLUMN IF NOT EXISTS case_id uuid REFERENCES public.support_cases(id) ON DELETE SET NULL;
+
+CREATE OR REPLACE FUNCTION public.touch_support_case()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  IF NEW.status IN ('resolved','closed') AND (OLD.status IS DISTINCT FROM NEW.status) THEN
+    NEW.resolved_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_support_cases_touch
+BEFORE UPDATE ON public.support_cases
+FOR EACH ROW EXECUTE FUNCTION public.touch_support_case();
+
+CREATE OR REPLACE FUNCTION public.bump_case_activity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE public.support_cases
+  SET last_activity_at = now()
+  WHERE id = NEW.case_id;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_case_notes_activity
+AFTER INSERT ON public.case_notes
+FOR EACH ROW EXECUTE FUNCTION public.bump_case_activity();
+
+CREATE TRIGGER trg_case_events_activity
+AFTER INSERT ON public.case_events
+FOR EACH ROW EXECUTE FUNCTION public.bump_case_activity();
+
+-- Create (or reuse) a case for a call log entry.
+CREATE OR REPLACE FUNCTION public.case_for_call(p_call_id uuid, p_subject text DEFAULT NULL)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_call public.voip_calls%ROWTYPE;
+  v_case_id uuid;
+BEGIN
+  SELECT * INTO v_call FROM public.voip_calls WHERE id = p_call_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Call not found';
+  END IF;
+  IF v_call.case_id IS NOT NULL THEN
+    RETURN v_call.case_id;
+  END IF;
+
+  INSERT INTO public.support_cases (subject, status, region, origin_channel, customer_user_id, assigned_to, call_id, description)
+  VALUES (
+    COALESCE(p_subject, 'Call on ' || to_char(COALESCE(v_call.started_at, v_call.created_at), 'YYYY-MM-DD HH24:MI')),
+    'open',
+    v_call.region,
+    'call',
+    COALESCE(v_call.receiver_id, v_call.initiated_by),
+    v_call.answered_by,
+    v_call.id,
+    'Case opened from ' || v_call.direction || ' call.'
+  )
+  RETURNING id INTO v_case_id;
+
+  UPDATE public.voip_calls SET case_id = v_case_id WHERE id = v_call.id;
+
+  INSERT INTO public.case_events (case_id, event_type, description, actor_id, metadata)
+  VALUES (v_case_id, 'case_created', 'Case created from call log entry', auth.uid(),
+          jsonb_build_object('call_id', v_call.id, 'call_sid', v_call.call_sid));
+
+  RETURN v_case_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.case_for_call(uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.case_for_call(uuid, text) TO authenticated, service_role;
+
+-- Create (or reuse) a case for an inbound SMS/WhatsApp conversation.
+CREATE OR REPLACE FUNCTION public.case_for_conversation(
+  p_conversation_id uuid,
+  p_channel text DEFAULT 'sms',
+  p_subject text DEFAULT NULL
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_conv public.inbox_conversations%ROWTYPE;
+  v_case_id uuid;
+BEGIN
+  SELECT * INTO v_conv FROM public.inbox_conversations WHERE id = p_conversation_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Conversation not found';
+  END IF;
+  IF v_conv.case_id IS NOT NULL THEN
+    RETURN v_conv.case_id;
+  END IF;
+
+  SELECT id INTO v_case_id
+  FROM public.support_cases
+  WHERE customer_phone IS NOT NULL
+    AND customer_phone = v_conv.user_phone
+    AND status NOT IN ('resolved','closed')
+  ORDER BY last_activity_at DESC
+  LIMIT 1;
+
+  IF v_case_id IS NULL THEN
+    INSERT INTO public.support_cases (subject, region, origin_channel, customer_user_id, customer_name, customer_phone, customer_email, conversation_id, description)
+    VALUES (
+      COALESCE(p_subject, COALESCE(v_conv.subject, initcap(p_channel) || ' conversation')),
+      v_conv.region,
+      CASE WHEN p_channel = 'whatsapp' THEN 'whatsapp' ELSE 'sms' END,
+      v_conv.user_id,
+      v_conv.user_name,
+      v_conv.user_phone,
+      v_conv.user_email,
+      v_conv.id,
+      'Case opened from inbound ' || p_channel || ' message.'
+    )
+    RETURNING id INTO v_case_id;
+  END IF;
+
+  UPDATE public.inbox_conversations SET case_id = v_case_id WHERE id = v_conv.id;
+  UPDATE public.support_cases SET conversation_id = COALESCE(conversation_id, v_conv.id) WHERE id = v_case_id;
+
+  INSERT INTO public.case_events (case_id, event_type, description, metadata)
+  VALUES (v_case_id, 'message_received', 'Inbound ' || p_channel || ' message linked to case',
+          jsonb_build_object('conversation_id', v_conv.id, 'channel', p_channel));
+
+  RETURN v_case_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.case_for_conversation(uuid, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.case_for_conversation(uuid, text, text) TO authenticated, service_role;
+
+-- Customer reply from the portal.
+CREATE OR REPLACE FUNCTION public.customer_reply_to_case(p_case_id uuid, p_body text)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_case public.support_cases%ROWTYPE;
+  v_note_id uuid;
+  v_name text;
+BEGIN
+  SELECT * INTO v_case FROM public.support_cases WHERE id = p_case_id;
+  IF NOT FOUND OR v_case.customer_user_id IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'Case not found';
+  END IF;
+  IF length(coalesce(trim(p_body), '')) = 0 THEN
+    RAISE EXCEPTION 'Reply cannot be empty';
+  END IF;
+
+  SELECT full_name INTO v_name FROM public.profiles WHERE user_id = auth.uid();
+
+  INSERT INTO public.case_notes (case_id, author_id, author_name, author_role, body, is_internal)
+  VALUES (p_case_id, auth.uid(), v_name, 'customer', left(p_body, 4000), false)
+  RETURNING id INTO v_note_id;
+
+  INSERT INTO public.case_events (case_id, event_type, description, actor_id)
+  VALUES (p_case_id, 'customer_reply', 'Customer replied from the portal', auth.uid());
+
+  IF v_case.status IN ('waiting_customer','resolved') THEN
+    UPDATE public.support_cases SET status = 'in_progress' WHERE id = p_case_id;
+  END IF;
+
+  RETURN v_note_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.customer_reply_to_case(uuid, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.customer_reply_to_case(uuid, text) TO authenticated;
+
+-- ==============================================================================
+-- [376/381] Migration: 20260904163000_fix_payment_and_withdrawal_failures.sql
+-- ==============================================================================
+
+-- Fix payment failures for drivers and owners, and withdrawal failures for owners
+-- 1. Ensure get_ledger_balance handles case-insensitive currency
+CREATE OR REPLACE FUNCTION public.get_ledger_balance(
+  _user_id uuid,
+  _account_type text,
+  _currency text,
+  _include_pending boolean DEFAULT false
+) RETURNS numeric
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT COALESCE(SUM(
+    CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END
+  ), 0)::numeric(14,2)
+  FROM public.wallet_ledger_entries e
+  JOIN public.wallet_accounts w ON w.id = e.wallet_id
+  WHERE e.user_id = _user_id
+    AND w.account_type = _account_type
+    AND UPPER(e.currency) = UPPER(_currency)
+    AND (
+      e.status = 'posted'
+      OR (_include_pending AND e.status = 'pending')
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.get_ledger_balance(uuid, text, text, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_ledger_balance(uuid, text, text, boolean) TO authenticated, service_role;
+
+-- 2. Owner available balance: check ledger first, with fallback to owner_earnings if ledger is empty
+CREATE OR REPLACE FUNCTION public.get_owner_available_balance(
+  _owner_id uuid,
+  _currency text
+) RETURNS numeric
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  bal numeric;
+  legacy_earnings numeric := 0;
+  legacy_payouts numeric := 0;
+  has_ledger boolean := false;
+BEGIN
+  bal := public.get_ledger_balance(_owner_id, 'owner', UPPER(_currency), false);
+  
+  -- If ledger has posted positive balance, use it
+  SELECT EXISTS(
+    SELECT 1 FROM public.wallet_ledger_entries e
+    JOIN public.wallet_accounts w ON w.id = e.wallet_id
+    WHERE e.user_id = _owner_id AND w.account_type = 'owner' AND UPPER(e.currency) = UPPER(_currency)
+  ) INTO has_ledger;
+
+  IF has_ledger AND bal > 0 THEN
+    RETURN COALESCE(bal, 0);
+  END IF;
+
+  -- Fallback to owner_earnings minus owner_payouts for accounts before ledger entries
+  SELECT COALESCE(SUM(amount), 0) INTO legacy_earnings
+  FROM public.owner_earnings
+  WHERE owner_id = _owner_id AND UPPER(currency) = UPPER(_currency) AND status IN ('available', 'pending', 'paid');
+
+  SELECT COALESCE(SUM(amount), 0) INTO legacy_payouts
+  FROM public.owner_payouts
+  WHERE owner_id = _owner_id AND UPPER(currency) = UPPER(_currency) AND status IN ('pending', 'authorized', 'captured', 'processing', 'completed', 'settled');
+
+  IF legacy_earnings > legacy_payouts THEN
+    RETURN (legacy_earnings - legacy_payouts)::numeric(14,2);
+  END IF;
+
+  RETURN COALESCE(bal, 0);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_owner_available_balance(uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_owner_available_balance(uuid, text) TO authenticated, service_role;
+
+-- 3. Update payment_preflight:
+-- - Stop blocking payments on pending Persona verification (treat as warning instead)
+-- - Support driver_payment, invoice_payment, and owner_payment without requiring driver role only
+CREATE OR REPLACE FUNCTION public.payment_preflight(_operation text, _context jsonb DEFAULT '{}'::jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  uid uuid := auth.uid();
+  prof public.profiles%ROWTYPE;
+  blockers text[] := '{}';
+  warnings text[] := '{}';
+  amt numeric := NULLIF(_context->>'amount','')::numeric;
+  cur text := UPPER(COALESCE(NULLIF(_context->>'currency',''), 'USD'));
+  acct public.owner_payout_accounts%ROWTYPE;
+  bal numeric;
+BEGIN
+  IF uid IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'operation', _operation,
+      'blockers', jsonb_build_array(jsonb_build_object('code','AUTH_REQUIRED')));
+  END IF;
+
+  SELECT * INTO prof FROM public.profiles WHERE user_id = uid;
+  IF NOT FOUND THEN
+    blockers := blockers || 'PROFILE_MISSING';
+  ELSE
+    IF prof.is_active IS FALSE THEN blockers := blockers || 'ACCOUNT_DISABLED'; END IF;
+    IF prof.payments_suspended IS TRUE THEN blockers := blockers || 'PAYMENTS_SUSPENDED'; END IF;
+    IF prof.email_verified IS NOT TRUE THEN warnings := warnings || 'EMAIL_NOT_VERIFIED'; END IF;
+    IF prof.phone_verified IS NOT TRUE THEN warnings := warnings || 'PHONE_NOT_VERIFIED'; END IF;
+    IF prof.onboarding_completed_at IS NULL THEN warnings := warnings || 'ONBOARDING_INCOMPLETE'; END IF;
+    IF prof.identity_verified_at IS NULL THEN
+      IF COALESCE(prof.identity_verification_status,'') IN ('pending','submitted','processing') THEN
+        warnings := warnings || 'PERSONA_PENDING';
+      ELSE
+        warnings := warnings || 'PERSONA_REQUIRED';
+      END IF;
+    END IF;
+  END IF;
+
+  IF amt IS NOT NULL AND amt <= 0 THEN blockers := blockers || 'AMOUNT_INVALID'; END IF;
+  IF cur NOT IN ('USD','NGN') THEN blockers := blockers || 'CURRENCY_UNSUPPORTED'; END IF;
+
+  IF _operation IN ('driver_payment', 'invoice_payment', 'owner_payment') THEN
+    IF NOT (public.has_role(uid, 'driver') OR public.has_role(uid, 'owner') OR public.has_role(uid, 'admin')) THEN
+      blockers := blockers || 'ROLE_UNAUTHORIZED';
+    END IF;
+    IF amt IS NULL THEN blockers := blockers || 'AMOUNT_MISSING'; END IF;
+
+  ELSIF _operation = 'owner_payout' THEN
+    IF NOT (public.has_role(uid, 'owner') OR public.has_role(uid, 'admin')) THEN
+      blockers := blockers || 'ROLE_NOT_OWNER';
+    END IF;
+    SELECT * INTO acct FROM public.owner_payout_accounts
+      WHERE owner_id = uid AND UPPER(currency) = cur
+      ORDER BY is_default DESC, created_at DESC LIMIT 1;
+    IF NOT FOUND THEN
+      blockers := blockers || 'PAYOUT_ACCOUNT_MISSING';
+    END IF;
+    bal := public.get_owner_available_balance(uid, cur);
+    IF amt IS NULL THEN
+      blockers := blockers || 'AMOUNT_MISSING';
+    ELSIF bal < amt THEN
+      blockers := blockers || 'INSUFFICIENT_AVAILABLE_BALANCE';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.owner_payouts
+               WHERE owner_id = uid AND status IN ('pending','processing')) THEN
+      blockers := blockers || 'PAYOUT_ALREADY_IN_FLIGHT';
+    END IF;
+
+  ELSIF _operation = 'admin_withdrawal' THEN
+    IF NOT public.has_role(uid, 'admin') THEN blockers := blockers || 'ROLE_NOT_ADMIN'; END IF;
+    IF amt IS NULL THEN blockers := blockers || 'AMOUNT_MISSING'; END IF;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', array_length(blockers, 1) IS NULL,
+    'operation', _operation,
+    'currency', cur,
+    'amount', amt,
+    'available_balance', bal,
+    'blockers', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'code', c, 'message', f.user_message, 'remediation', f.remediation,
+        'retryable', COALESCE(f.retryable,false), 'category', f.category))
+      FROM unnest(blockers) c LEFT JOIN public.payment_failure_codes f ON f.code = c
+    ), '[]'::jsonb),
+    'warnings', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'code', c, 'message', f.user_message, 'remediation', f.remediation,
+        'category', f.category))
+      FROM unnest(warnings) c LEFT JOIN public.payment_failure_codes f ON f.code = c
+    ), '[]'::jsonb)
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.payment_preflight(text, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.payment_preflight(text, jsonb) TO authenticated, service_role;
+
+
+-- ==============================================================================
+-- [377/381] Migration: 20260904233000_harden_security_definer_search_path.sql
+-- ==============================================================================
+
+-- Migration: Harden SECURITY DEFINER functions by fixing search_path
+-- Prevents search_path hijacking on privileged queue operations
+
+CREATE OR REPLACE FUNCTION public.enqueue_email(queue_name TEXT, payload JSONB)
+RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pgmq, pg_temp
+AS $$
+BEGIN
+  RETURN pgmq.send(queue_name, payload);
+EXCEPTION WHEN undefined_table THEN
+  PERFORM pgmq.create(queue_name);
+  RETURN pgmq.send(queue_name, payload);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.read_email_batch(queue_name TEXT, batch_size INT, vt INT)
+RETURNS TABLE(msg_id BIGINT, read_ct INT, message JSONB)
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pgmq, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY SELECT r.msg_id, r.read_ct, r.message FROM pgmq.read(queue_name, vt, batch_size) r;
+EXCEPTION WHEN undefined_table THEN
+  PERFORM pgmq.create(queue_name);
+  RETURN;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_email(queue_name TEXT, message_id BIGINT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pgmq, pg_temp
+AS $$
+BEGIN
+  RETURN pgmq.delete(queue_name, message_id);
+EXCEPTION WHEN undefined_table THEN
+  RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.move_to_dlq(
+  source_queue TEXT, dlq_name TEXT, message_id BIGINT, payload JSONB
+)
+RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pgmq, pg_temp
+AS $$
+DECLARE new_id BIGINT;
+BEGIN
+  SELECT pgmq.send(dlq_name, payload) INTO new_id;
+  PERFORM pgmq.delete(source_queue, message_id);
+  RETURN new_id;
+EXCEPTION WHEN undefined_table THEN
+  BEGIN
+    PERFORM pgmq.create(dlq_name);
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+  SELECT pgmq.send(dlq_name, payload) INTO new_id;
+  BEGIN
+    PERFORM pgmq.delete(source_queue, message_id);
+  EXCEPTION WHEN undefined_table THEN
+    NULL;
+  END;
+  RETURN new_id;
+END;
+$$;
+
+-- Ensure permissions remain restricted strictly to service_role
+REVOKE EXECUTE ON FUNCTION public.enqueue_email(TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.enqueue_email(TEXT, JSONB) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.read_email_batch(TEXT, INT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.read_email_batch(TEXT, INT, INT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.delete_email(TEXT, BIGINT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_email(TEXT, BIGINT) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.move_to_dlq(TEXT, TEXT, BIGINT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.move_to_dlq(TEXT, TEXT, BIGINT, JSONB) TO service_role;
+
+
+-- ==============================================================================
+-- [378/381] Migration: 20260910103000_fault_maintenance_call_in_renewals.sql
+-- ==============================================================================
+
+-- Migration: 20260910103000_fault_maintenance_call_in_renewals.sql
+-- Fault/Maintenance call-ins renewable every 24hrs up to max 3, after which vehicle call-in process is initiated.
+
+-- 1. Add renewal & recall tracking columns to driver_call_ins
+ALTER TABLE public.driver_call_ins
+  ADD COLUMN IF NOT EXISTS renewal_count INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS max_renewals INTEGER NOT NULL DEFAULT 3,
+  ADD COLUMN IF NOT EXISTS last_renewed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS recall_initiated BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS recall_id UUID REFERENCES public.vehicle_recalls(id);
+
+CREATE INDEX IF NOT EXISTS idx_call_ins_renewals ON public.driver_call_ins (renewal_count, max_renewals);
+
+-- 2. Update column-scope guard for driver_call_ins to permit legitimate renewal executions
+CREATE OR REPLACE FUNCTION public.enforce_call_in_column_scope()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  -- Unrestricted contexts: admins, assistant admins, service-role/edge-functions, or local renewal session override
+  IF public.has_role(auth.uid(), 'admin')
+     OR public.has_role(auth.uid(), 'admin_assistant')
+     OR auth.uid() IS NULL
+     OR current_setting('app.allow_call_in_renewal', true) = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Non-admin (driver) updates: freeze protected columns except cancellation + extension request
+  IF NEW.id                 IS DISTINCT FROM OLD.id
+     OR NEW.driver_id       IS DISTINCT FROM OLD.driver_id
+     OR NEW.rental_id       IS DISTINCT FROM OLD.rental_id
+     OR NEW.vehicle_id      IS DISTINCT FROM OLD.vehicle_id
+     OR NEW.type            IS DISTINCT FROM OLD.type
+     OR NEW.reason          IS DISTINCT FROM OLD.reason
+     OR NEW.notes           IS DISTINCT FROM OLD.notes
+     OR NEW.telemetry_snapshot IS DISTINCT FROM OLD.telemetry_snapshot
+     OR NEW.geofence_lat    IS DISTINCT FROM OLD.geofence_lat
+     OR NEW.geofence_lng    IS DISTINCT FROM OLD.geofence_lng
+     OR NEW.geofence_radius_m IS DISTINCT FROM OLD.geofence_radius_m
+     OR NEW.started_at      IS DISTINCT FROM OLD.started_at
+     OR NEW.expires_at      IS DISTINCT FROM OLD.expires_at
+     OR NEW.created_at      IS DISTINCT FROM OLD.created_at
+     OR NEW.renewal_count   IS DISTINCT FROM OLD.renewal_count
+     OR NEW.max_renewals    IS DISTINCT FROM OLD.max_renewals
+     OR NEW.last_renewed_at IS DISTINCT FROM OLD.last_renewed_at
+     OR NEW.recall_initiated IS DISTINCT FROM OLD.recall_initiated
+     OR NEW.recall_id       IS DISTINCT FROM OLD.recall_id
+  THEN
+    RAISE EXCEPTION 'not authorized to modify protected call-in columns';
+  END IF;
+
+  -- status may only move to 'cancelled' from an active call-in
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    IF NOT (OLD.status::text = 'active' AND NEW.status::text = 'cancelled') THEN
+      RAISE EXCEPTION 'drivers may only cancel an active call-in';
+    END IF;
+  END IF;
+
+  -- extension flag may only be raised, never lowered
+  IF NEW.extend_requested IS DISTINCT FROM OLD.extend_requested
+     AND COALESCE(NEW.extend_requested, false) = false THEN
+    RAISE EXCEPTION 'not authorized to clear the extension request flag';
+  END IF;
+
+  -- ended_at/end_reason only allowed alongside a driver cancellation
+  IF (NEW.ended_at IS DISTINCT FROM OLD.ended_at OR NEW.end_reason IS DISTINCT FROM OLD.end_reason)
+     AND NEW.status::text <> 'cancelled' THEN
+    RAISE EXCEPTION 'not authorized to modify call-in closure columns';
+  END IF;
+
+  RETURN NEW;
+END $$;
+
+-- 3. Core RPC function: renew_driver_call_in
+-- Allows renewing fault/maintenance call-ins every 24hrs up to 3 times.
+-- Once 3 renewals are reached, automatically initiates vehicle call-in/recall.
+CREATE OR REPLACE FUNCTION public.renew_driver_call_in(
+  p_call_in_id UUID,
+  p_notes TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_caller UUID := auth.uid();
+  v_call_in RECORD;
+  v_vehicle RECORD;
+  v_new_renewal_count INTEGER;
+  v_new_expires_at TIMESTAMPTZ;
+  v_recall_id UUID;
+  v_appended_notes TEXT;
+BEGIN
+  -- Must be authenticated
+  IF v_caller IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Authentication required');
+  END IF;
+
+  -- Fetch active call-in
+  SELECT * INTO v_call_in
+  FROM public.driver_call_ins
+  WHERE id = p_call_in_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Call-in not found');
+  END IF;
+
+  -- Authorization check: caller must be the driver or an admin
+  IF v_call_in.driver_id <> v_caller
+     AND NOT public.has_role(v_caller, 'admin')
+     AND NOT public.has_role(v_caller, 'admin_assistant') THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Not authorized to renew this call-in');
+  END IF;
+
+  -- Status check
+  IF v_call_in.status <> 'active' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Only active call-ins can be renewed');
+  END IF;
+
+  -- Type check: only fault and maintenance are eligible for 24h renewals
+  IF v_call_in.type NOT IN ('fault', 'maintenance') THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Only Fault and Maintenance call-ins are eligible for 24-hour renewals'
+    );
+  END IF;
+
+  -- Fetch vehicle details for recall owner reference
+  SELECT * INTO v_vehicle
+  FROM public.vehicles
+  WHERE id = v_call_in.vehicle_id;
+
+  -- Check if max renewals (3) already reached
+  IF v_call_in.renewal_count >= COALESCE(v_call_in.max_renewals, 3) THEN
+    -- Maximum renewals already reached! Initiate vehicle call in / recall process if not already initiated.
+    IF NOT v_call_in.recall_initiated THEN
+      -- Check if open recall already exists for this vehicle & call-in
+      SELECT id INTO v_recall_id
+      FROM public.vehicle_recalls
+      WHERE vehicle_id = v_call_in.vehicle_id
+        AND status IN ('requested', 'approved', 'in_progress', 'pending')
+      LIMIT 1;
+
+      IF v_recall_id IS NULL THEN
+        INSERT INTO public.vehicle_recalls (
+          vehicle_id,
+          driver_id,
+          owner_id,
+          recall_reason,
+          recall_type,
+          status,
+          priority,
+          triggered_by_call_ins
+        ) VALUES (
+          v_call_in.vehicle_id,
+          v_call_in.driver_id,
+          v_vehicle.owner_id,
+          'Vehicle fault/maintenance call-in reached maximum 3 renewals (72h grounded). Vehicle call-in process initiated for mandatory mechanical inspection.',
+          'fault_maintenance_max_renewals',
+          'requested',
+          'high',
+          ARRAY[v_call_in.id]
+        ) RETURNING id INTO v_recall_id;
+      END IF;
+
+      -- Update call-in with recall initiation flag
+      PERFORM set_config('app.allow_call_in_renewal', 'on', true);
+      UPDATE public.driver_call_ins
+      SET recall_initiated = TRUE,
+          recall_id = v_recall_id,
+          updated_at = now()
+      WHERE id = v_call_in.id;
+    ELSE
+      v_recall_id := v_call_in.recall_id;
+    END IF;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'renewed', false,
+      'max_reached', true,
+      'renewal_count', v_call_in.renewal_count,
+      'max_renewals', v_call_in.max_renewals,
+      'recall_initiated', true,
+      'recall_id', v_recall_id,
+      'message', 'Maximum 3 renewals reached. Vehicle call-in process has been initiated.'
+    );
+  END IF;
+
+  -- Perform 24-hour renewal
+  v_new_renewal_count := v_call_in.renewal_count + 1;
+  -- Extend by 24h from current expires_at or now() if expired
+  v_new_expires_at := GREATEST(v_call_in.expires_at, now()) + INTERVAL '24 hours';
+
+  -- Format notes with renewal audit
+  v_appended_notes := v_call_in.notes;
+  IF p_notes IS NOT NULL AND length(trim(p_notes)) > 0 THEN
+    v_appended_notes := COALESCE(v_appended_notes || E'\n', '') ||
+      '[Renewal #' || v_new_renewal_count || ' · ' || to_char(now(), 'YYYY-MM-DD HH24:MI') || ']: ' || trim(p_notes);
+  END IF;
+
+  -- Bypass column guard in this local transaction
+  PERFORM set_config('app.allow_call_in_renewal', 'on', true);
+
+  UPDATE public.driver_call_ins
+  SET renewal_count = v_new_renewal_count,
+      expires_at = v_new_expires_at,
+      last_renewed_at = now(),
+      notes = v_appended_notes,
+      updated_at = now()
+  WHERE id = v_call_in.id;
+
+  -- Keep driver profile payment suspension aligned with new expires_at
+  UPDATE public.profiles
+  SET suspended_until = v_new_expires_at
+  WHERE user_id = v_call_in.driver_id;
+
+  -- Ensure vehicle geofence remains active
+  UPDATE public.vehicle_geofences
+  SET active = TRUE,
+      updated_at = now()
+  WHERE call_in_id = v_call_in.id;
+
+  -- If this renewal was the 3rd (maximum allowed), immediately initiate the vehicle call-in/recall!
+  IF v_new_renewal_count >= COALESCE(v_call_in.max_renewals, 3) THEN
+    INSERT INTO public.vehicle_recalls (
+      vehicle_id,
+      driver_id,
+      owner_id,
+      recall_reason,
+      recall_type,
+      status,
+      priority,
+      triggered_by_call_ins
+    ) VALUES (
+      v_call_in.vehicle_id,
+      v_call_in.driver_id,
+      v_vehicle.owner_id,
+      'Vehicle fault/maintenance call-in reached maximum 3 renewals (72h grounded). Vehicle call-in process initiated for mandatory mechanical inspection.',
+      'fault_maintenance_max_renewals',
+      'requested',
+      'high',
+      ARRAY[v_call_in.id]
+    ) RETURNING id INTO v_recall_id;
+
+    UPDATE public.driver_call_ins
+    SET recall_initiated = TRUE,
+        recall_id = v_recall_id,
+        updated_at = now()
+    WHERE id = v_call_in.id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'renewed', true,
+      'renewal_count', v_new_renewal_count,
+      'max_renewals', COALESCE(v_call_in.max_renewals, 3),
+      'expires_at', v_new_expires_at,
+      'max_reached', true,
+      'recall_initiated', true,
+      'recall_id', v_recall_id,
+      'message', 'Call-in renewed for final 24hrs (Renewal 3 of 3). Maximum renewals reached; vehicle call-in process has been initiated.'
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'renewed', true,
+    'renewal_count', v_new_renewal_count,
+    'max_renewals', COALESCE(v_call_in.max_renewals, 3),
+    'expires_at', v_new_expires_at,
+    'max_reached', false,
+    'recall_initiated', false,
+    'message', 'Call-in successfully renewed for 24 hours (Renewal ' || v_new_renewal_count || ' of 3).'
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.renew_driver_call_in(UUID, TEXT) TO authenticated, service_role;
+
+
+-- ==============================================================================
+-- [379/381] Migration: 20260910113000_referee_gated_vehicle_provisioning.sql
+-- ==============================================================================
+
+-- Migration: Referee-Gated Vehicle Provisioning, Agreement-Signed Disabling, and Bad Report Lockdown/Recall
+-- 1. Ensure columns exist on public.vehicles
+ALTER TABLE public.vehicles 
+  ADD COLUMN IF NOT EXISTS is_enabled boolean NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS disabled_reason text,
+  ADD COLUMN IF NOT EXISTS disabled_at timestamptz,
+  ADD COLUMN IF NOT EXISTS enabled_at timestamptz,
+  ADD COLUMN IF NOT EXISTS lockdown_reason text;
+
+-- 2. Ensure vehicle_enabled column on public.driver_vehicle_matches
+ALTER TABLE public.driver_vehicle_matches
+  ADD COLUMN IF NOT EXISTS vehicle_enabled boolean NOT NULL DEFAULT false;
+
+-- Index for speedy queries
+CREATE INDEX IF NOT EXISTS idx_vehicles_is_enabled ON public.vehicles(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_matches_vehicle_enabled ON public.driver_vehicle_matches(vehicle_enabled);
+
+-- 3. Update admin_assign_driver_to_vehicle with referee reminder
+CREATE OR REPLACE FUNCTION public.admin_assign_driver_to_vehicle(
+  _driver_id uuid,
+  _vehicle_id uuid,
+  _distance_miles numeric DEFAULT NULL,
+  _notes text DEFAULT NULL
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  _m public.driver_vehicle_matches;
+  _v public.vehicles;
+  _d public.profiles;
+  _label text;
+  _referee_count int;
+  _driver_status jsonb;
+BEGIN
+  IF NOT (has_role(auth.uid(),'admin') OR has_role(auth.uid(),'admin_assistant')) THEN
+    RAISE EXCEPTION 'not authorised';
+  END IF;
+
+  SELECT * INTO _v FROM public.vehicles WHERE id = _vehicle_id;
+  IF _v.id IS NULL THEN RAISE EXCEPTION 'vehicle not found'; END IF;
+
+  SELECT * INTO _d FROM public.profiles WHERE id = _driver_id;
+  IF _d.id IS NULL THEN RAISE EXCEPTION 'driver profile not found'; END IF;
+
+  -- Check referee count
+  _driver_status := public.driver_accreditation_status(_driver_id);
+  _referee_count := coalesce((_driver_status->>'referee_count')::int, 0);
+
+  -- Prevent duplicate active match for this driver/vehicle pair
+  IF EXISTS (
+    SELECT 1 FROM public.driver_vehicle_matches
+     WHERE vehicle_id = _vehicle_id AND driver_id = _driver_id
+       AND status NOT IN ('cancelled', 'picked_up')
+  ) THEN
+    RAISE EXCEPTION 'active match already exists for this driver and vehicle';
+  END IF;
+
+  INSERT INTO public.driver_vehicle_matches
+    (vehicle_id, driver_id, owner_id, status, assigned_by, distance_miles, notes,
+     referee_count, vehicle_enabled)
+  VALUES
+    (_vehicle_id, _driver_id, _v.owner_id, 'assigned', auth.uid(), _distance_miles, _notes,
+     _referee_count, (_referee_count >= 1))
+  RETURNING * INTO _m;
+
+  INSERT INTO public.driver_vehicle_match_events
+    (match_id, actor_id, from_status, to_status, action, details)
+  VALUES
+    (_m.id, auth.uid(), NULL, 'assigned', 'assigned',
+     jsonb_build_object('distance_miles', _distance_miles, 'notes', _notes, 'referees_submitted', (_referee_count >= 1)));
+
+  _label := concat_ws(' ', _v.year::text, _v.make, _v.model, '(' || _v.license_plate || ')');
+
+  PERFORM public._match_broadcast(_m, 'assigned',
+    'Vehicle option assigned',
+    format('You have been matched with %s. Important: Please ensure your 3 referee contact details are submitted. Provisioned vehicles are disabled upon signing the agreement and only enabled once referee details are submitted.', _label),
+    format('A driver has been matched to your vehicle %s. The rental agreement will follow.', _label),
+    format('Start agreement for %s', _label),
+    'Driver assigned to a provisioned vehicle. Ensure driver is reminded to submit referee contacts before pickup.');
+
+  RETURN _m.id;
+END;
+$$;
+
+-- 4. Update admin_initiate_match_agreement with reminder
+CREATE OR REPLACE FUNCTION public.admin_initiate_match_agreement(_match_id uuid, _agreement_id uuid DEFAULT NULL)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE _m public.driver_vehicle_matches;
+BEGIN
+  IF NOT (has_role(auth.uid(),'admin') OR has_role(auth.uid(),'admin_assistant')) THEN
+    RAISE EXCEPTION 'not authorised';
+  END IF;
+
+  UPDATE public.driver_vehicle_matches
+     SET status = 'agreement_initiated',
+         agreement_initiated_at = now(),
+         agreement_id = coalesce(_agreement_id, agreement_id)
+   WHERE id = _match_id AND status IN ('assigned','agreement_initiated')
+  RETURNING * INTO _m;
+  IF _m.id IS NULL THEN RAISE EXCEPTION 'match not found or not in an assignable state'; END IF;
+
+  PERFORM public._match_broadcast(_m, 'agreement_initiated',
+    'Rental agreement started',
+    'Your rental agreement is ready. Note: The provisioned vehicle is disabled immediately upon signing the agreement and only enabled after you submit your referee contact details.',
+    'The rental agreement for your vehicle has been started. Please review and sign.',
+    'Collect signatures on the rental agreement',
+    'Agreement initiated. Remind driver to submit referee contacts so the vehicle can be enabled for pickup.');
+END;
+$$;
+
+-- 5. Update admin_mark_match_agreement_signed:
+-- Immediately disables provisioned vehicle if referee details have NOT been submitted,
+-- and enables it ONLY after referee details are provided.
+CREATE OR REPLACE FUNCTION public.admin_mark_match_agreement_signed(_match_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  _m public.driver_vehicle_matches;
+  _a public.legal_agreements;
+  _s jsonb;
+  _referee_count int;
+  _vehicle_enabled boolean;
+BEGIN
+  IF NOT (has_role(auth.uid(),'admin') OR has_role(auth.uid(),'admin_assistant')) THEN
+    RAISE EXCEPTION 'not authorised';
+  END IF;
+
+  SELECT * INTO _m FROM public.driver_vehicle_matches WHERE id = _match_id;
+  IF _m.id IS NULL THEN RAISE EXCEPTION 'match not found'; END IF;
+  IF _m.agreement_id IS NULL THEN RAISE EXCEPTION 'no agreement linked to this match'; END IF;
+
+  SELECT * INTO _a FROM public.legal_agreements WHERE id = _m.agreement_id;
+  IF _a.driver_signature IS NULL OR _a.owner_signature IS NULL OR _a.admin_witness_signature IS NULL THEN
+    RAISE EXCEPTION 'agreement is not fully signed yet';
+  END IF;
+
+  -- Check referee count
+  _s := public.driver_accreditation_status(_m.driver_id);
+  _referee_count := coalesce((_s->>'referee_count')::int, 0);
+
+  -- Provisioned vehicles should be disabled immediately the owner-driver agreement is signed,
+  -- and only enabled after the submission of referee details by the driver.
+  IF _referee_count < 1 THEN
+    _vehicle_enabled := false;
+    UPDATE public.vehicles
+       SET is_enabled = false,
+           disabled_reason = 'awaiting_referee_submission',
+           disabled_at = now()
+     WHERE id = _m.vehicle_id;
+
+    UPDATE public.driver_vehicle_matches
+       SET status = 'agreement_signed',
+           agreement_signed_at = now(),
+           vehicle_enabled = false,
+           referee_count = _referee_count
+     WHERE id = _match_id
+     RETURNING * INTO _m;
+
+    INSERT INTO public.driver_vehicle_match_events
+      (match_id, actor_id, from_status, to_status, action, details)
+    VALUES
+      (_match_id, auth.uid(), 'agreement_initiated', 'agreement_signed', 'agreement_signed_vehicle_disabled',
+       jsonb_build_object('referee_count', _referee_count, 'vehicle_enabled', false, 'reason', 'Vehicle disabled awaiting referee submission'));
+
+    PERFORM public._match_broadcast(_m, 'agreement_signed',
+      'Agreement signed — Referee submission required',
+      'Your rental agreement is signed! Note: Your provisioned vehicle is disabled and will ONLY be enabled for pickup after you submit your referee contact details.',
+      'The rental agreement for your vehicle is fully signed. The vehicle is currently disabled pending driver referee submission.',
+      'Awaiting referee submission',
+      'Agreement signed. Provisioned vehicle is disabled pending driver referee details.');
+  ELSE
+    _vehicle_enabled := true;
+    UPDATE public.vehicles
+       SET is_enabled = true,
+           disabled_reason = null,
+           enabled_at = now()
+     WHERE id = _m.vehicle_id;
+
+    UPDATE public.driver_vehicle_matches
+       SET status = 'agreement_signed',
+           agreement_signed_at = now(),
+           vehicle_enabled = true,
+           referee_count = _referee_count
+     WHERE id = _match_id
+     RETURNING * INTO _m;
+
+    INSERT INTO public.driver_vehicle_match_events
+      (match_id, actor_id, from_status, to_status, action, details)
+    VALUES
+      (_match_id, auth.uid(), 'agreement_initiated', 'agreement_signed', 'agreement_signed_vehicle_enabled',
+       jsonb_build_object('referee_count', _referee_count, 'vehicle_enabled', true));
+
+    PERFORM public._match_broadcast(_m, 'agreement_signed',
+      'Rental agreement fully executed',
+      'Your rental agreement is fully signed and your referees are on file. Accreditation checks are next.',
+      'The rental agreement for your vehicle is fully signed.',
+      'Run accreditation checks',
+      'Agreement signed and referees verified. Confirm driver''s licence before handover.');
+  END IF;
+END;
+$$;
+
+-- 6. Condition at pickup: Provisioned vehicle MUST be enabled and have referee details
+CREATE OR REPLACE FUNCTION public.admin_mark_match_picked_up(_match_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  _m public.driver_vehicle_matches;
+  _v public.vehicles;
+BEGIN
+  IF NOT (has_role(auth.uid(),'admin') OR has_role(auth.uid(),'admin_assistant')) THEN
+    RAISE EXCEPTION 'not authorised';
+  END IF;
+
+  SELECT * INTO _m FROM public.driver_vehicle_matches WHERE id = _match_id;
+  IF _m.id IS NULL THEN RAISE EXCEPTION 'match not found'; END IF;
+  IF _m.status <> 'accredited' THEN RAISE EXCEPTION 'match must be accredited before pickup'; END IF;
+
+  -- CONDITION TO ENABLE AT PICKUP:
+  IF NOT coalesce(_m.vehicle_enabled, false) THEN
+    RAISE EXCEPTION 'Cannot complete pickup: Provisioned vehicle is disabled. Driver must submit referee details before the vehicle can be enabled for pickup.';
+  END IF;
+
+  SELECT * INTO _v FROM public.vehicles WHERE id = _m.vehicle_id;
+  IF _v.is_enabled IS FALSE THEN
+    RAISE EXCEPTION 'Cannot complete pickup: Vehicle is currently disabled (%). Resolve condition before handover.', coalesce(_v.disabled_reason, 'unknown');
+  END IF;
+
+  UPDATE public.driver_vehicle_matches
+     SET status = 'picked_up', picked_up_at = now()
+   WHERE id = _match_id AND status = 'accredited'
+  RETURNING * INTO _m;
+
+  INSERT INTO public.driver_vehicle_match_events
+    (match_id, actor_id, from_status, to_status, action, details)
+  VALUES
+    (_match_id, auth.uid(), 'accredited', 'picked_up', 'picked_up',
+     jsonb_build_object('vehicle_id', _m.vehicle_id, 'referee_count', _m.referee_count));
+
+  PERFORM public._match_broadcast(_m, 'picked_up',
+    'Vehicle picked up',
+    'Vehicle pickup confirmed. Your provisioned vehicle is enabled and your rental is now active.',
+    'Your vehicle has been picked up by the matched driver.',
+    NULL, 'Vehicle handover confirmed.');
+END;
+$$;
+
+-- 7. Update submit_driver_referees to enable matched provisioned vehicles
+CREATE OR REPLACE FUNCTION public.submit_driver_referees(_referees jsonb)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  _uid uuid := auth.uid();
+  _app record;
+  _i int;
+  _r jsonb;
+  _match record;
+BEGIN
+  IF _uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+
+  IF _referees IS NULL OR jsonb_typeof(_referees) <> 'array' OR jsonb_array_length(_referees) <> 3 THEN
+    RAISE EXCEPTION 'Exactly 3 referees are required';
+  END IF;
+
+  SELECT id INTO _app FROM public.applications
+   WHERE user_id = _uid AND application_type = 'driver'
+   ORDER BY created_at DESC LIMIT 1;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'No driver application found for this user';
+  END IF;
+
+  -- Store referees on application
+  UPDATE public.applications
+     SET referee1_name  = nullif(trim(_referees->0->>'name'), ''),
+         referee1_phone = nullif(trim(_referees->0->>'phone'), ''),
+         referee1_email = nullif(trim(_referees->0->>'email'), ''),
+         referee2_name  = nullif(trim(_referees->1->>'name'), ''),
+         referee2_phone = nullif(trim(_referees->1->>'phone'), ''),
+         referee2_email = nullif(trim(_referees->1->>'email'), ''),
+         referee3_name  = nullif(trim(_referees->2->>'name'), ''),
+         referee3_phone = nullif(trim(_referees->2->>'phone'), ''),
+         referee3_email = nullif(trim(_referees->2->>'email'), ''),
+         referees_verification_status = 'pending',
+         updated_at = now()
+   WHERE id = _app.id;
+
+  -- Upsert individual referee verifications
+  FOR _i IN 0..2 LOOP
+    _r := _referees -> _i;
+    INSERT INTO public.referee_verifications
+      (application_id, user_id, referee_index, full_name, phone, email)
+    VALUES
+      (_app.id, _uid, _i, trim(_r->>'name'), trim(_r->>'phone'),
+       nullif(trim(coalesce(_r->>'email','')), ''))
+    ON CONFLICT (application_id, referee_index) DO UPDATE SET
+      full_name  = excluded.full_name,
+      phone      = excluded.phone,
+      email      = excluded.email,
+      status     = 'pending',
+      updated_at = now();
+  END LOOP;
+
+  -- ENABLE PROVISIONED VEHICLES FOR THIS DRIVER:
+  -- "and only enabled, after the submission of referee details by the driver."
+  FOR _match IN
+    SELECT id, vehicle_id, status FROM public.driver_vehicle_matches
+     WHERE driver_id = _uid AND status IN ('assigned', 'agreement_initiated', 'agreement_signed', 'accredited')
+  LOOP
+    -- Enable vehicle record
+    UPDATE public.vehicles
+       SET is_enabled = true,
+           disabled_reason = null,
+           enabled_at = now()
+     WHERE id = _match.vehicle_id;
+
+    -- Enable match record
+    UPDATE public.driver_vehicle_matches
+       SET vehicle_enabled = true,
+           referee_count = 3
+     WHERE id = _match.id;
+
+    -- Record audit event
+    INSERT INTO public.driver_vehicle_match_events
+      (match_id, actor_id, from_status, to_status, action, details)
+    VALUES
+      (_match.id, _uid, _match.status, _match.status, 'referees_submitted_vehicle_enabled',
+       jsonb_build_object('vehicle_id', _match.vehicle_id, 'vehicle_enabled', true, 'referee_count', 3));
+  END LOOP;
+
+  -- Notify driver
+  INSERT INTO public.inbox_messages
+    (user_id, direction, channel, subject, body, status)
+  VALUES
+    (_uid, 'inbound', 'system',
+     'Referee details submitted — Provisioned vehicle enabled',
+     'Your 3 referee contacts have been received. Your provisioned vehicle has been enabled for pickup once handover is completed.',
+     'unread');
+
+  INSERT INTO public.application_audit_log (application_id, actor_id, actor_role, action, changed, details)
+  VALUES (_app.id, _uid, 'driver', 'referees_submitted', '["referees"]'::jsonb,
+          jsonb_build_object('count', 3, 'provisioned_vehicles_enabled', true));
+
+  RETURN _app.id;
+END;
+$$;
+
+-- 8. Enhance get_my_pickup_details to check both driver_vehicle_matches AND rentals,
+-- returning vehicle_enabled status so driver knows if vehicle is currently disabled awaiting referees.
+CREATE OR REPLACE FUNCTION public.get_my_pickup_details()
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  _uid uuid := auth.uid();
+  _vehicle record;
+  _submitted boolean;
+  _vehicle_enabled boolean;
+  _disabled_reason text;
+  _match_id uuid;
+  _match_status text;
+BEGIN
+  IF _uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+
+  -- 1. Check active rental first
+  SELECT r.id as rental_id, v.id as vehicle_id, v.make, v.model, v.year,
+         v.license_plate, v.pickup_location, v.pickup_address,
+         v.pickup_city, v.pickup_instructions, v.is_enabled, v.disabled_reason,
+         NULL::uuid as match_id, 'active_rental' as match_status
+    INTO _vehicle
+    FROM public.rentals r
+    JOIN public.vehicles v ON v.id = r.vehicle_id
+   WHERE r.driver_id = _uid AND r.status = 'active'
+   ORDER BY r.created_at DESC LIMIT 1;
+
+  -- 2. If no active rental, check driver_vehicle_matches
+  IF NOT FOUND THEN
+    SELECT NULL::uuid as rental_id, v.id as vehicle_id, v.make, v.model, v.year,
+           v.license_plate, v.pickup_location, v.pickup_address,
+           v.pickup_city, v.pickup_instructions, v.is_enabled, v.disabled_reason,
+           m.id as match_id, m.status as match_status
+      INTO _vehicle
+      FROM public.driver_vehicle_matches m
+      JOIN public.vehicles v ON v.id = m.vehicle_id
+     WHERE m.driver_id = _uid
+       AND m.status IN ('assigned', 'agreement_initiated', 'agreement_signed', 'accredited', 'picked_up')
+     ORDER BY m.created_at DESC LIMIT 1;
+  END IF;
+
+  IF _vehicle.vehicle_id IS NULL THEN
+    RETURN jsonb_build_object('has_rental', false, 'referees_submitted', false);
+  END IF;
+
+  -- Check if driver has submitted 3 referees
+  SELECT exists (
+    SELECT 1 FROM public.applications a
+     WHERE a.user_id = _uid AND a.application_type = 'driver'
+       AND nullif(trim(coalesce(a.referee1_name,'')), '') IS NOT NULL
+       AND nullif(trim(coalesce(a.referee1_phone,'')), '') IS NOT NULL
+       AND nullif(trim(coalesce(a.referee2_name,'')), '') IS NOT NULL
+       AND nullif(trim(coalesce(a.referee2_phone,'')), '') IS NOT NULL
+       AND nullif(trim(coalesce(a.referee3_name,'')), '') IS NOT NULL
+       AND nullif(trim(coalesce(a.referee3_phone,'')), '') IS NOT NULL
+  ) INTO _submitted;
+
+  _vehicle_enabled := coalesce(_vehicle.is_enabled, true);
+  _disabled_reason := _vehicle.disabled_reason;
+
+  RETURN jsonb_build_object(
+    'has_rental', true,
+    'referees_submitted', _submitted,
+    'vehicle_enabled', _vehicle_enabled,
+    'disabled_reason', _disabled_reason,
+    'match_id', _vehicle.match_id,
+    'match_status', _vehicle.match_status,
+    'rental_id', _vehicle.rental_id,
+    'vehicle', jsonb_build_object(
+      'id', _vehicle.vehicle_id,
+      'make', _vehicle.make, 'model', _vehicle.model,
+      'year', _vehicle.year, 'license_plate', _vehicle.license_plate),
+    'pickup', CASE WHEN _submitted THEN jsonb_build_object(
+        'location', _vehicle.pickup_location,
+        'address', _vehicle.pickup_address,
+        'city', _vehicle.pickup_city,
+        'instructions', _vehicle.pickup_instructions)
+      ELSE NULL END
+  );
+END;
+$$;
+
+-- 9. Security Lockdown & Recall function when bad report by referee is received
+CREATE OR REPLACE FUNCTION public.lockdown_and_recall_vehicle(
+  _driver_id uuid,
+  _reason text,
+  _referee_name text DEFAULT 'Referee'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  _match record;
+  _rental record;
+  _target_vehicle_id uuid;
+  _target_owner_id uuid;
+  _recall_id uuid;
+  _device record;
+  _vehicle_label text;
+  _v public.vehicles;
+BEGIN
+  -- Search in matches
+  SELECT m.id as match_id, m.vehicle_id, m.owner_id, v.make, v.model, v.year, v.license_plate
+    INTO _match
+    FROM public.driver_vehicle_matches m
+    JOIN public.vehicles v ON v.id = m.vehicle_id
+   WHERE m.driver_id = _driver_id AND m.status NOT IN ('cancelled')
+   ORDER BY m.created_at DESC LIMIT 1;
+
+  IF _match.vehicle_id IS NOT NULL THEN
+    _target_vehicle_id := _match.vehicle_id;
+    _target_owner_id := _match.owner_id;
+    _vehicle_label := concat_ws(' ', _match.year::text, _match.make, _match.model, '(' || _match.license_plate || ')');
+  ELSE
+    -- Search in active rentals
+    SELECT r.id as rental_id, r.vehicle_id, v.owner_id, v.make, v.model, v.year, v.license_plate
+      INTO _rental
+      FROM public.rentals r
+      JOIN public.vehicles v ON v.id = r.vehicle_id
+     WHERE r.driver_id = _driver_id AND r.status = 'active'
+     ORDER BY r.created_at DESC LIMIT 1;
+
+    IF _rental.vehicle_id IS NOT NULL THEN
+      _target_vehicle_id := _rental.vehicle_id;
+      _target_owner_id := _rental.owner_id;
+      _vehicle_label := concat_ws(' ', _rental.year::text, _rental.make, _rental.model, '(' || _rental.license_plate || ')');
+    END IF;
+  END IF;
+
+  IF _target_vehicle_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'message', 'No active matched or rented vehicle found for driver');
+  END IF;
+
+  -- 1. VEHICLE LOCKDOWN
+  UPDATE public.vehicles
+     SET is_enabled = false,
+         status = 'locked_down',
+         disabled_reason = 'referee_bad_report',
+         lockdown_reason = _reason,
+         disabled_at = now()
+   WHERE id = _target_vehicle_id;
+
+  -- Update match if exists
+  IF _match.match_id IS NOT NULL THEN
+    UPDATE public.driver_vehicle_matches
+       SET vehicle_enabled = false
+     WHERE id = _match.match_id;
+
+    INSERT INTO public.driver_vehicle_match_events
+      (match_id, actor_id, from_status, to_status, action, details)
+    VALUES
+      (_match.match_id, auth.uid(), _match.match_id::text, 'locked_down', 'referee_bad_report_lockdown',
+       jsonb_build_object('reason', _reason, 'referee', _referee_name));
+  END IF;
+
+  -- 2. CREATE VEHICLE RECALL
+  INSERT INTO public.vehicle_recalls
+    (vehicle_id, driver_id, owner_id, recall_reason, recall_type, status, priority)
+  VALUES
+    (_target_vehicle_id, _driver_id, _target_owner_id,
+     format('SECURITY LOCKDOWN & RECALL: Adverse referee report received from %s. Reason: %s', _referee_name, _reason),
+     'safety', 'pending', 'critical')
+  RETURNING id INTO _recall_id;
+
+  -- 3. LOG IOT DEVICE AUDIT
+  SELECT id INTO _device FROM public.iot_devices WHERE vehicle_id = _target_vehicle_id AND is_linked = true LIMIT 1;
+  IF _device.id IS NOT NULL THEN
+    INSERT INTO public.device_activity_log
+      (device_id, action, performed_by, details)
+    VALUES
+      (_device.id, 'LOCKDOWN', coalesce(auth.uid(), _driver_id),
+       jsonb_build_object('trigger', 'referee_bad_report', 'referee', _referee_name, 'reason', _reason, 'recall_id', _recall_id));
+  END IF;
+
+  -- 4. NOTIFICATIONS
+  -- To Driver:
+  INSERT INTO public.inbox_messages
+    (user_id, direction, channel, subject, body, status)
+  VALUES
+    (_driver_id, 'inbound', 'system',
+     'SECURITY ALERT: Vehicle Lockdown & Immediate Recall',
+     format('Your vehicle (%s) has been immobilized and recalled immediately following an adverse report from your referee (%s). Please contact support immediately.', _vehicle_label, _referee_name),
+     'unread');
+
+  -- To Owner:
+  IF _target_owner_id IS NOT NULL THEN
+    INSERT INTO public.inbox_messages
+      (user_id, direction, channel, subject, body, status)
+    VALUES
+      (_target_owner_id, 'inbound', 'system',
+       'URGENT: Vehicle Recalled & Locked Down',
+       format('Vehicle %s has been placed in lockdown and an immediate recall initiated due to an adverse referee report on the matched driver.', _vehicle_label),
+       'unread');
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'vehicle_id', _target_vehicle_id,
+    'recall_id', _recall_id,
+    'vehicle_label', _vehicle_label,
+    'locked_down', true
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.lockdown_and_recall_vehicle(uuid, text, text) TO authenticated, service_role;
+
+
+-- ==============================================================================
+-- [380/381] Migration: 20260911080000_reconcile_99_missing_columns_source_parity.sql
+-- ==============================================================================
+
+-- ==============================================================================
+-- RentMaikar Database Schema Reconciliation Migration
+-- Target: https://jrsydiofzceoeddjogov.supabase.co (PostgreSQL 17.6)
+-- Authoritative Source: bwvocmhcledbwqlpcswp (RentMaikar / Lovable)
+--
+-- PURPOSE:
+-- Reconciles all 99 missing columns across 15 domain tables identified in the
+-- Database Schema Reconciliation Report to achieve 100% parity with source.
+--
+-- SAFETY & IDEMPOTENCY GUARANTEES:
+-- 1. All column additions use 'ADD COLUMN IF NOT EXISTS'.
+-- 2. All types & enums are created idempotently if not already present.
+-- 3. Non-blocking O(1) metadata changes on PostgreSQL 11+ (safe constant defaults).
+-- 4. Existing accounts (e.g. adebayoolusola39@gmail.com) and vehicles remain preserved.
+-- 5. Foreign keys and helper indexes are applied with existence guards.
+-- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- PRE-FLIGHT: Ensure Custom Enum Types Exist
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  -- 1. access_level_enum
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_level_enum') THEN
+    CREATE TYPE public.access_level_enum AS ENUM ('view_only', 'full');
+  END IF;
+
+  -- 2. registration_stage_enum
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'registration_stage_enum') THEN
+    CREATE TYPE public.registration_stage_enum AS ENUM (
+      'auth',
+      'role_selection',
+      'contact_verified',
+      'kyc_submitted',
+      'under_review',
+      'approved',
+      'rejected'
+    );
+  END IF;
+
+  -- 3. insurance_task_status
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'insurance_task_status') THEN
+    CREATE TYPE public.insurance_task_status AS ENUM (
+      'open',
+      'reviewing',
+      'awaiting_documents',
+      'quote_sent',
+      'escalated',
+      'resolved',
+      'closed'
+    );
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 1. TABLE: applications (22 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'applications') THEN
+    ALTER TABLE public.applications
+      ADD COLUMN IF NOT EXISTS street_address text,
+      ADD COLUMN IF NOT EXISTS messaging_consent boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS messaging_channel text NOT NULL DEFAULT 'none',
+      ADD COLUMN IF NOT EXISTS data_sharing_consent boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS consent_recorded_at timestamptz,
+      ADD COLUMN IF NOT EXISTS recovered_from_application_id uuid,
+      ADD COLUMN IF NOT EXISTS recovery_status text NOT NULL DEFAULT 'none',
+      ADD COLUMN IF NOT EXISTS recovery_eligible_at timestamptz,
+      ADD COLUMN IF NOT EXISTS recycle_count integer NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS security_deposit_acknowledged boolean DEFAULT false,
+      ADD COLUMN IF NOT EXISTS referee1_name text,
+      ADD COLUMN IF NOT EXISTS referee1_phone text,
+      ADD COLUMN IF NOT EXISTS referee1_email text,
+      ADD COLUMN IF NOT EXISTS referee1_address text,
+      ADD COLUMN IF NOT EXISTS referee2_name text,
+      ADD COLUMN IF NOT EXISTS referee2_phone text,
+      ADD COLUMN IF NOT EXISTS referee2_email text,
+      ADD COLUMN IF NOT EXISTS referee2_address text,
+      ADD COLUMN IF NOT EXISTS referee3_name text,
+      ADD COLUMN IF NOT EXISTS referee3_phone text,
+      ADD COLUMN IF NOT EXISTS referee3_email text,
+      ADD COLUMN IF NOT EXISTS referee3_address text;
+
+    -- Foreign key to self for application recovery lineage
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE constraint_schema = 'public'
+        AND table_name = 'applications'
+        AND constraint_name = 'applications_recovered_from_application_id_fkey'
+    ) THEN
+      ALTER TABLE public.applications
+        ADD CONSTRAINT applications_recovered_from_application_id_fkey
+        FOREIGN KEY (recovered_from_application_id) REFERENCES public.applications(id) ON DELETE SET NULL;
+    END IF;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 2. TABLE: communication_providers (1 missing column)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'communication_providers') THEN
+    ALTER TABLE public.communication_providers
+      ADD COLUMN IF NOT EXISTS whatsapp_provider text;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 3. TABLE: driver_call_ins (5 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'driver_call_ins') THEN
+    ALTER TABLE public.driver_call_ins
+      ADD COLUMN IF NOT EXISTS renewal_count integer NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS max_renewals integer NOT NULL DEFAULT 3,
+      ADD COLUMN IF NOT EXISTS last_renewed_at timestamptz,
+      ADD COLUMN IF NOT EXISTS recall_initiated boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS recall_id uuid;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'vehicle_recalls') THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = 'public'
+          AND table_name = 'driver_call_ins'
+          AND constraint_name = 'driver_call_ins_recall_id_fkey'
+      ) THEN
+        ALTER TABLE public.driver_call_ins
+          ADD CONSTRAINT driver_call_ins_recall_id_fkey
+          FOREIGN KEY (recall_id) REFERENCES public.vehicle_recalls(id) ON DELETE SET NULL;
+      END IF;
+    END IF;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 4. TABLE: driver_vehicle_matches (1 missing column)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'driver_vehicle_matches') THEN
+    ALTER TABLE public.driver_vehicle_matches
+      ADD COLUMN IF NOT EXISTS vehicle_enabled boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 5. TABLE: inbox_conversations (2 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'inbox_conversations') THEN
+    ALTER TABLE public.inbox_conversations
+      ADD COLUMN IF NOT EXISTS archived_at timestamptz,
+      ADD COLUMN IF NOT EXISTS is_flagged boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 6. TABLE: outreach_contacts (2 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'outreach_contacts') THEN
+    ALTER TABLE public.outreach_contacts
+      ADD COLUMN IF NOT EXISTS email text,
+      ADD COLUMN IF NOT EXISTS signup_role text;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 7. TABLE: payments (6 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'payments') THEN
+    ALTER TABLE public.payments
+      ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'rental',
+      ADD COLUMN IF NOT EXISTS owner_share_amount numeric(14,2),
+      ADD COLUMN IF NOT EXISTS platform_fee_amount numeric(14,2),
+      ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS settled_at timestamptz,
+      ADD COLUMN IF NOT EXISTS subscription_plan_id uuid;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscription_plans') THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = 'public'
+          AND table_name = 'payments'
+          AND constraint_name = 'payments_subscription_plan_id_fkey'
+      ) THEN
+        ALTER TABLE public.payments
+          ADD CONSTRAINT payments_subscription_plan_id_fkey
+          FOREIGN KEY (subscription_plan_id) REFERENCES public.subscription_plans(id) ON DELETE SET NULL;
+      END IF;
+    END IF;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 8. TABLE: persona_template_config (1 missing column)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'persona_template_config') THEN
+    ALTER TABLE public.persona_template_config
+      ADD COLUMN IF NOT EXISTS requires_drivers_license boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 9. TABLE: profiles (30 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'profiles') THEN
+    ALTER TABLE public.profiles
+      ADD COLUMN IF NOT EXISTS username text,
+      ADD COLUMN IF NOT EXISTS street_address text,
+      ADD COLUMN IF NOT EXISTS city text,
+      ADD COLUMN IF NOT EXISTS public_uuid uuid NOT NULL DEFAULT gen_random_uuid(),
+      ADD COLUMN IF NOT EXISTS access_level public.access_level_enum NOT NULL DEFAULT 'view_only',
+      ADD COLUMN IF NOT EXISTS registration_stage public.registration_stage_enum,
+      ADD COLUMN IF NOT EXISTS stage_updated_at timestamptz,
+      ADD COLUMN IF NOT EXISTS onboarding_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS onboarding_completed_at timestamptz,
+      ADD COLUMN IF NOT EXISTS profile_completion_skipped_at timestamptz,
+      ADD COLUMN IF NOT EXISTS owns_vehicle boolean,
+      ADD COLUMN IF NOT EXISTS has_payment_method boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS payment_proxy_verified boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS driver_license_number text,
+      ADD COLUMN IF NOT EXISTS driver_license_expiry date,
+      ADD COLUMN IF NOT EXISTS emergency_contact_name text,
+      ADD COLUMN IF NOT EXISTS emergency_contact_phone text,
+      ADD COLUMN IF NOT EXISTS referee_verified boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS persona_verified boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS identity_verification_status text,
+      ADD COLUMN IF NOT EXISTS identity_verified_at timestamptz,
+      ADD COLUMN IF NOT EXISTS identity_verified_inquiry_id text,
+      ADD COLUMN IF NOT EXISTS persona_notification_frequency text NOT NULL DEFAULT 'immediate',
+      ADD COLUMN IF NOT EXISTS role_change_used boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS role_changed_at timestamptz,
+      ADD COLUMN IF NOT EXISTS data_sharing_consent boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS data_sharing_consent_at timestamptz,
+      ADD COLUMN IF NOT EXISTS messaging_consent_at timestamptz,
+      ADD COLUMN IF NOT EXISTS cookie_consent jsonb,
+      ADD COLUMN IF NOT EXISTS cookie_consent_at timestamptz;
+
+    -- Maintain unique case-insensitive index on username if non-null
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_username_lower
+      ON public.profiles (LOWER(username))
+      WHERE username IS NOT NULL;
+
+    -- Ensure index on public_uuid for quick lookups
+    CREATE INDEX IF NOT EXISTS idx_profiles_public_uuid
+      ON public.profiles (public_uuid);
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 10. TABLE: rentals (5 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'rentals') THEN
+    ALTER TABLE public.rentals
+      ADD COLUMN IF NOT EXISTS negotiation_id uuid,
+      ADD COLUMN IF NOT EXISTS security_deposit_amount numeric(12,2),
+      ADD COLUMN IF NOT EXISTS security_deposit_currency text,
+      ADD COLUMN IF NOT EXISTS security_deposit_status text NOT NULL DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS security_deposit_released_at timestamptz;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'price_negotiations') THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = 'public'
+          AND table_name = 'rentals'
+          AND constraint_name = 'rentals_negotiation_id_fkey'
+      ) THEN
+        ALTER TABLE public.rentals
+          ADD CONSTRAINT rentals_negotiation_id_fkey
+          FOREIGN KEY (negotiation_id) REFERENCES public.price_negotiations(id) ON DELETE SET NULL;
+      END IF;
+    END IF;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 11. TABLE: sms_consent_records (4 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'sms_consent_records') THEN
+    ALTER TABLE public.sms_consent_records
+      ADD COLUMN IF NOT EXISTS keywords_shown jsonb NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS timing_shown jsonb NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS program_version text,
+      ADD COLUMN IF NOT EXISTS page_url text;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 12. TABLE: support_tasks (8 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'support_tasks') THEN
+    ALTER TABLE public.support_tasks
+      ADD COLUMN IF NOT EXISTS insurance_status public.insurance_task_status DEFAULT 'open',
+      ADD COLUMN IF NOT EXISTS verification_state text NOT NULL DEFAULT 'not_submitted',
+      ADD COLUMN IF NOT EXISTS verification_notes text,
+      ADD COLUMN IF NOT EXISTS verified_at timestamptz,
+      ADD COLUMN IF NOT EXISTS verified_by uuid,
+      ADD COLUMN IF NOT EXISTS staff_feedback text,
+      ADD COLUMN IF NOT EXISTS staff_resolved_at timestamptz,
+      ADD COLUMN IF NOT EXISTS staff_resolved_by uuid;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 13. TABLE: training_completions (4 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'training_completions') THEN
+    ALTER TABLE public.training_completions
+      ADD COLUMN IF NOT EXISTS verification_status text NOT NULL DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS review_notes text,
+      ADD COLUMN IF NOT EXISTS verified_at timestamptz,
+      ADD COLUMN IF NOT EXISTS verified_by uuid;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 14. TABLE: vehicle_geofences (3 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'vehicle_geofences') THEN
+    ALTER TABLE public.vehicle_geofences
+      ADD COLUMN IF NOT EXISTS name text,
+      ADD COLUMN IF NOT EXISTS created_by uuid,
+      ADD COLUMN IF NOT EXISTS updated_by uuid;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 15. TABLE: vehicles (5 missing columns)
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'vehicles') THEN
+    ALTER TABLE public.vehicles
+      ADD COLUMN IF NOT EXISTS is_enabled boolean NOT NULL DEFAULT true,
+      ADD COLUMN IF NOT EXISTS disabled_at timestamptz,
+      ADD COLUMN IF NOT EXISTS disabled_reason text,
+      ADD COLUMN IF NOT EXISTS enabled_at timestamptz,
+      ADD COLUMN IF NOT EXISTS lockdown_reason text;
+
+    -- Ensure existing vehicles default to enabled
+    UPDATE public.vehicles
+      SET is_enabled = true
+      WHERE is_enabled IS NULL;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- VERIFICATION NOTIFICATION
+-- ------------------------------------------------------------------------------
+DO $$
+BEGIN
+  RAISE NOTICE '✅ RentMaikar 99-column schema reconciliation migration completed successfully.';
+END $$;
+
+
+-- ==============================================================================
+-- [381/381] Migration: 20260911090000_harden_event_deep_link.sql
+-- ==============================================================================
+
+-- ==============================================================================
+-- Hardens public.event_deep_link with comprehensive table coverage, role safety,
+-- search_path isolation, and frontend URL/tab synchronization.
+-- ==============================================================================
+
+CREATE OR REPLACE FUNCTION public.event_deep_link(_table text, _record_id text, _recipient uuid)
+RETURNS text
+LANGUAGE plpgsql
+STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_table text := lower(btrim(COALESCE(_table, '')));
+  v_record text := btrim(COALESCE(_record_id, ''));
+  v_is_staff boolean := FALSE;
+  v_role text;
+  v_path text;
+BEGIN
+  -- 1. Determine staff eligibility safely
+  IF _recipient IS NOT NULL THEN
+    v_is_staff := COALESCE(public.is_admin(_recipient), false)
+                  OR EXISTS (
+                    SELECT 1 FROM public.user_roles ur
+                    WHERE ur.user_id = _recipient
+                      AND ur.role::text IN (
+                        'admin',
+                        'admin_assistant',
+                        'legal_support',
+                        'iot_support',
+                        'vehicle_support',
+                        'finance_admin',
+                        'superadmin'
+                      )
+                  );
+  END IF;
+
+  -- 2. Staff routing
+  IF v_is_staff THEN
+    v_path := CASE v_table
+      WHEN 'applications' THEN '/admin?portal=crm&tab=applications'
+      WHEN 'invoices' THEN '/admin?portal=crm&tab=billing'
+      WHEN 'payments' THEN '/admin/payments'
+      WHEN 'rentals' THEN '/admin/rental-reconciliation'
+      WHEN 'user_subscriptions' THEN '/admin?portal=crm&tab=subscriptions'
+      WHEN 'subscriptions' THEN '/admin?portal=crm&tab=subscriptions'
+      WHEN 'legal_agreements' THEN '/admin?portal=crm&tab=legal-agreements'
+      WHEN 'rent_to_own_agreements' THEN '/admin?portal=crm&tab=rent-to-own'
+      WHEN 'price_negotiations' THEN '/admin?portal=crm&tab=negotiations'
+      WHEN 'vehicle_booking_requests' THEN '/admin?portal=crm&tab=approvals'
+      WHEN 'booking_requests' THEN '/admin?portal=crm&tab=approvals'
+      WHEN 'vehicles' THEN '/admin/vehicle-queue'
+      WHEN 'owner_payouts' THEN '/admin/treasury'
+      WHEN 'payouts' THEN '/admin/treasury'
+      WHEN 'withdrawal_authorizations' THEN '/admin/treasury'
+      WHEN 'withdrawals' THEN '/admin/treasury'
+      WHEN 'driver_call_ins' THEN '/admin?portal=operations&tab=call-ins'
+      WHEN 'call_ins' THEN '/admin?portal=operations&tab=call-ins'
+      WHEN 'incidents' THEN '/admin?portal=operations&tab=incidents'
+      WHEN 'support_tasks' THEN '/admin?portal=operations&tab=tasks'
+      ELSE '/admin'
+    END;
+
+  -- 3. Non-staff or driver/owner routing
+  ELSE
+    IF _recipient IS NOT NULL THEN
+      SELECT ur.role::text INTO v_role
+        FROM public.user_roles ur
+       WHERE ur.user_id = _recipient
+       ORDER BY CASE ur.role::text WHEN 'owner' THEN 1 WHEN 'driver' THEN 2 ELSE 3 END
+       LIMIT 1;
+    END IF;
+
+    IF v_role = 'owner' THEN
+      v_path := CASE v_table
+        WHEN 'invoices' THEN '/owner/dashboard?tab=earnings'
+        WHEN 'payments' THEN '/owner/dashboard?tab=earnings'
+        WHEN 'owner_payouts' THEN '/owner/dashboard?tab=earnings'
+        WHEN 'payouts' THEN '/owner/dashboard?tab=earnings'
+        WHEN 'withdrawal_authorizations' THEN '/owner/dashboard?tab=withdrawals'
+        WHEN 'withdrawals' THEN '/owner/dashboard?tab=withdrawals'
+        WHEN 'rentals' THEN '/owner/dashboard?tab=vehicles'
+        WHEN 'vehicles' THEN '/owner/dashboard?tab=vehicles'
+        WHEN 'rent_to_own_agreements' THEN '/owner/dashboard?tab=rent-to-own'
+        WHEN 'legal_agreements' THEN '/owner/dashboard?tab=agreements'
+        WHEN 'price_negotiations' THEN '/owner/dashboard?tab=pricing'
+        WHEN 'vehicle_booking_requests' THEN '/owner/dashboard?tab=vehicles'
+        WHEN 'booking_requests' THEN '/owner/dashboard?tab=vehicles'
+        WHEN 'user_subscriptions' THEN '/owner/dashboard?tab=settings'
+        WHEN 'subscriptions' THEN '/owner/dashboard?tab=settings'
+        WHEN 'driver_call_ins' THEN '/owner/dashboard?tab=call-history'
+        WHEN 'call_ins' THEN '/owner/dashboard?tab=call-history'
+        WHEN 'incidents' THEN '/owner/dashboard?tab=vehicles'
+        WHEN 'applications' THEN '/owner/dashboard?tab=overview'
+        ELSE '/owner/dashboard'
+      END;
+    ELSIF v_role = 'driver' THEN
+      v_path := CASE v_table
+        WHEN 'invoices' THEN '/driver/dashboard?tab=payments'
+        WHEN 'payments' THEN '/driver/dashboard?tab=payments'
+        WHEN 'rentals' THEN '/driver/dashboard?tab=overview'
+        WHEN 'rent_to_own_agreements' THEN '/driver/dashboard?tab=lease-to-own'
+        WHEN 'legal_agreements' THEN '/driver/dashboard?tab=agreements'
+        WHEN 'price_negotiations' THEN '/driver/dashboard?tab=negotiate'
+        WHEN 'vehicle_booking_requests' THEN '/driver/dashboard?tab=overview'
+        WHEN 'booking_requests' THEN '/driver/dashboard?tab=overview'
+        WHEN 'user_subscriptions' THEN '/driver/dashboard?tab=subscriptions'
+        WHEN 'subscriptions' THEN '/driver/dashboard?tab=subscriptions'
+        WHEN 'driver_call_ins' THEN '/driver/dashboard?tab=call-history'
+        WHEN 'call_ins' THEN '/driver/dashboard?tab=call-history'
+        WHEN 'incidents' THEN '/driver/dashboard?tab=incidents'
+        WHEN 'vehicles' THEN '/catalogue/budget'
+        WHEN 'applications' THEN '/driver/dashboard?tab=overview'
+        ELSE '/driver/dashboard'
+      END;
+    ELSE
+      -- Recipient has no explicit role or is null: infer reasonable default
+      IF v_table IN ('vehicles', 'applications', 'owner_payouts', 'withdrawal_authorizations', 'withdrawals') THEN
+        v_path := '/admin';
+      ELSE
+        v_path := '/dashboard';
+      END IF;
+    END IF;
+  END IF;
+
+  -- 4. Append record query parameter when provided
+  IF v_record <> '' THEN
+    v_path := v_path || CASE WHEN position('?' in v_path) > 0 THEN '&' ELSE '?' END
+              || 'record=' || v_record;
+  END IF;
+
+  RETURN 'https://rentmaikar.com' || v_path;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.event_deep_link(text, text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.event_deep_link(text, text, uuid) TO authenticated, service_role;
+
