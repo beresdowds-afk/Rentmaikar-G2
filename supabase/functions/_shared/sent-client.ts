@@ -36,6 +36,8 @@ export interface SentSendRequest {
   senderId?: string;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string;
+  /** Explicitly toggle sandbox simulation vs live cellular dispatch */
+  sandbox?: boolean;
 }
 
 export interface SentSendResult {
@@ -111,7 +113,14 @@ function sentBaseUrl(): string {
   return Deno.env.get("SENT_API_BASE_URL") || DEFAULT_BASE_URL;
 }
 
-function sandboxMode(): boolean {
+function sandboxMode(override?: boolean): boolean {
+  if (override !== undefined) return override;
+  // If explicitly forced live or live delivery enabled
+  if ((Deno.env.get("SENT_FORCE_LIVE") ?? "").toLowerCase() === "true" ||
+      (Deno.env.get("SENT_LIVE_MODE") ?? "").toLowerCase() === "true" ||
+      (Deno.env.get("SENT_SANDBOX_MODE") ?? "").toLowerCase() === "false") {
+    return false;
+  }
   return (Deno.env.get("SENT_SANDBOX_MODE") ?? "false").toLowerCase() === "true";
 }
 
@@ -176,6 +185,7 @@ export async function sendViaSent(req: SentSendRequest): Promise<SentSendResult>
 
 
   try {
+    const useSandbox = sandboxMode(req.sandbox);
     const res = await fetch(`${sentBaseUrl()}/v3/messages`, {
       method: "POST",
       headers: {
@@ -188,7 +198,7 @@ export async function sendViaSent(req: SentSendRequest): Promise<SentSendResult>
         // v3 schema: { sandbox?, to: string[], channel: string[], template?, text? }
         to: [normalizeRecipient(req.channel, req.to)],
         channel: [req.channel],
-        sandbox: sandboxMode(),
+        sandbox: useSandbox,
         ...(req.text ? { text: req.text } : {}),
         ...(req.template
           ? {
@@ -223,7 +233,7 @@ export async function sendViaSent(req: SentSendRequest): Promise<SentSendResult>
       messageId: recipient?.message_id ?? (data as any)?.id ?? `sent_${Date.now()}`,
       status: (data as any)?.data?.status ?? (data as any)?.status ?? "queued",
       channel: recipient?.channel ?? req.channel,
-      sandbox: sandboxMode(),
+      sandbox: useSandbox,
     };
 
   } catch (e) {

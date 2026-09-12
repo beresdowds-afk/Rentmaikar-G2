@@ -23,7 +23,7 @@ const DEFAULT_CONFIG: CPaaSConfig = {
   enableFailover: true,
   // Twilio is voice-only (no messaging approval) — messaging failover is Sent.
   fallbackProvider: "sent",
-  sandboxMode: true,
+  sandboxMode: false,
   defaultSenderId: "Rentmaikar",
   channelRouting: {
     sms: "sent",
@@ -203,6 +203,7 @@ export class CPaaSRouterService {
         notificationType: payload.notificationType || "general",
         customMessage: payload.message,
         providerOverride: "sent",
+        sandbox: this.config.sandboxMode,
         ...(isWa && payload.templateId
           ? {
               whatsappTemplateId: payload.templateId,
@@ -242,6 +243,7 @@ export class CPaaSRouterService {
         notificationType: payload.notificationType || "general",
         customMessage: payload.message,
         providerOverride: "twilio",
+        sandbox: this.config.sandboxMode,
         metadata: payload.metadata,
       },
     });
@@ -272,6 +274,7 @@ export class CPaaSRouterService {
         customMessage: payload.message,
         provider: "termii",
         providerOverride: "termii",
+        sandbox: this.config.sandboxMode,
         metadata: payload.metadata,
       },
     });

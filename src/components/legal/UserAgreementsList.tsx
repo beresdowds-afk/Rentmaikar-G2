@@ -6,7 +6,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, FileText, Download, Eye, PenTool, CheckCircle, CalendarClock } from 'lucide-react';
+import { Loader2, FileText, Download, Eye, PenTool, CheckCircle, CalendarClock, ShieldAlert, CheckCircle2, CreditCard, Lock } from 'lucide-react';
+import { useDriverSecurityDepositStatus } from '@/hooks/useSecurityDepositPayment';
+import { useSecurityDeposit } from '@/hooks/useSecurityDeposit';
+import { useRegion } from '@/contexts/RegionContext';
 
 const renewalDaysLeft = (expiresAt: string) =>
   Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000);
@@ -54,6 +57,9 @@ interface UserAgreementsListProps {
 
 export default function UserAgreementsList({ userType }: UserAgreementsListProps) {
   const { user } = useAuth();
+  const { country } = useRegion();
+  const { deposit: depositConfig, formatted: formattedDeposit } = useSecurityDeposit(country);
+  const { isPaid: isDepositPaid, isLoading: isDepositLoading, recordPayment, isRecording: isPayingDeposit } = useDriverSecurityDepositStatus(country);
   const [agreements, setAgreements] = useState<AgreementWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAgreement, setSelectedAgreement] = useState<AgreementWithDetails | null>(null);
@@ -62,6 +68,23 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
   const [signature, setSignature] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
+  const isDriverDepositBlocked = userType === 'driver' && !isDepositPaid;
+
+  const handlePayDepositNow = async () => {
+    try {
+      const amount = depositConfig?.amount || (country?.toLowerCase().startsWith('nig') ? 250000 : 500);
+      const currency = depositConfig?.currency || (country?.toLowerCase().startsWith('nig') ? 'NGN' : 'USD');
+      await recordPayment({
+        amount,
+        currency,
+        paymentMethod: 'Instant Card / Transfer Gateway',
+      });
+      toast.success('Platform Security Deposit & Fee confirmed! You are now eligible to sign agreements.');
+    } catch (e: any) {
+      toast.error(`Payment failed: ${e.message || 'Please try again'}`);
+    }
+  };
 
   useEffect(() => {
     fetchAgreements();
@@ -152,6 +175,11 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
   };
 
   const handleSign = async () => {
+    if (userType === 'driver' && isDriverDepositBlocked) {
+      toast.error('Platform Security Deposit & Fee payment is required before signing the agreement.');
+      return;
+    }
+
     if (!selectedAgreement || !signature) {
       toast.error('Please provide your signature');
       return;
@@ -315,6 +343,51 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Driver Deposit Status Banner */}
+          {userType === 'driver' && (
+            <div className="mb-4">
+              {isDepositPaid ? (
+                <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <span className="font-semibold text-emerald-900">Platform Security Deposit & Fee Verified</span>
+                      <p className="text-emerald-700">Payment on file. You are cleared to sign agreements.</p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300">
+                    Paid
+                  </Badge>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlert className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <span className="font-semibold text-amber-900">Platform Security Deposit & Fee Required to Sign</span>
+                      <p className="text-amber-800 mt-0.5">
+                        Drivers must settle the Platform Security Deposit & Fee ({formattedDeposit || (country?.toLowerCase().startsWith('nig') ? '₦250,000 NGN' : '$500 USD')}) before signing agreements with vehicle owners.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold gap-1.5 shrink-0"
+                    onClick={handlePayDepositNow}
+                    disabled={isPayingDeposit}
+                  >
+                    {isPayingDeposit ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-3.5 w-3.5" />
+                    )}
+                    Pay Deposit Now
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {pendingCount > 0 && (
             <Alert className="mb-4 border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
               <PenTool className="h-4 w-4 text-amber-600 dark:text-amber-400" />
@@ -496,15 +569,39 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                 </AlertDescription>
               </Alert>
 
-              <div>
-                <SignaturePad
-                  onSignatureChange={setSignature}
-                  disabled={signing}
-                  signerName={userType === 'owner' ? selectedAgreement.owner_name : selectedAgreement.driver_name}
-                  signerRole={userType === 'owner' ? 'Vehicle Owner' : 'Driver'}
-                  label={userType === 'owner' ? 'Your Signature (Vehicle Owner)' : 'Your Signature (Driver)'}
-                />
-              </div>
+              {/* Deposit gating inside dialog */}
+              {userType === 'driver' && isDriverDepositBlocked ? (
+                <div className="p-4 rounded-xl border border-dashed border-amber-300 bg-amber-50/70 text-center space-y-2.5">
+                  <Lock className="h-6 w-6 text-amber-600 mx-auto" />
+                  <h4 className="font-semibold text-sm text-slate-900">Platform Security Deposit & Fee Required</h4>
+                  <p className="text-xs text-slate-600 max-w-sm mx-auto">
+                    Drivers must remit the refundable Platform Security Deposit & Fee ({formattedDeposit || (country?.toLowerCase().startsWith('nig') ? '₦250,000 NGN' : '$500 USD')}) before signing the owner-driver agreement.
+                  </p>
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold gap-1.5"
+                    onClick={handlePayDepositNow}
+                    disabled={isPayingDeposit}
+                  >
+                    {isPayingDeposit ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-3.5 w-3.5" />
+                    )}
+                    Pay Deposit ({formattedDeposit || (country?.toLowerCase().startsWith('nig') ? '₦250,000' : '$500')}) & Unlock
+                  </Button>
+                </div>
+              ) : (
+                <div>
+                  <SignaturePad
+                    onSignatureChange={setSignature}
+                    disabled={signing}
+                    signerName={userType === 'owner' ? selectedAgreement.owner_name : selectedAgreement.driver_name}
+                    signerRole={userType === 'owner' ? 'Vehicle Owner' : 'Driver'}
+                    label={userType === 'owner' ? 'Your Signature (Vehicle Owner)' : 'Your Signature (Driver)'}
+                  />
+                </div>
+              )}
 
               <div className="flex items-start gap-2.5 rounded-lg border p-3 bg-muted/30">
                 <Checkbox
@@ -531,7 +628,8 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                 </Button>
                 <Button
                   onClick={handleSign}
-                  disabled={!signature || !legalConsent || signing}
+                  disabled={!signature || !legalConsent || signing || isDriverDepositBlocked}
+                  className={isDriverDepositBlocked ? "opacity-50 cursor-not-allowed" : ""}
                 >
                   {signing ? (
                     <>
@@ -541,7 +639,7 @@ export default function UserAgreementsList({ userType }: UserAgreementsListProps
                   ) : (
                     <>
                       <PenTool className="h-4 w-4 mr-2" />
-                      Sign Agreement
+                      {isDriverDepositBlocked ? 'Deposit Payment Required' : 'Sign Agreement'}
                     </>
                   )}
                 </Button>

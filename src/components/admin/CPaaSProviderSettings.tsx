@@ -267,6 +267,29 @@ export function CPaaSProviderSettings() {
           </RadioGroup>
         </div>
 
+        {/* Delivery Mode & Live / Sandbox Toggle */}
+        <div className="p-4 rounded-xl border bg-muted/20 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <strong className="text-sm font-semibold flex items-center gap-1.5">
+                <Globe className="w-4 h-4 text-emerald-600" /> Real-time Live Network Delivery
+              </strong>
+              <p className="text-xs text-muted-foreground">
+                When enabled (recommended), SMS and WhatsApp messages transmit across real cellular carrier networks to user devices. When disabled, messages run in simulated sandbox mode.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant={!config.sandboxMode ? "default" : "secondary"} className={!config.sandboxMode ? "bg-emerald-600" : ""}>
+                {!config.sandboxMode ? "LIVE NETWORK" : "SANDBOX MODE"}
+              </Badge>
+              <Switch
+                checked={!config.sandboxMode}
+                onCheckedChange={(isLive) => updateConfig({ sandboxMode: !isLive })}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Failover & Channel Rules */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
           {/* Failover Protection Card */}

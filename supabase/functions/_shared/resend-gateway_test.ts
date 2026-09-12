@@ -8,6 +8,7 @@ import {
   resendFrom,
   resendHeaders,
   resendSendEmail,
+  sendEmailViaSent,
 } from "./resend-gateway.ts";
 
 Deno.env.set("RESEND_SENDING_DOMAIN", "notify.rentmaikar.com");
@@ -102,3 +103,42 @@ Deno.test("a 401 raises a provider alert and still returns the response", async 
     "expected an email_provider_alerts insert",
   );
 });
+
+Deno.test("falls back to SENT.DM when Resend fails", async () => {
+  const original = globalThis.fetch;
+  const calls: { url: string; body?: Record<string, unknown> }[] = [];
+  globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
+    const href = String(url);
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ url: href, body });
+    if (href.includes("/emails")) {
+      return Promise.resolve(new Response("Resend error", { status: 500 }));
+    }
+    if (href.includes("api.sent.dm/v3/messages")) {
+      return Promise.resolve(new Response(JSON.stringify({
+        data: { status: "sent", recipients: [{ message_id: "sent_msg_123" }] },
+      }), { status: 200 }));
+    }
+    return Promise.resolve(new Response("ok", { status: 200 }));
+  }) as typeof fetch;
+
+  Deno.env.set("SENT_API_KEY", "test_sent_key");
+  Deno.env.set("SENT_ENABLED", "true");
+
+  try {
+    const res = await resendSendEmail({
+      from: "Rentmaikar <noreply@rentmaikar.com>",
+      to: ["driver@example.com"],
+      subject: "Test Fallback",
+      html: "<p>fallback body</p>",
+    }, "re_test");
+
+    assertEquals(res.status, 200);
+    assert(calls.some((c) => c.url.includes("api.sent.dm/v3/messages")));
+  } finally {
+    globalThis.fetch = original;
+    Deno.env.delete("SENT_API_KEY");
+    Deno.env.delete("SENT_ENABLED");
+  }
+});
+

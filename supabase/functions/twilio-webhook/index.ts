@@ -225,11 +225,13 @@ serve(async (req) => {
 
     const from = formData.get("From") as string;
     const to = formData.get("To") as string;
-    const messageSid = formData.get("MessageSid") as string;
+    const messageSid = (formData.get("MessageSid") || formData.get("SmsSid")) as string;
     const accountSid = formData.get("AccountSid") as string;
+    const messageStatus = (formData.get("MessageStatus") || formData.get("SmsStatus")) as string;
+    const bodyText = formData.get("Body") as string;
 
     // Determine channel type
-    const channel = from?.startsWith("whatsapp:") ? "whatsapp" : "sms";
+    const channel = (from?.startsWith("whatsapp:") || to?.startsWith("whatsapp:")) ? "whatsapp" : "sms";
     const cleanFrom = from?.replace("whatsapp:", "");
     const cleanTo = to?.replace("whatsapp:", "");
 
@@ -237,6 +239,70 @@ serve(async (req) => {
     let region = "USA";
     if (cleanFrom?.startsWith("+234") || cleanTo?.startsWith("+234")) {
       region = "NIGERIA";
+    }
+
+    // ─── Handle Delivery Status Callbacks (MessageStatus / SmsStatus without Body) ───
+    if (messageStatus && !formData.get("CallSid") && !bodyText) {
+      console.log(`[twilio-webhook] Processing delivery status callback for ${messageSid}: ${messageStatus}`);
+      const errorCode = (formData.get("ErrorCode") || "") as string;
+      const errorMessage = (formData.get("ErrorMessage") || "") as string;
+
+      await logMessagingEvent(supabase, {
+        channel,
+        provider: "twilio",
+        event_type: messageStatus === "delivered" ? "delivered"
+          : messageStatus === "read" ? "read"
+          : (messageStatus === "failed" || messageStatus === "undelivered") ? "failed"
+          : messageStatus === "sent" ? "sent"
+          : "queued",
+        direction: "outbound",
+        recipient: to || cleanTo || "",
+        region,
+        provider_message_id: messageSid,
+        error_code: errorCode,
+        error_message: errorMessage,
+        raw_payload: { messageStatus, to, from },
+      });
+
+      if (messageSid) {
+        const { data: existingMsg } = await supabase
+          .from("inbox_messages")
+          .select("id, metadata")
+          .eq("external_id", messageSid)
+          .limit(1)
+          .single();
+
+        if (existingMsg) {
+          const currentMeta = (existingMsg.metadata || {}) as Record<string, unknown>;
+          await supabase
+            .from("inbox_messages")
+            .update({
+              metadata: {
+                ...currentMeta,
+                delivery_status: messageStatus,
+                delivery_updated_at: new Date().toISOString(),
+                ...(errorCode ? { error_code: errorCode, error_message: errorMessage } : {}),
+              },
+            })
+            .eq("id", existingMsg.id);
+        }
+
+        await supabase
+          .from("unified_message_log")
+          .update({
+            delivery_status: (messageStatus === "delivered" || messageStatus === "read") ? "delivered"
+              : (messageStatus === "failed" || messageStatus === "undelivered") ? "failed"
+              : "pending",
+            error_message: errorMessage || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("provider_message_id", messageSid);
+      }
+
+      return new Response(
+        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "text/xml" } }
+      );
     }
 
     // ─── Parse message type ───

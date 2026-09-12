@@ -21,10 +21,12 @@ export class SentBackendClient {
     this.apiKey = process.env.SENT_API_KEY || "";
     this.baseUrl = process.env.SENT_API_BASE_URL || "https://api.sent.dm";
     this.senderId = process.env.SENT_SENDER_ID || "Rentmaikar";
-    this.sandbox = process.env.SENT_SANDBOX_MODE === "true" || !this.apiKey;
+    const isLiveForced = process.env.SENT_FORCE_LIVE === "true" || process.env.SENT_LIVE_MODE === "true";
+    this.sandbox = !isLiveForced && (process.env.SENT_SANDBOX_MODE === "true" || !this.apiKey);
   }
 
   async sendMessage(payload: SentMessagePayload) {
+    const isSandbox = payload.sandbox !== undefined ? payload.sandbox : this.sandbox;
     if (this.apiKey && this.apiKey !== "mock" && !this.apiKey.startsWith("demo_")) {
       const response = await fetch(`${this.baseUrl}/v3/messages`, {
         method: "POST",
@@ -32,11 +34,12 @@ export class SentBackendClient {
           "Content-Type": "application/json",
           "x-api-key": this.apiKey,
           "x-idempotency-key": `rm_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          ...(this.sandbox ? { "x-sandbox": "true" } : {}),
+          ...(isSandbox ? { "x-sandbox": "true" } : {}),
         },
         body: JSON.stringify({
           to: payload.to,
           channel: payload.channel,
+          sandbox: isSandbox,
           text: payload.text,
           template: payload.template,
           sender_id: payload.sender_id || this.senderId,

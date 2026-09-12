@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { logMessagingEvent } from "../_shared/messaging-events.ts";
 import { isStopKeyword, isStartKeyword } from "../_shared/opt-out.ts";
 import { maybeAutoReply } from "../_shared/auto-reply.ts";
 
@@ -203,9 +204,11 @@ serve(async (req) => {
 
     const payload = await req.json();
 
-    const from = (payload.from || payload.mobile || payload.phone || "") as string;
+    const from = (payload.from || payload.mobile || payload.phone || payload.receiver || "") as string;
     const messageId = (payload.message_id || payload.id || "") as string;
     const channel = (payload.channel || "sms") as string;
+    const status = (payload.status || payload.delivery_status || "") as string;
+    const hasText = !!(payload.text || payload.body || payload.message);
 
     // Normalize Nigerian phone
     let cleanFrom = from;
@@ -214,6 +217,63 @@ serve(async (req) => {
     }
 
     const inboundChannel = channel === "whatsapp" ? "whatsapp" : "sms";
+
+    // ─── Handle Termii Delivery Reports (DLR) ───
+    if (status && !hasText && messageId) {
+      console.log(`[termii-webhook] Processing delivery report for message ${messageId}: ${status}`);
+      const normStatus = status.toLowerCase();
+      const eventType = (normStatus === "delivered" || normStatus === "successful") ? "delivered"
+        : (normStatus === "failed" || normStatus === "rejected" || normStatus === "dnd_active") ? "failed"
+        : (normStatus === "sent") ? "sent"
+        : "queued";
+
+      await logMessagingEvent(supabase, {
+        channel: inboundChannel,
+        provider: "termii",
+        event_type: eventType,
+        direction: "outbound",
+        recipient: cleanFrom || "",
+        region: "NIGERIA",
+        provider_message_id: messageId,
+        error_code: normStatus === "failed" ? status : undefined,
+        raw_payload: payload,
+      });
+
+      const { data: existingMsg } = await supabase
+        .from("inbox_messages")
+        .select("id, metadata")
+        .eq("external_id", messageId)
+        .limit(1)
+        .single();
+
+      if (existingMsg) {
+        const currentMeta = (existingMsg.metadata || {}) as Record<string, unknown>;
+        await supabase
+          .from("inbox_messages")
+          .update({
+            metadata: {
+              ...currentMeta,
+              delivery_status: status,
+              delivery_updated_at: new Date().toISOString(),
+            },
+          })
+          .eq("id", existingMsg.id);
+      }
+
+      await supabase
+        .from("unified_message_log")
+        .update({
+          delivery_status: eventType === "delivered" ? "delivered" : eventType === "failed" ? "failed" : "pending",
+          error_message: eventType === "failed" ? status : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("provider_message_id", messageId);
+
+      return new Response(
+        JSON.stringify({ success: true, type: "delivery_report", status }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // ─── Parse message type ───
     const parsed = parseTermiiMessage(payload);

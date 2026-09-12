@@ -22,6 +22,7 @@ import { DeviceIdentityPanel } from "./DeviceIdentityPanel";
 import { HologramAccountPanel } from "./HologramAccountPanel";
 import { HologramOnboardWizard } from "./HologramOnboardWizard";
 import { HologramSyncActivityPanel } from "./HologramSyncActivityPanel";
+import { ProviderCredentialSettings } from "./ProviderCredentialSettings";
 
 
 interface SimCard {
@@ -101,9 +102,22 @@ export function HologramDashboard() {
       const { data, error } = await supabase.functions.invoke("hologram-admin", {
         body: { action, ...body },
       });
-      if (error) throw new Error(error.message);
-      const res = data as { ok?: boolean; imported?: number; updated?: number; state?: string | null; usage_mb?: number | null };
-      if (res?.ok === false) throw new Error(JSON.stringify(res));
+      if (error) {
+        let errorMsg = error.message;
+        try {
+          const ctx = (error as unknown as { context?: { text?: () => Promise<string> } }).context;
+          if (ctx?.text) {
+            const parsed = JSON.parse(await ctx.text());
+            if (parsed?.error) errorMsg = parsed.error;
+            else if (parsed?.message) errorMsg = parsed.message;
+          }
+        } catch { /* keep generic message */ }
+        throw new Error(errorMsg);
+      }
+      const res = data as { ok?: boolean; error?: string; message?: string; imported?: number; updated?: number; state?: string | null; usage_mb?: number | null };
+      if (res?.ok === false) {
+        throw new Error(res.error || res.message || JSON.stringify(res));
+      }
       if (action === "import_sims") toast.success(`Imported ${res?.imported ?? 0} SIMs`);
       else if (action === "sync_usage") toast.success(`Synced usage for ${res?.updated ?? 0} SIMs`);
       else if (action === "test_connection") toast.success("Hologram API reachable");
@@ -461,8 +475,8 @@ export function HologramDashboard() {
               </div>
               <div className="text-xs text-muted-foreground">
                 Base URL: <code>https://dashboard.hologram.io/api/1</code>. Auth: Basic (<code>apikey:$KEY</code>).
-                Endpoints used: <code>/links/cellular</code>, <code>/links/cellular/{"{id}"}/state</code>,
-                <code> /links/cellular/{"{id}"}/usage</code>.
+                Endpoints used: <code>/devices</code>, <code>/devices/{"{id}"}/state</code>,
+                <code> /usage/data/monthly</code>.
               </div>
             </CardContent>
           </Card>
@@ -476,6 +490,8 @@ export function HologramDashboard() {
               downstream telemetry can be attributed. Every change is written to <code>iot_audit_log</code>.
             </CardContent>
           </Card>
+
+          <ProviderCredentialSettings />
         </TabsContent>
 
         <TabsContent value="audit">

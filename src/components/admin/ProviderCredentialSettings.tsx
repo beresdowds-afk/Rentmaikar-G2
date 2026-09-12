@@ -106,7 +106,7 @@ function ProviderForm({ provider }: { provider: "hologram" | "traccar" }) {
   );
 }
 
-export default function ProviderCredentialSettings() {
+export function ProviderCredentialSettings() {
   const versionsQuery = useQuery({
     queryKey: ["provider-credential-versions"],
     queryFn: async (): Promise<Version[]> => {
@@ -161,3 +161,5 @@ export default function ProviderCredentialSettings() {
     </Card>
   );
 }
+
+export default ProviderCredentialSettings;

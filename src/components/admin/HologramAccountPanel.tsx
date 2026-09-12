@@ -10,7 +10,7 @@ import { toast } from "sonner";
 const invoke = async (action: string) => {
   const { data, error } = await supabase.functions.invoke("hologram-admin", { body: { action } });
   if (error) throw new Error(error.message);
-  return data as { ok?: boolean; org_id?: string | null; body?: { data?: unknown } };
+  return data as { ok?: boolean; org_id?: string | null; data?: unknown; body?: { data?: unknown } };
 };
 
 type Plan = { id?: number; name?: string; description?: string; amount?: number; zone?: string; data?: number };
@@ -35,10 +35,10 @@ export function HologramAccountPanel() {
         invoke("list_tags").catch(() => null),
       ]);
       setOrgId(acct?.org_id ?? null);
-      setMe((acct?.body?.data as Record<string, unknown>) ?? null);
-      setOrgs(((o?.body?.data as Org[]) ?? []).filter(Boolean));
-      setPlans(((p?.body?.data as Plan[]) ?? []).filter(Boolean));
-      setTags(((t?.body?.data as Tag[]) ?? []).filter(Boolean));
+      setMe(((acct?.data ?? acct?.body?.data) as Record<string, unknown>) ?? null);
+      setOrgs((((o?.data ?? o?.body?.data) as Org[]) ?? []).filter(Boolean));
+      setPlans((((p?.data ?? p?.body?.data) as Plan[]) ?? []).filter(Boolean));
+      setTags((((t?.data ?? t?.body?.data) as Tag[]) ?? []).filter(Boolean));
     } catch (e) {
       toast.error("Could not load Hologram account", { description: (e as Error).message });
     } finally {

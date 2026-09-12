@@ -27,6 +27,7 @@ const HeroSection = () => {
 
   const navLinks = [
     { href: "/", label: "Home" },
+    { href: "/#get-qualified", label: "Get Qualified" },
     { href: "/how-it-works", label: "How it Works" },
     { href: "/catalogue/budget", label: "Budget Cars" },
     { href: "/catalogue/standard", label: "Standard Cars" },

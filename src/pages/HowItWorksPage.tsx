@@ -59,7 +59,7 @@ const HowItWorksPage = () => {
           idDoc,
           "Valid driver's licence (front & back)",
           "A recent selfie for liveness check",
-          "Three referees (name, phone, address)",
+          "Three referees (name, phone number)",
         ],
       },
       {

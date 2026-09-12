@@ -6,6 +6,7 @@ import Footer from "@/components/layout/Footer";
 import HeroSection from "@/components/home/HeroSection";
 import PricingHintBanner from "@/components/home/PricingHintBanner";
 import CategoryCards from "@/components/home/CategoryCards";
+import GetQualifiedSection from "@/components/home/GetQualifiedSection";
 import HowItWorks from "@/components/home/HowItWorks";
 import FeaturesSection from "@/components/home/FeaturesSection";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
@@ -84,6 +85,7 @@ useEffect(() => {
         <div data-tour="categories">
           <CategoryCards />
         </div>
+        <GetQualifiedSection />
         <OwnerBenefitsSection />
         <HowItWorks />
         <div data-tour="features">

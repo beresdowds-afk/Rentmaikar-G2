@@ -40,6 +40,7 @@ export interface AgreementTerms {
   excessMileageFee?: string | number | null;
   previousMileage?: string | number | null;
   presentMileage?: string | number | null;
+  securityDeposit?: string | number | null;
   negotiationId?: string | null;
 }
 
@@ -49,6 +50,7 @@ export interface AgreementContext {
   vehicle: AgreementVehicleInfo;
   terms?: AgreementTerms;
   region?: string;
+  securityDeposit?: string | number | null;
   agreementDate?: Date;
   supportEmail?: string;
   supportPhone?: string;
@@ -84,6 +86,7 @@ export const AGREEMENT_PLACEHOLDERS: { token: string; description: string }[] = 
   { token: '{{contract_end_time}}', description: 'Contract end time' },
   { token: '{{currency}}', description: 'Regional currency code' },
   { token: '{{basic_rental_price}}', description: 'Agreed basic rental price' },
+  { token: '{{security_deposit}}', description: 'Platform Security Deposit & Fee (prerequisite)' },
   { token: '{{weekly_mileage_limit}}', description: 'Weekly mileage allowance' },
   { token: '{{excess_mileage_fee}}', description: 'Fee charged per excess mile' },
   { token: '{{negotiation_id}}', description: 'Reference of the approved negotiation' },
@@ -134,6 +137,7 @@ export const buildAgreementValues = (ctx: AgreementContext): Record<string, stri
     contract_end_time: val(terms.endTime),
     currency: val(terms.currency),
     basic_rental_price: val(terms.rentalPrice),
+    security_deposit: val(ctx.securityDeposit ?? terms.securityDeposit),
     weekly_mileage_limit: val(terms.weeklyMileageLimit),
     excess_mileage_fee: val(terms.excessMileageFee),
     negotiation_id: val(terms.negotiationId),

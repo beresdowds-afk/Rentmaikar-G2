@@ -227,8 +227,13 @@ async function sendViaResend(
     return { success: false, error: errText };
   }
 
-  const result = await res.json();
-  return { success: true, messageId: result.id };
+  const result = await res.json().catch(() => ({} as Record<string, unknown>));
+  const messageId =
+    (result as any)?.id ??
+    (result as any)?.data?.recipients?.[0]?.message_id ??
+    (result as any)?.messageId ??
+    `msg_${Date.now()}`;
+  return { success: true, messageId };
 }
 
 // ─── Log Email ───

@@ -14,6 +14,7 @@ import { logPipelineEvent } from "../_shared/pipeline-events.ts";
 import { isOptedOut } from "../_shared/opt-out.ts";
 import { twilioMessagingEnabled } from "../_shared/twilio-messaging-guard.ts";
 import { resendSendEmail } from "../_shared/resend-gateway.ts";
+import { sendViaSent, sentEnabled } from "../_shared/sent-client.ts";
 
 const Body = z.object({
   application_id: z.string().uuid(),
@@ -97,6 +98,31 @@ async function sendEmail(to: string, name: string, driverName: string, link: str
     return { ok: r.ok, status: r.status, error: txt.slice(0, 300) };
   });
   return { channel: "email", provider: "resend", latency_ms: Date.now() - t0, ...res };
+}
+
+async function sendSent(to: string, body: string, channel: "sms" | "whatsapp"): Promise<ChannelResult> {
+  if (await isOptedOut(to, channel)) {
+    console.log(`[opt-out] Suppressed ${channel} to ${to}`);
+    return { channel, provider: "sent", ok: false, skipped: true };
+  }
+  if (!sentEnabled()) {
+    return { channel, provider: "sent", ok: false, skipped: true };
+  }
+  const t0 = Date.now();
+  const res = await sendViaSent({
+    to,
+    channel,
+    text: body,
+    sandbox: false,
+  });
+  return {
+    channel,
+    provider: "sent",
+    ok: res.ok,
+    status: res.ok ? 200 : 500,
+    error: res.error,
+    latency_ms: Date.now() - t0,
+  };
 }
 
 async function sendTwilio(to: string, body: string, channel: "sms" | "whatsapp"): Promise<ChannelResult> {
@@ -239,12 +265,21 @@ Deno.serve(async (req) => {
       const channelResults: ChannelResult[] = [];
       if (r.email) channelResults.push(await sendEmail(r.email, r.full_name, driverName, link));
       if (r.phone) {
-        channelResults.push(
-          isNigeria(r.phone)
+        // Primary: Sent.dm (global CPaaS without carrier 10DLC blockage)
+        let smsRes = await sendSent(r.phone, smsBody, "sms");
+        if (!smsRes.ok) {
+          // Fallback: Termii for Nigeria, Twilio for USA
+          smsRes = isNigeria(r.phone)
             ? await sendTermii(r.phone, smsBody)
-            : await sendTwilio(r.phone, smsBody, "sms"),
-        );
-        channelResults.push(await sendTwilio(r.phone, smsBody, "whatsapp"));
+            : await sendTwilio(r.phone, smsBody, "sms");
+        }
+        channelResults.push(smsRes);
+
+        let waRes = await sendSent(r.phone, smsBody, "whatsapp");
+        if (!waRes.ok) {
+          waRes = await sendTwilio(r.phone, smsBody, "whatsapp");
+        }
+        channelResults.push(waRes);
       }
 
       // Log each attempt

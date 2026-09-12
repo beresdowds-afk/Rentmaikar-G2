@@ -67,6 +67,27 @@ export default defineConfig(({ mode }) => ({
               console.error("Vite sitemap middleware error:", e);
             }
           }
+
+          if (req.url?.startsWith("/api/region-qualification")) {
+            try {
+              const urlObj = new URL(req.url, "http://localhost:3000");
+              const region = urlObj.searchParams.get("region") || "USA";
+              const { resolveRegionQualification } = await import("./src/server/geminiRegionHandler");
+              const qualificationData = await resolveRegionQualification(region);
+
+              res.setHeader("Content-Type", "application/json; charset=utf-8");
+              res.setHeader("Cache-Control", "public, max-age=3600");
+              res.end(JSON.stringify(qualificationData));
+              return;
+            } catch (e) {
+              console.error("Vite region-qualification API error:", e);
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Failed to resolve qualification" }));
+              return;
+            }
+          }
+
           next();
         });
       },

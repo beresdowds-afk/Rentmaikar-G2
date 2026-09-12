@@ -30,6 +30,7 @@ import { refereeDetailsRequired } from "@/lib/referee-requirements";
 import { useRefereeRequirement } from "@/hooks/useRefereeRequirement";
 import { useRegionSamples } from "@/hooks/useRegionSamples";
 import { useSecurityDeposit } from "@/hooks/useSecurityDeposit";
+import { usePlatformSecurityFee } from "@/hooks/usePlatformSecurityFee";
 
 import {
   ADDRESS_MIN,
@@ -77,10 +78,9 @@ const buildDriverSchema = (detailsRequired: boolean, refereesRequired: boolean) 
       : optionalText(100);
   const refereePhoneField = (label: string) =>
     refereesRequired ? refereePhone(label) : optionalText(20);
-  const refereeAddress = (label: string) =>
-    detailsRequired && refereesRequired
-      ? z.string().min(5, `${label} home address is required`).max(200, "Address too long")
-      : optionalText(200);
+  // Referees: name and phone are required when refereesRequired is true.
+  // Residential address is never required for referees (optional).
+  const refereeAddress = (_label: string) => optionalText(200);
   const refereeEmail = (label: string) =>
     detailsRequired && refereesRequired
       ? z.string().min(1, `${label} email is required`).email("Invalid email address").max(255)
@@ -256,6 +256,7 @@ const DriverRegistration = () => {
   const selectedCountry = watch("country");
   const cities = selectedCountry === "usa" ? usaCities : nigeriaCities;
   const { formatted: depositFormatted } = useSecurityDeposit(selectedCountry);
+  const { formatted: securityFeeFormatted } = usePlatformSecurityFee(selectedCountry);
 
   // ---- Live home-address validation ---------------------------------------
   // Rules live in `@/lib/address-validation` so web and the Capacitor
@@ -679,9 +680,8 @@ const DriverRegistration = () => {
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   Please provide details for three referees who can vouch for your character.
-                  Name and phone number are always required — home address and email are{" "}
-                  {refereeDetailsMandatory ? "also required for identity verification" : "optional"}.
-
+                  Name and phone number are always required — email is{" "}
+                  {refereeDetailsMandatory ? "required for identity verification" : "optional"}, and residential address is optional.
                 </p>
 
 
@@ -726,10 +726,7 @@ const DriverRegistration = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label htmlFor={`referee${num}Address`}>
-                          Residential Address{" "}
-                          {!refereeDetailsMandatory && (
-                            <span className="text-muted-foreground">(optional)</span>
-                          )}
+                          Residential Address <span className="text-muted-foreground">(optional)</span>
                         </Label>
                         <Input
                           id={`referee${num}Address`}

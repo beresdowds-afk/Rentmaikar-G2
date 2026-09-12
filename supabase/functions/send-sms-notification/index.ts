@@ -84,6 +84,8 @@ interface SMSNotificationRequest {
   whatsappTemplateParams?: Record<string, string | number>;
   /** Public media URLs (WhatsApp only). */
   mediaUrls?: string[];
+  /** Explicitly toggle sandbox mode (defaults to false for live delivery to users) */
+  sandbox?: boolean;
 }
 
 
@@ -331,10 +333,13 @@ const handler = async (req: Request): Promise<Response> => {
     if (body.providerOverride !== 'twilio' && body.providerOverride !== 'termii') {
       const isWa = body.channel === 'whatsapp';
       const waTemplateId = body.whatsappTemplateId || body.templateName;
+      // Default to live cellular delivery unless the caller explicitly requests sandbox testing
+      const isSandboxRequested = body.sandbox === true;
       const sentResult = await sendViaSent({
         to: body.phone,
         channel: isWa ? 'whatsapp' : 'sms',
         text: message,
+        sandbox: isSandboxRequested,
         template: isWa && waTemplateId
           ? {
               id: waTemplateId,
@@ -348,7 +353,7 @@ const handler = async (req: Request): Promise<Response> => {
 
 
       if (sentResult.ok) {
-        console.log(`${body.channel.toUpperCase()} sent via Sent.dm:`, sentResult.messageId);
+        console.log(`${body.channel.toUpperCase()} sent via Sent.dm:`, sentResult.messageId, `(sandbox: ${sentResult.sandbox})`);
         const supabase = createClient(Deno.env.get("SUPABASE_URL")!, supabaseServiceKey);
         await logMessagingEvent(supabase, {
           channel: body.channel === 'whatsapp' ? 'whatsapp' : 'sms',
@@ -397,17 +402,17 @@ const handler = async (req: Request): Promise<Response> => {
       const termiiApiKey = Deno.env.get("TERMII_API_KEY");
 
       if (!termiiApiKey) {
-        console.error("Termii credentials not configured for Nigeria");
-        throw new Error("Nigeria SMS service not configured");
+        console.error("Termii credentials not configured for Nigeria and Sent.dm was bypassed or failed");
+        throw new Error("Nigeria SMS service not configured. Please ensure Sent.dm is enabled or set TERMII_API_KEY.");
       }
 
       const isWhatsApp = body.channel === 'whatsapp';
-      const termiiChannel = isWhatsApp ? 'whatsapp' : 'generic';
+      let termiiChannel = isWhatsApp ? 'whatsapp' : 'generic';
 
       console.log(`Sending ${body.channel.toUpperCase()} via Termii to ${body.phone}: ${body.notificationType}`);
 
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      const termiiResponse = await fetch('https://api.ng.termii.com/api/sms/send', {
+      let termiiResponse = await fetch('https://api.ng.termii.com/api/sms/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -421,8 +426,27 @@ const handler = async (req: Request): Promise<Response> => {
         }),
       });
 
+      let termiiData = await termiiResponse.json().catch(() => ({}));
 
-      const termiiData = await termiiResponse.json();
+      // If generic channel fails or DND block occurs, retry via DND route for transactional delivery
+      if ((!termiiResponse.ok || termiiData.code !== 'ok') && termiiChannel === 'generic') {
+        console.warn("Termii generic route failed, retrying via DND route:", termiiData);
+        termiiChannel = 'dnd';
+        termiiResponse = await fetch('https://api.ng.termii.com/api/sms/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: body.phone.replace('+', ''),
+            from: regionConfig.senderId,
+            sms: message,
+            type: 'plain',
+            channel: 'dnd',
+            api_key: termiiApiKey,
+            notify_url: `${supabaseUrl}/functions/v1/termii-webhook`,
+          }),
+        });
+        termiiData = await termiiResponse.json().catch(() => ({}));
+      }
 
       if (!termiiResponse.ok || termiiData.code !== 'ok') {
         console.error("Termii API error:", termiiData);

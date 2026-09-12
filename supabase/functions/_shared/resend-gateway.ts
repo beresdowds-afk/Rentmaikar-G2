@@ -12,6 +12,7 @@
  */
 
 import { reportResendAuthFailure } from "./email-alerts.ts";
+import { sentApiKey, sentEnabled } from "./sent-client.ts";
 
 const RESEND_DIRECT_URL = "https://api.resend.com";
 const RESEND_GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
@@ -102,10 +103,58 @@ function callerFunctionName(): string {
 }
 
 /**
- * Single transport for every outbound Resend email. Normalises the sender onto
- * the verified domain and keeps the original address as `reply_to` so replies
- * still reach the human mailbox. A 401/403 from Resend is terminal, so it is
- * alerted to the team with the failing recipient and payload excerpt.
+ * Fallback: send email via SENT.DM when Resend dispatch fails or is unavailable.
+ */
+export async function sendEmailViaSent(payload: Record<string, unknown>): Promise<Response | null> {
+  if (!sentEnabled()) return null;
+  const baseUrl = Deno.env.get("SENT_API_BASE_URL") || "https://api.sent.dm";
+  const apiKey = sentApiKey();
+  const toRaw = payload.to;
+  const toList: string[] = Array.isArray(toRaw)
+    ? toRaw.map(String)
+    : typeof toRaw === "string"
+      ? [toRaw]
+      : [];
+
+  if (!toList.length) return null;
+
+  try {
+    const res = await fetch(`${baseUrl}/v3/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        to: toList,
+        channel: ["email"],
+        subject: payload.subject,
+        text: payload.text || payload.subject,
+        html: payload.html,
+        from: payload.from,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (res.ok) {
+      console.log("[resend-gateway] Email fallback via SENT.DM succeeded for", toList.join(", "));
+    } else {
+      console.warn(`[resend-gateway] Email fallback via SENT.DM returned HTTP ${res.status}`);
+    }
+    return res;
+  } catch (e) {
+    console.error("[resend-gateway] Email fallback via SENT.DM error:", e);
+    return null;
+  }
+}
+
+/**
+ * Single transport for every outbound Resend email with SENT.DM fallback.
+ * Resend is the primary Global email service provider and SENT.DM is the fallback.
+ * Normalises the sender onto the verified domain and keeps the original address
+ * as `reply_to` so replies still reach the human mailbox. A 401/403 from Resend
+ * is terminal, so it is alerted to the team with the failing recipient and
+ * payload excerpt before attempting the SENT.DM fallback.
  */
 export async function resendSendEmail(body: ResendBody, key?: string | null): Promise<Response> {
   const apiKey = key ?? Deno.env.get("RESEND_API_KEY") ?? "";
@@ -121,14 +170,30 @@ export async function resendSendEmail(body: ResendBody, key?: string | null): Pr
     ...(replyTo ? { reply_to: replyTo } : {}),
   };
 
-  const res = await fetch(resendEmailsUrl(apiKey), {
-    method: "POST",
-    headers: resendHeaders(apiKey),
-    body: JSON.stringify(payload),
-  });
+  let res: Response | null = null;
+  let resendFailed = false;
 
-  if (res.status === 401 || res.status === 403) {
-    // Clone so the caller can still read the body itself.
+  if (apiKey) {
+    try {
+      res = await fetch(resendEmailsUrl(apiKey), {
+        method: "POST",
+        headers: resendHeaders(apiKey),
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        resendFailed = true;
+      }
+    } catch (e) {
+      console.warn("[resend-gateway] Primary Resend fetch failed:", e);
+      resendFailed = true;
+    }
+  } else {
+    resendFailed = true;
+  }
+
+  if (res && (res.status === 401 || res.status === 403)) {
+    // Clone so the caller can still read the body itself if not falling back.
     const detail = await res.clone().text().catch(() => "");
     const to = Array.isArray(body.to) ? body.to[0] : body.to;
     await reportResendAuthFailure({
@@ -141,7 +206,29 @@ export async function resendSendEmail(body: ResendBody, key?: string | null): Pr
     });
   }
 
-  return res;
+  // If primary Resend succeeded, return response immediately
+  if (res && res.ok) {
+    return res;
+  }
+
+  // Fallback: SENT.DM as global fallback email provider
+  if (resendFailed || !res || !res.ok) {
+    console.warn(`[resend-gateway] Resend send ${res ? `status ${res.status}` : 'unavailable'}, trying SENT.DM fallback...`);
+    const sentFallbackRes = await sendEmailViaSent(payload);
+    if (sentFallbackRes && sentFallbackRes.ok) {
+      return sentFallbackRes;
+    }
+  }
+
+  // If fallback was not successful or unavailable, return the original Resend response (or synthetic error)
+  if (res) {
+    return res;
+  }
+
+  return new Response(
+    JSON.stringify({ error: "Resend and SENT.DM email delivery failed or unconfigured" }),
+    { status: 500, headers: { "Content-Type": "application/json" } }
+  );
 }
 
 
