@@ -109,39 +109,74 @@ Deno.serve(async (req) => {
 
   try {
     // ---- Step 1: link provisioned SIMs to available devices -----------------
+    // CRITICAL DIRECTIVE: GPS AND TRACK has a direct dependence on SAREKON maps and services.
+    // Do NOT automatically map SIM to GPSANDTRACK/SAREKON devices.
+    // The device number will be manually linked when SIMs are manually inputted.
+    const isSarekonOrGpsAndTrack = (prov?: string | null, model?: string | null) => {
+      const p = String(prov || "").toLowerCase().trim();
+      const m = String(model || "").toLowerCase().trim();
+      return (
+        p === "sarekon" ||
+        p === "gpsandtrack" ||
+        p.includes("sarekon") ||
+        p.includes("gpsandtrack") ||
+        m.includes("sarekon") ||
+        m.includes("gpsandtrack")
+      );
+    };
+
     const { data: freeSims } = await supa
       .from("iot_sim_cards")
-      .select("id, iccid, msisdn, provider, status, device_id")
+      .select("id, iccid, msisdn, provider, status, device_id, metadata")
       .is("device_id", null)
       .in("status", ["available", "provisioned", "active"])
+      .not("provider", "in", "('sarekon','gpsandtrack')")
       .order("created_at", { ascending: true })
       .limit(batch);
 
     for (const sim of freeSims ?? []) {
       try {
+        // Skip any SIM explicitly tied to Sarekon or GPSANDTRACK
+        if (isSarekonOrGpsAndTrack(sim.provider)) {
+          continue;
+        }
+
         // Prefer a device that already references this SIM (imported hardware pairing).
+        // MUST NEVER automatically link to GPSANDTRACK/SAREKON devices.
         let device: { id: string } | null = null;
         if (sim.iccid || sim.msisdn) {
           const match = [sim.iccid, sim.msisdn].filter(Boolean) as string[];
           const { data: paired } = await supa
             .from("iot_devices")
-            .select("id")
+            .select("id, provider, device_model")
             .in("sim_number", match)
             .is("vehicle_id", null)
-            .limit(1);
-          device = paired?.[0] ?? null;
+            .not("provider", "in", "('sarekon','gpsandtrack')")
+            .limit(5);
+
+          const validPaired = (paired ?? []).find(
+            (d) => !isSarekonOrGpsAndTrack(d.provider, d.device_model)
+          );
+          device = validPaired ? { id: validPaired.id } : null;
         }
+
         if (!device) {
+          // Find spare device that is NOT GPSANDTRACK / SAREKON
           const { data: spare } = await supa
             .from("iot_devices")
-            .select("id")
+            .select("id, provider, device_model")
             .is("sim_number", null)
             .is("vehicle_id", null)
+            .not("provider", "in", "('sarekon','gpsandtrack')")
             .order("created_at", { ascending: true })
-            .limit(1);
-          device = spare?.[0] ?? null;
+            .limit(10);
+
+          const validSpare = (spare ?? []).find(
+            (d) => !isSarekonOrGpsAndTrack(d.provider, d.device_model)
+          );
+          device = validSpare ? { id: validSpare.id } : null;
         }
-        if (!device) break; // no hardware left this run
+        if (!device) break; // no eligible hardware left this run
 
         const { error: simErr } = await supa
           .from("iot_sim_cards")
@@ -219,13 +254,16 @@ Deno.serve(async (req) => {
         if (!deviceId) {
           const { data: available } = await supa
             .from("iot_devices")
-            .select("id")
+            .select("id, provider, device_model")
             .is("vehicle_id", null)
             .eq("status", "active")
             .eq("telemetry_enabled", true)
+            .not("provider", "in", "('sarekon','gpsandtrack')")
             .order("activated_at", { ascending: true })
-            .limit(1);
-          const candidate = available?.[0];
+            .limit(10);
+          const candidate = (available ?? []).find(
+            (d) => !isSarekonOrGpsAndTrack(d.provider, d.device_model)
+          );
           if (!candidate) {
             console.log("no_device_available", v.id);
             await upsertState(supa, v.id, { stage: "awaiting_device", last_error: "No enabled device available" });

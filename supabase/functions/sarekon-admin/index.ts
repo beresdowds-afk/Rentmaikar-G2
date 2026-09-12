@@ -391,6 +391,24 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (error) return json({ ok: false, error: error.message }, 400);
 
+      // Maintain relational integrity with iot_sim_cards when manually linking ICCID
+      if (patch.sim_number && saved?.id) {
+        await supa
+          .from("iot_sim_cards")
+          .update({
+            device_id: saved.id,
+            vehicle_id: target,
+            status: "active",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("iccid", patch.sim_number);
+      } else if (p.iccid !== undefined && patch.sim_number === null && saved?.id) {
+        await supa
+          .from("iot_sim_cards")
+          .update({ device_id: null, vehicle_id: null, updated_at: new Date().toISOString() })
+          .eq("device_id", saved.id);
+      }
+
       await audit({
         action: target ? "sarekon_device_linked" : "sarekon_device_unlinked",
         device_id: saved?.id ?? null,

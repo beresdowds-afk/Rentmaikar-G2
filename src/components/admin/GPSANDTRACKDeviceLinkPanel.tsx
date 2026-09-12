@@ -256,6 +256,14 @@ export default function GPSANDTRACKDeviceLinkPanel() {
       </CardHeader>
 
       <CardContent className="space-y-4">
+        <Alert className="border-amber-200 bg-amber-50/90 dark:border-amber-900/40 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+          <TriangleAlert className="h-4 w-4 text-amber-600 shrink-0" />
+          <AlertTitle className="font-semibold">SAREKON Maps &amp; Services Direct Dependency</AlertTitle>
+          <AlertDescription className="text-xs text-muted-foreground mt-0.5">
+            GPS AND TRACK has a direct dependence on SAREKON maps and services. Automatic SIM mapping is disabled for GPSANDTRACK/SAREKON hardware. Device numbers and SIMs must be manually linked here or during manual SIM entry.
+          </AlertDescription>
+        </Alert>
+
         {unlinkedCount > 0 && (
           <Alert>
             <TriangleAlert className="h-4 w-4" />

@@ -122,22 +122,30 @@ export const DeviceLinking = () => {
 
   const submitLinkSim = async () => {
     if (!linkSimFor || !pickedSim) return;
-    if (imeiConfirm.trim() !== linkSimFor.imei) { toast.error('IMEI does not match'); return; }
+    const matchesImei = imeiConfirm.trim().toLowerCase() === (linkSimFor.imei || '').toLowerCase();
+    const matchesSerial = imeiConfirm.trim().toLowerCase() === (linkSimFor.serial_number || '').toLowerCase();
+    if (!matchesImei && !matchesSerial) {
+      toast.error('IMEI / Serial number does not match device');
+      return;
+    }
     setLinking(true);
     try {
       const { data, error } = await supabase.functions.invoke('iot-admin', {
-        body: { action: 'link_sim_to_device', device_imei: linkSimFor.imei, sim_id: pickedSim },
+        body: {
+          action: 'link_sim_to_device',
+          device_id: linkSimFor.id,
+          device_number: linkSimFor.serial_number || linkSimFor.imei,
+          device_imei: linkSimFor.imei,
+          sim_id: pickedSim,
+        },
       });
       if (error || (data as any)?.error) throw new Error(error?.message || (data as any)?.error);
-      toast.success('SIM linked to device', { description: 'You can now activate the pair.' });
+      toast.success('SIM linked to device', { description: 'Device number and SIM are now manually paired.' });
       setLinkSimFor(null); load();
     } catch (err) {
-  toast.error('Link failed', {
-    description:
-      err instanceof Error
-        ? err.message
-        : 'Unexpected error occurred',
-  });
+      toast.error('Link failed', {
+        description: err instanceof Error ? err.message : 'Unexpected error occurred',
+      });
     } finally { setLinking(false); }
   };
 
@@ -357,13 +365,25 @@ export const DeviceLinking = () => {
               </Select>
             </div>
             <div>
-              <Label>Confirm IMEI</Label>
-              <Input value={imeiConfirm} onChange={e => setImeiConfirm(e.target.value.replace(/\D/g, ''))} maxLength={15} placeholder="Retype the 15-digit IMEI" />
+              <Label>Confirm Device Identifier (IMEI: {linkSimFor?.imei} or Serial: {linkSimFor?.serial_number})</Label>
+              <Input
+                value={imeiConfirm}
+                onChange={e => setImeiConfirm(e.target.value.trim())}
+                placeholder={`Retype ${linkSimFor?.imei || linkSimFor?.serial_number}`}
+              />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkSimFor(null)}>Cancel</Button>
-            <Button onClick={submitLinkSim} disabled={linking || !pickedSim || imeiConfirm !== linkSimFor?.imei}>
+            <Button
+              onClick={submitLinkSim}
+              disabled={
+                linking ||
+                !pickedSim ||
+                (imeiConfirm.toLowerCase() !== (linkSimFor?.imei || '').toLowerCase() &&
+                  imeiConfirm.toLowerCase() !== (linkSimFor?.serial_number || '').toLowerCase())
+              }
+            >
               {linking ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <LinkIcon className="h-4 w-4 mr-1" />} Link
             </Button>
           </DialogFooter>

@@ -184,12 +184,33 @@ serve(async (req) => {
 
         const planName = planNameInput || (source === "hologram" ? `Plan #${planId}` : null);
 
+        // Optional manual link to device by ID or Device Number (Serial / IMEI)
+        let targetDevice: any = null;
+        if (body?.device_id && body.device_id !== "none") {
+          const { data: d } = await admin
+            .from("iot_devices")
+            .select("*")
+            .eq("id", String(body.device_id))
+            .maybeSingle();
+          targetDevice = d;
+        } else if (body?.device_number) {
+          const num = String(body.device_number).trim();
+          const { data: d } = await admin
+            .from("iot_devices")
+            .select("*")
+            .or(`serial_number.eq.${num},imei.eq.${num},provider_device_id.eq.${num}`)
+            .limit(1);
+          targetDevice = d?.[0] ?? null;
+        }
+
         const insertPayload: Record<string, unknown> = {
           iccid,
           msisdn,
           imsi,
           provider,
           provider_sim_id: providerSimId,
+          device_id: targetDevice ? targetDevice.id : null,
+          vehicle_id: targetDevice?.vehicle_id ?? null,
           status: "available",
           plan_name: planName,
           metadata: {
@@ -197,6 +218,7 @@ serve(async (req) => {
             plan_id: source === "hologram" ? planId : null,
             notes,
             provider_state: providerState,
+            manually_linked_device: targetDevice ? (targetDevice.serial_number || targetDevice.provider_device_id) : null,
           },
         };
 
@@ -207,9 +229,20 @@ serve(async (req) => {
           .single();
         if (error) return json(400, { error: error.message });
 
+        if (targetDevice) {
+          await admin
+            .from("iot_devices")
+            .update({
+              sim_number: iccid || msisdn,
+              sim_provider: provider,
+            })
+            .eq("id", targetDevice.id);
+        }
+
         await audit(admin, user.id, source === "manual" ? "sim_added_manually" : "sim_purchased", {
           sim_id: inserted.id,
-          details: { source, provider, plan_id: planId, provider_sim_id: providerSimId, iccid, notes },
+          device_id: targetDevice?.id ?? null,
+          details: { source, provider, plan_id: planId, provider_sim_id: providerSimId, iccid, notes, target_device: targetDevice?.serial_number ?? null },
         });
 
         return json(200, {
@@ -298,16 +331,38 @@ serve(async (req) => {
       }
 
       case "link_sim_to_device": {
-        const { device_imei, sim_id } = body || {};
-        if (!device_imei || !sim_id) {
-          return json(400, { error: "device_imei and sim_id are required" });
+        const { device_imei, device_id, device_number, sim_id } = body || {};
+        if ((!device_imei && !device_id && !device_number) || !sim_id) {
+          return json(400, { error: "device identifier (device_number, device_imei, or device_id) and sim_id are required" });
         }
-        const { data: device } = await admin
-          .from("iot_devices")
-          .select("*")
-          .eq("imei", String(device_imei))
-          .maybeSingle();
-        if (!device) return json(404, { error: "No device with that IMEI" });
+
+        let device: any = null;
+        if (device_id) {
+          const { data: d } = await admin
+            .from("iot_devices")
+            .select("*")
+            .eq("id", String(device_id))
+            .maybeSingle();
+          device = d;
+        } else if (device_number) {
+          const num = String(device_number).trim();
+          const { data: d } = await admin
+            .from("iot_devices")
+            .select("*")
+            .or(`serial_number.eq.${num},imei.eq.${num},provider_device_id.eq.${num}`)
+            .limit(1);
+          device = d?.[0] ?? null;
+        } else if (device_imei) {
+          const imeiStr = String(device_imei).trim();
+          const { data: d } = await admin
+            .from("iot_devices")
+            .select("*")
+            .or(`imei.eq.${imeiStr},serial_number.eq.${imeiStr},provider_device_id.eq.${imeiStr}`)
+            .limit(1);
+          device = d?.[0] ?? null;
+        }
+
+        if (!device) return json(404, { error: "No matching device found for the provided device number / identifier" });
 
         const { data: sim } = await admin
           .from("iot_sim_cards")
@@ -321,19 +376,33 @@ serve(async (req) => {
 
         await admin
           .from("iot_sim_cards")
-          .update({ device_id: device.id })
+          .update({
+            device_id: device.id,
+            vehicle_id: device.vehicle_id ?? null,
+            status: "active",
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", sim_id);
         await admin
           .from("iot_devices")
-          .update({ sim_number: sim.msisdn, sim_provider: sim.provider })
+          .update({
+            sim_number: sim.iccid || sim.msisdn,
+            sim_provider: sim.provider,
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", device.id);
 
         await audit(admin, user.id, "sim_linked_to_device", {
           device_id: device.id,
           sim_id: sim.id,
-          details: { device_imei, iccid: sim.iccid },
+          details: {
+            device_identifier: device_number || device_imei || device.serial_number,
+            device_provider: device.provider,
+            iccid: sim.iccid,
+            notes: "Manually linked SIM to device",
+          },
         });
-        return json(200, { success: true });
+        return json(200, { success: true, device, sim });
       }
 
       case "activate_pair": {

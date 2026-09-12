@@ -57,6 +57,9 @@ interface SimCard {
 interface DeviceOption {
   id: string;
   serial_number: string;
+  imei?: string | null;
+  provider?: string | null;
+  provider_device_id?: string | null;
   device_model: string | null;
   vehicle_id: string | null;
 }
@@ -99,6 +102,7 @@ export function IoTSimCardsPanel() {
   const [newDataLimit, setNewDataLimit] = useState("250");
   const [newStatus, setNewStatus] = useState("active");
   const [newDeviceId, setNewDeviceId] = useState("none");
+  const [manualDeviceNumber, setManualDeviceNumber] = useState("");
   const [newVehicleId, setNewVehicleId] = useState("none");
 
   // Edit / Link Modal
@@ -120,7 +124,7 @@ export function IoTSimCardsPanel() {
           .limit(300),
         supabase
           .from("iot_devices")
-          .select("id, serial_number, device_model, vehicle_id"),
+          .select("id, serial_number, imei, provider, provider_device_id, device_model, vehicle_id"),
         supabase
           .from("vehicles")
           .select("id, make, model, year, license_plate")
@@ -182,6 +186,37 @@ export function IoTSimCardsPanel() {
 
     setSubmitting(true);
     try {
+      // Resolve device if manual device number is provided or picked
+      let resolvedDeviceId: string | null = newDeviceId !== "none" ? newDeviceId : null;
+      let matchedDevice: DeviceOption | null = resolvedDeviceId
+        ? devices.find((d) => d.id === resolvedDeviceId) || null
+        : null;
+
+      if (!resolvedDeviceId && manualDeviceNumber.trim()) {
+        const num = manualDeviceNumber.trim().toLowerCase();
+        const found = devices.find(
+          (d) =>
+            d.serial_number.toLowerCase() === num ||
+            (d.imei && d.imei.toLowerCase() === num) ||
+            (d.provider_device_id && d.provider_device_id.toLowerCase() === num)
+        );
+        if (found) {
+          resolvedDeviceId = found.id;
+          matchedDevice = found;
+        } else {
+          // Look up in database directly in case it was created recently
+          const { data: dbDev } = await supabase
+            .from("iot_devices")
+            .select("id, serial_number, imei, provider, provider_device_id, device_model, vehicle_id")
+            .or(`serial_number.eq.${manualDeviceNumber.trim()},imei.eq.${manualDeviceNumber.trim()},provider_device_id.eq.${manualDeviceNumber.trim()}`)
+            .limit(1);
+          if (dbDev && dbDev.length > 0) {
+            resolvedDeviceId = dbDev[0].id;
+            matchedDevice = dbDev[0] as DeviceOption;
+          }
+        }
+      }
+
       const payload = {
         iccid: newIccid.trim(),
         msisdn: newMsisdn.trim() || null,
@@ -191,8 +226,8 @@ export function IoTSimCardsPanel() {
         data_limit_mb: Number(newDataLimit) || 250,
         data_usage_mb: 0,
         status: newStatus,
-        device_id: newDeviceId !== "none" ? newDeviceId : null,
-        vehicle_id: newVehicleId !== "none" ? newVehicleId : null,
+        device_id: resolvedDeviceId,
+        vehicle_id: newVehicleId !== "none" ? newVehicleId : matchedDevice?.vehicle_id ?? null,
         activated_at: newStatus === "active" ? new Date().toISOString() : null,
       };
 
@@ -205,18 +240,23 @@ export function IoTSimCardsPanel() {
       if (error) throw error;
 
       toast.success("SIM card provisioned successfully", {
-        description: `ICCID: ${newIccid.trim()} on ${newProvider}`,
+        description: `ICCID: ${newIccid.trim()} on ${newProvider}${
+          matchedDevice
+            ? ` · Linked manually to device ${matchedDevice.serial_number || matchedDevice.provider_device_id}`
+            : ""
+        }`,
       });
 
-      // Also if device was selected, link device's sim_number/sim_provider
-      if (newDeviceId !== "none") {
+      // Maintain reciprocal link in iot_devices
+      if (resolvedDeviceId) {
         await supabase
           .from("iot_devices")
           .update({
             sim_number: newIccid.trim(),
             sim_provider: newProvider,
+            updated_at: new Date().toISOString(),
           })
-          .eq("id", newDeviceId);
+          .eq("id", resolvedDeviceId);
       }
 
       setProvisionOpen(false);
@@ -241,6 +281,7 @@ export function IoTSimCardsPanel() {
     setNewDataLimit("250");
     setNewStatus("active");
     setNewDeviceId("none");
+    setManualDeviceNumber("");
     setNewVehicleId("none");
   };
 
@@ -281,18 +322,40 @@ export function IoTSimCardsPanel() {
     if (!editSim) return;
     setSubmitting(true);
     try {
+      const nextDeviceId = editDeviceId !== "none" ? editDeviceId : null;
       const { error } = await supabase
         .from("iot_sim_cards")
         .update({
           plan_name: editPlanName.trim() || null,
           data_limit_mb: Number(editDataLimit) || null,
-          device_id: editDeviceId !== "none" ? editDeviceId : null,
+          device_id: nextDeviceId,
           vehicle_id: editVehicleId !== "none" ? editVehicleId : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", editSim.id);
 
       if (error) throw error;
+
+      // Keep iot_devices reciprocal fields up-to-date
+      if (editSim.device_id && editSim.device_id !== nextDeviceId) {
+        // Unlink previous device
+        await supabase
+          .from("iot_devices")
+          .update({ sim_number: null, sim_provider: null, updated_at: new Date().toISOString() })
+          .eq("id", editSim.device_id);
+      }
+
+      if (nextDeviceId) {
+        // Link new device
+        await supabase
+          .from("iot_devices")
+          .update({
+            sim_number: editSim.iccid,
+            sim_provider: editSim.provider,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", nextDeviceId);
+      }
 
       toast.success("SIM card configuration updated");
       setEditModalOpen(false);
@@ -387,7 +450,14 @@ export function IoTSimCardsPanel() {
   const getDeviceLabel = (deviceId: string | null) => {
     if (!deviceId) return "—";
     const d = devices.find((x) => x.id === deviceId);
-    return d ? `${d.serial_number} (${d.device_model || "GPS"})` : deviceId.slice(0, 8);
+    if (!d) return deviceId.slice(0, 8);
+    const isSarekon =
+      d.provider === "sarekon" ||
+      d.provider === "gpsandtrack" ||
+      (d.device_model || "").toLowerCase().includes("sarekon") ||
+      (d.device_model || "").toLowerCase().includes("gpsandtrack");
+    const tag = isSarekon ? "[GPSANDTRACK / SAREKON] " : d.provider ? `[${d.provider.toUpperCase()}] ` : "";
+    return `${tag}${d.serial_number || d.provider_device_id || d.imei} (${d.device_model || "GPS"})`;
   };
 
   return (
@@ -434,6 +504,17 @@ export function IoTSimCardsPanel() {
                 </DialogHeader>
 
                 <div className="grid gap-4 py-4">
+                  {/* GPSANDTRACK / SAREKON Directive Banner */}
+                  <div className="rounded-md border border-amber-200 bg-amber-50/90 dark:border-amber-900/40 dark:bg-amber-950/40 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div className="space-y-0.5">
+                      <p className="font-semibold">GPSANDTRACK / SAREKON Manual Mapping Directive</p>
+                      <p className="text-muted-foreground">
+                        GPS AND TRACK has a direct dependence on SAREKON maps and services. Automatic mapping is disabled for GPSANDTRACK/SAREKON devices. The device number must be manually linked here when SIMs are manually inputted.
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="grid gap-2">
                     <Label htmlFor="iccid">ICCID (SIM Serial Number) *</Label>
                     <Input
@@ -520,20 +601,52 @@ export function IoTSimCardsPanel() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="grid gap-2">
-                      <Label htmlFor="device">Link to Device</Label>
-                      <Select value={newDeviceId} onValueChange={setNewDeviceId}>
+                      <Label htmlFor="device">Link to Device Number</Label>
+                      <Select
+                        value={newDeviceId}
+                        onValueChange={(val) => {
+                          setNewDeviceId(val);
+                          if (val !== "none") {
+                            const d = devices.find((x) => x.id === val);
+                            if (d) setManualDeviceNumber(d.serial_number || d.provider_device_id || d.imei || "");
+                          }
+                        }}
+                      >
                         <SelectTrigger id="device">
                           <SelectValue placeholder="Select device..." />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">None (Unassigned)</SelectItem>
-                          {devices.map((d) => (
-                            <SelectItem key={d.id} value={d.id}>
-                              {d.serial_number} ({d.device_model || "GPS"})
-                            </SelectItem>
-                          ))}
+                          {devices.map((d) => {
+                            const isSarekon =
+                              d.provider === "sarekon" ||
+                              d.provider === "gpsandtrack" ||
+                              (d.device_model || "").toLowerCase().includes("sarekon") ||
+                              (d.device_model || "").toLowerCase().includes("gpsandtrack");
+                            return (
+                              <SelectItem key={d.id} value={d.id}>
+                                {isSarekon ? "🛰️ [GPSANDTRACK/SAREKON] " : ""}
+                                {d.serial_number || d.provider_device_id || d.imei} ({d.device_model || "GPS"})
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
+                      <Input
+                        placeholder="Or type Device # / Serial / IMEI"
+                        value={manualDeviceNumber}
+                        onChange={(e) => {
+                          setManualDeviceNumber(e.target.value);
+                          const matched = devices.find(
+                            (d) =>
+                              d.serial_number.toLowerCase() === e.target.value.trim().toLowerCase() ||
+                              (d.imei && d.imei.toLowerCase() === e.target.value.trim().toLowerCase()) ||
+                              (d.provider_device_id && d.provider_device_id.toLowerCase() === e.target.value.trim().toLowerCase())
+                          );
+                          if (matched) setNewDeviceId(matched.id);
+                        }}
+                        className="text-xs h-8 mt-1"
+                      />
                     </div>
 
                     <div className="grid gap-2">
@@ -793,18 +906,26 @@ export function IoTSimCardsPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Assign to Tracker Device</Label>
+              <Label>Assign to Tracker Device Number</Label>
               <Select value={editDeviceId} onValueChange={setEditDeviceId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select device..." />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Unassigned</SelectItem>
-                  {devices.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {d.serial_number} ({d.device_model || "GPS"})
-                    </SelectItem>
-                  ))}
+                  {devices.map((d) => {
+                    const isSarekon =
+                      d.provider === "sarekon" ||
+                      d.provider === "gpsandtrack" ||
+                      (d.device_model || "").toLowerCase().includes("sarekon") ||
+                      (d.device_model || "").toLowerCase().includes("gpsandtrack");
+                    return (
+                      <SelectItem key={d.id} value={d.id}>
+                        {isSarekon ? "🛰️ [GPSANDTRACK / SAREKON] " : ""}
+                        {d.serial_number || d.provider_device_id || d.imei} ({d.device_model || "GPS"})
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Plus, ShoppingCart, RefreshCw, Loader2, Info, Cpu, CreditCard as SimCard } from 'lucide-react';
+import { Plus, ShoppingCart, RefreshCw, Loader2, Info, Cpu, CreditCard as SimCard, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { IoTLivenessCommandBar } from '@/components/admin/IoTLivenessCommandBar';
@@ -34,6 +34,8 @@ interface Device {
   id: string;
   serial_number: string;
   imei: string;
+  provider?: string | null;
+  provider_device_id?: string | null;
   device_model: string | null;
   firmware_version: string | null;
   status: string;
@@ -57,6 +59,8 @@ export const DeviceRegistry = () => {
   const [buyMsisdn, setBuyMsisdn] = useState('');
   const [buyImsi, setBuyImsi] = useState('');
   const [buyPlanName, setBuyPlanName] = useState('');
+  const [buyDeviceId, setBuyDeviceId] = useState('none');
+  const [buyDeviceNumber, setBuyDeviceNumber] = useState('');
   const [buying, setBuying] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -152,18 +156,21 @@ export const DeviceRegistry = () => {
           iccid: buyIccid || undefined,
           msisdn: buyMsisdn || undefined,
           imsi: buyImsi || undefined,
+          device_id: buyDeviceId !== 'none' ? buyDeviceId : undefined,
+          device_number: buyDeviceNumber.trim() || undefined,
         },
       });
       if (error || (data as any)?.error) throw new Error(error?.message || (data as any)?.error);
       toast.success(buySource === 'manual' ? 'SIM added to inventory' : 'eSIM added to inventory', {
         description: buySource === 'manual'
-          ? `Recorded manually under provider "${buyProvider || 'manual'}".`
+          ? `Recorded manually under provider "${buyProvider || 'manual'}"${buyDeviceNumber || buyDeviceId !== 'none' ? ' and linked to device.' : '.'}`
           : (data as any)?.hologram_configured
             ? 'Provisioned from Hologram pool.'
             : 'Recorded locally — add HOLOGRAM_API_KEY to sync with the provider.',
       });
       setBuyOpen(false);
       setBuyNotes(''); setBuyIccid(''); setBuyMsisdn(''); setBuyImsi(''); setBuyPlanName('');
+      setBuyDeviceId('none'); setBuyDeviceNumber('');
       load();
     } catch (err: any) {
       toast.error('Could not add SIM', { description: err.message });
@@ -276,6 +283,18 @@ export const DeviceRegistry = () => {
                     </Select>
                   </div>
 
+                  {buySource === 'manual' && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50/90 dark:border-amber-900/40 dark:bg-amber-950/40 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="font-semibold">GPSANDTRACK / SAREKON Manual Mapping:</span>
+                        <p className="mt-0.5 text-muted-foreground">
+                          GPS AND TRACK has a direct dependence on SAREKON maps and services. Automatic mapping is disabled for GPSANDTRACK/SAREKON devices. Link the device number manually below.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {buySource === 'hologram' ? (
                     <div>
                       <Label>Data plan</Label>
@@ -294,12 +313,61 @@ export const DeviceRegistry = () => {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label>Provider *</Label>
-                        <Input value={buyProvider} onChange={e => setBuyProvider(e.target.value)} placeholder="e.g. MTN, Airtel, Twilio" />
+                        <Input value={buyProvider} onChange={e => setBuyProvider(e.target.value)} placeholder="e.g. Sarekon, MTN, Airtel" />
                       </div>
                       <div>
                         <Label>Plan name</Label>
                         <Input value={buyPlanName} onChange={e => setBuyPlanName(e.target.value)} placeholder="e.g. 5GB Monthly" />
                       </div>
+                    </div>
+                  )}
+
+                  {buySource === 'manual' && (
+                    <div className="space-y-1.5">
+                      <Label>Link to Device Number (optional)</Label>
+                      <Select
+                        value={buyDeviceId}
+                        onValueChange={(v) => {
+                          setBuyDeviceId(v);
+                          if (v !== 'none') {
+                            const d = devices.find(x => x.id === v);
+                            if (d) setBuyDeviceNumber(d.serial_number || d.provider_device_id || d.imei);
+                          }
+                        }}
+                      >
+                        <SelectTrigger><SelectValue placeholder="Select device..." /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None (Unassigned)</SelectItem>
+                          {devices.map(d => {
+                            const isSarekon =
+                              d.provider === 'sarekon' ||
+                              d.provider === 'gpsandtrack' ||
+                              (d.device_model || '').toLowerCase().includes('sarekon') ||
+                              (d.device_model || '').toLowerCase().includes('gpsandtrack');
+                            return (
+                              <SelectItem key={d.id} value={d.id}>
+                                {isSarekon ? '🛰️ [GPSANDTRACK/SAREKON] ' : ''}
+                                {d.serial_number || d.provider_device_id || d.imei} ({d.device_model || 'GPS'})
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        placeholder="Or enter Device # / Serial / IMEI"
+                        value={buyDeviceNumber}
+                        onChange={(e) => {
+                          setBuyDeviceNumber(e.target.value);
+                          const matched = devices.find(
+                            d =>
+                              d.serial_number.toLowerCase() === e.target.value.trim().toLowerCase() ||
+                              (d.imei && d.imei.toLowerCase() === e.target.value.trim().toLowerCase()) ||
+                              (d.provider_device_id && d.provider_device_id.toLowerCase() === e.target.value.trim().toLowerCase())
+                          );
+                          if (matched) setBuyDeviceId(matched.id);
+                        }}
+                        className="text-xs h-8"
+                      />
                     </div>
                   )}
 
