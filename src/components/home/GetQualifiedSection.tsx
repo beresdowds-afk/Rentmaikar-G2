@@ -336,8 +336,8 @@ const GetQualifiedSection: React.FC = () => {
                       Three Referees
                     </h4>
                     <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
-                      Provide contact details (Full name, phone, residential address, relationship) for 3
-                      credible referees or professional guarantors who can vouch for your integrity.
+                      Provide contact details (Full name, phone, relationship) for 3 credible referees or
+                      professional guarantors who can vouch for your integrity.
                     </p>
                   </div>
                 </div>
