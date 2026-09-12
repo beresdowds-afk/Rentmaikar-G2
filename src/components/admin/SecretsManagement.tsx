@@ -37,6 +37,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
+import ProviderCredentialSettings from "./ProviderCredentialSettings";
 
 interface SecretConfig {
   name: string;
@@ -268,6 +269,23 @@ const secrets: SecretConfig[] = [
     category: "iot",
     testable: false,
     docsUrl: "https://docs.emqx.com/en/emqx/latest/admin/api.html",
+  },
+  // IoT / Cellular Connectivity (Hologram)
+  {
+    name: "HOLOGRAM_API_KEY",
+    displayName: "Hologram API Key",
+    description: "API key for Hologram cellular IoT SIM management, provisioning, and data usage sync",
+    category: "iot",
+    testable: true,
+    docsUrl: "https://dashboard.hologram.io/account/api",
+  },
+  {
+    name: "HOLOGRAM_ORG_ID",
+    displayName: "Hologram Organization ID",
+    description: "Hologram Organization ID for multi-tenant SIM inventory and routing",
+    category: "iot",
+    testable: false,
+    docsUrl: "https://dashboard.hologram.io/account/api",
   },
   // Voice / TTS
   {
@@ -628,6 +646,37 @@ export function SecretsManagement() {
     }
   };
 
+  const testHologramSecrets = async () => {
+    setTestingSecret("HOLOGRAM");
+    try {
+      const { data, error } = await supabase.functions.invoke("hologram-admin", {
+        body: { action: "test_connection" },
+      });
+      if (error) throw error;
+      if (!data?.configured) {
+        throw new Error(data?.message || "Hologram is not configured. Add HOLOGRAM_API_KEY and HOLOGRAM_ORG_ID.");
+      }
+      if (!data?.ok) {
+        throw new Error(data?.probe?.error || "Hologram connection probe rejected.");
+      }
+      setTestResults((prev) => ({
+        ...prev,
+        HOLOGRAM_API_KEY: "success",
+        HOLOGRAM_ORG_ID: "success",
+      }));
+      toast.success("Hologram credentials verified successfully!");
+    } catch (error: any) {
+      setTestResults((prev) => ({
+        ...prev,
+        HOLOGRAM_API_KEY: "error",
+        HOLOGRAM_ORG_ID: "error",
+      }));
+      toast.error(`Hologram test failed: ${error.message}`);
+    } finally {
+      setTestingSecret(null);
+    }
+  };
+
   const getStatusBadge = (secretName: string) => {
     const result = testResults[secretName];
     if (result === "success") {
@@ -954,11 +1003,41 @@ export function SecretsManagement() {
                       </DialogContent>
                     </Dialog>
                   )}
+                  {category === "iot" && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={testHologramSecrets}
+                      disabled={testingSecret === "HOLOGRAM"}
+                    >
+                      {testingSecret === "HOLOGRAM" ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Testing Hologram Connection...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Test Hologram Connection
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold tracking-tight">Direct Credential Rotation (Encrypted Vault)</h3>
+          <p className="text-sm text-muted-foreground">
+            Rotate Hologram (API key, Org ID) and Traccar credentials instantly. Values are encrypted in PostgreSQL Vault and take effect immediately without redeploying.
+          </p>
+        </div>
+        <ProviderCredentialSettings />
       </div>
 
       <Card>
@@ -970,8 +1049,22 @@ export function SecretsManagement() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            To update API secrets, follow these steps:
+            You have two ways to configure and rotate secrets:
           </p>
+          <div className="grid gap-4 sm:grid-cols-2 text-sm text-muted-foreground">
+            <div className="rounded-lg border p-3 space-y-1.5 bg-muted/30">
+              <h4 className="font-semibold text-foreground">1. In-App Encrypted Vault (Hologram &amp; Traccar)</h4>
+              <p className="text-xs">
+                Use the <strong>Direct Credential Rotation</strong> form above (or visit <em>IoT Admin → Hologram → Setup</em> or <em>Credential Health</em>). Enter your Hologram API Key and Org ID, then click <strong>Save &amp; verify</strong>. Credentials are saved encrypted into the database vault and verified live.
+              </p>
+            </div>
+            <div className="rounded-lg border p-3 space-y-1.5 bg-muted/30">
+              <h4 className="font-semibold text-foreground">2. Project Environment Secrets</h4>
+              <p className="text-xs">
+                For platform-wide environment variables (<code className="text-[11px]">HOLOGRAM_API_KEY</code>, <code className="text-[11px]">HOLOGRAM_ORG_ID</code>, Twilio, Sent.dm, etc.), provide them in your deployment environment or project settings.
+              </p>
+            </div>
+          </div>
           <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
             <li>Open the Lovable chat interface</li>
             <li>Request to update the specific secret (e.g., "Update my Twilio API key")</li>
