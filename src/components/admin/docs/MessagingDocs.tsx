@@ -360,3 +360,5 @@ export const MessagingDocs = () => {
     </div>
   );
 };
+
+export default MessagingDocs;

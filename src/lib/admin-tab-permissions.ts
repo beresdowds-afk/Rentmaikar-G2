@@ -81,6 +81,7 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   google: 'can_view_reports',
 
   // Docs – reference material, always available to assistants and support staff.
+  'service-disruption-docs': null,
   'platform-features': null,
   glossary: null,
   'messaging-docs': null,

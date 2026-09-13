@@ -161,6 +161,7 @@ const AdminAssistantDashboard = () => {
     canAccessTab,
     isFullAdmin,
     isAssistant,
+    perms,
     loading: permsLoading,
   } = useAssistantPermissions();
 

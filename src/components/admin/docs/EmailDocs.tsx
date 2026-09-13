@@ -537,3 +537,5 @@ export const EmailDocs = () => {
     </div>
   );
 };
+
+export default EmailDocs;

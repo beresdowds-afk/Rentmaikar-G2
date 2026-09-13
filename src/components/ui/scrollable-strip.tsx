@@ -42,13 +42,15 @@ export function ScrollableStrip({
     const el = scrollerRef.current;
     if (!el) return;
     el.addEventListener("scroll", update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    Array.from(el.children).forEach((c) => ro.observe(c as Element));
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    if (ro) {
+      ro.observe(el);
+      Array.from(el.children).forEach((c) => ro.observe(c as Element));
+    }
     window.addEventListener("resize", update);
     return () => {
       el.removeEventListener("scroll", update);
-      ro.disconnect();
+      if (ro) ro.disconnect();
       window.removeEventListener("resize", update);
     };
   }, [update, children]);

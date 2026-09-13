@@ -308,3 +308,5 @@ export default function PlatformFeaturesReport() {
     </div>
   );
 }
+
+export { PlatformFeaturesReport };

@@ -259,3 +259,5 @@ export default function PlatformGlossary() {
     </div>
   );
 }
+
+export { PlatformGlossary };

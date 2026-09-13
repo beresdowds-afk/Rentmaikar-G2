@@ -369,3 +369,5 @@ export const VoIPDocs = () => {
     </div>
   );
 };
+
+export default VoIPDocs;
