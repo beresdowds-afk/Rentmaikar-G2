@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Download, FileText, GraduationCap, Map, Package, AlertCircle } from 'lucide-react';
+import { Download, FileText, GraduationCap, Map, Package, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 type OnboardingItem = {
@@ -54,14 +54,19 @@ const kindMeta = {
   tour: { label: 'Tour guide', icon: Map },
 } as const;
 
+interface StaffOnboardingDownloadsProps {
+  defaultCollapsed?: boolean;
+}
+
 /**
  * Onboarding download centre for staff dashboards.
  * Surfaces the onboarding pack (agreements, training scripts, guided tours)
  * so admins, assistants and support staff never leave the installed admin PWA.
  */
-export const StaffOnboardingDownloads = () => {
+export const StaffOnboardingDownloads = ({ defaultCollapsed = false }: StaffOnboardingDownloadsProps = {}) => {
   const { country } = useRegion();
   const [busy, setBusy] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['staff-onboarding-downloads', country],
@@ -179,19 +184,41 @@ export const StaffOnboardingDownloads = () => {
             Agreements, training scripts and guided tours for {country}. Available inside the installed app.
           </CardDescription>
         </div>
-        <Button size="sm" onClick={handleDownloadAll} disabled={busy || !items.length} className="gap-2 shrink-0">
-          <Download className="h-4 w-4" />
-          Download pack
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button size="sm" onClick={handleDownloadAll} disabled={busy || !items.length} className="gap-2 shrink-0">
+            <Download className="h-4 w-4" />
+            Download pack
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="gap-1 text-xs text-muted-foreground hover:text-foreground"
+            aria-label={isCollapsed ? "Expand onboarding items" : "Minimize onboarding items"}
+          >
+            {isCollapsed ? (
+              <>
+                <span>Show items</span>
+                <ChevronDown className="h-3.5 w-3.5" />
+              </>
+            ) : (
+              <>
+                <span>Minimize</span>
+                <ChevronUp className="h-3.5 w-3.5" />
+              </>
+            )}
+          </Button>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-2">
-        {isLoading && (
-          <div className="space-y-2">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
-        )}
+      {!isCollapsed && (
+        <CardContent className="space-y-2">
+          {isLoading && (
+            <div className="space-y-2">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          )}
 
         {isError && (
           <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
@@ -245,6 +272,7 @@ export const StaffOnboardingDownloads = () => {
           );
         })}
       </CardContent>
+      )}
     </Card>
   );
 };

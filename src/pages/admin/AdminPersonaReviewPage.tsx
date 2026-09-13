@@ -16,6 +16,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { RefreshCw, Search, CheckCircle2, XCircle, Eye, ShieldCheck, History, Loader2 } from "lucide-react";
+import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 
 type UserRow = {
   user_id: string;
@@ -170,6 +171,8 @@ export default function AdminPersonaReviewPage() {
           Refresh
         </Button>
       </div>
+
+      <PersonaVerificationSettings compact />
 
       <Card>
         <CardHeader className="pb-2">

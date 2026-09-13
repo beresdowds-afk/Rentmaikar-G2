@@ -33,3 +33,84 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
   }
 });
+
+// Resilient Edge Function gateway: Routes communication and platform functions directly to local gateway
+const LOCAL_GATEWAY_FUNCTIONS = new Set([
+  "send-sms-notification",
+  "case-send-sms",
+  "reprocess-sms-dlq",
+  "phone-otp-custom",
+  "verify-phone",
+  "twilio-test-send",
+  "voice-access-token",
+  "initiate-voip-call",
+  "voice-call-request",
+  "voice-twiml-config",
+  "voice-twiml-dial",
+  "end-voip-call",
+  "get-recording-url",
+  "create-call-in",
+  "renew-call-in",
+  "send-in-app-message",
+  "send-inbox-reply",
+  "send-email-reply",
+  "inbox-attachment-ocr",
+  "hologram-admin",
+  "verify-credentials",
+  "resend-events",
+]);
+
+async function callLocalGateway(functionName: string, options?: any) {
+  let authHeader = options?.headers?.Authorization || options?.headers?.authorization;
+  if (!authHeader) {
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (session?.access_token) {
+        authHeader = `Bearer ${session.access_token}`;
+      }
+    } catch {
+      // Session fetch error ignored
+    }
+  }
+
+  const res = await fetch(`/api/functions/${functionName}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(authHeader ? { Authorization: authHeader } : {}),
+      ...(options?.headers || {}),
+    },
+    body: options?.body ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body)) : undefined,
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (res.ok) {
+    return { data: json, error: null };
+  } else {
+    const errorMsg = json?.error || json?.message || `Edge function '${functionName}' failed (HTTP ${res.status})`;
+    return { data: null, error: new Error(errorMsg) };
+  }
+}
+
+const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
+supabase.functions.invoke = (async (functionName: string, options?: any) => {
+  if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
+    return await callLocalGateway(functionName, options);
+  }
+
+  try {
+    const res = await originalInvoke(functionName, options);
+    if (!res.error) return res;
+
+    const is404 =
+      res.error?.message?.includes("404") ||
+      res.error?.message?.toLowerCase().includes("not found") ||
+      (res.error as any)?.context?.status === 404;
+
+    if (!is404) return res;
+  } catch {
+    // Continue to fallback
+  }
+
+  return await callLocalGateway(functionName, options);
+}) as typeof supabase.functions.invoke;

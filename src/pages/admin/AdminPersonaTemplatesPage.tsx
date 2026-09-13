@@ -13,6 +13,7 @@ import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PersonaIdClassSettings from "@/components/admin/PersonaIdClassSettings";
+import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 
 
 type Role = "driver" | "owner" | "referee" | "proxy" | "admin_assistant" | "support_staff";
@@ -145,6 +146,8 @@ export default function AdminPersonaTemplatesPage() {
             {envId ? <code>{envId}</code> : <span className="text-destructive">not set</span>}. Individual roles may override it below.
           </AlertDescription>
         </Alert>
+
+        <PersonaVerificationSettings />
 
         <Tabs defaultValue="templates" className="space-y-4">
           <TabsList>

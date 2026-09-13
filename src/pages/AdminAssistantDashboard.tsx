@@ -75,6 +75,8 @@ import { SectionErrorBoundary } from "@/components/admin/SectionErrorBoundary";
 import { useDecoupledAdminPortal } from "@/hooks/useDecoupledAdminPortal";
 import PlatformFeaturesReport from "@/components/admin/docs/PlatformFeaturesReport";
 import { PortalNavigation, type PortalType } from "@/components/admin/PortalNavigation";
+import { AdminUnifiedNavigation } from "@/components/admin/AdminUnifiedNavigation";
+import { AdminOperationsBar } from "@/components/admin/AdminOperationsBar";
 import { AdminNotificationsBell } from "@/components/admin/AdminNotificationsBell";
 
 import { TrainingModuleManagement } from "@/components/admin/TrainingModuleManagement";
@@ -266,15 +268,8 @@ const AdminAssistantDashboard = () => {
             </div>
           </div>
 
-          {/* Install App Banner */}
-          <div className="mb-6">
-            <InstallAppBanner appName="Rentmaikar Assistant" />
-          </div>
-
-          {/* Onboarding downloads */}
-          <div className="mb-6">
-            <StaffOnboardingDownloads />
-          </div>
+          {/* Operations Bar (Persona toggle, collapsible downloads & PWA banner) */}
+          <AdminOperationsBar appName="Rentmaikar Assistant" showDisconnectSwitch={false} />
 
           {/* Stats Grid - Dynamically filtered to the assistant's granted permissions */}
           {(() => {
@@ -284,51 +279,54 @@ const AdminAssistantDashboard = () => {
             if (!showVehicles && !showDrivers && !showFinancials) return null;
 
             return (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7 gap-4 mb-8">
-                {/* Active Vehicles */}
-                {showVehicles && (
-                  <Card className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Active Vehicles</p>
-                        <p className="text-2xl font-bold text-foreground mt-1">{counts.activeVehicles}</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-accent">
-                        <Car className="w-6 h-6" />
-                      </div>
-                    </div>
-                  </Card>
-                )}
-
-                {/* Active Drivers */}
-                {showDrivers && (
-                  <Card className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Active Drivers</p>
-                        <p className="text-2xl font-bold text-foreground mt-1">{counts.activeDrivers}</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-success">
-                        <Users className="w-6 h-6" />
-                      </div>
-                    </div>
-                  </Card>
-                )}
-
-                {/* Monthly Income - Enhanced with breakdown */}
-                {showFinancials && (
-                  <>
-                    <Card className="p-6">
-                      <div className="flex items-center justify-between mb-3">
+              <div className="space-y-4 mb-6">
+                {/* Operational Highlights */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Active Vehicles */}
+                  {showVehicles && (
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between">
                         <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm text-muted-foreground">Monthly Income</p>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Vehicles</p>
+                          <p className="text-2xl font-bold text-foreground mt-1">{counts.activeVehicles}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Enrolled fleet</p>
+                        </div>
+                        <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                          <Car className="w-5 h-5" />
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Active Drivers */}
+                  {showDrivers && (
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Active Drivers</p>
+                          <p className="text-2xl font-bold text-foreground mt-1">{counts.activeDrivers}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Verified active</p>
+                        </div>
+                        <div className="w-11 h-11 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                          <Users className="w-5 h-5" />
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Monthly Gross Income */}
+                  {showFinancials && (
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Monthly Income</p>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
-                                  className="h-5 w-5"
+                                  className="h-4 w-4 text-muted-foreground hover:text-foreground"
                                   onClick={() => {
                                     refetchRates();
                                     toast.success('Exchange rates refreshed');
@@ -340,315 +338,151 @@ const AdminAssistantDashboard = () => {
                               <TooltipContent>Refresh exchange rate</TooltipContent>
                             </Tooltip>
                           </div>
-                          <p className="text-2xl font-bold text-green-600 mt-1">
+                          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                             ${totalIncomeUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center text-green-600">
-                          <TrendingUp className="w-6 h-6" />
+                        <div className="w-11 h-11 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                          <TrendingUp className="w-5 h-5" />
                         </div>
                       </div>
-                      <div className="space-y-1.5 pt-2 border-t">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <span>🇺🇸</span> USD
-                          </span>
-                          <span className="font-medium">${financials.income.usd.toLocaleString()}</span>
+                      <div className="space-y-1 pt-2 border-t text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">🇺🇸 USD</span>
+                          <span className="font-semibold text-foreground">${financials.income.usd.toLocaleString()}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <span>🇳🇬</span> NGN
-                          </span>
-                          <span className="font-medium">₦{financials.income.ngn.toLocaleString()}</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">🇳🇬 NGN</span>
+                          <span className="font-semibold text-foreground">₦{financials.income.ngn.toLocaleString()}</span>
                         </div>
-                        {rates && (
-                          <p className="text-[10px] text-muted-foreground pt-1">
-                            Rate: USD 1 = NGN {rates.USD_NGN.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                          </p>
-                        )}
                       </div>
                     </Card>
+                  )}
 
-                    {/* Monthly Payouts to Owners */}
-                    <Card className="p-6">
-                      <div className="flex items-center justify-between mb-3">
+                  {/* Payment Defaults */}
+                  {showFinancials && (
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm text-muted-foreground">Monthly Payouts</p>
-                          <p className="text-2xl font-bold text-blue-600 mt-1">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Payment Defaults</p>
+                          <p className="text-2xl font-bold text-destructive mt-1">{counts.paymentDefaults}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Requires intervention</p>
+                        </div>
+                        <div className="w-11 h-11 rounded-xl bg-destructive/10 flex items-center justify-center text-destructive shrink-0">
+                          <AlertTriangle className="w-5 h-5" />
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+
+                {/* Financial Settlements Breakdown */}
+                {showFinancials && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Monthly Payouts to Owners */}
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Owner Payouts (60%)</p>
+                          <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-0.5">
                             ${totalPayoutsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
-                          <Wallet className="w-6 h-6" />
+                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                          <Wallet className="w-5 h-5" />
                         </div>
                       </div>
-                      <div className="space-y-1.5 pt-2 border-t">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <span>🇺🇸</span> USD
-                          </span>
-                          <span className="font-medium">${financials.ownerPayouts.usd.toLocaleString()}</span>
+                      <div className="space-y-1 pt-2 border-t text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">🇺🇸 USD</span>
+                          <span className="font-medium text-foreground">${financials.ownerPayouts.usd.toLocaleString()}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <span>🇳🇬</span> NGN
-                          </span>
-                          <span className="font-medium">₦{financials.ownerPayouts.ngn.toLocaleString()}</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">🇳🇬 NGN</span>
+                          <span className="font-medium text-foreground">₦{financials.ownerPayouts.ngn.toLocaleString()}</span>
                         </div>
-                        <p className="text-[10px] text-muted-foreground pt-1">
-                          Paid to owners (60% of income)
-                        </p>
                       </div>
                     </Card>
 
                     {/* Admin Withdrawals */}
-                    <Card className="p-6">
-                      <div className="flex items-center justify-between mb-3">
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between mb-2">
                         <div>
-                          <p className="text-sm text-muted-foreground">Admin Withdrawals</p>
-                          <p className="text-2xl font-bold text-primary mt-1">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Platform Earnings (40%)</p>
+                          <p className="text-xl font-bold text-primary mt-0.5">
                             ${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                          <DollarSign className="w-6 h-6" />
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                          <DollarSign className="w-5 h-5" />
                         </div>
                       </div>
-                      <div className="space-y-1.5 pt-2 border-t">
-                        <div className="flex items-center justify-between text-sm">
+                      <div className="space-y-1 pt-2 border-t text-xs">
+                        <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">Weekly</span>
-                          <span className="font-medium">${totalWeeklyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                          <span className="font-medium text-foreground">${totalWeeklyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center justify-between">
                           <span className="text-muted-foreground">Monthly</span>
-                          <span className="font-medium">${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                          <span className="font-medium text-foreground">${totalMonthlyWithdrawalsUsd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                         </div>
-                        <p className="text-[10px] text-muted-foreground pt-1">
-                          Platform earnings (40% fee)
-                        </p>
                       </div>
                     </Card>
 
                     {/* Admin Balance */}
-                    <Card className="p-6">
-                      <div className="flex items-center justify-between mb-3">
+                    <Card className="p-5 border shadow-xs">
+                      <div className="flex items-center justify-between mb-2">
                         <div>
-                          <p className="text-sm text-muted-foreground">Admin Balance</p>
-                          <p className="text-2xl font-bold text-emerald-600 mt-1">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Net Balance</p>
+                          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                             ${(totalIncomeUsd - totalPayoutsUsd).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="w-12 h-12 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
-                          <CreditCard className="w-6 h-6" />
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                          <CreditCard className="w-5 h-5" />
                         </div>
                       </div>
-                      <div className="space-y-1.5 pt-2 border-t">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <span>🇺🇸</span> USD
-                          </span>
-                          <span className="font-medium">${(financials.income.usd - financials.ownerPayouts.usd).toLocaleString()}</span>
+                      <div className="space-y-1 pt-2 border-t text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">🇺🇸 USD</span>
+                          <span className="font-medium text-foreground">${(financials.income.usd - financials.ownerPayouts.usd).toLocaleString()}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground flex items-center gap-1">
-                            <span>🇳🇬</span> NGN
-                          </span>
-                          <span className="font-medium">₦{(financials.income.ngn - financials.ownerPayouts.ngn).toLocaleString()}</span>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground pt-1">
-                          Available platform balance
-                        </p>
-                      </div>
-                    </Card>
-
-                    {/* Payment Defaults */}
-                    <Card className="p-6">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Payment Defaults</p>
-                          <p className="text-2xl font-bold text-foreground mt-1">{counts.paymentDefaults}</p>
-                        </div>
-                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center text-destructive">
-                          <AlertTriangle className="w-6 h-6" />
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground flex items-center gap-1">🇳🇬 NGN</span>
+                          <span className="font-medium text-foreground">₦{(financials.income.ngn - financials.ownerPayouts.ngn).toLocaleString()}</span>
                         </div>
                       </div>
                     </Card>
-                  </>
+                  </div>
                 )}
               </div>
             );
           })()}
 
           {/* Daily To-Do List */}
-          <div className="mb-8">
+          <div className="mb-6">
             <AdminDailyTodoList />
           </div>
 
-          {/* Admin Tools quick links - Scoped to granted roles */}
-          {(() => {
-            const showAudit = isFullAdmin || !!perms?.can_view_audit_log;
-            const showPayments = isFullAdmin || !!perms?.can_view_payments;
-            const showSupport = isFullAdmin || !!perms?.can_view_support_tasks;
-            const showComms = isFullAdmin || !!perms?.can_view_communications;
-            const showContent = true;
-            const showReports = isFullAdmin || !!perms?.can_view_reports;
-            const showVehicles = isFullAdmin || !!perms?.can_view_vehicles;
-
-            const hasAnyTool = showAudit || showPayments || showSupport || showComms || showContent || showReports || showVehicles;
-            if (!hasAnyTool) return null;
-
-            return (
-              <Card className="p-4 mb-8">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-primary" />
-                    Admin Tools
-                  </h3>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  {showAudit && (
-                    <Button asChild variant="outline" size="sm" className="justify-start">
-                      <a href="/admin/audit-log">Security audit log</a>
-                    </Button>
-                  )}
-                  {showPayments && (
-                    <>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/payments">Payments viewer</a>
-                      </Button>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/reconciliation">Reconciliation logs</a>
-                      </Button>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/settlement-reconciliation">Settlement reconciliation</a>
-                      </Button>
-                    </>
-                  )}
-                  {showAudit && (
-                    <Button asChild variant="outline" size="sm" className="justify-start">
-                      <a href="/admin/export-audit">Document export audit</a>
-                    </Button>
-                  )}
-                  {showSupport && (
-                    <Button asChild variant="outline" size="sm" className="justify-start">
-                      <a href="/admin/document-failures">Document failures</a>
-                    </Button>
-                  )}
-                  {showComms && (
-                    <Button asChild variant="outline" size="sm" className="justify-start">
-                      <a href="/m/call-in">Mobile call-in</a>
-                    </Button>
-                  )}
-                  {showContent && (
-                    <>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/tour-config">Tour step config</a>
-                      </Button>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/persona-templates">Persona templates</a>
-                      </Button>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/legal-templates/preview">Legal templates preview</a>
-                      </Button>
-                    </>
-                  )}
-                  {showReports && (
-                    <Button asChild variant="outline" size="sm" className="justify-start">
-                      <a href="/admin/tour-analytics">Tour analytics</a>
-                    </Button>
-                  )}
-                  {showVehicles && (
-                    <>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/authorizations">Rental authorizations log</a>
-                      </Button>
-                      <Button asChild variant="outline" size="sm" className="justify-start">
-                        <a href="/admin/vehicle-queue">Vehicle submission queue</a>
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </Card>
-            );
-          })()}
-
-          {/* Portal Navigation */}
-          <div className="flex flex-col gap-4 mb-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <PortalNavigation
-                activePortal={portalView}
-                activeTab={activeTab}
-                onPortalChange={setPortalView}
-                onTabChange={setActiveTab}
-                excludeTabs={EXCLUDED_TABS}
-                excludePortals={EXCLUDED_PORTALS}
-                storageScope="admin-assistant"
-
-              />
-              <div className="ml-auto"><AdminNotificationsBell /></div>
-
-            </div>
-            {/* Independent Quick Access Buttons */}
-            <ScrollableStrip ariaLabel="Quick access shortcuts">
-              <div className="flex items-center gap-2">
-                {canAccessTab('inbox') && (
-                  <Button
-                    variant={activeTab === 'inbox' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => {
-                      setPortalView('support');
-                      setActiveTab('inbox');
-                    }}
-                    className="gap-2 shrink-0"
-                  >
-                    <Inbox className="h-4 w-4" />
-                    Unified Inbox
-                  </Button>
-                )}
-                {canAccessTab('call-center') && (
-                  <Button
-                    variant={activeTab === 'call-center' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => {
-                      setPortalView('support');
-                      setActiveTab('call-center');
-                    }}
-                    className="gap-2 shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border-primary/30"
-                  >
-                    <Headphones className="h-4 w-4" />
-                    Call Center
-                  </Button>
-                )}
-                {canAccessTab('support-tasks') && (
-                  <Button
-                    variant={activeTab === 'support-tasks' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => {
-                      navigateTo('support', 'support-tasks');
-                    }}
-                    className="gap-2 shrink-0"
-                  >
-                    <Phone className="h-4 w-4" />
-                    Support Tasks
-                  </Button>
-                )}
-                {canAccessTab('attestation-review') && (
-                  <Button
-                    variant={activeTab === 'attestation-review' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => {
-                      navigateTo('crm', 'attestation-review');
-                    }}
-                    className="gap-2 shrink-0"
-                  >
-                    <ShieldCheck className="h-4 w-4" />
-                    Attestation Review
-                  </Button>
-                )}
-              </div>
-            </ScrollableStrip>
-
-          </div>
+          {/* Scoped Unified Portal Navigation & Tools */}
+          <AdminUnifiedNavigation
+            activePortal={portalView}
+            activeTab={activeTab}
+            onPortalChange={setPortalView}
+            onTabChange={setActiveTab}
+            excludeTabs={EXCLUDED_TABS}
+            excludePortals={EXCLUDED_PORTALS}
+            storageScope="admin-assistant"
+            allowedTools={{
+              canAudit: isFullAdmin || !!perms?.can_view_audit_log,
+              canPayments: isFullAdmin || !!perms?.can_view_payments,
+              canSupport: isFullAdmin || !!perms?.can_view_support_tasks,
+              canComms: isFullAdmin || !!perms?.can_view_communications,
+              canContent: true,
+              canReports: isFullAdmin || !!perms?.can_view_reports,
+              canVehicles: isFullAdmin || !!perms?.can_view_vehicles,
+            }}
+          />
 
           {/* Portal Analytics Cards */}
           <PortalAnalyticsCards 

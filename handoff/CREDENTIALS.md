@@ -44,6 +44,7 @@ This document defines the strict segregation between client-safe variables (pref
 | `PAYSTACK_SECRET_KEY` | Backend | **CRITICAL** | Paystack payment secret (Nigeria gateway) |
 | `PERSONA_API_KEY` | Backend | High | Persona biometric & driver KYC verification key |
 | `RESEND_API_KEY` | Backend | High | Transactional email delivery service |
+| `RESEND_WEBHOOK_SIGNING_SECRET` | Backend / Edge | High | Resend Svix webhook signing secret (`whsec_...`) to verify delivery and inbound callbacks |
 
 ---
 

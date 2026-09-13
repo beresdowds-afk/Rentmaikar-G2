@@ -7,7 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   ListTodo, RefreshCw, Calendar, Clock, Plus,
-  Layers, ChevronDown
+  Layers, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/contexts/AuthContext';
@@ -93,6 +93,7 @@ export const AdminDailyTodoList = ({ isEmbedPage = false }: AdminDailyTodoListPr
   const [isGenerating, setIsGenerating] = useState(false);
   const [customTask, setCustomTask] = useState('');
   const [customPriority, setCustomPriority] = useState<'urgent' | 'high' | 'medium' | 'low'>('medium');
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -314,6 +315,25 @@ export const AdminDailyTodoList = ({ isEmbedPage = false }: AdminDailyTodoListPr
               <RefreshCw className={`h-3.5 w-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
               {isGenerating ? 'Syncing...' : 'Refresh List'}
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="gap-1 h-8 text-xs font-medium text-muted-foreground hover:text-foreground"
+              aria-label={isCollapsed ? 'Expand daily to-do list' : 'Minimize daily to-do list'}
+            >
+              {isCollapsed ? (
+                <>
+                  <span>Show Tasks</span>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </>
+              ) : (
+                <>
+                  <span>Minimize</span>
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </>
+              )}
+            </Button>
           </div>
         </div>
 
@@ -336,50 +356,52 @@ export const AdminDailyTodoList = ({ isEmbedPage = false }: AdminDailyTodoListPr
         )}
       </CardHeader>
 
-      <CardContent className="space-y-3 pt-0">
-        {/* Scrolling iFrame Component displaying 6 items */}
-        <TodoListScrollingIframe
-          tasks={tasks}
-          onToggleTask={toggleTask}
-          isLoading={isLoading}
-          onGenerateTasks={generateTasks}
-          isGenerating={isGenerating}
-        />
-
-        <Separator className="my-2" />
-
-        {/* Quick Add Custom Task */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input
-            placeholder="Add a new custom task to the scrolling frame..."
-            value={customTask}
-            onChange={(e) => setCustomTask(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addCustomTask()}
-            className="text-xs h-9"
+      {!isCollapsed && (
+        <CardContent className="space-y-3 pt-0">
+          {/* Scrolling iFrame Component displaying 6 items */}
+          <TodoListScrollingIframe
+            tasks={tasks}
+            onToggleTask={toggleTask}
+            isLoading={isLoading}
+            onGenerateTasks={generateTasks}
+            isGenerating={isGenerating}
           />
-          <div className="flex items-center gap-2 shrink-0">
-            <select
-              value={customPriority}
-              onChange={(e) => setCustomPriority(e.target.value as any)}
-              className="h-9 px-2 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="urgent">Urgent</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <Button
-              size="sm"
-              onClick={addCustomTask}
-              disabled={!customTask.trim()}
-              className="h-9 px-3 gap-1.5 text-xs"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Add Task</span>
-            </Button>
+
+          <Separator className="my-2" />
+
+          {/* Quick Add Custom Task */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input
+              placeholder="Add a new custom task to the scrolling frame..."
+              value={customTask}
+              onChange={(e) => setCustomTask(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addCustomTask()}
+              className="text-xs h-9"
+            />
+            <div className="flex items-center gap-2 shrink-0">
+              <select
+                value={customPriority}
+                onChange={(e) => setCustomPriority(e.target.value as any)}
+                className="h-9 px-2 text-xs rounded-md border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+              <Button
+                size="sm"
+                onClick={addCustomTask}
+                disabled={!customTask.trim()}
+                className="h-9 px-3 gap-1.5 text-xs"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Task</span>
+              </Button>
+            </div>
           </div>
-        </div>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 };

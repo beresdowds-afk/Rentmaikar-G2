@@ -8,10 +8,10 @@ export const personaEnabledQueryKey = ['persona-verification-enabled'] as const;
 /**
  * Platform-wide switch for Persona identity verification.
  *
- * When an admin turns this off, every Persona-dependent gate (marketplace,
- * portals, dashboards, verification prompts) must behave as if identity
- * verification already passed. Defaults to ENABLED so a failed read can never
- * silently weaken the gate.
+ * When Persona is disabled (the default), every Persona-dependent gate
+ * (marketplace, portals, dashboards, verification prompts) treats identity
+ * verification as bypassed. Admins can enable or disable Persona at any time
+ * via the Admin Dashboard switch.
  */
 export function usePersonaEnabled() {
   const qc = useQueryClient();
@@ -20,14 +20,23 @@ export function usePersonaEnabled() {
     queryKey: personaEnabledQueryKey,
     staleTime: 60_000,
     queryFn: async (): Promise<boolean> => {
-      const { data, error } = await supabase
-        .from('platform_kv_settings')
-        .select('value')
-        .eq('key', PERSONA_SETTING_KEY)
-        .maybeSingle();
-      if (error) throw error;
-      const v = (data?.value as { enabled?: boolean } | null)?.enabled;
-      return v === undefined ? true : !!v;
+      try {
+        const { data, error } = await supabase
+          .from('platform_kv_settings')
+          .select('value')
+          .eq('key', PERSONA_SETTING_KEY)
+          .maybeSingle();
+        if (error) {
+          console.warn('[usePersonaEnabled] Failed to fetch setting, defaulting to false:', error);
+          return false;
+        }
+        const v = (data?.value as { enabled?: boolean } | null)?.enabled;
+        // Default to false (disabled) unless explicitly enabled in platform_kv_settings
+        return v === true;
+      } catch (err) {
+        console.warn('[usePersonaEnabled] Unexpected error fetching setting:', err);
+        return false;
+      }
     },
   });
 
@@ -47,9 +56,8 @@ export function usePersonaEnabled() {
   }, [qc]);
 
   return {
-    /** True while unknown — callers should keep the gate closed until resolved. */
     isLoading: query.isLoading,
-    enabled: query.data ?? true,
+    enabled: query.data ?? false,
     refetch: query.refetch,
   };
 }

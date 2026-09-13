@@ -221,7 +221,35 @@ export default function PersonaVerification({
           },
           headers: { "x-correlation-id": correlationId },
         });
-        if (error) throw error;
+        if (error) {
+          let detail = error.message;
+          try {
+            const ctx = (error as unknown as { context?: { json?: () => Promise<any>; text?: () => Promise<string> } }).context;
+            if (ctx?.json) {
+              const body = await ctx.json();
+              if (body?.detail?.errors?.[0]?.title) {
+                detail = body.detail.errors[0].title;
+              } else if (body?.error) {
+                detail = typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
+              }
+            } else if (ctx?.text) {
+              const txt = await ctx.text();
+              try {
+                const body = JSON.parse(txt);
+                if (body?.detail?.errors?.[0]?.title) {
+                  detail = body.detail.errors[0].title;
+                } else if (body?.error) {
+                  detail = typeof body.error === 'string' ? body.error : txt;
+                }
+              } catch {
+                if (txt) detail = txt;
+              }
+            }
+          } catch {
+            // Keep default detail
+          }
+          throw new Error(detail);
+        }
         return data;
       }, { stage: "identity", step: "create_inquiry", provider: "persona", correlationId });
 

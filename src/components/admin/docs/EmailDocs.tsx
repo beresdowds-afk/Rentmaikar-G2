@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mail, Send, BarChart3, Shield, Clock, ArrowRight, CheckCircle, AlertTriangle } from "lucide-react";
+import { Mail, Send, BarChart3, Shield, Clock, ArrowRight, CheckCircle, AlertTriangle, Globe, Key, ShieldCheck, Terminal } from "lucide-react";
 
 const transactionalEmails = [
   {
@@ -400,6 +400,64 @@ export const EmailDocs = () => {
                 Primary web app, user dashboards & booking interface.
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* RESEND_WEBHOOK_SIGNING_SECRET System Setup & Verification Instruction */}
+        <div className="mb-8 p-5 rounded-lg border border-primary/30 bg-primary/5">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <h3 className="font-semibold text-base flex items-center gap-2 text-foreground">
+              <Key className="h-4 w-4 text-primary" /> RESEND_WEBHOOK_SIGNING_SECRET System Setup & Verification
+            </h3>
+            <Badge variant="outline" className="border-primary/40 text-primary font-mono text-xs">
+              Svix Webhook Verification
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Resend authenticates webhook event callbacks (delivered, bounced, complained) and incoming emails using Svix cryptographic signatures (<code className="text-xs bg-muted px-1 py-0.5 rounded">svix-id</code>, <code className="text-xs bg-muted px-1 py-0.5 rounded">svix-timestamp</code>, and <code className="text-xs bg-muted px-1 py-0.5 rounded">svix-signature</code>). To safeguard system telemetry, verify webhook integrity, and protect against replay attacks, define <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded font-semibold text-foreground">RESEND_WEBHOOK_SIGNING_SECRET</code> in the environment configuration.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
+            <div className="p-3.5 rounded-lg bg-background border border-border">
+              <div className="flex items-center gap-2 mb-2 font-medium text-xs uppercase tracking-wider text-muted-foreground">
+                <ShieldCheck className="h-3.5 w-3.5 text-primary" /> 1. Retrieve Secret from Resend Dashboard
+              </div>
+              <ol className="list-decimal list-inside space-y-1.5 text-xs text-muted-foreground">
+                <li>Log in to <strong className="text-foreground">Resend Dashboard</strong> & navigate to <strong className="text-foreground">Webhooks</strong>.</li>
+                <li>Create or select the webhook pointing to the delivery handler:
+                  <div className="mt-1 font-mono text-[11px] bg-muted px-2 py-1 rounded text-foreground break-all">
+                    https://&lt;project&gt;.supabase.co/functions/v1/resend-events
+                  </div>
+                </li>
+                <li>Select events: <code className="text-[11px] bg-muted px-1 py-0.5 rounded">email.delivered</code>, <code className="text-[11px] bg-muted px-1 py-0.5 rounded">email.bounced</code>, <code className="text-[11px] bg-muted px-1 py-0.5 rounded">email.complained</code>, <code className="text-[11px] bg-muted px-1 py-0.5 rounded">email.failed</code>.</li>
+                <li>Copy the generated <strong className="text-foreground">Signing Secret</strong> (starts with <code className="font-mono text-[11px] text-primary">whsec_...</code>).</li>
+              </ol>
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-background border border-border">
+              <div className="flex items-center gap-2 mb-2 font-medium text-xs uppercase tracking-wider text-muted-foreground">
+                <Terminal className="h-3.5 w-3.5 text-primary" /> 2. Define Environment Configuration
+              </div>
+              <p className="text-xs text-muted-foreground mb-2">
+                Map the secret into your backend/edge environment (<code className="text-[11px] bg-muted px-1 py-0.5 rounded">.env</code>, Supabase Vault, or Cloud Run):
+              </p>
+              <div className="bg-muted p-2.5 rounded font-mono text-xs text-foreground space-y-1">
+                <div className="text-muted-foreground"># Resend API Secret Key</div>
+                <div>RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxx</div>
+                <div className="text-muted-foreground mt-1.5"># Webhook Signature Verification Secret</div>
+                <div className="text-primary font-semibold">RESEND_WEBHOOK_SIGNING_SECRET=whsec_xxxxxxxxxxxxxxxxxxxx</div>
+                <div className="text-[11px] text-muted-foreground mt-1"># (RESEND_WEBHOOK_SECRET is also supported as legacy alias)</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-background border border-border text-xs space-y-2">
+            <div className="flex items-center gap-2 font-medium text-foreground">
+              <Shield className="h-3.5 w-3.5 text-primary" /> Server-Side Handler Verification Flow:
+            </div>
+            <p className="text-muted-foreground leading-relaxed">
+              When an event arrives, the server-side delivery handler (<code className="bg-muted px-1 py-0.5 rounded text-foreground font-mono">resend-events</code> / <code className="bg-muted px-1 py-0.5 rounded text-foreground font-mono">email-webhook</code>) invokes <code className="bg-muted px-1 py-0.5 rounded text-foreground font-mono">verifySvixSignature(req, rawBody, secret)</code>. The handler computes an HMAC-SHA256 signature using the secret and compares it against <code className="bg-muted px-1 py-0.5 rounded text-foreground font-mono">svix-signature</code>. Payloads with timestamps skewed beyond 5 minutes or missing/invalid signatures fail closed with a <code className="text-destructive font-mono">401 Unauthorized</code> or <code className="text-destructive font-mono">403 Forbidden</code> response, ensuring only verified Resend delivery outcomes are logged to <code className="bg-muted px-1 py-0.5 rounded text-foreground font-mono">email_send_log</code>.
+            </p>
           </div>
         </div>
 

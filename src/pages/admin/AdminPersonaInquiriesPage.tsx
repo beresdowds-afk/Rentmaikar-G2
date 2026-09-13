@@ -13,6 +13,7 @@ import {
 import { RefreshCw, Search } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PersonaAttemptsAudit from "@/components/admin/PersonaAttemptsAudit";
+import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 
 
 type InquiryRow = {
@@ -133,6 +134,8 @@ export default function AdminPersonaInquiriesPage() {
           Refresh
         </Button>
       </div>
+
+      <PersonaVerificationSettings compact />
 
       <Tabs defaultValue="inquiries" className="space-y-4">
         <TabsList>
