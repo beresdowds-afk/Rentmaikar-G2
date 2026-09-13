@@ -8,6 +8,7 @@ const STORAGE_PREFIX = 'rentmaikar:decoupled-portal';
 function normalizePortal(raw: string | null): PortalType {
   if (!raw) return 'support';
   if (raw === 'content') return 'content-editor';
+  if (raw === 'comms') return 'support';
   if (['crm', 'erp', 'support', 'content-editor', 'marketing', 'docs'].includes(raw)) {
     return raw as PortalType;
   }

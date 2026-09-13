@@ -635,6 +635,16 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/admin/inbound-forwarding"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminProfiler id="AdminInboundForwardingPage">
+                          <AdminEmailRoutingPage />
+                        </AdminProfiler>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/admin/email-routing"
                     element={
                       <ProtectedRoute allowedRoles={['admin']}>

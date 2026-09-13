@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, PhoneForwarded, MessageSquare, Mail, Phone, PowerOff, Send, Globe } from 'lucide-react';
+import { Loader2, PhoneForwarded, MessageSquare, Mail, Phone, PowerOff, Send, Globe, ArrowUpRight, ExternalLink } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
+import { InboundEmailRoutingEditor } from '@/components/admin/InboundEmailRoutingEditor';
 
 export const FORWARDING_CONFIG_KEY = 'forwarding_config';
 export const OUTBOUND_CONFIG_KEY = 'outbound_channel_config';
@@ -240,18 +242,27 @@ export const ForwardingSettingsPanel = () => {
 
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <PhoneForwarded className="h-4 w-4 text-primary" />
-          Channel Control
-          {pausedCount > 0 && (
-            <Badge variant="destructive">{pausedCount} outbound paused</Badge>
-          )}
-        </CardTitle>
-        <CardDescription>
-          Route inbound customer communications, and pause outbound providers per channel and region — no redeploy needed.
-        </CardDescription>
+    <Card id="channel-control">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <PhoneForwarded className="h-4 w-4 text-primary" />
+            Channel Control
+            {pausedCount > 0 && (
+              <Badge variant="destructive">{pausedCount} outbound paused</Badge>
+            )}
+          </CardTitle>
+          <CardDescription className="mt-1">
+            Route inbound customer communications, and pause outbound providers per channel and region — no redeploy needed.
+          </CardDescription>
+        </div>
+        <Button variant="outline" size="sm" asChild className="shrink-0 h-8 gap-1.5 text-xs">
+          <Link to="/admin/inbound-forwarding">
+            <Mail className="h-3.5 w-3.5 text-primary" />
+            Inbound Forwarding Page
+            <ArrowUpRight className="h-3.5 w-3.5 ml-0.5" />
+          </Link>
+        </Button>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -267,7 +278,24 @@ export const ForwardingSettingsPanel = () => {
             </TabsList>
 
 
-            <TabsContent value="inbound" className="space-y-3">
+            <TabsContent value="inbound" className="space-y-4">
+              {/* Quick banner linking to the Inbound Forwarding page */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs">
+                <div>
+                  <span className="font-semibold text-foreground flex items-center gap-1.5">
+                    <PhoneForwarded className="h-3.5 w-3.5 text-primary" /> Inbound Forwarding Center
+                  </span>
+                  <p className="text-muted-foreground mt-0.5">
+                    Manage multi-channel forwarding and mailbox distribution tables across all platform numbers and domains.
+                  </p>
+                </div>
+                <Button variant="default" size="sm" asChild className="shrink-0 h-7 text-xs gap-1">
+                  <Link to="/admin/inbound-forwarding">
+                    Inbound Forwarding Page <ArrowUpRight className="h-3 w-3" />
+                  </Link>
+                </Button>
+              </div>
+
               <div className="flex items-start justify-between gap-4 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3">
                 <div>
                   <span className="font-medium text-sm">Keep outbound in sync with inbound</span>
@@ -282,32 +310,48 @@ export const ForwardingSettingsPanel = () => {
                 />
               </div>
 
-              {CHANNELS.map(({ key, label, description, Icon }) => (
-                <div key={key} className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      <Icon className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">{label} forwarding</span>
-                        <Badge variant={config[key] ? 'default' : 'secondary'}>
-                          {config[key] ? 'Enabled' : 'Disabled'}
-                        </Badge>
+              <div className="space-y-2.5">
+                {CHANNELS.map(({ key, label, description, Icon }) => (
+                  <div key={key} className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg bg-primary/10">
+                        <Icon className="h-4 w-4 text-primary" />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{label} forwarding</span>
+                          <Badge variant={config[key] ? 'default' : 'secondary'}>
+                            {config[key] ? 'Enabled' : 'Disabled'}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {key === 'email' && (
+                        <Button variant="outline" size="sm" asChild className="h-7 text-xs gap-1 hidden sm:inline-flex">
+                          <Link to="/admin/inbound-forwarding">
+                            Rules <ArrowUpRight className="h-3 w-3" />
+                          </Link>
+                        </Button>
+                      )}
+                      <Switch
+                        checked={config[key]}
+                        onCheckedChange={(v) => toggleInbound(key, v)}
+                      />
                     </div>
                   </div>
-                  <Switch
-                    checked={config[key]}
-                    onCheckedChange={(v) => toggleInbound(key, v)}
-                  />
-                </div>
-              ))}
+                ))}
+              </div>
               <p className="text-xs text-muted-foreground">
                 Call forwarding requires the inbound voice webhook of the platform number to point at the
                 <span className="font-mono"> incoming-call-forward </span> endpoint.
               </p>
+
+              {/* Embedded Inbound Forwarding Rules & Platform Distribution */}
+              <div className="pt-2">
+                <InboundEmailRoutingEditor embedded />
+              </div>
             </TabsContent>
 
             <TabsContent value="outbound" className="space-y-5">
