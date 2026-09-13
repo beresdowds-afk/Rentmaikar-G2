@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Mail, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Loader2, Mail, Plus, RefreshCw, Save, Trash2, ArrowUpRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import Seo from "@/components/seo/Seo";
@@ -15,15 +15,30 @@ import Seo from "@/components/seo/Seo";
 const ROUTING_KEY = "email_routing_rules";
 const FORWARDING_CONFIG_KEY = "forwarding_config";
 
-/** External mailboxes inbound mail can be delivered to. */
+/** Default fallback delivery addresses if platform_email_config is empty. */
 const DELIVERY_ADDRESSES = [
   "support@rentmaikar.com",
-  "noreply@rentmaikar.com",
   "admin@rentmaikar.com",
+  "payments@rentmaikar.com",
+  "documents@rentmaikar.com",
+  "legal@rentmaikar.com",
+  "privacy@rentmaikar.com",
+  "dpo@rentmaikar.com",
+  "negotiations@rentmaikar.com",
   "notification@rentmaikar.com",
+  "noreply@rentmaikar.com",
 ] as const;
 
 const INBOUND_DOMAIN = "backend.rentmaikar.com";
+
+interface PlatformEmailItem {
+  id: string;
+  key: string;
+  email: string;
+  sender_name: string | null;
+  description: string | null;
+  is_active: boolean;
+}
 
 interface RoutingRule {
   mailbox: string;
@@ -39,15 +54,16 @@ interface RoutingTable {
 const DEFAULT_TABLE: RoutingTable = {
   rules: [
     { mailbox: "support", destinations: ["support@rentmaikar.com"], enabled: true },
-    { mailbox: "payments", destinations: ["admin@rentmaikar.com"], enabled: true },
-    { mailbox: "documents", destinations: ["admin@rentmaikar.com"], enabled: true },
+    { mailbox: "payments", destinations: ["payments@rentmaikar.com"], enabled: true },
+    { mailbox: "documents", destinations: ["documents@rentmaikar.com"], enabled: true },
     { mailbox: "admin", destinations: ["admin@rentmaikar.com"], enabled: true },
-    { mailbox: "legal", destinations: ["admin@rentmaikar.com"], enabled: true },
-    { mailbox: "privacy", destinations: ["admin@rentmaikar.com"], enabled: true },
-    { mailbox: "dpo", destinations: ["admin@rentmaikar.com"], enabled: true },
+    { mailbox: "legal", destinations: ["legal@rentmaikar.com"], enabled: true },
+    { mailbox: "privacy", destinations: ["privacy@rentmaikar.com"], enabled: true },
+    { mailbox: "dpo", destinations: ["dpo@rentmaikar.com"], enabled: true },
+    { mailbox: "negotiations", destinations: ["negotiations@rentmaikar.com"], enabled: true },
     { mailbox: "nigeria", destinations: ["support@rentmaikar.com"], enabled: true },
     { mailbox: "usa", destinations: ["support@rentmaikar.com"], enabled: true },
-    { mailbox: "negotiations", destinations: ["admin@rentmaikar.com"], enabled: true },
+    { mailbox: "notification", destinations: ["notification@rentmaikar.com"], enabled: true },
     { mailbox: "noreply", destinations: ["noreply@rentmaikar.com"], enabled: false },
     { mailbox: "*", destinations: ["support@rentmaikar.com"], enabled: true },
   ],
@@ -56,6 +72,7 @@ const DEFAULT_TABLE: RoutingTable = {
 
 export default function AdminEmailRoutingPage() {
   const [table, setTable] = useState<RoutingTable>(DEFAULT_TABLE);
+  const [platformEmails, setPlatformEmails] = useState<PlatformEmailItem[]>([]);
   const [forwardingOn, setForwardingOn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -63,30 +80,65 @@ export default function AdminEmailRoutingPage() {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("platform_kv_settings")
-      .select("key, value")
-      .in("key", [ROUTING_KEY, FORWARDING_CONFIG_KEY]);
+    const [{ data: emailConfigData }, { data: kvData, error }] = await Promise.all([
+      supabase
+        .from("platform_email_config")
+        .select("id, key, email, sender_name, description, is_active")
+        .eq("is_active", true)
+        .order("key"),
+      supabase
+        .from("platform_kv_settings")
+        .select("key, value")
+        .in("key", [ROUTING_KEY, FORWARDING_CONFIG_KEY]),
+    ]);
     setLoading(false);
+
     if (error) {
       toast.error("Could not load email routing settings");
       return;
     }
-    const rows = (data ?? []) as { key: string; value: unknown }[];
+
+    const activeEmails = (emailConfigData ?? []) as PlatformEmailItem[];
+    setPlatformEmails(activeEmails);
+
+    const rows = (kvData ?? []) as { key: string; value: unknown }[];
     const routing = rows.find((r) => r.key === ROUTING_KEY)?.value as Partial<RoutingTable> | undefined;
     const fwd = rows.find((r) => r.key === FORWARDING_CONFIG_KEY)?.value as
       | { email?: boolean }
       | undefined;
+
     if (routing?.rules?.length) {
       setTable({
         rules: routing.rules.map((r) => ({
           mailbox: String(r.mailbox ?? "").toLowerCase(),
-          destinations: Array.isArray(r.destinations) ? r.destinations : [],
+          destinations: Array.isArray(r.destinations) ? r.destinations.map((d) => d.toLowerCase()) : [],
           enabled: r.enabled !== false,
         })),
-        fallback: Array.isArray(routing.fallback) ? routing.fallback : DEFAULT_TABLE.fallback,
+        fallback: Array.isArray(routing.fallback) ? routing.fallback.map((d) => d.toLowerCase()) : DEFAULT_TABLE.fallback,
+      });
+    } else if (activeEmails.length > 0) {
+      // Initialize dynamic defaults from active platform email addresses
+      const supportEmail = activeEmails.find((e) => e.key.toLowerCase() === "support")?.email || "support@rentmaikar.com";
+      const initialRules: RoutingRule[] = activeEmails.map((entry) => ({
+        mailbox: entry.key.toLowerCase(),
+        destinations: [entry.email.toLowerCase()],
+        enabled: entry.key.toLowerCase() !== "noreply",
+      }));
+      if (!initialRules.some((r) => r.mailbox === "usa")) {
+        initialRules.push({ mailbox: "usa", destinations: [supportEmail.toLowerCase()], enabled: true });
+      }
+      if (!initialRules.some((r) => r.mailbox === "nigeria")) {
+        initialRules.push({ mailbox: "nigeria", destinations: [supportEmail.toLowerCase()], enabled: true });
+      }
+      if (!initialRules.some((r) => r.mailbox === "*")) {
+        initialRules.push({ mailbox: "*", destinations: [supportEmail.toLowerCase()], enabled: true });
+      }
+      setTable({
+        rules: initialRules,
+        fallback: [supportEmail.toLowerCase()],
       });
     }
+
     setForwardingOn(!!fwd?.email);
   };
 
@@ -94,6 +146,19 @@ export default function AdminEmailRoutingPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const deliveryOptions: { email: string; label?: string; description?: string }[] =
+    platformEmails.length > 0
+      ? platformEmails.map((p) => ({
+          email: p.email.toLowerCase(),
+          label: p.sender_name || p.key,
+          description: p.description || undefined,
+        }))
+      : DELIVERY_ADDRESSES.map((email) => ({
+          email,
+          label: undefined,
+          description: undefined,
+        }));
 
   const updateRule = (mailbox: string, patch: Partial<RoutingRule>) =>
     setTable((t) => ({
@@ -115,9 +180,17 @@ export default function AdminEmailRoutingPage() {
       toast.error("That mailbox already has a rule");
       return;
     }
+
+    const matchingPlatform = platformEmails.find((p) => p.key.toLowerCase() === key);
+    const initialDest = matchingPlatform?.email
+      ? [matchingPlatform.email.toLowerCase()]
+      : platformEmails.length > 0
+        ? [platformEmails[0].email.toLowerCase()]
+        : ["support@rentmaikar.com"];
+
     setTable((t) => ({
       ...t,
-      rules: [...t.rules, { mailbox: key, destinations: ["support@rentmaikar.com"], enabled: true }],
+      rules: [...t.rules, { mailbox: key, destinations: initialDest, enabled: true }],
     }));
     setNewMailbox("");
   };
@@ -172,10 +245,25 @@ export default function AdminEmailRoutingPage() {
           <Mail className="h-6 w-6 text-primary" /> Email Routing
         </h1>
         <p className="text-sm text-muted-foreground">
-          Every message received on <strong>{INBOUND_DOMAIN}</strong> is delivered externally to the
+          Every message received on <strong>{INBOUND_DOMAIN}</strong> is distributed externally to the
           addresses selected below, in addition to landing in the Unified Inbox.
         </p>
       </header>
+
+      {/* Platform Email Distribution Information */}
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+        <div className="space-y-0.5">
+          <span className="font-semibold text-foreground">Platform Email Distribution</span>
+          <p className="text-muted-foreground">
+            Delivery targets are sourced directly from <strong>Platform Email Addresses</strong> (managed under Contact Settings). Any active address configured there is available here for distribution.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" asChild className="shrink-0 h-8 text-xs">
+          <a href="/admin?portal=comms&tab=contacts">
+            Manage Platform Emails <ArrowUpRight className="ml-1 h-3.5 w-3.5" />
+          </a>
+        </Button>
+      </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
@@ -239,16 +327,42 @@ export default function AdminEmailRoutingPage() {
                 </div>
                 <Separator className="my-3" />
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {DELIVERY_ADDRESSES.map((address) => {
-                    const id = `${rule.mailbox}-${address}`;
+                  {deliveryOptions.map(({ email, label, description }) => {
+                    const id = `${rule.mailbox}-${email}`;
+                    const isSelected = rule.destinations.includes(email);
+                    const isDirectMatch = rule.mailbox.toLowerCase() === email.split("@")[0].toLowerCase();
                     return (
-                      <label key={id} htmlFor={id} className="flex items-center gap-2 text-sm">
+                      <label
+                        key={id}
+                        htmlFor={id}
+                        className={`flex items-start gap-2.5 rounded-md border p-2.5 text-xs transition-colors cursor-pointer ${
+                          isSelected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-muted/40"
+                        }`}
+                      >
                         <Checkbox
                           id={id}
-                          checked={rule.destinations.includes(address)}
-                          onCheckedChange={(v) => toggleDestination(rule, address, v === true)}
+                          checked={isSelected}
+                          onCheckedChange={(v) => toggleDestination(rule, email, v === true)}
+                          className="mt-0.5"
                         />
-                        <span className="font-mono text-xs">{address}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono font-medium text-foreground">{email}</span>
+                            {label && (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                {label}
+                              </Badge>
+                            )}
+                            {isDirectMatch && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/40 text-emerald-600 dark:text-emerald-400">
+                                Dedicated
+                              </Badge>
+                            )}
+                          </div>
+                          {description && (
+                            <p className="text-[11px] text-muted-foreground truncate mt-0.5">{description}</p>
+                          )}
+                        </div>
                       </label>
                     );
                   })}

@@ -673,6 +673,77 @@ useEffect(() => {
   };
 }, [loadRegions]);
 
+// ---------------------------------------------------------------------
+// Contact Settings — Authoritative Source of Truth for Platform Contact Details
+// ---------------------------------------------------------------------
+const [contactSettingsMap, setContactSettingsMap] = useState<
+  Record<string, { whatsappNumber?: string; smsNumber?: string; supportEmail?: string }>
+>({});
+
+const loadContactSettings = useCallback(async () => {
+  try {
+    const { data, error } = await supabase
+      .from("contact_settings")
+      .select("region, contact_type, contact_value, is_active")
+      .eq("is_active", true);
+
+    if (error || !data) return;
+
+    const map: Record<string, { whatsappNumber?: string; smsNumber?: string; supportEmail?: string }> = {};
+    for (const row of data as { region: string; contact_type: string; contact_value: string }[]) {
+      const reg = row.region;
+      if (!map[reg]) map[reg] = {};
+      if (row.contact_type === "whatsapp") {
+        map[reg].whatsappNumber = row.contact_value;
+      } else if (row.contact_type === "sms") {
+        map[reg].smsNumber = row.contact_value;
+      } else if (row.contact_type === "email") {
+        map[reg].supportEmail = row.contact_value;
+      }
+    }
+    setContactSettingsMap(map);
+  } catch (err) {
+    console.warn("[region] failed to load contact_settings:", err);
+  }
+}, []);
+
+useEffect(() => {
+  void loadContactSettings();
+
+  const channel = supabase
+    .channel("contact_settings_live_feed")
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "contact_settings",
+      },
+      () => {
+        void loadContactSettings();
+      }
+    )
+    .subscribe();
+
+  const onResume = () => {
+    if (document.visibilityState === "visible") {
+      void loadContactSettings();
+    }
+  };
+  const onOnline = () => {
+    void loadContactSettings();
+  };
+
+  document.addEventListener("visibilitychange", onResume);
+  window.addEventListener("online", onOnline);
+
+  return () => {
+    supabase.removeChannel(channel);
+    document.removeEventListener("visibilitychange", onResume);
+    window.removeEventListener("online", onOnline);
+  };
+}, [loadContactSettings]);
+
 
 
 
@@ -697,24 +768,39 @@ const baseConfig: RegionConfig =
     supportEmail: "",
   };
 
-// Contact overrides loaded from Regional Contact Channels.
-const overrides = contactOverrides[country] ?? {};
+// Contact overrides loaded from Regional Contact Channels (public.contact_settings is the source of truth).
+const staticOverride = contactOverrides[country] ?? {};
+const dbOverride = contactSettingsMap[country] ?? {};
 
 const config: RegionConfig = {
   ...baseConfig,
 
   whatsappNumber:
-    overrides.whatsappNumber ??
+    dbOverride.whatsappNumber ??
+    staticOverride.whatsappNumber ??
     baseConfig.whatsappNumber,
 
   smsNumber:
-    overrides.smsNumber ??
+    dbOverride.smsNumber ??
+    staticOverride.smsNumber ??
     baseConfig.smsNumber,
 
   supportEmail:
-    overrides.supportEmail ??
+    dbOverride.supportEmail ??
+    staticOverride.supportEmail ??
     baseConfig.supportEmail,
 };
+
+// Company info enriched with authoritative contact details from contact_settings
+const baseCompany = companyInfoMap[country] ?? null;
+const resolvedCompanyInfo: CompanyInfo | null = baseCompany
+  ? {
+      ...baseCompany,
+      phone: config.smsNumber || baseCompany.phone,
+      phoneRaw: config.smsNumber ? config.smsNumber.replace(/[^\d+]/g, "") : baseCompany.phoneRaw,
+      email: config.supportEmail || baseCompany.email,
+    }
+  : null;
 
 // ---------------------------------------------------------------------
 // Currency icon
@@ -747,8 +833,7 @@ return (
       smsNumber: config.smsNumber,
       supportEmail: config.supportEmail,
 
-      companyInfo:
-        companyInfoMap[country] ?? null,
+      companyInfo: resolvedCompanyInfo,
 
       getCurrencyIcon,
 

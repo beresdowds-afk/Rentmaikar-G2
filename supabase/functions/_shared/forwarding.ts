@@ -22,7 +22,7 @@ import {
   RENTMAIKAR_NUMBERS,
 } from "./comms-endpoints.ts";
 import { resendSendEmail } from "./resend-gateway.ts";
-import { getEmailRoutingTable, resolveDestinations } from "./email-routing.ts";
+import { getEmailRoutingTable, resolveDestinations, getPlatformEmailConfig } from "./email-routing.ts";
 
 export { evaluateHop, formatTrace, getLoopPolicy, LOOP_POLICY_KEY, parseTrace, stripTrace } from "./comms-correlation.ts";
 
@@ -363,13 +363,22 @@ export async function forwardInboundEmail(
     }
 
     const mailbox = (args.mailbox || "").trim().toLowerCase().split("@")[0] ?? "";
-    const table = await getEmailRoutingTable(supabase);
-    const routed = resolveDestinations(table, mailbox);
+    const [table, platformEmails] = await Promise.all([
+      getEmailRoutingTable(supabase),
+      getPlatformEmailConfig(supabase),
+    ]);
+    const platformMap = new Map<string, string>(
+      platformEmails.map((e) => [e.key.toLowerCase(), e.email.toLowerCase()]),
+    );
+    const routed = resolveDestinations(table, mailbox, platformMap);
 
     let destinations = routed.destinations;
     if (!destinations.length) {
       const regional = await getForwardingDestination(supabase, "email", args.region);
       destinations = regional ? [regional] : [];
+    }
+    if (!destinations.length && platformMap.has("support")) {
+      destinations = [platformMap.get("support")!];
     }
 
     const sender = (args.fromAddress || "").toLowerCase();

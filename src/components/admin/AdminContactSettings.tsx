@@ -497,7 +497,7 @@ export const AdminContactSettings = () => {
             Platform Email Addresses
           </CardTitle>
           <CardDescription>
-            All official @rentmaikar.com email addresses used across the platform. Click Edit to modify.
+            Official @rentmaikar.com email addresses used across the platform. These define the email distribution endpoints used by the messaging router (Admin → Email Routing). Click Edit to modify.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -632,10 +632,10 @@ export const AdminContactSettings = () => {
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-primary" />
-            Regional Contact Channels
+            Regional Contact Channels (Source of Truth)
           </CardTitle>
           <CardDescription>
-            Editable customer-facing contact points (SMS, WhatsApp, Email) by region. These populate dashboard contact options and drive Unified Inbox routing.
+            Authoritative source of truth for platform contact details (SMS, WhatsApp, Email) by region. These populate customer-facing contact points, footers, direct links, and the messaging router.
           </CardDescription>
         </CardHeader>
         <CardContent>

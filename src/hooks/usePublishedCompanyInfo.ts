@@ -32,6 +32,17 @@ interface CompanyInfoRow {
   postal_code: string | null;
 }
 
+interface ContactSettingRow {
+  region: string;
+  contact_type: string;
+  contact_value: string;
+}
+
+interface PublishedPayload {
+  companies: CompanyInfoRow[];
+  contacts: ContactSettingRow[];
+}
+
 /** COMPANY_INFO is keyed by uppercase region ("USA" | "NIGERIA"). */
 function legacyFallback(region: Country) {
   const key = region.toUpperCase() as keyof typeof COMPANY_INFO;
@@ -56,19 +67,45 @@ function staticFallback(region: Country): CompanyInfo {
   };
 }
 
-function rowToCompanyInfo(row: CompanyInfoRow, region: Country): CompanyInfo {
+function resolveCompanyInfo(
+  row: CompanyInfoRow | undefined,
+  contactsForRegion: ContactSettingRow[],
+  region: Country,
+): CompanyInfo {
   const fallback = staticFallback(region);
+
+  const smsContact = contactsForRegion.find(
+    (c) => c.contact_type === "sms" || c.contact_type === "phone",
+  );
+  const emailContact = contactsForRegion.find(
+    (c) => c.contact_type === "email",
+  );
+  const whatsappContact = contactsForRegion.find(
+    (c) => c.contact_type === "whatsapp",
+  );
+
+  const phone = smsContact?.contact_value || row?.phone || fallback.phone;
+  const phoneRaw = smsContact?.contact_value
+    ? smsContact.contact_value.replace(/[^\d+]/g, "")
+    : row?.phone_raw || fallback.phoneRaw;
+  const email = emailContact?.contact_value || row?.email || fallback.email;
+  const whatsapp =
+    whatsappContact?.contact_value ||
+    phoneRaw ||
+    fallback.phoneRaw;
+
   return {
-    companyName: row.company_name || fallback.companyName,
-    phone: row.phone || fallback.phone,
-    phoneRaw: row.phone_raw || fallback.phoneRaw,
-    email: row.email || fallback.email,
-    fullAddress: row.full_address || fallback.fullAddress,
-    address: row.address_line || fallback.address,
-    city: row.city || fallback.city,
-    state: row.state || fallback.state,
-    country: row.country_name || fallback.country,
-    postalCode: row.postal_code || fallback.postalCode,
+    companyName: row?.company_name || fallback.companyName,
+    phone,
+    phoneRaw,
+    email,
+    fullAddress: row?.full_address || fallback.fullAddress,
+    address: row?.address_line || fallback.address,
+    city: row?.city || fallback.city,
+    state: row?.state || fallback.state,
+    country: row?.country_name || fallback.country,
+    postalCode: row?.postal_code || fallback.postalCode,
+    whatsapp,
   };
 }
 
@@ -77,29 +114,45 @@ export function usePublishedCompanyInfo() {
     queryKey: ["published-company-info"],
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
-    queryFn: async (): Promise<CompanyInfoRow[]> => {
-      const { data, error } = await supabase
-        .from("platform_company_info" as never)
-        .select(
-          "region,company_name,phone,phone_raw,email,full_address,address_line,city,state,country_name,postal_code",
-        )
-        .eq("is_active", true);
-      if (error) throw error;
-      return (data ?? []) as unknown as CompanyInfoRow[];
+    queryFn: async (): Promise<PublishedPayload> => {
+      const [compRes, contactsRes] = await Promise.all([
+        supabase
+          .from("platform_company_info" as never)
+          .select(
+            "region,company_name,phone,phone_raw,email,full_address,address_line,city,state,country_name,postal_code",
+          )
+          .eq("is_active", true),
+        supabase
+          .from("contact_settings" as never)
+          .select("region,contact_type,contact_value")
+          .eq("is_active", true),
+      ]);
+
+      if (compRes.error) throw compRes.error;
+
+      return {
+        companies: (compRes.data ?? []) as unknown as CompanyInfoRow[],
+        contacts: (contactsRes.data ?? []) as unknown as ContactSettingRow[],
+      };
     },
   });
 
-  const rows = query.data ?? [];
+  const payload = query.data ?? { companies: [], contacts: [] };
 
   /**
-   * Company info for a region. Published database values win; static
-   * bootstrap/legacy values fill any gaps so the UI never renders blank
-   * contact details while the table is loading or offline.
+   * Company info for a region. CONTACT SETTINGS acts as the primary source
+   * of truth for active channel details (phone/sms, email, whatsapp),
+   * enriched by published company info and static bootstrap fallbacks.
    */
   const infoFor = (region: Country): CompanyInfo => {
     const needle = region.trim().toLowerCase();
-    const row = rows.find((r) => r.region.trim().toLowerCase() === needle);
-    return row ? rowToCompanyInfo(row, region) : staticFallback(region);
+    const row = payload.companies.find(
+      (r) => r.region.trim().toLowerCase() === needle,
+    );
+    const regionContacts = payload.contacts.filter(
+      (c) => c.region.trim().toLowerCase() === needle,
+    );
+    return resolveCompanyInfo(row, regionContacts, region);
   };
 
   return { ...query, infoFor };

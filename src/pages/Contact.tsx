@@ -70,8 +70,8 @@ const Contact = () => {
           <CardContent className="space-y-2 text-sm">
             <p>
               General support:{" "}
-              <a href={`mailto:${EMAIL_CONFIG.support}`} className="text-primary hover:underline font-medium">
-                {EMAIL_CONFIG.support}
+              <a href={`mailto:${supportEmail || EMAIL_CONFIG.support}`} className="text-primary hover:underline font-medium">
+                {supportEmail || EMAIL_CONFIG.support}
               </a>
             </p>
             <p>
@@ -92,7 +92,8 @@ const Contact = () => {
         <div className="grid gap-6 md:grid-cols-2 mb-8">
           {orderedRegions.map((r) => {
             const info = infoFor(r);
-            const whatsapp = buildWhatsAppLink(info.phoneRaw || info.phone);
+            const whatsappNumber = info.whatsapp || info.phoneRaw || info.phone;
+            const whatsapp = buildWhatsAppLink(whatsappNumber);
             return (
               <Card key={r} data-testid={`contact-region-${r.toLowerCase()}`}>
                 <CardHeader>
