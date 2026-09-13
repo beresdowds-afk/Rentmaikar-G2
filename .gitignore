@@ -49,5 +49,6 @@ playwright/.cache/
 .cache/
 .temp/
 .lovable/
+.aistudio/
 build-diagnosis-report.json
 

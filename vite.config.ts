@@ -88,6 +88,48 @@ export default defineConfig(({ mode }) => ({
             }
           }
 
+          if (req.url?.startsWith("/api/functions/")) {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Headers", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+            if (req.method === "OPTIONS") {
+              res.statusCode = 204;
+              res.end();
+              return;
+            }
+
+            try {
+              const functionName = req.url.replace(/^\/api\/functions\//, "").split("?")[0];
+              const chunks: any[] = [];
+              req.on("data", (chunk: any) => chunks.push(chunk));
+              req.on("end", async () => {
+                let body: any = {};
+                try {
+                  const raw = Buffer.concat(chunks).toString("utf8");
+                  if (raw) body = JSON.parse(raw);
+                } catch {
+                  // ignore non-json
+                }
+                const { handleEdgeFunction } = await import("./src/server/functionsHandler");
+                const response = await handleEdgeFunction(functionName, {
+                  body,
+                  headers: req.headers as Record<string, string>,
+                  method: req.method,
+                });
+                res.statusCode = response.status;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(response.data));
+              });
+              return;
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: err.message }));
+              return;
+            }
+          }
+
           next();
         });
       },
