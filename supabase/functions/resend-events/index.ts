@@ -6,7 +6,7 @@
 // admin email delivery page reflects reality beyond the initial send result.
 //
 // Signature: Svix (svix-id / svix-timestamp / svix-signature) using
-// RESEND_WEBHOOK_SECRET. Falls back to a plain HMAC of the raw body for
+// RESEND_WEBHOOK_SIGNING_SECRET (or legacy RESEND_WEBHOOK_SECRET). Falls back to a plain HMAC of the raw body for
 // non-Svix style signatures. Fails closed when no secret is configured.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -20,9 +20,9 @@ const corsHeaders = {
 };
 
 async function verifySignature(req: Request, rawBody: string): Promise<boolean> {
-  const secret = Deno.env.get("RESEND_WEBHOOK_SECRET");
+  const secret = Deno.env.get("RESEND_WEBHOOK_SIGNING_SECRET") || Deno.env.get("RESEND_WEBHOOK_SECRET");
   if (!secret) {
-    console.error("RESEND_WEBHOOK_SECRET not configured — rejecting event");
+    console.error("RESEND_WEBHOOK_SIGNING_SECRET / RESEND_WEBHOOK_SECRET not configured — rejecting event");
     return false;
   }
   return await verifySvixSignature(req, rawBody, secret);

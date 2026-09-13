@@ -475,12 +475,13 @@ function getAcknowledgmentHtml(
 // ─── Inbound Email Webhook Signature Verification ───
 // Uses the shared Svix verifier so `svix-id`/`svix-timestamp` signed payloads
 // (Resend / Lovable email events) validate correctly, with a raw-body HMAC
-// fallback. Fails closed when RESEND_WEBHOOK_SECRET is not configured.
+// fallback. Fails closed when RESEND_WEBHOOK_SIGNING_SECRET or RESEND_WEBHOOK_SECRET is not configured.
 const verifyResendSignature = async (req: Request): Promise<boolean> => {
   try {
-    // Two webhooks exist in Resend: delivery events (RESEND_WEBHOOK_SECRET) and
-    // native inbound email (RESEND_INBOUND_WEBHOOK_SECRET). Accept either.
+    // Two webhooks exist in Resend: delivery events (RESEND_WEBHOOK_SIGNING_SECRET / RESEND_WEBHOOK_SECRET) and
+    // native inbound email (RESEND_INBOUND_WEBHOOK_SECRET). Accept any configured secret.
     const secrets = [
+      Deno.env.get('RESEND_WEBHOOK_SIGNING_SECRET'),
       Deno.env.get('RESEND_INBOUND_WEBHOOK_SECRET'),
       Deno.env.get('RESEND_WEBHOOK_SECRET'),
     ].filter((s): s is string => !!s);

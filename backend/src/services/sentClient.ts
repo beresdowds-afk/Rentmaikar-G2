@@ -38,7 +38,7 @@ export class SentBackendClient {
         },
         body: JSON.stringify({
           to: payload.to,
-          channel: payload.channel,
+          channel: Array.isArray(payload.channel) ? payload.channel : [payload.channel],
           sandbox: isSandbox,
           text: payload.text,
           template: payload.template,

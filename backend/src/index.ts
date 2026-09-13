@@ -6,6 +6,7 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 import { healthRouter } from "./routes/health";
 import { cpaasRouter } from "./routes/cpaas";
+import { functionsRouter } from "./routes/functions";
 import { webhooksRouter } from "./routes/webhooks";
 import { portalApiRouter } from "./routes/portal";
 import { bridgeRouter } from "./routes/bridge";
@@ -290,6 +291,7 @@ app.use("/api/portal", portalApiRouter);
 
 app.use("/api/health", healthRouter);
 app.use("/api/cpaas", cpaasRouter);
+app.use("/api/functions", functionsRouter);
 
 // Bridge endpoints for Call, Listen (SSE), Respond, Polling, Telemetry, and Handshake
 app.use("/api/bridge", bridgeRouter);

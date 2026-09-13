@@ -46,9 +46,37 @@ Deno.serve(async (req) => {
     const raw = await req.text();
     if (secret) {
       const provided = req.headers.get("persona-signature") ?? "";
-      const v1 = provided.split(",").find((p) => p.trim().startsWith("v1="))?.split("=")[1] ?? provided;
-      const expected = await hmac(secret, raw);
-      if (v1 !== expected) {
+      // Persona-Signature is formatted as: t=<timestamp>,v1=<signature>
+      // Multiple v1 signatures may be present during secret rotation.
+      const tokens = provided.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+      let timestamp = "";
+      const signatures: string[] = [];
+      for (const token of tokens) {
+        if (token.startsWith("t=")) {
+          timestamp = token.slice(2);
+        } else if (token.startsWith("v1=")) {
+          signatures.push(token.slice(3));
+        } else if (token.length === 64) {
+          signatures.push(token);
+        }
+      }
+
+      let isValid = false;
+      if (timestamp && signatures.length > 0) {
+        const payloadToSign = `${timestamp}.${raw}`;
+        const expected = await hmac(secret, payloadToSign);
+        isValid = signatures.some((sig) => sig.toLowerCase() === expected.toLowerCase());
+      }
+
+      // Fallback verification for test payloads or webhooks sent without timestamp prefix
+      if (!isValid) {
+        const directExpected = await hmac(secret, raw);
+        isValid = signatures.some((sig) => sig.toLowerCase() === directExpected.toLowerCase()) ||
+          provided.toLowerCase() === directExpected.toLowerCase();
+      }
+
+      if (!isValid) {
+        console.warn("[persona-webhook] Invalid signature. Header:", provided);
         return new Response("invalid signature", { status: 401, headers: corsHeaders });
       }
     }
