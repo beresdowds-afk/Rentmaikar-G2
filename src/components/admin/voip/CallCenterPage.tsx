@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -9,13 +10,9 @@ import {
   PhoneCall,
   Globe,
   Radio,
-  UserPlus,
   Volume2,
-  Link2,
-  Sparkles,
   PhoneOff,
   PhoneIncoming,
-  ClipboardList,
   MessageSquare,
   Hash,
   Activity,
@@ -24,7 +21,6 @@ import {
 import { useVoIPCalls } from '@/hooks/useVoIPCalls';
 import { useVoiceCall } from '@/hooks/useVoiceCall';
 import { CallDialer } from './CallDialer';
-import { CallGroups } from './CallGroups';
 import { ActiveCallPanel } from './ActiveCallPanel';
 import { VoIPFeatureSettings } from './VoIPFeatureSettings';
 import { OutreachContactsPanel } from './OutreachContactsPanel';
@@ -34,7 +30,6 @@ import { TwiMLAppConfigPanel } from './TwiMLAppConfigPanel';
 import { OutboundNumberRouting } from './OutboundNumberRouting';
 
 import { IncomingCallAlerts } from '@/components/voice/IncomingCallAlerts';
-import { SoftphoneControls } from './SoftphoneControls';
 import { useVoiceDevice } from '@/hooks/useVoiceDevice';
 import { Badge } from '@/components/ui/badge';
 import { AccentConversionAgentPanel } from './AccentConversionAgentPanel';
@@ -53,16 +48,94 @@ import { AgentExtensionManager } from './AgentExtensionManager';
 import { TelephonyNumbersProvisioning } from './TelephonyNumbersProvisioning';
 import { UnifiedCallHistory } from './UnifiedCallHistory';
 import { useAuth } from '@/contexts/AuthContext';
+import { CallCenterSubPageErrorBoundary } from './CallCenterSubPageErrorBoundary';
+
+export type CallCenterSubTab =
+  | 'dialer'
+  | 'whatsapp-voice'
+  | 'ivr'
+  | 'numbers'
+  | 'extensions'
+  | 'telecom-health'
+  | 'queue'
+  | 'history'
+  | 'recordings'
+  | 'conferences'
+  | 'settings';
+
+export const VALID_CALL_CENTER_SUBTABS: CallCenterSubTab[] = [
+  'dialer',
+  'whatsapp-voice',
+  'ivr',
+  'numbers',
+  'extensions',
+  'telecom-health',
+  'queue',
+  'history',
+  'recordings',
+  'conferences',
+  'settings',
+];
+
+const CALL_CENTER_STORAGE_KEY = 'rentmaikar:callcenter:last_subtab';
 
 export const CallCenterPage = () => {
-  const { calls, groups, isLoading, activeCall, initiateCall, endCall, createGroup, deleteGroup, refreshCalls } = useVoIPCalls();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { calls, groups, isLoading, activeCall, initiateCall, endCall, refreshCalls } = useVoIPCalls();
   const { incomingRequests, acceptCallRequest, rejectCallRequest, escalateCallRequest } = useVoiceCall('admin');
-  const [selectedTab, setSelectedTab] = useState('dialer');
   const voice = useVoiceDevice();
   const queueState = useCallQueue();
   const { userRole } = useAuth();
 
   const isAssistant = userRole === 'admin_assistant';
+
+  // Initialize selected subtab from URL parameter, with sticky storage fallback
+  const [selectedTab, setSelectedTab] = useState<CallCenterSubTab>(() => {
+    const urlSubtab = searchParams.get('subtab') || searchParams.get('section');
+    if (urlSubtab && VALID_CALL_CENTER_SUBTABS.includes(urlSubtab as CallCenterSubTab)) {
+      return urlSubtab as CallCenterSubTab;
+    }
+    try {
+      const saved = localStorage.getItem(CALL_CENTER_STORAGE_KEY);
+      if (saved && VALID_CALL_CENTER_SUBTABS.includes(saved as CallCenterSubTab)) {
+        return saved as CallCenterSubTab;
+      }
+    } catch {
+      /* ignore */
+    }
+    return 'dialer';
+  });
+
+  // Keep selected tab in sync with URL search params (e.g. browser back/forward or external links)
+  useEffect(() => {
+    const urlSubtab = searchParams.get('subtab') || searchParams.get('section');
+    if (urlSubtab && VALID_CALL_CENTER_SUBTABS.includes(urlSubtab as CallCenterSubTab) && urlSubtab !== selectedTab) {
+      setSelectedTab(urlSubtab as CallCenterSubTab);
+    }
+  }, [searchParams, selectedTab]);
+
+  // Clean navigation handler that updates URL and persistence without sibling interference
+  const handleTabChange = useCallback(
+    (newTab: string) => {
+      if (!VALID_CALL_CENTER_SUBTABS.includes(newTab as CallCenterSubTab)) return;
+      const target = newTab as CallCenterSubTab;
+      setSelectedTab(target);
+      try {
+        localStorage.setItem(CALL_CENTER_STORAGE_KEY, target);
+      } catch {
+        /* ignore */
+      }
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('subtab', target);
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
 
   // Duck the raw microphone while the American-accent voice is speaking so the
   // caller only hears the converted output.
@@ -95,7 +168,7 @@ export const CallCenterPage = () => {
       return;
     }
     if (call.source === 'live_inbound') {
-      setSelectedTab('dialer');
+      handleTabChange('dialer');
       await refreshCalls();
       return;
     }
@@ -106,7 +179,7 @@ export const CallCenterPage = () => {
       ]);
     }
     await queueState.refresh();
-  }, [acceptCallRequest, initiateCall, queueState, refreshCalls]);
+  }, [acceptCallRequest, handleTabChange, initiateCall, queueState, refreshCalls]);
 
   const escalateQueuedCall = useCallback(async (call: QueuedCall) => {
     if (call.isSimulated || call.source === 'live_inbound') return;
@@ -212,7 +285,7 @@ export const CallCenterPage = () => {
       {queueState.metrics.waiting > 0 && (
         <button
           type="button"
-          onClick={() => setSelectedTab('queue')}
+          onClick={() => handleTabChange('queue')}
           className="flex w-full items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-left"
         >
           <PhoneIncoming className="h-5 w-5 animate-pulse text-amber-500" />
@@ -228,7 +301,7 @@ export const CallCenterPage = () => {
           <Card
             key={stat.label}
             className={stat.tab ? 'cursor-pointer transition-colors hover:bg-accent/40' : undefined}
-            onClick={stat.tab ? () => setSelectedTab(stat.tab as string) : undefined}
+            onClick={stat.tab ? () => handleTabChange(stat.tab as string) : undefined}
           >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
@@ -250,8 +323,8 @@ export const CallCenterPage = () => {
         userRole="admin"
       />
 
-      {/* Navigation Tabs */}
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">
+      {/* Navigation Tabs - Strict single-active-mount prevents background hardware/stream sibling interference */}
+      <Tabs value={selectedTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:w-auto lg:inline-grid lg:grid-cols-11 gap-1">
           <TabsTrigger value="dialer" className="flex items-center gap-1.5 text-xs">
             <Phone className="h-3.5 w-3.5" />
@@ -305,98 +378,142 @@ export const CallCenterPage = () => {
         </TabsList>
 
         {/* Tab 1: Primary Softphone & Dialer with Unified Telephone Card */}
-        <TabsContent value="dialer" className="space-y-6">
-          <UnifiedTelephoneCard
-            voice={voice}
-            userRole={userRole || 'admin'}
-            isAssistant={isAssistant}
-            onInitiateCall={initiateCall}
-            onOpenWhatsAppConsole={() => setSelectedTab('whatsapp-voice')}
-            onOpenIVRBuilder={() => setSelectedTab('ivr')}
-          />
+        {selectedTab === 'dialer' && (
+          <CallCenterSubPageErrorBoundary subPage="Softphone & Dialer" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="dialer" className="space-y-6 mt-0">
+              <UnifiedTelephoneCard
+                voice={voice}
+                userRole={userRole || 'admin'}
+                isAssistant={isAssistant}
+                onInitiateCall={initiateCall}
+                onOpenWhatsAppConsole={() => handleTabChange('whatsapp-voice')}
+                onOpenIVRBuilder={() => handleTabChange('ivr')}
+              />
 
-          <div className="grid gap-6 md:grid-cols-2">
-            <CallDialer 
-              onInitiateCall={initiateCall}
-              groups={groups}
-              isLoading={isLoading}
-              activeCall={activeCall ? { id: activeCall.id, status: activeCall.status } : null}
-              onEndCall={activeCall ? () => terminateCall(activeCall.id) : undefined}
-            />
+              <div className="grid gap-6 md:grid-cols-2">
+                <CallDialer
+                  onInitiateCall={initiateCall}
+                  groups={groups}
+                  isLoading={isLoading}
+                  activeCall={activeCall ? { id: activeCall.id, status: activeCall.status } : null}
+                  onEndCall={activeCall ? () => terminateCall(activeCall.id) : undefined}
+                />
 
-            <div className="space-y-4">
-              <AudioHardwareTester />
-              <OutreachContactsPanel onInitiateCall={initiateCall} isLoading={isLoading} />
-            </div>
-          </div>
-        </TabsContent>
+                <div className="space-y-4">
+                  <AudioHardwareTester />
+                  <OutreachContactsPanel onInitiateCall={initiateCall} isLoading={isLoading} />
+                </div>
+              </div>
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 2: WhatsApp Voice Console */}
-        <TabsContent value="whatsapp-voice">
-          <WhatsAppVoiceConsole voice={voice} />
-        </TabsContent>
+        {selectedTab === 'whatsapp-voice' && (
+          <CallCenterSubPageErrorBoundary subPage="WhatsApp Voice Console" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="whatsapp-voice" className="mt-0">
+              <WhatsAppVoiceConsole voice={voice} userRole={userRole || 'admin'} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 3: Visual IVR Flow Builder & Simulator */}
-        <TabsContent value="ivr">
-          <VisualIVRBuilder voice={voice} />
-        </TabsContent>
+        {selectedTab === 'ivr' && (
+          <CallCenterSubPageErrorBoundary subPage="Visual IVR Flow Builder" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="ivr" className="mt-0">
+              <VisualIVRBuilder voice={voice} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 4: Telephony Numbers & Inbound Provisioning */}
-        <TabsContent value="numbers">
-          <TelephonyNumbersProvisioning userRole={userRole || 'admin'} isAssistant={isAssistant} />
-        </TabsContent>
+        {selectedTab === 'numbers' && (
+          <CallCenterSubPageErrorBoundary subPage="Telephony Numbers Provisioning" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="numbers" className="mt-0">
+              <TelephonyNumbersProvisioning userRole={userRole || 'admin'} isAssistant={isAssistant} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 5: PBX Internal Extensions & Roles */}
-        <TabsContent value="extensions">
-          <AgentExtensionManager userRole={userRole || 'admin'} isAssistant={isAssistant} />
-        </TabsContent>
+        {selectedTab === 'extensions' && (
+          <CallCenterSubPageErrorBoundary subPage="PBX Extensions Manager" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="extensions" className="mt-0">
+              <AgentExtensionManager userRole={userRole || 'admin'} isAssistant={isAssistant} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 6: Voice Health & Gateway Telemetry */}
-        <TabsContent value="telecom-health">
-          <VoiceHealthDashboard />
-        </TabsContent>
+        {selectedTab === 'telecom-health' && (
+          <CallCenterSubPageErrorBoundary subPage="Voice Health & Telemetry" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="telecom-health" className="mt-0">
+              <VoiceHealthDashboard voice={voice} userRole={userRole || 'admin'} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 7: Inbound Queues */}
-        <TabsContent value="queue">
-          <CallQueueList
-            queueState={queueState}
-            onAnswer={answerQueuedCall}
-            onEscalate={escalateQueuedCall}
-            onDismiss={dismissQueuedCall}
-          />
-        </TabsContent>
+        {selectedTab === 'queue' && (
+          <CallCenterSubPageErrorBoundary subPage="Call Queues" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="queue" className="mt-0">
+              <CallQueueList
+                queueState={queueState}
+                onAnswer={answerQueuedCall}
+                onEscalate={escalateQueuedCall}
+                onDismiss={dismissQueuedCall}
+              />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 8: Unified Call History & Transcripts */}
-        <TabsContent value="history">
-          <UnifiedCallHistory
-            userRole={userRole || 'admin'}
-            isAssistant={isAssistant}
-            onOpenMessageComposer={(payload) => {
-              setSelectedTab('whatsapp-voice');
-            }}
-          />
-        </TabsContent>
+        {selectedTab === 'history' && (
+          <CallCenterSubPageErrorBoundary subPage="Unified Call History" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="history" className="mt-0">
+              <UnifiedCallHistory
+                userRole={userRole || 'admin'}
+                isAssistant={isAssistant}
+                onOpenMessageComposer={() => {
+                  handleTabChange('whatsapp-voice');
+                }}
+              />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 9: Audio Recordings */}
-        <TabsContent value="recordings">
-          <CallRecordingsPanel calls={calls} onRefresh={refreshCalls} isLoading={isLoading} />
-        </TabsContent>
+        {selectedTab === 'recordings' && (
+          <CallCenterSubPageErrorBoundary subPage="Call Recordings" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="recordings" className="mt-0">
+              <CallRecordingsPanel calls={calls} onRefresh={refreshCalls} isLoading={isLoading} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 10: Multi-party Conferences */}
-        <TabsContent value="conferences">
-          <ConferenceRoomPanel
-            activeCalls={activeCalls}
-            onEndCall={terminateCall}
-          />
-        </TabsContent>
+        {selectedTab === 'conferences' && (
+          <CallCenterSubPageErrorBoundary subPage="Conference Rooms" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="conferences" className="mt-0">
+              <ConferenceRoomPanel
+                activeCalls={activeCalls}
+                onEndCall={terminateCall}
+              />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
 
         {/* Tab 11: Telephony Settings & Outbound Routing */}
-        <TabsContent value="settings" className="space-y-4">
-          <OutboundNumberRouting />
-          <VoIPFeatureSettings />
-          <TwiMLAppConfigPanel />
-          <AccentConversionAgentPanel agent={accentAgent} />
-        </TabsContent>
+        {selectedTab === 'settings' && (
+          <CallCenterSubPageErrorBoundary subPage="Telephony Settings" onResetToDialer={() => handleTabChange('dialer')}>
+            <TabsContent value="settings" className="space-y-4 mt-0">
+              <OutboundNumberRouting />
+              <VoIPFeatureSettings />
+              <TwiMLAppConfigPanel />
+              <AccentConversionAgentPanel agent={accentAgent} />
+            </TabsContent>
+          </CallCenterSubPageErrorBoundary>
+        )}
       </Tabs>
     </div>
   );

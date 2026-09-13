@@ -27,7 +27,7 @@ import type { useVoiceDevice } from '@/hooks/useVoiceDevice';
 type VoiceDevice = ReturnType<typeof useVoiceDevice>;
 
 interface VoiceHealthDashboardProps {
-  voice: VoiceDevice;
+  voice?: VoiceDevice;
   userRole?: string;
   onRefresh?: () => void;
 }
@@ -40,15 +40,13 @@ export const VoiceHealthDashboard = ({
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  const {
-    status: deviceStatus,
-    speakerVolume,
-    setSpeakerVolume,
-    testSpeakerSound,
-    outputLabel,
-    micPermission,
-    headsetConnected,
-  } = voice;
+  const deviceStatus = voice?.status ?? 'unregistered';
+  const speakerVolume = voice?.speakerVolume ?? 80;
+  const setSpeakerVolume = voice?.setSpeakerVolume ?? (() => {});
+  const testSpeakerSound = voice?.testSpeakerSound ?? (() => {});
+  const outputLabel = voice?.outputLabel ?? 'Default System Output';
+  const micPermission = voice?.micPermission ?? 'prompt';
+  const headsetConnected = voice?.headsetConnected ?? false;
 
   const handleRunDiagnostics = () => {
     setIsTesting(true);

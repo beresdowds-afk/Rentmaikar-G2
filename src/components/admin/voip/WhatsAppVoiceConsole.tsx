@@ -33,7 +33,7 @@ import type { useVoiceDevice } from '@/hooks/useVoiceDevice';
 type VoiceDevice = ReturnType<typeof useVoiceDevice>;
 
 interface WhatsAppVoiceConsoleProps {
-  voice: VoiceDevice;
+  voice?: VoiceDevice;
   userRole?: string;
   onOpenMessageComposer?: (payload: { recipient: string; templateId?: string; defaultParams?: Record<string, string> }) => void;
 }
@@ -93,7 +93,9 @@ export const WhatsAppVoiceConsole = ({
   onOpenMessageComposer,
 }: WhatsAppVoiceConsoleProps) => {
   const { toast } = useToast();
-  const { speakerVolume, setSpeakerVolume, testSpeakerSound } = voice;
+  const speakerVolume = voice?.speakerVolume ?? 80;
+  const setSpeakerVolume = voice?.setSpeakerVolume ?? (() => {});
+  const testSpeakerSound = voice?.testSpeakerSound ?? (() => {});
 
   const [activeTab, setActiveTab] = useState<'dial' | 'active_call' | 'templates'>('dial');
   const [targetNumber, setTargetNumber] = useState('');

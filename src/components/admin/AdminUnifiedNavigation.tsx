@@ -172,6 +172,7 @@ export function AdminUnifiedNavigation({
     { title: 'Settlement Reconciliation', href: '/admin/settlement-reconciliation', icon: <Receipt className="h-4 w-4 text-indigo-500" />, category: 'Financial & Settlement', allowed: allowedTools.canPayments ?? true },
 
     { title: 'Vehicle Submission Queue', href: '/admin/vehicle-queue', icon: <Car className="h-4 w-4 text-primary" />, category: 'Fleet & Operations', allowed: allowedTools.canVehicles ?? true },
+    { title: 'Call Center Desk', href: '/admin/call-center', icon: <PhoneCall className="h-4 w-4 text-primary" />, category: 'Fleet & Operations', allowed: allowedTools.canComms ?? true },
     { title: 'Inbound Forwarding', href: '/admin/inbound-forwarding', icon: <PhoneForwarded className="h-4 w-4 text-primary" />, category: 'Fleet & Operations', allowed: allowedTools.canComms ?? true },
     { title: 'Mobile Call-In Desk', href: '/m/call-in', icon: <PhoneCall className="h-4 w-4 text-emerald-600" />, category: 'Fleet & Operations', allowed: allowedTools.canComms ?? true },
 
