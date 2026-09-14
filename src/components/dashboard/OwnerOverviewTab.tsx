@@ -206,7 +206,7 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
       items.push({ id: 'ok', severity: 'success', title: 'Everything looks good — no action needed.' });
     }
     return items;
-  }, [pendingRecalls, openIncidents, pendingInspections, expiringDocs, fleetHealth]);
+  }, [pendingRecalls, openIncidents, pendingInspections, expiringDocs, pendingAgreements, fleetHealth]);
 
   const severityBadge = (s: AlertItem['severity']) => {
     const map = {

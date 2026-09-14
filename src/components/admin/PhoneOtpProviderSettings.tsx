@@ -8,10 +8,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 
-type Provider = 'supabase' | 'custom';
+type Provider = 'sent' | 'custom' | 'supabase';
 
 export function PhoneOtpProviderSettings() {
-  const [provider, setProvider] = useState<Provider>('supabase');
+  const [provider, setProvider] = useState<Provider>('sent');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -23,7 +23,12 @@ export function PhoneOtpProviderSettings() {
         .eq('key', 'phone_otp_provider')
         .maybeSingle();
       const v = (data?.value as { provider?: Provider } | null)?.provider;
-      if (v === 'custom' || v === 'supabase') setProvider(v);
+      if (v === 'custom' || v === 'sent') {
+        setProvider(v);
+      } else {
+        // Replace legacy 'supabase' (Lovable Cloud) or unset with SENT.DM as primary
+        setProvider('sent');
+      }
       setLoading(false);
     })();
   }, []);
@@ -64,11 +69,11 @@ export function PhoneOtpProviderSettings() {
           <>
             <RadioGroup value={provider} onValueChange={(v) => setProvider(v as Provider)}>
               <div className="flex items-start gap-3 p-3 rounded-md border">
-                <RadioGroupItem value="supabase" id="prov-supabase" className="mt-1" />
+                <RadioGroupItem value="sent" id="prov-sent" className="mt-1" />
                 <div>
-                  <Label htmlFor="prov-supabase" className="font-medium">Managed (Lovable Cloud)</Label>
+                  <Label htmlFor="prov-sent" className="font-medium">SENT.DM (Primary)</Label>
                   <p className="text-sm text-muted-foreground">
-                    Codes are delivered by the built-in phone auth provider. Simplest setup.
+                    Primary phone OTP message delivery. Codes are dispatched via SENT.DM global CPaaS with verified SMS delivery.
                   </p>
                 </div>
               </div>

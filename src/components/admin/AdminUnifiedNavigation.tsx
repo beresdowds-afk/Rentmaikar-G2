@@ -215,14 +215,6 @@ export function AdminUnifiedNavigation({
                 size="sm"
                 onClick={() => {
                   onPortalChange(p.key);
-                  const rememberedTab = last[p.key];
-                  const portalTabs = getTabsForPortal(p.key);
-                  const validRemembered = portalTabs.find((t) => t.value === rememberedTab);
-                  const nextTab = validRemembered ? validRemembered.value : portalTabs[0]?.value;
-                  if (nextTab) {
-                    onTabChange(nextTab);
-                    remember(p.key, nextTab);
-                  }
                 }}
                 className={cn(
                   'gap-2 h-9 px-3 text-xs font-medium transition-all rounded-lg',

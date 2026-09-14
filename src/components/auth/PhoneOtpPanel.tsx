@@ -15,7 +15,7 @@ import { normalizeToE164, PhoneValidationError } from '@/lib/phone-normalize';
 
 export type PhoneOtpMode = 'signin' | 'link';
 type Role = 'driver' | 'owner';
-type Provider = 'supabase' | 'custom';
+type Provider = 'sent' | 'custom' | 'supabase';
 type Step = 'phone' | 'code' | 'done';
 
 const STEPS: { key: Step; label: string }[] = [
@@ -80,9 +80,9 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Default to the custom Twilio/Termii pipeline: Supabase-native phone auth
+  // Default to SENT.DM custom phone OTP pipeline: Supabase-native phone auth
   // is not provisioned for this project, so it would fail silently.
-  const [provider, setProvider] = useState<Provider>('custom');
+  const [provider, setProvider] = useState<Provider>('sent');
 
   // Parse once and reuse: everything downstream works with strict E.164.
   const parsed = useMemo(() => {
@@ -106,7 +106,12 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
         .eq('key', 'phone_otp_provider')
         .maybeSingle();
       const v = (data?.value as { provider?: Provider } | null)?.provider;
-      if (v === 'custom' || v === 'supabase') setProvider(v);
+      if (v === 'custom') {
+        setProvider('custom');
+      } else {
+        // 'sent', legacy 'supabase' (Lovable Cloud), or default all use SENT.DM primary
+        setProvider('sent');
+      }
     })();
   }, []);
 
@@ -144,7 +149,7 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
       const ok = await trigger(async () => {
         if (mode === 'link') {
           await invokeOtp({ action: 'link_send', phone: e164 });
-        } else if (provider === 'custom') {
+        } else if (provider === 'sent' || provider === 'custom') {
           await invokeOtp({ action: 'send', phone: e164 });
         } else {
           const { error: otpErr } = await supabase.auth.signInWithOtp({ phone: e164 });
@@ -177,7 +182,7 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
       if (mode === 'link') {
         await invokeOtp({ action: 'link_verify', phone: e164, code });
         toast.success('Phone number verified and added to your account');
-      } else if (provider === 'custom') {
+      } else if (provider === 'sent' || provider === 'custom') {
         const data = await invokeOtp({ action: 'verify', phone: e164, code, full_name: name, role });
         // Exchange the one-time token for a real session (no password involved).
         const { error: sessionErr } = await supabase.auth.verifyOtp({

@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { InboundEmailRoutingEditor } from '@/components/admin/InboundEmailRoutingEditor';
+import { savePlatformKvSetting, loadPlatformKvSetting } from '@/lib/platformSettings';
 
 export const FORWARDING_CONFIG_KEY = 'forwarding_config';
 export const OUTBOUND_CONFIG_KEY = 'outbound_channel_config';
@@ -107,17 +108,14 @@ export const ForwardingSettingsPanel = () => {
 
   useEffect(() => {
     const load = async () => {
-      const { data, error } = await supabase
-        .from('platform_kv_settings')
-        .select('key, value')
-        .in('key', [FORWARDING_CONFIG_KEY, OUTBOUND_CONFIG_KEY, MASTER_ENDPOINT_KEY, LOOP_POLICY_KEY]);
-      if (error) {
-        toast.error('Could not load channel settings');
-      } else {
-        const rows = (data ?? []) as { key: string; value: unknown }[];
-        const inb = rows.find((r) => r.key === FORWARDING_CONFIG_KEY)?.value as Partial<InboundConfig> | undefined;
-        const out = rows.find((r) => r.key === OUTBOUND_CONFIG_KEY)?.value as Partial<Record<RegionKey, Partial<ForwardingConfig>>> | undefined;
-        const end = rows.find((r) => r.key === MASTER_ENDPOINT_KEY)?.value as Partial<MasterEndpoint> | string | undefined;
+      try {
+        const [inb, out, end, loop] = await Promise.all([
+          loadPlatformKvSetting<Partial<InboundConfig>>(FORWARDING_CONFIG_KEY, DEFAULTS),
+          loadPlatformKvSetting<Partial<Record<RegionKey, Partial<ForwardingConfig>>>>(OUTBOUND_CONFIG_KEY, OUTBOUND_DEFAULTS),
+          loadPlatformKvSetting<Partial<MasterEndpoint> | string>(MASTER_ENDPOINT_KEY, MASTER_DEFAULTS),
+          loadPlatformKvSetting<Partial<LoopPolicy>>(LOOP_POLICY_KEY, LOOP_DEFAULTS),
+        ]);
+
         setConfig({ ...DEFAULTS, ...(inb ?? {}) });
         setOutbound({
           USA: { ...ALL_ON, ...(out?.USA ?? {}) },
@@ -128,20 +126,19 @@ export const ForwardingSettingsPanel = () => {
         } else if (end) {
           setMaster({ ...MASTER_DEFAULTS, ...end });
         }
-        const loop = rows.find((r) => r.key === LOOP_POLICY_KEY)?.value as Partial<LoopPolicy> | undefined;
         if (loop) setLoopPolicy({ ...LOOP_DEFAULTS, ...loop });
+      } catch (err) {
+        console.warn('Could not load channel settings from remote:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
     load();
   }, []);
 
-
   const persist = async (key: string, value: unknown) => {
-    const { error } = await supabase
-      .from('platform_kv_settings')
-      .upsert({ key, value: value as never }, { onConflict: 'key' });
-    return error;
+    const result = await savePlatformKvSetting(key, value);
+    return result.success ? null : new Error(result.error || 'Failed to persist setting');
   };
 
   const toggleLink = async (value: boolean) => {

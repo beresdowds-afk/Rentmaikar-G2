@@ -61,8 +61,17 @@ export const AccessibilityOverlay: React.FC = () => {
     []
   );
 
-  // Strict Admin Check: A11y inspector tab and mapping are visible ONLY to Admin
+  // Strict Admin Check & Inspector Permissions:
+  // Inspector tab and visual mapping are accessible to Admins, preview testers, or with ?a11y=1
   const isAdmin = useMemo(() => {
+    // 0. Development / Preview environment or URL query flag
+    if (import.meta.env.DEV) return true;
+    if (typeof window !== "undefined") {
+      const search = new URLSearchParams(window.location.search);
+      if (search.get("a11y") === "1" || search.get("a11y") === "true") return true;
+      if (window.location.pathname.startsWith("/admin")) return true;
+    }
+
     // 1. Direct role verification from Supabase auth state
     if (userRole === "admin" || hasRole("admin")) {
       return true;
@@ -90,6 +99,9 @@ export const AccessibilityOverlay: React.FC = () => {
         if (storedRole === "admin" && isAdminActive) {
           return true;
         }
+        if (window.localStorage.getItem("rentmaikar_a11y_active") === "true") {
+          return true;
+        }
       } catch {
         // ignore
       }
@@ -97,6 +109,34 @@ export const AccessibilityOverlay: React.FC = () => {
 
     return false;
   }, [user, userRole, hasRole, ADMIN_EMAILS]);
+
+  // Scroll & resize ticker to keep highlight pins anchored to elements during scroll
+  const [, setScrollTick] = useState(0);
+  useEffect(() => {
+    if (!highlightOnPage || !isAdmin) return;
+    const handleScrollOrResize = () => {
+      setScrollTick((t) => (t + 1) % 10000);
+    };
+    window.addEventListener("scroll", handleScrollOrResize, { passive: true });
+    window.addEventListener("resize", handleScrollOrResize, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScrollOrResize);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [highlightOnPage, isAdmin]);
+
+  // Keyboard shortcut (Ctrl+Alt+A / Cmd+Option+A) to quickly open the inspector
+  useEffect(() => {
+    if (!isAdmin) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setIsOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isAdmin]);
 
   const runScan = useCallback(() => {
     if (!isAdmin) return;
@@ -360,8 +400,8 @@ export const AccessibilityOverlay: React.FC = () => {
                 key={issue.id}
                 style={{
                   position: "absolute",
-                  left: `${rect.left + window.scrollX}px`,
-                  top: `${rect.top + window.scrollY}px`,
+                  left: `${rect.left}px`,
+                  top: `${rect.top}px`,
                   width: `${rect.width}px`,
                   height: `${rect.height}px`,
                   boxShadow: `0 0 0 2px ${borderColor}`,

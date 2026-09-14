@@ -53,6 +53,7 @@ import { useVoiceCall } from '@/hooks/useVoiceCall';
 import { AdminViewBanner } from '@/components/admin/AdminViewBanner';
 import { AdminNotificationsBell as NotificationsBell } from "@/components/admin/AdminNotificationsBell";
 import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/contexts/ImpersonationContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useOwnerDashboard } from '@/hooks/useOwnerDashboard';
 import { RecallApprovalPanel } from '@/components/recall/RecallApprovalPanel';
@@ -108,6 +109,8 @@ const FALLBACK_CATEGORY_YEARS: Record<string, string> = {
 export default function OwnerDashboard() {
   const { country, currency } = useRegion();
   const { user, userRole } = useAuth();
+  const impersonation = useImpersonation();
+  const targetId = impersonation?.role === 'owner' ? impersonation.viewAsUserId : user?.id;
   const queryClient = useQueryClient();
 
   const isAdminView = userRole === 'admin';
@@ -136,8 +139,8 @@ export default function OwnerDashboard() {
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [calcCategory, setCalcCategory] = useState<string>('standard');
-  const [calcRate, setCalcRate] = useState<string>(country === 'USA' ? '350' : '175000');
+  const [calcCategory, setCalcCategory] = useState<string>('earnings-optimizer');
+  const [calcRate, setCalcRate] = useState<string>(country === 'USA' ? '300' : '175000');
   const [phoneVerified, setPhoneVerified] = useState(false);
   const { callHistory, isLoading: callsLoading, refreshHistory } = useVoiceCall('owner');
   const {
@@ -202,7 +205,7 @@ export default function OwnerDashboard() {
       const { data: account, error: accountError } = await supabase
         .from('owner_payout_accounts')
         .select('id, provider, currency')
-        .eq('owner_id', user?.id ?? '')
+        .eq('owner_id', targetId ?? '')
         .eq('currency', currency)
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: false })
@@ -356,7 +359,8 @@ export default function OwnerDashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-5 px-1.5 text-xs text-primary"
-                          onClick={() => setWithdrawAmount(String(dbAvailableBalance > 0 ? dbAvailableBalance : 500))}
+                          disabled={dbAvailableBalance <= 0}
+                          onClick={() => setWithdrawAmount(String(Math.max(0, dbAvailableBalance)))}
                         >
                           Use Max Available
                         </Button>
@@ -388,7 +392,7 @@ export default function OwnerDashboard() {
                       amount={parseFloat(withdrawAmount) || 0}
                       currency={currency as 'USD' | 'NGN' | (string & {})}
                       destinationRef={selectedVehicle || 'primary_fleet'}
-                      disabled={!selectedVehicle || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
+                      disabled={!selectedVehicle || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > dbAvailableBalance}
                       metadata={{ vehicle_id: selectedVehicle }}
                     >
                       {(authorizationId) => (
@@ -580,8 +584,8 @@ export default function OwnerDashboard() {
               <PortalGate portal="Payments" require="authenticated">
                 <div className="space-y-6">
                   
-                  <UnifiedBillingPanel userId={user?.id} role="owner" country={country} />
-                  <InvoiceStatusPanel scope="owner" userId={user?.id} />
+                  <UnifiedBillingPanel userId={targetId} role="owner" country={country} />
+                  <InvoiceStatusPanel scope="owner" userId={targetId} />
 
                 </div>
               </PortalGate>
@@ -737,9 +741,9 @@ export default function OwnerDashboard() {
                           value={calcCategory}
                           onValueChange={(val) => {
                             setCalcCategory(val);
-                            if (val === 'budget') setCalcRate(isUSA ? '280' : '135000');
-                            else if (val === 'standard') setCalcRate(isUSA ? '350' : '175000');
-                            else if (val === 'premium') setCalcRate(isUSA ? '480' : '240000');
+                            if (val === 'smart-start' || val === 'budget') setCalcRate(isUSA ? '250' : '135000');
+                            else if (val === 'earnings-optimizer' || val === 'standard') setCalcRate(isUSA ? '300' : '175000');
+                            else if (val === 'top-earner' || val === 'premium') setCalcRate(isUSA ? '350' : '240000');
                           }}
                         >
                           <SelectTrigger>
@@ -758,7 +762,7 @@ export default function OwnerDashboard() {
                         <Label>Weekly Rental Rate ({currency})</Label>
                         <Input
                           type="number"
-                          placeholder={isUSA ? '350' : '175000'}
+                          placeholder={isUSA ? '300' : '175000'}
                           value={calcRate}
                           onChange={(e) => setCalcRate(e.target.value)}
                         />
@@ -769,27 +773,36 @@ export default function OwnerDashboard() {
                           variant="outline"
                           size="sm"
                           className="text-xs h-7"
-                          onClick={() => setCalcRate(isUSA ? '280' : '135000')}
+                          onClick={() => {
+                            setCalcCategory('smart-start');
+                            setCalcRate(isUSA ? '250' : '135000');
+                          }}
                         >
-                          Budget ({formatCurrency(isUSA ? 280 : 135000, currency)})
+                          Smart Start ({formatCurrency(isUSA ? 250 : 135000, currency)})
                         </Button>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           className="text-xs h-7"
-                          onClick={() => setCalcRate(isUSA ? '350' : '175000')}
+                          onClick={() => {
+                            setCalcCategory('earnings-optimizer');
+                            setCalcRate(isUSA ? '300' : '175000');
+                          }}
                         >
-                          Standard ({formatCurrency(isUSA ? 350 : 175000, currency)})
+                          Earnings Optimizer ({formatCurrency(isUSA ? 300 : 175000, currency)})
                         </Button>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           className="text-xs h-7"
-                          onClick={() => setCalcRate(isUSA ? '480' : '240000')}
+                          onClick={() => {
+                            setCalcCategory('top-earner');
+                            setCalcRate(isUSA ? '350' : '240000');
+                          }}
                         >
-                          Premium ({formatCurrency(isUSA ? 480 : 240000, currency)})
+                          Top Earner ({formatCurrency(isUSA ? 350 : 240000, currency)})
                         </Button>
                       </div>
                     </div>

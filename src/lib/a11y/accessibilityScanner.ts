@@ -336,6 +336,15 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
       }
     }
 
+    const isSwitch = btn.getAttribute("role") === "switch";
+    if (isSwitch && !hasAssociatedLabel) {
+      const container = btn.closest(".flex, .grid, .space-y-1, .space-y-2, [class*='items-center']");
+      const adjacentLabel = container?.querySelector("label, [for]");
+      if (adjacentLabel && adjacentLabel.textContent?.trim()) {
+        hasAssociatedLabel = true;
+      }
+    }
+
     if (!hasVisibleText && !hasAriaLabel && !hasLabelledBy && !hasTitle && !hasImgWithAlt && !hasSvgWithTitle && !hasAssociatedLabel) {
       issues.push({
         id: `missing-btn-${index}`,
@@ -346,8 +355,12 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
         selector: getElementSelector(btn),
         tagName: btn.tagName.toLowerCase(),
         snippet: btn.outerHTML.slice(0, 120),
-        message: "Icon-only button has no text, aria-label, or title. Screen reader users cannot determine its purpose.",
-        suggestedFix: `Add an aria-label="..." to the button describing the action (e.g. aria-label="Close dialog").`,
+        message: isSwitch
+          ? "Switch toggle has no accessible label or aria-label. Screen reader users cannot identify which setting this toggle controls."
+          : "Icon-only button has no text, aria-label, or title. Screen reader users cannot determine its purpose.",
+        suggestedFix: isSwitch
+          ? `Add an aria-label="..." or associate with a <Label htmlFor="..."> describing the toggle.`
+          : `Add an aria-label="..." to the button describing the action (e.g. aria-label="Close dialog").`,
         pageCategory,
       });
     }

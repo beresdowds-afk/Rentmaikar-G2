@@ -11,6 +11,7 @@ import { Loader2, Mail, Plus, RefreshCw, Save, Trash2, ArrowUpRight, ExternalLin
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import { savePlatformKvSetting, loadPlatformKvSetting } from "@/lib/platformSettings";
 
 export const ROUTING_KEY = "email_routing_rules";
 export const FORWARDING_CONFIG_KEY = "forwarding_config";
@@ -88,32 +89,34 @@ export function InboundEmailRoutingEditor({
 
   const load = async () => {
     setLoading(true);
-    const [{ data: emailConfigData }, { data: kvData, error }] = await Promise.all([
-      supabase
-        .from("platform_email_config")
-        .select("id, key, email, sender_name, description, is_active")
-        .eq("is_active", true)
-        .order("key"),
-      supabase
-        .from("platform_kv_settings")
-        .select("key, value")
-        .in("key", [ROUTING_KEY, FORWARDING_CONFIG_KEY]),
-    ]);
-    setLoading(false);
+    try {
+      const [{ data: emailConfigData }, { data: kvData }] = await Promise.all([
+        supabase
+          .from("platform_email_config")
+          .select("id, key, email, sender_name, description, is_active")
+          .eq("is_active", true)
+          .order("key"),
+        supabase
+          .from("platform_kv_settings")
+          .select("key, value")
+          .in("key", [ROUTING_KEY, FORWARDING_CONFIG_KEY]),
+      ]);
 
-    if (error) {
-      toast.error("Could not load inbound forwarding settings");
-      return;
-    }
+      const activeEmails = (emailConfigData ?? []) as PlatformEmailItem[];
+      setPlatformEmails(activeEmails);
 
-    const activeEmails = (emailConfigData ?? []) as PlatformEmailItem[];
-    setPlatformEmails(activeEmails);
+      const rows = (kvData ?? []) as { key: string; value: unknown }[];
+      let routing = rows.find((r) => r.key === ROUTING_KEY)?.value as Partial<RoutingTable> | undefined;
+      let fwd = rows.find((r) => r.key === FORWARDING_CONFIG_KEY)?.value as
+        | { email?: boolean }
+        | undefined;
 
-    const rows = (kvData ?? []) as { key: string; value: unknown }[];
-    const routing = rows.find((r) => r.key === ROUTING_KEY)?.value as Partial<RoutingTable> | undefined;
-    const fwd = rows.find((r) => r.key === FORWARDING_CONFIG_KEY)?.value as
-      | { email?: boolean }
-      | undefined;
+      if (!routing) {
+        routing = await loadPlatformKvSetting<Partial<RoutingTable>>(ROUTING_KEY);
+      }
+      if (!fwd) {
+        fwd = await loadPlatformKvSetting<{ email?: boolean }>(FORWARDING_CONFIG_KEY);
+      }
 
     if (routing?.rules?.length) {
       setTable({
@@ -147,7 +150,12 @@ export function InboundEmailRoutingEditor({
     }
 
     setForwardingOn(!!fwd?.email);
-  };
+  } catch (err) {
+    console.warn("Could not load inbound forwarding settings:", err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     void load();
@@ -211,11 +219,9 @@ export function InboundEmailRoutingEditor({
       return;
     }
     setSaving(true);
-    const { error } = await supabase
-      .from("platform_kv_settings")
-      .upsert({ key: ROUTING_KEY, value: table as never }, { onConflict: "key" });
+    const res = await savePlatformKvSetting(ROUTING_KEY, table);
     setSaving(false);
-    if (error) {
+    if (!res.success) {
       toast.error("Failed to save inbound forwarding rules");
     } else {
       toast.success("Inbound forwarding rules saved");
@@ -225,16 +231,9 @@ export function InboundEmailRoutingEditor({
 
   const toggleForwarding = async (value: boolean) => {
     setForwardingOn(value);
-    const { data } = await supabase
-      .from("platform_kv_settings")
-      .select("value")
-      .eq("key", FORWARDING_CONFIG_KEY)
-      .maybeSingle();
-    const current = (data?.value ?? {}) as Record<string, unknown>;
-    const { error } = await supabase
-      .from("platform_kv_settings")
-      .upsert({ key: FORWARDING_CONFIG_KEY, value: { ...current, email: value } as never }, { onConflict: "key" });
-    if (error) {
+    const current = (await loadPlatformKvSetting<Record<string, unknown>>(FORWARDING_CONFIG_KEY, {})) ?? {};
+    const res = await savePlatformKvSetting(FORWARDING_CONFIG_KEY, { ...current, email: value });
+    if (!res.success) {
       setForwardingOn(!value);
       toast.error("Failed to update external delivery switch");
     } else {

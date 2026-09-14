@@ -94,3 +94,72 @@ export class SectionErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+/**
+ * Isolated error boundary for individual tab pages within admin portal sections.
+ * Ensures an unhandled error inside one page (e.g. Inbound Forwarding, Tracking)
+ * cannot crash sibling pages or tabs within the section.
+ */
+export class TabPageErrorBoundary extends Component<
+  { tab: string; pageTitle?: string; children: ReactNode },
+  State
+> {
+  public state: State = {
+    hasError: false,
+    error: null,
+  };
+
+  public static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error(`[TabPageErrorBoundary:${this.props.tab}] Page crash isolated:`, error, errorInfo);
+  }
+
+  private handleReset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  public render() {
+    if (this.state.hasError) {
+      const name = this.props.pageTitle || this.props.tab;
+      return (
+        <Card className="p-6 border-destructive/40 bg-destructive/5 text-card-foreground shadow-sm my-4">
+          <div className="flex items-start gap-4">
+            <div className="p-2.5 rounded-lg bg-destructive/10 text-destructive mt-0.5">
+              <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="flex-1 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h4 className="text-base font-semibold text-foreground">
+                  {name} Page Temporarily Unavailable
+                </h4>
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-muted text-muted-foreground border">
+                  Page-Level Isolation
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                An isolated issue occurred while rendering the <strong>{name}</strong> page.
+                Sibling tabs and sections remain fully responsive and operational.
+              </p>
+              {this.state.error && (
+                <div className="text-xs font-mono p-2.5 rounded bg-muted/80 text-foreground overflow-x-auto max-h-28 border">
+                  {this.state.error.message || "Unknown error"}
+                </div>
+              )}
+              <div className="pt-2">
+                <Button size="sm" variant="outline" onClick={this.handleReset} className="gap-2">
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Reload {name}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      );
+    }
+
+    return this.props.children;
+  }
+}

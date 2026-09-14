@@ -15,7 +15,7 @@ import {
 import { useOnboardingMachine } from '@/hooks/useOnboardingMachine';
 import { useOnboardingComplete } from '@/hooks/useOnboardingComplete';
 import { useAuth } from '@/contexts/AuthContext';
-import { onboardingForRole, type AppRole } from '@/lib/role-home';
+import { onboardingForRole, isStaffRole, type AppRole } from '@/lib/role-home';
 
 export type Requirement =
   | 'authenticated'
@@ -141,12 +141,13 @@ export function PortalGate({
     return onboarding.isComplete;
   })();
 
-  const meets = userRole === 'admin' || actuallyMeets || forceUnlocked;
+  const isStaff = isStaffRole(userRole);
+  const meets = isStaff || actuallyMeets || forceUnlocked;
 
   if (meets) {
     return (
       <>
-        {!actuallyMeets && userRole !== 'admin' && (
+        {!actuallyMeets && !isStaff && (
           <div className="flex items-center justify-between p-2.5 px-3 mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 shadow-xs">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />

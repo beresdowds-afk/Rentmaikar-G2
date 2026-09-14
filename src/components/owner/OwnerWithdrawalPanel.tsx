@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useImpersonation } from "@/contexts/ImpersonationContext";
 import { useRegion } from "@/contexts/RegionContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,8 @@ const StatusIcon = ({ status }: { status: string }) =>
  */
 export const OwnerWithdrawalPanel = () => {
   const { user } = useAuth();
+  const impersonation = useImpersonation();
+  const targetId = impersonation?.role === 'owner' ? impersonation.viewAsUserId : user?.id;
   const samples = useRegionSamples();
   const { country } = useRegion();
   const currency = country === "Nigeria" ? "NGN" : "USD";
@@ -109,19 +112,19 @@ export const OwnerWithdrawalPanel = () => {
   }, [currency]);
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!targetId) return;
     setLoading(true);
     const [bal, accs, hist] = await Promise.all([
-      supabase.rpc("get_owner_available_balance", { _owner_id: user.id, _currency: currency }),
+      supabase.rpc("get_owner_available_balance", { _owner_id: targetId, _currency: currency }),
       supabase
         .from("owner_payout_accounts")
         .select("id,provider,currency,bank_name,account_number,account_name,paypal_email,recipient_code,is_default")
-        .eq("owner_id", user.id)
+        .eq("owner_id", targetId)
         .order("is_default", { ascending: false }),
       supabase
         .from("owner_payouts")
         .select("id,amount,currency,status,provider,transfer_reference,failure_reason,created_at,processed_at")
-        .eq("owner_id", user.id)
+        .eq("owner_id", targetId)
         .order("created_at", { ascending: false })
         .limit(25),
     ]);
@@ -133,11 +136,11 @@ export const OwnerWithdrawalPanel = () => {
     const { data: profile } = await supabase
       .from("profiles")
       .select("phone_verified")
-      .eq("user_id", user.id)
+      .eq("user_id", targetId)
       .maybeSingle();
     setPhoneVerified(!!profile?.phone_verified);
     setLoading(false);
-  }, [user, currency]);
+  }, [targetId, currency]);
 
   useEffect(() => {
     load();
@@ -149,7 +152,7 @@ export const OwnerWithdrawalPanel = () => {
   const inFlight = payouts.some((p) => ["pending", "authorized", "captured", "processing"].includes(p.status));
 
   const addAccount = async () => {
-    if (!user) return;
+    if (!targetId) return;
     setSavingAccount(true);
     try {
       if (currency === "NGN") {
@@ -161,7 +164,7 @@ export const OwnerWithdrawalPanel = () => {
       } else {
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(paypalEmail)) throw new Error("Enter a valid PayPal email");
         const { error } = await supabase.from("owner_payout_accounts").insert({
-          owner_id: user.id,
+          owner_id: targetId,
           provider: "paypal",
           currency: "USD",
           country_code: "US",
@@ -346,7 +349,7 @@ export const OwnerWithdrawalPanel = () => {
                   requestType="owner_payout"
                   amount={numericAmount}
                   currency={currency}
-                  subjectUserId={user?.id}
+                  subjectUserId={targetId}
                   destinationRef={selected?.id}
                   metadata={{ provider: selected?.provider, self_service: true }}
                   disabled={!amountValid || !selected}

@@ -109,6 +109,13 @@ export function inferButtonAccessibleName(btn: HTMLElement): string {
     return "Select option";
   }
 
+  if (role === "switch") {
+    const container = btn.closest(".flex, .grid, .space-y-1, .space-y-2, [class*='items-center'], tr, div");
+    const labelText = container?.querySelector("label, span.font-medium, p.font-medium, h4, h3")?.textContent?.trim();
+    if (labelText) return `Toggle ${labelText.replace(/\s+/g, " ")}`;
+    return "Toggle switch";
+  }
+
   // 5. Check parent context
   if (btn.closest("header")) return "Header action";
   if (btn.closest("dialog, [role='dialog']")) return "Close dialog";

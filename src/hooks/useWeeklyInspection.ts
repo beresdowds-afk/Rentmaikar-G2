@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/contexts/ImpersonationContext';
 import { toast } from 'sonner';
 
 export interface InspectionReport {
@@ -110,7 +111,9 @@ export function getPeriodStartDate(frequency: 'weekly' | 'monthly', date: Date =
 
 export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
   const { user } = useAuth();
-  const effectiveDriverId = driverId || user?.id;
+  const impersonation = useImpersonation();
+  const impersonatedDriverId = impersonation?.role === 'driver' ? impersonation.viewAsUserId : undefined;
+  const effectiveDriverId = driverId || impersonatedDriverId || user?.id;
 
   const [reports, setReports] = useState<InspectionReport[]>([]);
   const [currentReport, setCurrentReport] = useState<InspectionReport | null>(null);
@@ -122,7 +125,7 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
     const { data, error } = await supabase
       .from('weekly_report_settings')
       .select('*')
-      .single();
+      .maybeSingle();
     if (data && !error) {
       setSettings(data as ReportSettings);
     }
@@ -218,7 +221,7 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
       .eq('vehicle_id', vehicleId)
       .eq('driver_id', effectiveDriverId)
       .eq('week_start_date', periodStart)
-      .single();
+      .maybeSingle();
 
     if (existing) {
       const currentTimestamps = (existing.photo_timestamps as Record<string, string>) || {};

@@ -21,6 +21,9 @@ export function usePersonaEnabled() {
     staleTime: 60_000,
     queryFn: async (): Promise<boolean> => {
       try {
+        if (typeof supabase?.from !== 'function') {
+          return false;
+        }
         const { data, error } = await supabase
           .from('platform_kv_settings')
           .select('value')
@@ -42,6 +45,9 @@ export function usePersonaEnabled() {
 
   // Propagate admin changes to every open session immediately.
   useEffect(() => {
+    if (typeof supabase?.channel !== 'function') {
+      return;
+    }
     const channel = supabase
       .channel('platform-kv:persona_verification')
       .on(

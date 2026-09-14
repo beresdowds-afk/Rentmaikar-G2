@@ -78,6 +78,15 @@ export function useDecoupledAdminPortal(
   const [portalView, setPortalViewState] = useState<PortalType>(initialState.portal);
   const [activeTab, setActiveTabState] = useState<string>(initialState.tab);
 
+  const tabByPortalRef = useRef(tabByPortal);
+  tabByPortalRef.current = tabByPortal;
+
+  const portalViewRef = useRef(portalView);
+  portalViewRef.current = portalView;
+
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
   // Sync state when location.search changes (browser back/forward button or external navigation)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -86,8 +95,8 @@ export function useDecoupledAdminPortal(
 
     if (!urlPortalRaw && !urlTab) {
       // Initialize URL with current state if completely empty
-      const targetPortal = portalView;
-      const targetTab = activeTab;
+      const targetPortal = portalViewRef.current;
+      const targetTab = activeTabRef.current;
       params.set('portal', targetPortal);
       params.set('tab', targetTab);
       navigate({ pathname: location.pathname, search: `?${params.toString()}`, hash: location.hash }, { replace: true });
@@ -97,12 +106,12 @@ export function useDecoupledAdminPortal(
     const urlPortal = normalizePortal(urlPortalRaw);
     const portalTabs = PORTAL_TABS[urlPortal] || [];
     const isValidTab = urlTab && portalTabs.some((t) => t.value === urlTab);
-    const resolvedTab = isValidTab ? urlTab : (tabByPortal[urlPortal] || getDefaultTabForPortal(urlPortal));
+    const resolvedTab = isValidTab ? urlTab : (tabByPortalRef.current[urlPortal] || getDefaultTabForPortal(urlPortal));
 
-    if (urlPortal !== portalView) {
+    if (urlPortal !== portalViewRef.current) {
       setPortalViewState(urlPortal);
     }
-    if (resolvedTab !== activeTab) {
+    if (resolvedTab !== activeTabRef.current) {
       setActiveTabState(resolvedTab);
     }
 
@@ -117,7 +126,7 @@ export function useDecoupledAdminPortal(
       }
       return next;
     });
-  }, [location.search, portalView, activeTab, tabByPortal, location.pathname, location.hash, navigate, scope]);
+  }, [location.search, location.pathname, location.hash, navigate, scope]);
 
   // Navigate to a specific portal and tab atomically
   const navigateTo = useCallback(

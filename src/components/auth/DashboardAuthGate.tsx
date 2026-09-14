@@ -3,12 +3,13 @@ import { Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Lock, LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/contexts/ImpersonationContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
-import { ROLE_HOME, type AppRole } from '@/lib/role-home';
+import { ROLE_HOME, isStaffRole, type AppRole } from '@/lib/role-home';
 
 interface GateArgs {
   allowedRoles: AppRole[];
@@ -47,6 +48,8 @@ export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNo
   });
 
 
+  const impersonation = useImpersonation();
+
   if (isLoading || (user && isRoleLoading)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -58,7 +61,12 @@ export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNo
     );
   }
 
-  const effectiveAllowed: AppRole[] = Array.from(new Set([...allowedRoles, 'admin']));
+  // If viewing via administrative impersonation or staff role, allow access
+  if (impersonation && (allowedRoles.includes(impersonation.role) || isStaffRole(userRole))) {
+    return null;
+  }
+
+  const effectiveAllowed: AppRole[] = Array.from(new Set([...allowedRoles, 'admin', 'admin_assistant']));
 
   if (!user) {
     return (

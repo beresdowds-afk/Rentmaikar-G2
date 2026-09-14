@@ -33,6 +33,7 @@ import { ProfileEditor } from '@/components/profile/ProfileEditor';
 import { AdminViewBanner } from '@/components/admin/AdminViewBanner';
 import { AdminNotificationsBell as NotificationsBell } from "@/components/admin/AdminNotificationsBell";
 import { useAuth } from '@/contexts/AuthContext';
+import { useImpersonation } from '@/contexts/ImpersonationContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DriverBehaviorLogs } from '@/components/admin/DriverBehaviorLogs';
 import { InstallAppBanner } from '@/components/pwa/InstallAppBanner';
@@ -92,6 +93,8 @@ import { buildWhatsAppLink } from '@/lib/contact-links';
 export default function DriverDashboard() {
   const { country, currency } = useRegion();
   const { user, userRole } = useAuth();
+  const impersonation = useImpersonation();
+  const targetId = impersonation?.role === 'driver' ? impersonation.viewAsUserId : user?.id;
   const [activeTab, setActiveTab] = usePersistedTab('overview');
 
   useEffect(() => {
@@ -164,18 +167,18 @@ export default function DriverDashboard() {
   // Fetch phone verification status
   useEffect(() => {
     const fetchPhoneStatus = async () => {
-      if (!user) return;
+      if (!targetId) return;
       const { data } = await supabase
         .from('profiles')
         .select('phone_verified')
-        .eq('user_id', user.id)
-        .single();
+        .eq('user_id', targetId)
+        .maybeSingle();
       if (data) {
         setPhoneVerified(data.phone_verified || false);
       }
     };
     fetchPhoneStatus();
-  }, [user]);
+  }, [targetId]);
 
   // Calculate amounts based on real data or region defaults
   const weeklyRate = rental ? rental.weeklyRate : (isUSA ? 300 : 150000);
@@ -479,9 +482,9 @@ export default function DriverDashboard() {
                 planTypes={["training", "insurance", "roadside_support"]}
                 compact
               />
-              <UnifiedBillingPanel userId={user?.id} role="driver" country={country} />
-              <InvoiceStatusPanel scope="driver" userId={user?.id} />
-              <ProxyBillingSettings userId={user?.id} />
+              <UnifiedBillingPanel userId={targetId} role="driver" country={country} />
+              <InvoiceStatusPanel scope="driver" userId={targetId} />
+              <ProxyBillingSettings userId={targetId} />
 
 
               {showPaymentModal ? (
@@ -625,7 +628,7 @@ export default function DriverDashboard() {
                   <WeeklyInspectionReport
                     vehicleId={vehicle.id}
                     vehicleName={`${vehicle.year} ${vehicle.make} ${vehicle.model}`}
-                    ownerId={null}
+                    ownerId={activeRental?.owner_id || dbVehicle?.owner_id || null}
                     region={country}
                   />
                 ) : (
@@ -717,7 +720,7 @@ export default function DriverDashboard() {
 
             {/* Driving Score / Telemetry Tab */}
             <TabsContent value="telemetry" className="space-y-6">
-              <DriverBehaviorLogs driverIdFilter={user?.id} />
+              <DriverBehaviorLogs driverIdFilter={targetId} />
             </TabsContent>
           </Tabs>
         </div>
