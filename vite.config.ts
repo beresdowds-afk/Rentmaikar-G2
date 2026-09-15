@@ -88,6 +88,22 @@ export default defineConfig(({ mode }) => ({
             }
           }
 
+          if (req.url === "/api/email/health" || req.url === "/api/email-health") {
+            try {
+              const { checkEmailProviderHealth } = await import("./src/server/emailService");
+              const health = await checkEmailProviderHealth();
+              res.setHeader("Content-Type", "application/json; charset=utf-8");
+              res.statusCode = health.ok ? 200 : (health.status === "not_configured" ? 200 : 503);
+              res.end(JSON.stringify(health));
+              return;
+            } catch (e: any) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: false, error: e.message }));
+              return;
+            }
+          }
+
           if (req.url?.startsWith("/api/functions/") || req.url?.startsWith("/functions/v1/")) {
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Access-Control-Allow-Headers", "*");

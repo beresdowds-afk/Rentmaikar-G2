@@ -2,6 +2,7 @@ import CredentialVerificationPanel from "@/components/admin/CredentialVerificati
 import ProviderCredentialSettings from "@/components/admin/ProviderCredentialSettings";
 import { BackendGatewayHealthCard } from "@/components/admin/BackendGatewayHealthCard";
 import { BackendBridgeStatusIndicator } from "@/components/admin/BackendBridgeStatusIndicator";
+import { EmailProviderHealthCard } from "@/components/admin/EmailProviderHealthCard";
 import Seo from "@/components/seo/Seo";
 
 /**
@@ -26,6 +27,7 @@ export default function CredentialHealthPage() {
       </header>
       <BackendGatewayHealthCard />
       <BackendBridgeStatusIndicator />
+      <EmailProviderHealthCard />
       <CredentialVerificationPanel />
       <ProviderCredentialSettings />
     </div>

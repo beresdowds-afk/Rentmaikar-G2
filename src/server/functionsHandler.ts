@@ -251,66 +251,32 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         }
       }
 
-      // 3. Resend
-      if (filterAll || providers.includes("resend")) {
-        const start = Date.now();
-        const key = process.env.RESEND_API_KEY;
-        const webhookSigningSecret = process.env.RESEND_WEBHOOK_SIGNING_SECRET || process.env.RESEND_WEBHOOK_SECRET;
-        if (!key) {
+      // 3. Resend / Email Provider
+      if (filterAll || providers.includes("resend") || providers.includes("email") || providers.includes("email-provider")) {
+        try {
+          const { checkEmailProviderHealth } = await import("./emailService");
+          const health = await checkEmailProviderHealth();
           results.push({
             provider: "resend",
-            label: "Resend (email)",
-            status: "not_configured",
-            message: "RESEND_API_KEY is not set.",
-            latency_ms: Date.now() - start,
+            label: `Email Provider (${health.provider === "smtp" ? "SMTP" : "Resend"})`,
+            status: health.status,
+            message: health.message,
+            detail: health.detail,
+            latency_ms: health.latency_ms,
+            secrets: ["RESEND_API_KEY", "RESEND_WEBHOOK_SIGNING_SECRET"],
+            checked_at: health.checkedAt,
+          });
+        } catch (e: any) {
+          results.push({
+            provider: "resend",
+            label: "Email Provider (Resend)",
+            status: "failed",
+            message: "Email provider check failed",
+            detail: e.message,
+            latency_ms: 0,
             secrets: ["RESEND_API_KEY", "RESEND_WEBHOOK_SIGNING_SECRET"],
             checked_at: new Date().toISOString(),
           });
-        } else {
-          try {
-            const res = await fetch("https://api.resend.com/domains", {
-              headers: { Authorization: `Bearer ${key}` },
-            });
-            if (res.ok) {
-              const bodyData = await res.json();
-              const count = Array.isArray(bodyData?.data) ? bodyData.data.length : 0;
-              const webhookStatus = webhookSigningSecret
-                ? "Webhook signing secret verified in environment."
-                : "RESEND_WEBHOOK_SIGNING_SECRET pending configuration.";
-              results.push({
-                provider: "resend",
-                label: "Resend (email)",
-                status: "ok",
-                message: "API key accepted.",
-                detail: `${count} sending domain(s) available. ${webhookStatus}`,
-                latency_ms: Date.now() - start,
-                secrets: ["RESEND_API_KEY", "RESEND_WEBHOOK_SIGNING_SECRET"],
-                checked_at: new Date().toISOString(),
-              });
-            } else {
-              results.push({
-                provider: "resend",
-                label: "Resend (email)",
-                status: "failed",
-                message: "Resend rejected the API key.",
-                detail: `HTTP ${res.status}`,
-                latency_ms: Date.now() - start,
-                secrets: ["RESEND_API_KEY", "RESEND_WEBHOOK_SIGNING_SECRET"],
-                checked_at: new Date().toISOString(),
-              });
-            }
-          } catch (e: any) {
-            results.push({
-              provider: "resend",
-              label: "Resend (email)",
-              status: "failed",
-              message: "Connection error.",
-              detail: e.message,
-              latency_ms: Date.now() - start,
-              secrets: ["RESEND_API_KEY", "RESEND_WEBHOOK_SIGNING_SECRET"],
-              checked_at: new Date().toISOString(),
-            });
-          }
         }
       }
 
@@ -670,6 +636,16 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       return {
         status: 200,
         data: { synced: true, message: "Identity sync acknowledged" },
+      };
+    }
+
+    case "email-health":
+    case "check-email-health": {
+      const { checkEmailProviderHealth } = await import("./emailService");
+      const health = await checkEmailProviderHealth();
+      return {
+        status: 200,
+        data: health,
       };
     }
 

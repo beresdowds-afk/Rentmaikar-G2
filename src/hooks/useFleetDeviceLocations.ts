@@ -138,12 +138,18 @@ export function useFleetDeviceLocations() {
       const isTrackingGated = agreementStatus === "pending";
       const detectedDriver = (hd.detected_driver as string) || (hd.driver_name as string) || null;
 
+      const rawLat = st?.latitude ?? r.latitude;
+      const rawLng = st?.longitude ?? r.longitude;
+      const parsedLat = rawLat !== null && rawLat !== undefined ? Number(rawLat) : NaN;
+      const parsedLng = rawLng !== null && rawLng !== undefined ? Number(rawLng) : NaN;
+      const hasValidCoords = Number.isFinite(parsedLat) && Number.isFinite(parsedLng) && (parsedLat !== 0 || parsedLng !== 0);
+
       return {
         deviceRowId: r.id,
         serialNumber: r.serial_number,
         vehicleId: r.vehicle_id,
-        latitude: Number(st?.latitude ?? r.latitude),
-        longitude: Number(st?.longitude ?? r.longitude),
+        latitude: hasValidCoords ? parsedLat : 38.9072, // Fallback to DC coordinate if unset
+        longitude: hasValidCoords ? parsedLng : -77.0369,
         speedKmh: Number(st?.speed ?? lastPos.speed_kmh ?? 0),
         course: Number(st?.heading ?? lastPos.course ?? 0),
         lastPing: st?.gps_timestamp ?? r.last_ping,
@@ -190,10 +196,11 @@ export function useFleetDeviceLocations() {
           // Deterministic offset based on ID hash
           const offsetLat = ((v.id.charCodeAt(0) % 20) - 10) * 0.0035;
           const offsetLng = ((v.id.charCodeAt(1) % 20) - 10) * 0.0035;
+          const plateSanitized = (v.license_plate || v.id.slice(0, 8)).replace(/[^a-zA-Z0-9]/g, "");
 
           mappedDevices.push({
             deviceRowId: `sim-dev-${v.id}`,
-            serialNumber: `GPS-${v.license_plate.replace(/[^a-zA-Z0-9]/g, "")}`,
+            serialNumber: `GPS-${plateSanitized}`,
             vehicleId: v.id,
             latitude: baseLat + offsetLat,
             longitude: baseLng + offsetLng,
@@ -207,9 +214,9 @@ export function useFleetDeviceLocations() {
             gpsTimestamp: new Date().toISOString(),
             altitude: 45,
             isHistoric: false,
-            make: v.make,
-            model: v.model,
-            licensePlate: v.license_plate,
+            make: v.make || "Vehicle",
+            model: v.model || "Fleet",
+            licensePlate: v.license_plate || "UNREGISTERED",
             address: v.pickup_address || `${v.pickup_city || "DC Hub"}, Operational Zone`,
           });
         });

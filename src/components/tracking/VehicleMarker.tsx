@@ -50,6 +50,19 @@ const createVehicleIcon = (isParked: boolean, ignitionStatus: boolean): L.DivIco
 };
 
 const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => {
+  if (
+    !vehicle ||
+    typeof vehicle.latitude !== 'number' ||
+    typeof vehicle.longitude !== 'number' ||
+    !Number.isFinite(vehicle.latitude) ||
+    !Number.isFinite(vehicle.longitude) ||
+    Math.abs(vehicle.latitude) > 90 ||
+    Math.abs(vehicle.longitude) > 180 ||
+    (vehicle.latitude === 0 && vehicle.longitude === 0)
+  ) {
+    return null;
+  }
+
   const icon = createVehicleIcon(vehicle.isParked, vehicle.ignitionStatus);
   
   const formatSpeed = (speed: number) => {

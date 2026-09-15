@@ -71,7 +71,7 @@ import { PhoneOtpProviderSettings } from "@/components/admin/PhoneOtpProviderSet
 import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 import { RefereeRequirementSettings } from "@/components/admin/RefereeRequirementSettings";
 
-import { SectionErrorBoundary } from "@/components/admin/SectionErrorBoundary";
+import { SectionErrorBoundary, TabPageErrorBoundary } from "@/components/admin/SectionErrorBoundary";
 import { useDecoupledAdminPortal } from "@/hooks/useDecoupledAdminPortal";
 import PlatformFeaturesReport from "@/components/admin/docs/PlatformFeaturesReport";
 import { PortalNavigation, type PortalType } from "@/components/admin/PortalNavigation";
@@ -669,17 +669,18 @@ const AdminAssistantDashboard = () => {
           {/* ERP Portal */}
           {activeTabAllowed && portalView === 'erp' && (
             <SectionErrorBoundary section="ERP" onSwitchPortal={setPortalView}>
-              <div className="space-y-6">
-              {activeTab === 'tracking' && (
-                <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Live Vehicle Tracking</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Monitor vehicles across DMV states (USA) and Nigeria (Lagos, Abuja, Port Harcourt). 
-                    Click on markers to view details and send remote commands.
-                  </p>
-                  <VehicleTrackingMap />
-                </Card>
-              )}
+              <TabPageErrorBoundary tab={activeTab} key={`erp-tab-${activeTab}`}>
+                <div className="space-y-6">
+                {activeTab === 'tracking' && (
+                  <Card className="p-6">
+                    <h3 className="text-lg font-semibold mb-4">Live Vehicle Tracking</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Monitor vehicles across DMV states (USA) and Nigeria (Lagos, Abuja, Port Harcourt). 
+                      Click on markers to view details and send remote commands.
+                    </p>
+                    <VehicleTrackingMap />
+                  </Card>
+                )}
               {activeTab === 'assets' && <AssetsRegistry />}
               {activeTab === 'authorizations' && <VehicleAuthorizationLogManagement />}
               {activeTab === 'catalogue' && <AdminVehicleCataloguePage embedded />}
@@ -795,9 +796,10 @@ const AdminAssistantDashboard = () => {
               {activeTab === 'tax' && <TaxManagement />}
               {activeTab === 'settings' && <RegionalOperationsManagement />}
               {activeTab === 'region-autobuild' && <RegionAutoBuildWorker />}
-            </div>
-          </SectionErrorBoundary>
-        )}
+                </div>
+              </TabPageErrorBoundary>
+            </SectionErrorBoundary>
+          )}
 
           {/* Content Editor Portal */}
           {activeTabAllowed && (portalView === 'content-editor' || portalView === 'content') && (

@@ -65,6 +65,8 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "send-transactional-email",
   "auth-email-hook",
   "sync-auth-identity",
+  "email-health",
+  "check-email-health",
 ]);
 
 async function callLocalGateway(functionName: string, options?: any) {

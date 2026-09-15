@@ -27,7 +27,13 @@ const MapController = ({ center, zoom }: { center: { lat: number; lng: number };
   const map = useMap();
   
   useEffect(() => {
-    map.setView([center.lat, center.lng], zoom);
+    if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+      try {
+        map.setView([center.lat, center.lng], zoom);
+      } catch (err) {
+        console.warn('MapController setView safe catch:', err);
+      }
+    }
   }, [center, zoom, map]);
   
   return null;
@@ -52,10 +58,28 @@ const KMH_TO_MPH = 0.621371;
 // Auto-fit the viewport to the plotted devices on first load / after a sync.
 const FitToDevices = ({ points }: { points: Array<[number, number]> }) => {
   const map = useMap();
-  const signature = points.map((p) => p.join(',')).join('|');
+  const validPoints = useMemo(
+    () =>
+      points.filter(
+        ([lat, lng]) =>
+          typeof lat === 'number' &&
+          typeof lng === 'number' &&
+          Number.isFinite(lat) &&
+          Number.isFinite(lng) &&
+          Math.abs(lat) <= 90 &&
+          Math.abs(lng) <= 180 &&
+          (lat !== 0 || lng !== 0),
+      ),
+    [points],
+  );
+  const signature = validPoints.map((p) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`).join('|');
   useEffect(() => {
-    if (points.length === 0) return;
-    map.fitBounds(points as [number, number][], { padding: [40, 40], maxZoom: 14 });
+    if (validPoints.length === 0) return;
+    try {
+      map.fitBounds(validPoints as [number, number][], { padding: [40, 40], maxZoom: 14 });
+    } catch (err) {
+      console.warn('FitToDevices safe catch:', err);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, map]);
   return null;
@@ -113,8 +137,22 @@ const VehicleTrackingMap = () => {
     [devices, thresholdMinutes, liveOverrides],
   );
 
-  // Filter for map markers: only enable live location if agreement is completed or not gated
-  const vehicles = useMemo(() => allVehicles.filter(v => !v.isTrackingGated), [allVehicles]);
+  // Filter for map markers: only enable live location if agreement is completed or not gated, and coordinates are valid
+  const vehicles = useMemo(
+    () =>
+      allVehicles.filter(
+        (v) =>
+          !v.isTrackingGated &&
+          typeof v.latitude === 'number' &&
+          typeof v.longitude === 'number' &&
+          Number.isFinite(v.latitude) &&
+          Number.isFinite(v.longitude) &&
+          Math.abs(v.latitude) <= 90 &&
+          Math.abs(v.longitude) <= 180 &&
+          (v.latitude !== 0 || v.longitude !== 0),
+      ),
+    [allVehicles],
+  );
   const gatedCount = useMemo(() => allVehicles.filter(v => v.isTrackingGated).length, [allVehicles]);
 
   const setVehicles = useCallback(
@@ -479,6 +517,7 @@ const VehicleTrackingMap = () => {
       {/* Map */}
       <div className="h-[500px] xl:h-[min(760px,72dvh)] rounded-xl overflow-hidden border border-border">
         <MapContainer
+          key={`vehicle-tracking-map-${selectedRegion.id}`}
           center={[selectedRegion.center.lat, selectedRegion.center.lng]}
           zoom={selectedRegion.zoom}
           style={{ height: '100%', width: '100%' }}

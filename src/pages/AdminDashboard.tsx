@@ -69,7 +69,7 @@ import { PhoneOtpProviderSettings } from "@/components/admin/PhoneOtpProviderSet
 import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 import { RefereeRequirementSettings } from "@/components/admin/RefereeRequirementSettings";
 
-import { SectionErrorBoundary } from "@/components/admin/SectionErrorBoundary";
+import { SectionErrorBoundary, TabPageErrorBoundary } from "@/components/admin/SectionErrorBoundary";
 import { useDecoupledAdminPortal } from "@/hooks/useDecoupledAdminPortal";
 import { PortalNavigation, type PortalType } from "@/components/admin/PortalNavigation";
 import { AdminUnifiedNavigation } from "@/components/admin/AdminUnifiedNavigation";
