@@ -15,6 +15,13 @@ import {
   handleVerifyPhone,
   getSupabase,
 } from "./communicationServices";
+import {
+  handleSendPasswordReset,
+  handleGoogleSsoAuthEmail,
+  handleSendVerificationEmail,
+  handleSendOutboundEmail,
+  handleAuthEmailHook,
+} from "./emailService";
 
 export interface FunctionsPayload {
   body?: any;
@@ -627,6 +634,42 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       return {
         status: 200,
         data: { success: true, text: "Attachment processed successfully" },
+      };
+    }
+
+    // -----------------------------------------------------------------
+    // Authentication & Transactional Email Functions
+    // -----------------------------------------------------------------
+    case "send-password-reset": {
+      const result = await handleSendPasswordReset(body);
+      return { status: 200, data: result };
+    }
+
+    case "google-sso-auth-email": {
+      const result = await handleGoogleSsoAuthEmail(body);
+      return { status: 200, data: result };
+    }
+
+    case "send-verification-email": {
+      const result = await handleSendVerificationEmail(body);
+      return { status: 200, data: result };
+    }
+
+    case "send-outbound-email":
+    case "send-transactional-email": {
+      const result = await handleSendOutboundEmail(body);
+      return { status: 200, data: result };
+    }
+
+    case "auth-email-hook": {
+      const result = await handleAuthEmailHook(body);
+      return { status: 200, data: result };
+    }
+
+    case "sync-auth-identity": {
+      return {
+        status: 200,
+        data: { synced: true, message: "Identity sync acknowledged" },
       };
     }
 

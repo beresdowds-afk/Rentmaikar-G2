@@ -74,6 +74,7 @@ const Auth = () => {
     signUp,
     signIn,
     check2FAStatus,
+    sendPasswordReset,
   } = useAuth();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -370,24 +371,18 @@ const Auth = () => {
       });
 
       if (allowed !== false) {
-        let sent = false;
-        try {
-          const { error: fnErr } = await supabase.functions.invoke('send-password-reset', {
-            body: { email: normalized, redirectOrigin: window.location.origin },
-            headers: idempotencyHeaders('password_reset', normalized),
-          });
-          if (!fnErr) sent = true;
-        } catch {
-          // Edge function unavailable
-        }
+        const { error: resetErr } = await sendPasswordReset(normalized, {
+          redirectOrigin: window.location.origin,
+        });
 
-        if (!sent) {
+        if (resetErr) {
+          console.warn('sendPasswordReset error after retries, attempting native fallback:', resetErr);
           try {
             await supabase.auth.resetPasswordForEmail(normalized, {
               redirectTo: `${window.location.origin}/reset-password`,
             });
-          } catch (resetErr) {
-            console.warn('Native password reset fallback error:', resetErr);
+          } catch (fallbackErr) {
+            console.warn('Native password reset fallback error:', fallbackErr);
           }
         }
 

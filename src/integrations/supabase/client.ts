@@ -58,6 +58,13 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "hologram-admin",
   "verify-credentials",
   "resend-events",
+  "send-password-reset",
+  "google-sso-auth-email",
+  "send-verification-email",
+  "send-outbound-email",
+  "send-transactional-email",
+  "auth-email-hook",
+  "sync-auth-identity",
 ]);
 
 async function callLocalGateway(functionName: string, options?: any) {

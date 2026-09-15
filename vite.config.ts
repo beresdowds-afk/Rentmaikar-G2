@@ -88,7 +88,7 @@ export default defineConfig(({ mode }) => ({
             }
           }
 
-          if (req.url?.startsWith("/api/functions/")) {
+          if (req.url?.startsWith("/api/functions/") || req.url?.startsWith("/functions/v1/")) {
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Access-Control-Allow-Headers", "*");
             res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -100,7 +100,7 @@ export default defineConfig(({ mode }) => ({
             }
 
             try {
-              const functionName = req.url.replace(/^\/api\/functions\//, "").split("?")[0];
+              const functionName = req.url.replace(/^\/(?:api\/functions|functions\/v1)\//, "").split("?")[0];
               const chunks: any[] = [];
               req.on("data", (chunk: any) => chunks.push(chunk));
               req.on("end", async () => {

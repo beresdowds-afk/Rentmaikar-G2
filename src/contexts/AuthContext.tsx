@@ -5,6 +5,77 @@ import { assignRole } from '@/lib/user-provisioning';
 
 type AppRole = 'admin' | 'admin_assistant' | 'owner' | 'driver' | 'legal_support' | 'iot_support' | 'vehicle_support';
 
+export interface RetryOptions {
+  maxAttempts?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  factor?: number;
+  shouldRetry?: (error: any) => boolean;
+  onRetry?: (attempt: number, error: any, nextDelayMs: number) => void;
+}
+
+/**
+ * Detects if an error is likely transient/network-related and worth retrying
+ */
+export function isTransientAuthError(error: any): boolean {
+  if (!error) return false;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
+  const msg = String(error.message || error || '').toLowerCase();
+  const status = (error as any)?.status || (error as any)?.statusCode;
+
+  if (status && [408, 429, 500, 502, 503, 504].includes(Number(status))) {
+    return true;
+  }
+
+  return (
+    msg.includes('network') ||
+    msg.includes('fetch') ||
+    msg.includes('timeout') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('load failed') ||
+    msg.includes('econnreset') ||
+    msg.includes('connection refused') ||
+    msg.includes('gateway') ||
+    msg.includes('offline') ||
+    msg.includes('aborted')
+  );
+}
+
+/**
+ * Executes an async operation with exponential backoff and jitter for transient errors
+ */
+export async function withAuthRetry<T>(
+  operation: () => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
+  const maxAttempts = options.maxAttempts ?? 3;
+  const initialDelayMs = options.initialDelayMs ?? 1000;
+  const maxDelayMs = options.maxDelayMs ?? 5000;
+  const factor = options.factor ?? 2;
+  const shouldRetry = options.shouldRetry ?? isTransientAuthError;
+
+  let lastError: any;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (err: any) {
+      lastError = err;
+      if (attempt >= maxAttempts || !shouldRetry(err)) {
+        break;
+      }
+      const baseDelay = Math.min(initialDelayMs * Math.pow(factor, attempt - 1), maxDelayMs);
+      const delay = Math.round(baseDelay * (0.8 + 0.4 * Math.random()));
+      if (options.onRetry) {
+        options.onRetry(attempt, err, delay);
+      } else {
+        console.warn(`[AuthRetry] Attempt ${attempt}/${maxAttempts} failed (${err?.message || 'Error'}). Retrying in ${delay}ms...`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 interface TwoFactorStatus {
   requires_2fa: boolean;
   is_setup: boolean;
@@ -28,6 +99,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   hasRole: (role: AppRole) => boolean;
   check2FAStatus: (userId: string) => Promise<TwoFactorStatus | null>;
+  sendPasswordReset: (email: string, options?: { redirectOrigin?: string; maxAttempts?: number }) => Promise<{ error: Error | null; success: boolean }>;
+  sendGoogleSsoAuthEmail: (params: { email: string; fullName?: string; isNewUser?: boolean; device?: string; location?: string; origin?: string }) => Promise<{ success: boolean; error?: Error }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -251,6 +324,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setTimeout(() => {
           if (event === 'SIGNED_IN') {
             const provider = (session?.user?.app_metadata as any)?.provider ?? 'email';
+            const providers = (session?.user?.app_metadata as any)?.providers || [];
+            const isGoogleAuth = provider === 'google' || providers.includes('google');
+
+            if (isGoogleAuth && session?.user?.email) {
+              const alertKey = `rm_gauth_alert_${session.user.id}_${session.access_token?.slice(-12) || 'session'}`;
+              if (!sessionStorage.getItem(alertKey)) {
+                sessionStorage.setItem(alertKey, '1');
+                const isNewUser = !!(session.user.created_at && (Date.now() - new Date(session.user.created_at).getTime() < 180000));
+                const fullName = (session.user.user_metadata as any)?.full_name || (session.user.user_metadata as any)?.name || '';
+                sendGoogleSsoAuthEmail({
+                  email: session.user.email,
+                  fullName,
+                  isNewUser,
+                  device: navigator.userAgent ? navigator.userAgent.slice(0, 100) : 'Web Client',
+                  origin: window.location.origin,
+                }).catch(() => {});
+              }
+            }
+
             logAuthEvent('sign_in_success', {
               email: session?.user?.email ?? undefined,
               provider,
@@ -458,6 +550,90 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return userRole === role;
   };
 
+  /**
+   * Sends Google SSO welcome or sign-in alert email with automatic exponential backoff retries
+   */
+  const sendGoogleSsoAuthEmail = async (params: {
+    email: string;
+    fullName?: string;
+    isNewUser?: boolean;
+    device?: string;
+    location?: string;
+    origin?: string;
+  }): Promise<{ success: boolean; error?: Error }> => {
+    try {
+      await withAuthRetry(
+        async () => {
+          const { error } = await supabase.functions.invoke('google-sso-auth-email', {
+            body: {
+              email: params.email,
+              fullName: params.fullName,
+              isNewUser: params.isNewUser,
+              device: params.device || (typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : 'Web Client'),
+              location: params.location,
+              origin: params.origin || (typeof window !== 'undefined' ? window.location.origin : 'https://rentmaikar.com'),
+            },
+          });
+          if (error) {
+            throw new Error(error.message || 'Google SSO email invocation failed');
+          }
+        },
+        {
+          maxAttempts: 3,
+          initialDelayMs: 1200,
+          onRetry: (attempt, err, delay) => {
+            console.warn(`[AuthContext] Retrying Google SSO email delivery (attempt ${attempt}/3) in ${delay}ms:`, err?.message);
+          },
+        }
+      );
+      return { success: true };
+    } catch (err: any) {
+      console.error('[AuthContext] Google SSO auth email delivery failed after retries:', err?.message || err);
+      return { success: false, error: err as Error };
+    }
+  };
+
+  /**
+   * Sends password reset email with automatic exponential backoff retries
+   */
+  const sendPasswordReset = async (
+    email: string,
+    options?: { redirectOrigin?: string; maxAttempts?: number }
+  ): Promise<{ error: Error | null; success: boolean }> => {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+      return { error: new Error('Please enter a valid email address.'), success: false };
+    }
+
+    try {
+      await withAuthRetry(
+        async () => {
+          const { data, error } = await supabase.functions.invoke('send-password-reset', {
+            body: {
+              email: normalized,
+              redirectOrigin: options?.redirectOrigin || (typeof window !== 'undefined' ? window.location.origin : 'https://rentmaikar.com'),
+            },
+          });
+          if (error) {
+            throw new Error(error.message || 'Password reset request failed');
+          }
+          return data;
+        },
+        {
+          maxAttempts: options?.maxAttempts ?? 3,
+          initialDelayMs: 1000,
+          onRetry: (attempt, err, delay) => {
+            console.warn(`[AuthContext] Retrying password reset request (attempt ${attempt}/3) in ${delay}ms:`, err?.message);
+          },
+        }
+      );
+      return { error: null, success: true };
+    } catch (err: any) {
+      console.error('[AuthContext] Password reset request failed after retries:', err?.message || err);
+      return { error: err as Error, success: false };
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -474,6 +650,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         signOut,
         hasRole,
         check2FAStatus,
+        sendPasswordReset,
+        sendGoogleSsoAuthEmail,
       }}
     >
       {children}

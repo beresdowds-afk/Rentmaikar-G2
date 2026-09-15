@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,6 +27,7 @@ type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>;
 
 const ResetPassword = () => {
   const navigate = useNavigate();
+  const { sendPasswordReset } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -43,7 +45,42 @@ const ResetPassword = () => {
     }
   });
   const [resendStatus, setResendStatus] = useState<'idle' | 'sent' | 'error'>('idle');
+  const [otpCode, setOtpCode] = useState('');
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const sessionFoundRef = useRef(false);
+
+  const handleVerifyCode = async () => {
+    const targetEmail = resendEmail.trim().toLowerCase();
+    const targetCode = otpCode.trim();
+    if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+      toast.error('Please enter a valid email address.');
+      return;
+    }
+    if (!targetCode || targetCode.length < 6) {
+      toast.error('Please enter the 6-digit code sent to your email.');
+      return;
+    }
+    setIsVerifyingOtp(true);
+    try {
+      const { error } = await supabase.auth.verifyOtp({
+        type: 'recovery',
+        email: targetEmail,
+        token: targetCode,
+      });
+      if (error) {
+        toast.error('Invalid or expired code. Please request a new one.');
+      } else {
+        toast.success('Code verified! Enter your new password below.');
+        sessionFoundRef.current = true;
+        setIsValidSession(true);
+        window.history.replaceState({}, '', '/reset-password');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Verification failed');
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
 
   const form = useForm<ResetPasswordFormData>({
     resolver: zodResolver(resetPasswordSchema),
@@ -92,10 +129,23 @@ const ResetPassword = () => {
 
       const code = query.get('code');
       const tokenHash = query.get('token_hash') ?? hash.get('token_hash');
+      const token = query.get('token') ?? query.get('otp') ?? hash.get('token');
+      const email = query.get('email') ?? hash.get('email');
 
       try {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (!error) {
+            markValid();
+            window.history.replaceState({}, '', '/reset-password');
+            return;
+          }
+        } else if (token && email) {
+          const { error } = await supabase.auth.verifyOtp({
+            type: 'recovery',
+            email: email.trim().toLowerCase(),
+            token: token.trim(),
+          });
           if (!error) {
             markValid();
             window.history.replaceState({}, '', '/reset-password');
@@ -204,17 +254,61 @@ const ResetPassword = () => {
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
                 {linkErrorMessage ? `${linkErrorMessage} ` : ''}
-                Password reset links expire <strong>1 hour</strong> after they are sent, and can only be used once.
+                Password reset links expire <strong>1 hour</strong> after they are sent.
               </AlertDescription>
             </Alert>
 
+            {/* Code Verification Option */}
+            <div className="rounded-lg border bg-card p-4 space-y-3 shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <KeyRound className="h-4 w-4 text-primary" />
+                <span>Enter 6-Digit Reset Code</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Received an email with a 6-digit reset code? Enter it below to unlock your password reset immediately:
+              </p>
+              <div className="space-y-2">
+                <Input
+                  type="email"
+                  placeholder="your.email@example.com"
+                  value={resendEmail}
+                  onChange={(e) => setResendEmail(e.target.value)}
+                  className="bg-background text-sm"
+                />
+                <Input
+                  type="text"
+                  placeholder="123456"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                  className="bg-background text-base font-mono tracking-widest text-center"
+                />
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={isVerifyingOtp || otpCode.length < 6 || !resendEmail}
+                  onClick={handleVerifyCode}
+                >
+                  {isVerifyingOtp ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Verifying Code...
+                    </>
+                  ) : (
+                    'Verify Code & Set Password'
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {/* Resend Option */}
             <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <Mail className="h-4 w-4 text-primary" />
-                <span>Resend reset email</span>
+                <span>Need a new reset email?</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Enter your account email to receive a fresh password reset link via the verified gateway.
+                We'll deliver a fresh reset code and one-click link to your inbox.
               </p>
 
               {resendStatus === 'sent' && (
@@ -227,19 +321,12 @@ const ResetPassword = () => {
               )}
 
               <div className="space-y-2">
-                <Input
-                  type="email"
-                  placeholder="your.email@example.com"
-                  value={resendEmail}
-                  onChange={(e) => setResendEmail(e.target.value)}
-                  className="bg-background text-sm"
-                />
                 <ResendButton
                   channel="email"
                   identifier={resendEmail.trim().toLowerCase()}
-                  label="Resend reset email"
+                  label="Send new reset email"
                   className="w-full"
-                  variant="default"
+                  variant="outline"
                   onResend={async () => {
                     const target = resendEmail.trim().toLowerCase();
                     if (!target || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
@@ -247,14 +334,13 @@ const ResetPassword = () => {
                       return;
                     }
                     try {
-                      const { error: invokeErr } = await supabase.functions.invoke('send-password-reset', {
-                        body: { email: target, redirectOrigin: window.location.origin },
-                        headers: idempotencyHeaders('password_reset', target),
+                      const { error: resetErr } = await sendPasswordReset(target, {
+                        redirectOrigin: window.location.origin,
                       });
-                      if (invokeErr) throw invokeErr;
+                      if (resetErr) throw resetErr;
                       resetEmailIdempotencyKey('password_reset', target);
                       setResendStatus('sent');
-                      toast.success('Reset email sent via Resend gateway! Check your inbox.');
+                      toast.success('Reset email sent via verified gateway! Check your inbox.');
                     } catch (err) {
                       console.error('Failed to resend reset email', err);
                       toast.error('Unable to send reset email. Please try again shortly.');
