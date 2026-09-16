@@ -438,7 +438,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
 
     case "phone-otp-custom": {
       try {
-        const result = await handlePhoneOtp(body);
+        const result = await handlePhoneOtp(body, token);
         return { status: 200, data: result };
       } catch (err: any) {
         return { status: 400, data: { success: false, error: err.message } };
@@ -447,10 +447,10 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
 
     case "verify-phone": {
       try {
-        const result = await handleVerifyPhone(body);
+        const result = await handleVerifyPhone(body, token);
         return { status: 200, data: result };
       } catch (err: any) {
-        return { status: 400, data: { valid: false, error: err.message } };
+        return { status: 400, data: { success: false, valid: false, error: err.message } };
       }
     }
 
@@ -646,6 +646,47 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       return {
         status: 200,
         data: health,
+      };
+    }
+
+    case "email-webhook":
+    case "resend-events":
+    case "inbound-email": {
+      const { handleInboundEmailWebhook } = await import("./emailService");
+      const result = await handleInboundEmailWebhook(body, headers);
+      return {
+        status: 200,
+        data: result,
+      };
+    }
+
+    case "inbound-email-forward":
+    case "forward-email": {
+      const { handleInboundEmailForward } = await import("./emailService");
+      const result = await handleInboundEmailForward(body);
+      return {
+        status: 200,
+        data: result,
+      };
+    }
+
+    case "email-settings-review":
+    case "platform-email-settings": {
+      const { getPlatformEmailSettingsReview } = await import("./emailService");
+      const review = await getPlatformEmailSettingsReview();
+      return {
+        status: 200,
+        data: review,
+      };
+    }
+
+    case "test-email-delivery":
+    case "test-email-forward": {
+      const { testEmailDelivery } = await import("./emailService");
+      const result = await testEmailDelivery(body);
+      return {
+        status: 200,
+        data: result,
       };
     }
 

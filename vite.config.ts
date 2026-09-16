@@ -104,6 +104,87 @@ export default defineConfig(({ mode }) => ({
             }
           }
 
+          if (req.url === "/api/email/settings" || req.url === "/api/email/review" || req.url === "/api/email-settings") {
+            try {
+              const { getPlatformEmailSettingsReview } = await import("./src/server/emailService");
+              const review = await getPlatformEmailSettingsReview();
+              res.setHeader("Content-Type", "application/json; charset=utf-8");
+              res.statusCode = 200;
+              res.end(JSON.stringify(review));
+              return;
+            } catch (e: any) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: false, error: e.message }));
+              return;
+            }
+          }
+
+          if (
+            req.url === "/api/email/inbound" ||
+            req.url === "/api/email/webhook" ||
+            req.url === "/api/webhooks/resend" ||
+            req.url === "/api/email/forward" ||
+            req.url === "/api/email/test" ||
+            req.url === "/api/email/test-delivery"
+          ) {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Headers", "*");
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+            if (req.method === "OPTIONS") {
+              res.statusCode = 204;
+              res.end();
+              return;
+            }
+
+            const chunks: any[] = [];
+            req.on("data", (chunk: any) => chunks.push(chunk));
+            req.on("end", async () => {
+              let body: any = {};
+              try {
+                const raw = Buffer.concat(chunks).toString("utf8");
+                if (raw) body = JSON.parse(raw);
+              } catch {
+                // ignore
+              }
+
+              try {
+                if (req.url === "/api/email/forward") {
+                  const { handleInboundEmailForward } = await import("./src/server/emailService");
+                  const result = await handleInboundEmailForward(body);
+                  res.setHeader("Content-Type", "application/json");
+                  res.statusCode = result.ok ? 200 : 400;
+                  res.end(JSON.stringify(result));
+                  return;
+                }
+
+                if (req.url === "/api/email/test" || req.url === "/api/email/test-delivery") {
+                  const { testEmailDelivery } = await import("./src/server/emailService");
+                  const result = await testEmailDelivery(body);
+                  res.setHeader("Content-Type", "application/json");
+                  res.statusCode = result.ok ? 200 : 400;
+                  res.end(JSON.stringify(result));
+                  return;
+                }
+
+                // Inbound webhook
+                const { handleInboundEmailWebhook } = await import("./src/server/emailService");
+                const result = await handleInboundEmailWebhook(body, req.headers as Record<string, string>);
+                res.setHeader("Content-Type", "application/json");
+                res.statusCode = result.ok ? 200 : 400;
+                res.end(JSON.stringify(result));
+                return;
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: false, error: err.message }));
+                return;
+              }
+            });
+            return;
+          }
+
           if (req.url?.startsWith("/api/functions/") || req.url?.startsWith("/functions/v1/")) {
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Access-Control-Allow-Headers", "*");

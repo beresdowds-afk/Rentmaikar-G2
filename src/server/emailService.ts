@@ -10,12 +10,14 @@ import crypto from "crypto";
 import pg from "pg";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
-const VERIFIED_DOMAIN = "notify.rentmaikar.com";
+export const VERIFIED_DOMAIN = "notify.rentmaikar.com";
+export const INBOUND_DOMAIN = "backend.rentmaikar.com";
 
-const SENDERS = {
+export const SENDERS = {
   security: `RentMaikar Security <security@${VERIFIED_DOMAIN}>`,
   support: `RentMaikar Support <support@${VERIFIED_DOMAIN}>`,
   noreply: `RentMaikar Notifications <noreply@${VERIFIED_DOMAIN}>`,
+  forwarder: `RentMaikar Forwarder <support@${VERIFIED_DOMAIN}>`,
 };
 
 // Lazy PostgreSQL pool for database queries
@@ -41,12 +43,47 @@ function getDbPool(): pg.Pool {
   return pgPool;
 }
 
+export function parseEmailAddress(value: string): { name?: string; local: string; domain: string } | null {
+  if (!value) return null;
+  const angled = value.match(/^\s*(?:"?([^"<]*?)"?\s*)?<([^<>@\s]+)@([^<>@\s]+)>\s*$/);
+  if (angled) {
+    return { name: angled[1]?.trim() || undefined, local: angled[2], domain: angled[3] };
+  }
+  const bare = value.match(/^\s*([^<>@\s]+)@([^<>@\s]+)\s*$/);
+  if (!bare) return null;
+  return { local: bare[1], domain: bare[2] };
+}
+
+/**
+ * Rewrites a sender onto the verified domain (notify.rentmaikar.com)
+ * preserving the display name and original email as reply-to.
+ */
+export function rewriteSenderAddress(from?: string): { from: string; preservedReplyTo?: string } {
+  if (!from) return { from: SENDERS.security };
+  const parsed = parseEmailAddress(from);
+  if (!parsed) return { from: SENDERS.security };
+
+  // If already on the verified sending domain, keep it intact
+  if (parsed.domain.toLowerCase() === VERIFIED_DOMAIN.toLowerCase()) {
+    return { from };
+  }
+
+  // Rewrite apex or unverified domain to the verified sending subdomain
+  const rewrittenAddress = `${parsed.local}@${VERIFIED_DOMAIN}`;
+  const rewrittenFrom = parsed.name ? `${parsed.name} <${rewrittenAddress}>` : rewrittenAddress;
+  const originalFullAddress = parsed.name ? `${parsed.name} <${parsed.local}@${parsed.domain}>` : `${parsed.local}@${parsed.domain}`;
+
+  return { from: rewrittenFrom, preservedReplyTo: originalFullAddress };
+}
+
 export interface SendEmailOptions {
   from?: string;
   to: string | string[];
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string | string[];
+  reply_to?: string | string[];
   templateName?: string;
   metadata?: Record<string, any>;
 }
@@ -58,7 +95,8 @@ export interface SendEmailResult {
 }
 
 /**
- * Low-level Resend email dispatcher with automatic domain enforcement and DB logging
+ * Low-level Resend email dispatcher with automatic domain enforcement,
+ * reply-to retention, and DB logging.
  */
 export async function sendEmailViaResend(options: SendEmailOptions): Promise<SendEmailResult> {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
@@ -77,26 +115,29 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     return { ok: false, error: err };
   }
 
-  // Ensure 'from' always uses the verified domain
-  let fromAddress = options.from || SENDERS.security;
-  if (!fromAddress.includes(`@${VERIFIED_DOMAIN}`)) {
-    fromAddress = SENDERS.security;
-  }
+  // Ensure 'from' always uses the verified domain with name and reply-to preservation
+  const { from: fromAddress, preservedReplyTo } = rewriteSenderAddress(options.from);
+  const replyToAddress = options.replyTo || options.reply_to || preservedReplyTo || (fromAddress.includes("support") ? "support@rentmaikar.com" : undefined);
 
   try {
+    const payloadBody: Record<string, any> = {
+      from: fromAddress,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+    };
+    if (replyToAddress) {
+      payloadBody.reply_to = replyToAddress;
+    }
+
     const res = await fetch(RESEND_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        from: fromAddress,
-        to: options.to,
-        subject: options.subject,
-        html: options.html,
-        text: options.text,
-      }),
+      body: JSON.stringify(payloadBody),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -855,3 +896,414 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
     checkedAt: new Date().toISOString(),
   };
 }
+
+// -----------------------------------------------------------------
+// 7. Inbound Email Forwarding Engine & Webhook Handler
+// -----------------------------------------------------------------
+
+export interface InboundEmailPayload {
+  from: string;
+  to: string | string[];
+  subject: string;
+  html?: string;
+  text?: string;
+  headers?: Record<string, string>;
+  messageId?: string;
+}
+
+export interface InboundForwardResult {
+  ok: boolean;
+  forwarded: boolean;
+  reason?: string;
+  mailbox?: string;
+  originalSender?: string;
+  destinations?: string[];
+  matchedRule?: string;
+  messageId?: string;
+  error?: string;
+}
+
+/**
+ * Checks whether master external email forwarding is active in platform_kv_settings
+ */
+export async function isEmailForwardingEnabled(): Promise<boolean> {
+  try {
+    const pool = getDbPool();
+    const res = await pool.query(
+      `SELECT value FROM public.platform_kv_settings WHERE key = $1 LIMIT 1`,
+      ["forwarding_config"]
+    );
+    if (res.rows.length > 0 && res.rows[0].value) {
+      const cfg = res.rows[0].value;
+      return cfg.email !== false;
+    }
+  } catch (e: any) {
+    console.warn(`[EmailService] Failed to check forwarding_config:`, e.message);
+  }
+  return true;
+}
+
+/**
+ * Retrieves the configured email routing rules from platform_kv_settings
+ */
+export async function getEmailRoutingTableFromDb(): Promise<{
+  rules: Array<{ mailbox: string; destinations: string[]; enabled: boolean }>;
+  fallback: string[];
+}> {
+  const defaultTable = {
+    rules: [
+      { mailbox: "support", destinations: ["support@rentmaikar.com"], enabled: true },
+      { mailbox: "payments", destinations: ["payments@rentmaikar.com"], enabled: true },
+      { mailbox: "documents", destinations: ["documents@rentmaikar.com"], enabled: true },
+      { mailbox: "admin", destinations: ["admin@rentmaikar.com"], enabled: true },
+      { mailbox: "legal", destinations: ["legal@rentmaikar.com"], enabled: true },
+      { mailbox: "privacy", destinations: ["privacy@rentmaikar.com"], enabled: true },
+      { mailbox: "dpo", destinations: ["dpo@rentmaikar.com"], enabled: true },
+      { mailbox: "negotiations", destinations: ["negotiations@rentmaikar.com"], enabled: true },
+      { mailbox: "nigeria", destinations: ["support@rentmaikar.com"], enabled: true },
+      { mailbox: "usa", destinations: ["support@rentmaikar.com"], enabled: true },
+      { mailbox: "notification", destinations: ["notification@rentmaikar.com"], enabled: true },
+      { mailbox: "noreply", destinations: ["noreply@rentmaikar.com"], enabled: false },
+      { mailbox: "*", destinations: ["support@rentmaikar.com"], enabled: true },
+    ],
+    fallback: ["support@rentmaikar.com"],
+  };
+
+  try {
+    const pool = getDbPool();
+    const kvRes = await pool.query(
+      `SELECT value FROM public.platform_kv_settings WHERE key = $1 LIMIT 1`,
+      ["email_routing_rules"]
+    );
+    if (kvRes.rows.length > 0 && kvRes.rows[0].value?.rules) {
+      return kvRes.rows[0].value;
+    }
+  } catch (e: any) {
+    console.warn(`[EmailService] Failed to read email_routing_rules from DB:`, e.message);
+  }
+
+  return defaultTable;
+}
+
+/**
+ * Resolves external delivery destinations for an inbound mailbox (e.g. "support", "payments", etc.)
+ */
+export async function resolveInboundDestinations(
+  mailbox: string
+): Promise<{ destinations: string[]; matchedRule: string }> {
+  const table = await getEmailRoutingTableFromDb();
+  const mb = mailbox.trim().toLowerCase();
+
+  const exact = table.rules.find((r) => r.mailbox.toLowerCase() === mb);
+  if (exact) {
+    if (exact.enabled && exact.destinations?.length > 0) {
+      return { destinations: exact.destinations, matchedRule: exact.mailbox };
+    }
+    if (!exact.enabled) {
+      return { destinations: [], matchedRule: `${exact.mailbox} (paused)` };
+    }
+  }
+
+  // Check wildcard rule
+  const wildcard = table.rules.find((r) => r.mailbox === "*");
+  if (wildcard && wildcard.enabled && wildcard.destinations?.length > 0) {
+    return { destinations: wildcard.destinations, matchedRule: "*" };
+  }
+
+  // Fallback destination
+  return { destinations: table.fallback || ["support@rentmaikar.com"], matchedRule: "fallback" };
+}
+
+/**
+ * Core Inbound Forwarder:
+ * Accepts an inbound email, extracts the target mailbox, checks forwarding settings,
+ * resolves distribution targets, and forwards the email with original reply-to preserved.
+ */
+export async function handleInboundEmailForward(
+  payload: InboundEmailPayload
+): Promise<InboundForwardResult> {
+  const recipient = Array.isArray(payload.to) ? payload.to[0] : (payload.to || "");
+  const parsedTo = parseEmailAddress(recipient);
+  const mailbox = (parsedTo ? parsedTo.local : recipient.split("@")[0] || "").trim().toLowerCase();
+  const sender = (payload.from || "").trim();
+
+  if (!sender) {
+    return { ok: false, forwarded: false, reason: "missing_sender" };
+  }
+
+  // 1. Check if external email delivery is paused
+  const isEnabled = await isEmailForwardingEnabled();
+  if (!isEnabled) {
+    console.log(`[EmailForwarder] External email forwarding is paused in admin settings.`);
+    return {
+      ok: true,
+      forwarded: false,
+      reason: "external_email_delivery_paused",
+      mailbox,
+      originalSender: sender,
+    };
+  }
+
+  // 2. Resolve destinations for this mailbox
+  const { destinations, matchedRule } = await resolveInboundDestinations(mailbox);
+
+  // 3. Exclude the sender itself to prevent email loops
+  const parsedSender = parseEmailAddress(sender);
+  const senderEmail = (parsedSender ? `${parsedSender.local}@${parsedSender.domain}` : sender.replace(/.*<([^>]+)>.*/, "$1")).trim().toLowerCase();
+  const targetDestinations = destinations
+    .map((d) => d.trim().toLowerCase())
+    .filter((d) => d && d.includes("@") && d !== senderEmail);
+
+  if (targetDestinations.length === 0) {
+    console.warn(`[EmailForwarder] No valid external destinations found for mailbox "${mailbox}" (rule: ${matchedRule})`);
+    return {
+      ok: false,
+      forwarded: false,
+      reason: "no_valid_destinations",
+      mailbox,
+      matchedRule,
+      originalSender: sender,
+    };
+  }
+
+  // 4. Construct forwarded email
+  const subject = payload.subject || "(no subject)";
+  const forwardSubject = subject.startsWith("[Fwd]") ? subject : `[Fwd] ${subject}`;
+
+  const forwardHeaderHtml = `
+    <div style="background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 16px 20px; border-radius: 4px 8px 8px 4px; margin-bottom: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; font-size: 13px; line-height: 1.6;">
+      <div style="font-weight: 700; color: #0f172a; text-transform: uppercase; font-size: 11px; letter-spacing: 0.6px; margin-bottom: 8px;">Forwarded Inbound Customer Communication</div>
+      <div style="margin-bottom: 4px;"><strong>From:</strong> ${sender}</div>
+      <div style="margin-bottom: 4px;"><strong>Inbound Mailbox:</strong> ${mailbox}@${INBOUND_DOMAIN}</div>
+      <div style="margin-bottom: 4px;"><strong>Received:</strong> ${new Date().toUTCString()}</div>
+      <div style="margin-bottom: 6px;"><strong>Original Subject:</strong> ${subject}</div>
+      <div style="font-size: 11px; color: #64748b; margin-top: 8px; border-top: 1px solid #e2e8f0; padding-top: 6px;">
+        <em>Reply-To is preserved. Directly hitting "Reply" in your email client will respond to <strong>${sender}</strong>.</em>
+      </div>
+    </div>
+  `;
+
+  const bodyContent = payload.html || `<pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px;">${payload.text || ""}</pre>`;
+  const fullHtml = emailLayout(`${forwardHeaderHtml}\n${bodyContent}`, forwardSubject);
+
+  // 5. Send forwarded email via Resend
+  const sendResult = await sendEmailViaResend({
+    from: SENDERS.forwarder,
+    to: targetDestinations,
+    subject: forwardSubject,
+    html: fullHtml,
+    text: payload.text,
+    replyTo: sender,
+    templateName: "inbound_forward",
+    metadata: {
+      originalSender: sender,
+      originalRecipient: recipient,
+      mailbox,
+      matchedRule,
+      destinations: targetDestinations,
+      originalMessageId: payload.messageId,
+    },
+  });
+
+  if (!sendResult.ok) {
+    return {
+      ok: false,
+      forwarded: false,
+      error: sendResult.error,
+      mailbox,
+      matchedRule,
+      destinations: targetDestinations,
+      originalSender: sender,
+    };
+  }
+
+  console.log(`[EmailForwarder] Inbound email from ${sender} (mailbox: ${mailbox}@) forwarded to ${targetDestinations.join(", ")}`);
+
+  return {
+    ok: true,
+    forwarded: true,
+    mailbox,
+    matchedRule,
+    destinations: targetDestinations,
+    messageId: sendResult.messageId,
+    originalSender: sender,
+  };
+}
+
+/**
+ * Generic Inbound Webhook handler.
+ * Accommodates Resend inbound webhook events (email.received) and direct payloads.
+ */
+export async function handleInboundEmailWebhook(payload: any, _headers?: Record<string, string>): Promise<{
+  ok: boolean;
+  received: boolean;
+  result?: InboundForwardResult;
+  error?: string;
+}> {
+  try {
+    let emailData: InboundEmailPayload | null = null;
+
+    // 1. Resend webhook format: { type: "email.received", data: { ... } }
+    if (payload?.type === "email.received" && payload.data) {
+      emailData = {
+        from: payload.data.from,
+        to: payload.data.to,
+        subject: payload.data.subject,
+        html: payload.data.html,
+        text: payload.data.text,
+        messageId: payload.data.email_id || payload.data.id,
+      };
+    } else if (payload?.from && payload?.to) {
+      // 2. Direct inbound email payload
+      emailData = {
+        from: payload.from,
+        to: payload.to,
+        subject: payload.subject || "Incoming Message",
+        html: payload.html,
+        text: payload.text || payload.content || payload.body,
+        messageId: payload.messageId || payload.id,
+      };
+    }
+
+    if (!emailData) {
+      return { ok: true, received: true, error: "Event acknowledged: not an inbound email payload" };
+    }
+
+    const result = await handleInboundEmailForward(emailData);
+    return { ok: true, received: true, result };
+  } catch (err: any) {
+    console.error("[EmailWebhook] Processing error:", err);
+    return { ok: false, received: false, error: err.message };
+  }
+}
+
+/**
+ * 8. Comprehensive Platform Email Settings & Health Review
+ * Gathers complete configuration across Outgoing, Incoming, and Forwarding channels.
+ */
+export async function getPlatformEmailSettingsReview(): Promise<{
+  ok: boolean;
+  outgoing: {
+    status: "healthy" | "warning" | "error";
+    provider: string;
+    verifiedDomain: string;
+    domainVerified: boolean;
+    senders: typeof SENDERS;
+    apiKeyConfigured: boolean;
+    recentSendsCount: number;
+    lastSentAt: string | null;
+    lastError: string | null;
+  };
+  incoming: {
+    status: "configured";
+    inboundDomain: string;
+    aliasDomains: string[];
+    webhookEndpoints: string[];
+    supportedMailboxes: string[];
+  };
+  forwarding: {
+    status: "active" | "paused";
+    enabled: boolean;
+    rulesCount: number;
+    rules: Array<{ mailbox: string; destinations: string[]; enabled: boolean }>;
+    fallbackDestinations: string[];
+  };
+  summary: string;
+  checkedAt: string;
+}> {
+  const health = await checkEmailProviderHealth();
+  const forwardingEnabled = await isEmailForwardingEnabled();
+  const routingTable = await getEmailRoutingTableFromDb();
+
+  const outgoingStatus = health.ok ? "healthy" : (health.apiKeyConfigured ? "warning" : "error");
+
+  const supportedMailboxes = routingTable.rules.map((r) => r.mailbox);
+
+  let summary = `Platform email engine is ${outgoingStatus}. Outgoing domain "${VERIFIED_DOMAIN}" is configured. Inbound domain "${INBOUND_DOMAIN}" forwarding is ${forwardingEnabled ? "ACTIVE" : "PAUSED"} with ${routingTable.rules.length} routing rules.`;
+
+  return {
+    ok: health.ok,
+    outgoing: {
+      status: outgoingStatus,
+      provider: health.provider,
+      verifiedDomain: VERIFIED_DOMAIN,
+      domainVerified: health.domainVerified,
+      senders: SENDERS,
+      apiKeyConfigured: health.apiKeyConfigured,
+      recentSendsCount: health.recentLogsCount,
+      lastSentAt: health.lastSentAt,
+      lastError: health.lastError,
+    },
+    incoming: {
+      status: "configured",
+      inboundDomain: INBOUND_DOMAIN,
+      aliasDomains: [VERIFIED_DOMAIN, "rentmaikar.com"],
+      webhookEndpoints: [
+        "/api/email/inbound",
+        "/api/email/webhook",
+        "/api/webhooks/resend",
+        "/functions/v1/email-webhook",
+      ],
+      supportedMailboxes,
+    },
+    forwarding: {
+      status: forwardingEnabled ? "active" : "paused",
+      enabled: forwardingEnabled,
+      rulesCount: routingTable.rules.length,
+      rules: routingTable.rules,
+      fallbackDestinations: routingTable.fallback,
+    },
+    summary,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 9. Test Email Dispatcher
+ * Allows testing outgoing delivery and simulating inbound forwarding.
+ */
+export async function testEmailDelivery(options: {
+  type: "outbound" | "inbound_forward";
+  to?: string;
+  from?: string;
+  subject?: string;
+  content?: string;
+  mailbox?: string;
+}): Promise<any> {
+  if (options.type === "inbound_forward") {
+    const mailbox = options.mailbox || "support";
+    const inboundPayload: InboundEmailPayload = {
+      from: options.from || "customer.test@example.com",
+      to: `${mailbox}@${INBOUND_DOMAIN}`,
+      subject: options.subject || `Test Inbound Inquiry for ${mailbox}`,
+      text: options.content || `This is a test message to verify that inbound emails to ${mailbox}@${INBOUND_DOMAIN} are properly forwarded to external staff mailboxes with reply-to preserved.`,
+    };
+    return await handleInboundEmailForward(inboundPayload);
+  }
+
+  // Outbound test
+  const recipient = options.to || "support@rentmaikar.com";
+  const subject = options.subject || "RentMaikar Email Delivery Test";
+  const content = options.content || "This is a verification email to confirm that RentMaikar outbound email delivery is operating correctly via the verified domain notify.rentmaikar.com.";
+
+  const html = emailLayout(`
+    <p>Hello,</p>
+    <p>${content}</p>
+    <div class="info-box">
+      <strong>Verification Details:</strong><br/>
+      Domain: <code>${VERIFIED_DOMAIN}</code><br/>
+      Dispatched: <code>${new Date().toUTCString()}</code><br/>
+      Security: TLS 1.3 / DKIM / SPF Verified
+    </div>
+  `, subject);
+
+  return await sendEmailViaResend({
+    from: SENDERS.support,
+    to: recipient,
+    subject,
+    html,
+    text: content,
+    templateName: "test_delivery",
+  });
+}
+

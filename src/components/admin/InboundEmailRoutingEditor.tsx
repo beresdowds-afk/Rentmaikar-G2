@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Mail, Plus, RefreshCw, Save, Trash2, ArrowUpRight, ExternalLink } from "lucide-react";
+import { Loader2, Mail, Plus, RefreshCw, Save, Trash2, ArrowUpRight, ExternalLink, Send, CheckCircle2, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -86,6 +86,40 @@ export function InboundEmailRoutingEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newMailbox, setNewMailbox] = useState("");
+  const [testMailbox, setTestMailbox] = useState("support");
+  const [testSender, setTestSender] = useState("customer.inquiry@example.com");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
+
+  const handleTestForwarding = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/email/test-delivery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "inbound_forward",
+          mailbox: testMailbox,
+          from: testSender,
+          subject: `Diagnostic Forwarding Test for ${testMailbox}@${INBOUND_DOMAIN}`,
+          content: `This simulated message tests the inbound routing pipeline, external delivery, and reply-to preservation.`,
+        }),
+      });
+      const data = await res.json();
+      setTestResult(data);
+      if (data.forwarded || data.ok) {
+        toast.success(`Forwarding simulation successful for ${testMailbox}@!`);
+      } else {
+        toast.warning(`Forwarding test notice: ${data.reason || data.error || "Review configuration"}`);
+      }
+    } catch (err: any) {
+      setTestResult({ ok: false, error: err.message });
+      toast.error(`Test request failed: ${err.message}`);
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -410,6 +444,101 @@ export function InboundEmailRoutingEditor({
               <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Mailbox
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Live Pipeline Test & Delivery Diagnostic */}
+      <Card className="border-border/60">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Send className="h-4 w-4 text-primary" />
+                Live Inbound Forwarding Test
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Simulate an inbound customer email arriving at an inbound mailbox to verify rule matching, external delivery, and reply-to preservation.
+              </CardDescription>
+            </div>
+            <Badge variant="outline" className="text-xs">
+              Domain: @{INBOUND_DOMAIN}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="test-mailbox-select" className="text-xs">Target Inbound Mailbox</Label>
+              <Input
+                id="test-mailbox-select"
+                placeholder="e.g. support, payments, admin"
+                value={testMailbox}
+                onChange={(e) => setTestMailbox(e.target.value)}
+                className="h-8 text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">Will test: <code>{testMailbox || "support"}@{INBOUND_DOMAIN}</code></p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="test-sender-input" className="text-xs">Simulated Customer Sender</Label>
+              <Input
+                id="test-sender-input"
+                placeholder="customer@example.com"
+                value={testSender}
+                onChange={(e) => setTestSender(e.target.value)}
+                className="h-8 text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">The test message's From/Reply-To address</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <Button
+              size="sm"
+              onClick={handleTestForwarding}
+              disabled={testing || !forwardingOn}
+              className="text-xs h-8 gap-1.5"
+            >
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              {testing ? "Simulating Pipeline..." : "Dispatch Test Forwarding"}
+            </Button>
+            {!forwardingOn && (
+              <span className="text-xs text-amber-500 font-medium">
+                Turn on "External Email Delivery" switch above to enable forwarding
+              </span>
+            )}
+          </div>
+
+          {testResult && (
+            <div className={`p-3 rounded-md text-xs border ${
+              testResult.forwarded || testResult.ok
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300"
+                : "bg-destructive/10 border-destructive/30 text-destructive"
+            }`}>
+              <div className="flex items-center gap-2 font-medium mb-1.5">
+                {testResult.forwarded || testResult.ok ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <AlertCircle className="h-4 w-4" />
+                )}
+                <span>
+                  {testResult.forwarded
+                    ? `Forwarding succeeded for ${testResult.mailbox}@${INBOUND_DOMAIN}!`
+                    : testResult.reason === "external_email_delivery_paused"
+                    ? "External email delivery is currently paused by admin switch."
+                    : `Forwarding failed: ${testResult.reason || testResult.error || "No destinations matched"}`}
+                </span>
+              </div>
+              {testResult.destinations?.length > 0 && (
+                <div className="text-[11px] mt-1 space-y-0.5">
+                  <div><strong>Matched Rule:</strong> {testResult.matchedRule}</div>
+                  <div><strong>Forwarded to:</strong> {testResult.destinations.join(", ")}</div>
+                  {testResult.messageId && (
+                    <div className="font-mono text-[10px] text-muted-foreground"><strong>Message ID:</strong> {testResult.messageId}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

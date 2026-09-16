@@ -184,12 +184,20 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
         toast.success('Phone number verified and added to your account');
       } else if (provider === 'sent' || provider === 'custom') {
         const data = await invokeOtp({ action: 'verify', phone: e164, code, full_name: name, role });
-        // Exchange the one-time token for a real session (no password involved).
-        const { error: sessionErr } = await supabase.auth.verifyOtp({
-          token_hash: data.token_hash as string,
-          type: 'email',
-        });
-        if (sessionErr) throw sessionErr;
+        // Set session directly if provided, or exchange one-time token for a real session
+        if (data.session?.access_token && data.session?.refresh_token) {
+          const { error: sessionErr } = await supabase.auth.setSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          });
+          if (sessionErr) throw sessionErr;
+        } else if (data.token_hash) {
+          const { error: sessionErr } = await supabase.auth.verifyOtp({
+            token_hash: data.token_hash as string,
+            type: 'email',
+          });
+          if (sessionErr) throw sessionErr;
+        }
         if (data.is_new_user && name) {
           await supabase.from('profiles').update({ full_name: name }).eq('user_id', data.user_id);
         }
