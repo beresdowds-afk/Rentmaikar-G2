@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MapPin, Edit, Save, Car, CheckCircle, AlertCircle } from 'lucide-react';
+import { MapPin, Edit, Save, Car, CheckCircle, AlertCircle, Home } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRegion } from '@/contexts/RegionContext';
@@ -49,11 +49,24 @@ export function VehiclePickupLocation() {
     pickup_city: '',
     pickup_instructions: '',
   });
+  const [ownerHomeAddress, setOwnerHomeAddress] = useState<string | null>(null);
 
   const cities = country === 'USA' ? usaCities : nigeriaCities;
 
   useEffect(() => {
     fetchVehicles();
+    if (user?.id) {
+      supabase
+        .from('profiles')
+        .select('street_address')
+        .eq('user_id', user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.street_address) {
+            setOwnerHomeAddress(data.street_address);
+          }
+        });
+    }
   }, [user]);
 
   const fetchVehicles = async () => {
@@ -148,6 +161,23 @@ export function VehiclePickupLocation() {
         <CardDescription>
           Set compulsory pickup and handover locations for your vehicles. Submitting this information is required to enable the Publish Vehicle button.
         </CardDescription>
+
+        {/* Differentiation Callout */}
+        <div className="mt-3 rounded-lg border border-border/80 bg-muted/40 p-3 text-xs space-y-1.5">
+          <div className="flex items-center gap-1.5 font-semibold text-foreground">
+            <Home className="h-4 w-4 text-primary" />
+            <span>Owner Home Address vs. Vehicle Pickup Location</span>
+          </div>
+          <p className="text-muted-foreground text-[11px] leading-relaxed">
+            • <strong>Owner Home Address</strong>: Optional on your personal profile and kept private. Not compulsory for vehicle owners.
+          </p>
+          <p className="text-muted-foreground text-[11px] leading-relaxed">
+            • <strong>Vehicle Pickup Location</strong>: A strict requirement for each vehicle before it can be published on the public catalogue, so verified drivers know the exact collection point.
+          </p>
+          <p className="text-muted-foreground text-[11px] italic">
+            They may have the same address if you store and hand over vehicles from your personal residence.
+          </p>
+        </div>
       </CardHeader>
       <CardContent>
         {vehicles.length === 0 ? (
@@ -172,11 +202,18 @@ export function VehiclePickupLocation() {
                     </p>
                     <p className="text-sm text-muted-foreground">{vehicle.license_plate}</p>
                     {hasPickupDetails(vehicle) ? (
-                      <div className="flex items-center gap-2 mt-1">
-                        <MapPin className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-                          {vehicle.pickup_city} {vehicle.pickup_address ? `• ${vehicle.pickup_address}` : vehicle.pickup_location ? `• ${vehicle.pickup_location}` : ''}
-                        </span>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                            {vehicle.pickup_city} {vehicle.pickup_address ? `• ${vehicle.pickup_address}` : vehicle.pickup_location ? `• ${vehicle.pickup_location}` : ''}
+                          </span>
+                        </div>
+                        {ownerHomeAddress && vehicle.pickup_address?.trim() === ownerHomeAddress.trim() && (
+                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-700 border-emerald-300">
+                            Same as Owner's Home
+                          </Badge>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center gap-1.5 mt-1 text-amber-700 dark:text-amber-300">
@@ -214,6 +251,29 @@ export function VehiclePickupLocation() {
                       </DialogHeader>
                       
                       <div className="space-y-4 mt-4">
+                        {ownerHomeAddress ? (
+                          <div className="flex items-center justify-between gap-2 p-2.5 bg-muted/60 rounded-lg border text-xs">
+                            <div className="flex items-center gap-1.5 text-muted-foreground truncate">
+                              <Home className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span className="truncate">Saved home address: <strong>{ownerHomeAddress}</strong></span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setFormData(prev => ({ ...prev, pickup_address: ownerHomeAddress }))}
+                              className="h-6 text-[11px] px-2 shrink-0 gap-1 text-primary border-primary/40 hover:bg-primary/10"
+                            >
+                              <Home className="h-3 w-3" />
+                              Use as Pickup
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground italic">
+                            (Your personal home address is optional on your profile and not set. Enter this vehicle's physical pickup location below.)
+                          </p>
+                        )}
+
                         <div className="space-y-2">
                           <Label className="flex items-center gap-1">
                             Pickup City <span className="text-destructive font-bold">*</span>
@@ -234,9 +294,16 @@ export function VehiclePickupLocation() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label className="flex items-center gap-1">
-                            Full Street Address / Handover Point <span className="text-destructive font-bold">*</span>
-                          </Label>
+                          <div className="flex items-center justify-between">
+                            <Label className="flex items-center gap-1">
+                              Full Street Address / Handover Point <span className="text-destructive font-bold">*</span>
+                            </Label>
+                            {ownerHomeAddress && formData.pickup_address.trim() === ownerHomeAddress.trim() && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                <CheckCircle className="h-3 w-3" /> Matches owner's home address
+                              </span>
+                            )}
+                          </div>
                           <Input 
                             placeholder={`e.g. ${samples.address}`}
                             value={formData.pickup_address}

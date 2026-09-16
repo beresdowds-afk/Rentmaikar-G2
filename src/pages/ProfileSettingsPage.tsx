@@ -440,12 +440,14 @@ export default function ProfileSettingsPage() {
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="street_address">
-                    Home address{' '}
+                  <Label htmlFor="street_address" className="flex items-center gap-1.5 flex-wrap">
+                    <span>Home address</span>
                     {isDriver ? (
-                      <span className="text-destructive">*</span>
+                      <span className="text-destructive font-semibold">* (Required for drivers)</span>
                     ) : (
-                      <span className="text-xs text-muted-foreground">(optional)</span>
+                      <span className="text-xs text-muted-foreground font-normal">
+                        (Optional for owners — not required)
+                      </span>
                     )}
                   </Label>
                   <span
@@ -476,18 +478,31 @@ export default function ProfileSettingsPage() {
                     showAddressError
                       ? 'text-destructive'
                       : addressLength >= ADDRESS_MIN
-                      ? 'text-emerald-500'
+                      ? 'text-emerald-600 dark:text-emerald-400'
                       : 'text-muted-foreground'
                   }`}
                 >
                   {showAddressError
                     ? addressError
                     : addressLength >= ADDRESS_MIN
-                    ? 'Looks good — used for verification and vehicle handover.'
+                    ? 'Looks good — residential address saved.'
                     : isDriver
                     ? `Required for drivers — at least ${ADDRESS_MIN} characters.`
-                    : 'Optional for owners — add it to speed up handover.'}
+                    : 'Optional for owners. Note: Your personal home address is distinct from your Vehicle Pickup Location(s). Vehicle pickup location is compulsory for public listing on the catalogue, but you may choose to use your home address as the pickup point.'}
                 </p>
+                {!isDriver && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium text-foreground text-[11px]">
+                      Difference between Home Address &amp; Vehicle Pickup Location:
+                    </p>
+                    <p>
+                      • <strong>Home Address</strong>: Optional for vehicle owners and kept private on your personal profile.
+                    </p>
+                    <p>
+                      • <strong>Vehicle Pickup Location</strong>: A strict requirement for each vehicle before it can be listed publicly on the catalogue. You can set it to the same address as your home if you hand over vehicles from your residence.
+                    </p>
+                  </div>
+                )}
               </div>
 
 

@@ -30,6 +30,7 @@ import {
   MapPin,
   Building2,
   Check,
+  Home,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -122,6 +123,7 @@ export function PublishVehicleModal({
   const [pickupLocationName, setPickupLocationName] = useState(vehicle.pickup_location || '');
   const [pickupInstructions, setPickupInstructions] = useState(vehicle.pickup_instructions || '');
   const [useCustomCity, setUseCustomCity] = useState(false);
+  const [ownerHomeAddress, setOwnerHomeAddress] = useState<string | null>(null);
 
   // Sync state whenever the modal is opened or the vehicle prop updates
   useEffect(() => {
@@ -134,6 +136,19 @@ export function PublishVehicleModal({
       setSuccessResult(null);
       setShowCancelConfirmation(false);
 
+      if (user?.id) {
+        supabase
+          .from('profiles')
+          .select('street_address')
+          .eq('user_id', user.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (data?.street_address) {
+              setOwnerHomeAddress(data.street_address);
+            }
+          });
+      }
+
       const cityList = country === 'USA' ? USA_CITIES : NIGERIA_CITIES;
       if (vehicle.pickup_city && !cityList.includes(vehicle.pickup_city)) {
         setUseCustomCity(true);
@@ -141,7 +156,7 @@ export function PublishVehicleModal({
         setUseCustomCity(false);
       }
     }
-  }, [open, vehicle, country]);
+  }, [open, vehicle, country, user?.id]);
 
   const defaultCities = country === 'USA' ? USA_CITIES : NIGERIA_CITIES;
   const photos = (vehicle.photo_urls || []).filter((u) => Boolean(u && u.trim()));
@@ -506,6 +521,44 @@ export function PublishVehicleModal({
                 )}
               </div>
 
+              {/* Differentiation Callout */}
+              <div className="rounded-lg border border-border/70 bg-background/80 p-3 text-xs space-y-1.5">
+                <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                  <Home className="h-3.5 w-3.5 text-primary" />
+                  <span>Owner's Home Address vs. Vehicle Pickup Location</span>
+                </div>
+                <p className="text-muted-foreground text-[11px] leading-relaxed">
+                  • <strong>Owner Home Address</strong>: Optional on your profile and kept private. You are not required to provide a home address to own or list vehicles.
+                </p>
+                <p className="text-muted-foreground text-[11px] leading-relaxed">
+                  • <strong>Vehicle Pickup Location</strong>: Compulsory requirement for public listing on the catalogue, so verified drivers know where to collect the vehicle.
+                </p>
+                <p className="text-muted-foreground text-[11px] italic">
+                  They may have the same value if you store and hand over the vehicle from your home address.
+                </p>
+                {ownerHomeAddress ? (
+                  <div className="mt-2 pt-2 border-t border-border flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[11px] text-muted-foreground">
+                      Saved home address: <strong>{ownerHomeAddress}</strong>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPickupAddress(ownerHomeAddress)}
+                      className="h-6 text-[11px] px-2.5 gap-1 text-primary border-primary/40 hover:bg-primary/10"
+                    >
+                      <Home className="h-3 w-3" />
+                      Use My Home Address
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground pt-1">
+                    (No home address is saved on your profile — which is optional for owners. You can enter any handover location below.)
+                  </p>
+                )}
+              </div>
+
               {!isPickupLocationValid && (
                 <Alert className="bg-amber-100/70 dark:bg-amber-900/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 py-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
@@ -578,9 +631,16 @@ export function PublishVehicleModal({
 
                 {/* Full Address */}
                 <div className="space-y-1.5 md:col-span-2">
-                  <Label htmlFor="publish-pickup-address" className="text-xs font-semibold flex items-center gap-1">
-                    Full Handover Address / Street <span className="text-destructive font-bold">*</span>
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="publish-pickup-address" className="text-xs font-semibold flex items-center gap-1">
+                      Full Handover Address / Street <span className="text-destructive font-bold">*</span>
+                    </Label>
+                    {ownerHomeAddress && pickupAddress.trim() === ownerHomeAddress.trim() && (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Same as owner's home address
+                      </span>
+                    )}
+                  </div>
                   <Input
                     id="publish-pickup-address"
                     placeholder={`e.g. ${samples.address}`}

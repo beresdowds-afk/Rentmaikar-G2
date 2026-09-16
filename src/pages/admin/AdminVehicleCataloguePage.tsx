@@ -566,6 +566,12 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
 
 
   const setVisibility = async (v: VehicleRow, isPublic: boolean) => {
+    if (isPublic && (!v.pickup_city || !v.pickup_location)) {
+      toast.error("Pickup location required for public listing", {
+        description: "Vehicle pickup location is a strict requirement for public listing of vehicles on the catalogue. Owners' home address is not compulsory, but vehicles must have a designated pickup location.",
+      });
+      return;
+    }
     setSavingVisibility(v.id);
     try {
       // Visibility is controlled by is_public only. Never overwrite a real
@@ -629,6 +635,12 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
     const year = Number(form.year);
     if (!Number.isFinite(year) || year < 1980 || year > new Date().getFullYear() + 1) {
       toast.error("Enter a valid manufacture year");
+      return;
+    }
+    if (form.is_public && (!form.pickup_city.trim() || !form.pickup_location.trim())) {
+      toast.error("Pickup location required for public listing", {
+        description: "Vehicle pickup location is compulsory for public listing on the catalogue. Please specify both pickup city and pickup location, or disable 'Publish immediately'.",
+      });
       return;
     }
     setCreating(true);
@@ -1316,12 +1328,21 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
             <Input value={form.vin} onChange={(e) => setForm({ ...form, vin: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Pickup city</label>
+            <label className="text-xs font-medium text-foreground flex items-center justify-between">
+              <span>Pickup city</span>
+              {form.is_public && <span className="text-[10px] text-destructive">* Required</span>}
+            </label>
             <Input value={form.pickup_city} onChange={(e) => setForm({ ...form, pickup_city: e.target.value })} placeholder="Lagos / Atlanta" />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Pickup location</label>
-            <Input value={form.pickup_location} onChange={(e) => setForm({ ...form, pickup_location: e.target.value })} />
+            <label className="text-xs font-medium text-foreground flex items-center justify-between">
+              <span>Pickup location / depot</span>
+              {form.is_public && <span className="text-[10px] text-destructive">* Required</span>}
+            </label>
+            <Input value={form.pickup_location} onChange={(e) => setForm({ ...form, pickup_location: e.target.value })} placeholder="Street address or depot" />
+          </div>
+          <div className="sm:col-span-2 text-[11px] text-muted-foreground bg-muted/40 p-2.5 rounded border">
+            Vehicle pickup location is a compulsory requirement for public listing on the catalogue. Owners' home address is optional on their profile (though they may share the same value if handovers take place from home).
           </div>
           <div className="space-y-1 sm:col-span-2">
             <label className="text-xs text-muted-foreground">Owner</label>

@@ -59,17 +59,20 @@ export function addressHint(
   if (error) return { tone: "error", msg: error };
 
   if (!trimmed) {
-    return { tone: "ok", msg: "Optional for owners — add it to speed up handover." };
+    return {
+      tone: "ok",
+      msg: "Optional for owners — home address is not compulsory for listing vehicles (vehicle pickup location is set separately).",
+    };
   }
   if (!/\d/.test(trimmed)) {
     return {
       tone: "warn",
-      msg: "Tip: include your house or apartment number so handover isn’t delayed.",
+      msg: "Tip: include your house or apartment number so address verification isn’t delayed.",
     };
   }
   return {
     tone: "ok",
-    msg: "Looks good — this address will be used for verification and handover.",
+    msg: "Looks good — residential address saved (distinct from vehicle pickup location).",
   };
 }
 
