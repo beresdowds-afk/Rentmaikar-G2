@@ -155,6 +155,7 @@ git add -A \
   tailwind.config.ts \
   tsconfig*.json \
   vite.config.ts \
+  server.ts \
   public/ \
   docs/ \
   architecture/ \
