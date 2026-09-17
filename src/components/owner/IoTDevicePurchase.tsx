@@ -9,8 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -34,15 +34,17 @@ import {
   Truck,
   CheckCircle,
   Clock,
-  CreditCard,
-  Building2,
-  Copy,
   Package,
   Wrench,
-  Smartphone
+  Smartphone,
+  CreditCard,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/payment-config';
-import { PaymentGateway } from '@/lib/payment-gateway';
+import { PayPalCheckout } from '@/components/payments/PayPalCheckout';
+import { PaystackCheckout } from '@/components/payments/PaystackCheckout';
+import { OpayCheckout } from '@/components/payments/OpayCheckout';
 
 interface DevicePricing {
   id: string;
@@ -58,30 +60,16 @@ interface DeviceOrder {
   currency: string;
   payment_status: string;
   payment_method: string | null;
+  payment_reference?: string | null;
   shipping_status: string;
   tracking_number: string | null;
+  shipping_address?: string | null;
   created_at: string;
   delivery_confirmed_at: string | null;
   installation_confirmed_at: string | null;
   installed_sim_number: string | null;
   installed_sim_provider: string | null;
 }
-
-const BANK_DETAILS = {
-  usa: {
-    bankName: 'Chase Bank',
-    accountName: 'Rentmaikar LLC',
-    accountNumber: '123456789',
-    routingNumber: '021000021',
-    accountType: 'Business Checking',
-  },
-  nigeria: {
-    bankName: 'Access Bank',
-    accountName: 'Rentmaikar Nigeria Ltd',
-    accountNumber: '0123456789',
-    bankCode: '044',
-  },
-};
 
 const SIM_PROVIDERS = {
   usa: ['AT&T', 'T-Mobile', 'Verizon', 'Other'],
@@ -95,15 +83,15 @@ export function IoTDevicePurchase() {
   const [orders, setOrders] = useState<DeviceOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
+  const [purchaseStep, setPurchaseStep] = useState<'details' | 'checkout'>('details');
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [activeOrderAmount, setActiveOrderAmount] = useState<number>(0);
   const [deliveryConfirmOpen, setDeliveryConfirmOpen] = useState(false);
   const [installConfirmOpen, setInstallConfirmOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<DeviceOrder | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'bank_transfer' | 'online'>('bank_transfer');
   const [shippingAddress, setShippingAddress] = useState('');
-  const [paymentReference, setPaymentReference] = useState('');
   const [phone, setPhone] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [copied, setCopied] = useState(false);
   
   // Installation form state
   const [simNumber, setSimNumber] = useState('');
@@ -111,7 +99,6 @@ export function IoTDevicePurchase() {
   const [installNotes, setInstallNotes] = useState('');
 
   const currentRegion = country === 'Nigeria' ? 'nigeria' : 'usa';
-  const currentCurrency: 'USD' | 'NGN' | (string & {}) = country === 'Nigeria' ? 'NGN' : 'USD';
 
   useEffect(() => {
     fetchData();
@@ -150,116 +137,116 @@ export function IoTDevicePurchase() {
     }
   };
 
-  const handlePurchase = async () => {
+  const handleStartPurchase = () => {
+    if (!pricing) return;
+    setActiveOrderId(null);
+    setActiveOrderAmount(pricing.price);
+    setPurchaseStep('details');
+    setPurchaseOpen(true);
+  };
+
+  const handleProceedToPayment = async () => {
     if (!user || !pricing) return;
     
     if (!shippingAddress.trim()) {
-      toast.error('Please enter your shipping address');
+      toast.error('Please enter your delivery street address');
       return;
     }
-    if (paymentMethod === 'bank_transfer' && !paymentReference.trim()) {
-      toast.error('Please enter your payment reference/receipt number');
+    if (!phone.trim()) {
+      toast.error('Please enter a phone number for courier dispatch');
       return;
     }
 
     setProcessing(true);
 
     try {
-      let finalPaymentMethod = paymentMethod;
-      let finalPaymentReference = paymentReference || null;
-      let gatewayRedirectUrl: string | null = null;
-
-      // Handle online payment
-      if (paymentMethod === 'online') {
-        const gateway = new PaymentGateway(currentRegion);
-        const result = await gateway.initializePayment(
-          pricing.price,
-          user.id,
-          'device-order',
-          `device-${Date.now()}`,
-          { type: 'iot_device_purchase' }
-        );
-
-        if (!result.success) {
-          toast.error(result.error || 'Payment initialization failed');
-          setProcessing(false);
-          return;
-        }
-
-        finalPaymentReference = result.transactionId || null;
-
-        gatewayRedirectUrl = result.redirectUrl ?? null;
-      }
-
-      // Create the order
-      const { data: orderData, error } = await supabase.from('iot_device_orders').insert({
-        owner_id: user.id,
-        device_price: pricing.price,
-        currency: pricing.currency,
-        payment_method: finalPaymentMethod,
-        payment_reference: finalPaymentReference,
-        payment_status: paymentMethod === 'online' ? 'pending' : 'pending',
-        shipping_address: shippingAddress,
-        owner_email: user.email,
-        owner_phone: phone || null,
-      }).select().single();
-
-      if (error) throw error;
-
-      // Record the charge in the financial pipeline so the gateway webhook can
-      // settle it: ledger posting, invoice, receipt and audit trail.
-      if (paymentMethod === 'online' && finalPaymentReference) {
-        const { error: payErr } = await supabase.from('payments').insert({
-          driver_id: user.id,
-          amount: pricing.price,
+      if (!activeOrderId) {
+        // Create initial pending order
+        const { data: orderData, error } = await supabase.from('iot_device_orders').insert({
+          owner_id: user.id,
+          device_price: pricing.price,
           currency: pricing.currency,
-          payment_method: 'online',
-          transaction_id: finalPaymentReference,
-          status: 'pending',
-          purpose: 'iot_device',
-        });
-        if (payErr) console.error('[iot-purchase] payment record failed', payErr);
+          payment_method: currentRegion === 'nigeria' ? 'paystack' : 'paypal',
+          payment_status: 'pending',
+          shipping_address: shippingAddress.trim(),
+          owner_email: user.email,
+          owner_phone: phone.trim() || null,
+        }).select().single();
+
+        if (error) throw error;
+        setActiveOrderId(orderData.id);
+        setActiveOrderAmount(pricing.price);
+      } else {
+        // Update shipping address if modified
+        await supabase.from('iot_device_orders').update({
+          shipping_address: shippingAddress.trim(),
+          owner_phone: phone.trim() || null,
+        }).eq('id', activeOrderId);
       }
 
-      // Send admin notification
-      try {
-        await supabase.functions.invoke('send-order-notification', {
-          body: {
-            orderId: orderData.id,
-            ownerEmail: user.email,
-            ownerPhone: phone || null,
-            devicePrice: pricing.price,
-            currency: pricing.currency,
-            shippingAddress: shippingAddress,
-            paymentMethod: finalPaymentMethod,
-          }
-        });
-      } catch (notifyError) {
-        console.error('Admin notification failed:', notifyError);
-        // Don't fail the order if notification fails
-      }
-
-      if (gatewayRedirectUrl) {
-        toast.info('Redirecting to payment gateway...');
-        window.location.href = gatewayRedirectUrl;
-        return;
-      }
-
-
-      toast.success('Order placed successfully!', {
-        description: 'We will confirm your payment and ship the device soon.',
-      });
-      setPurchaseOpen(false);
-      setShippingAddress('');
-      setPaymentReference('');
-      setPhone('');
-      fetchData();
+      setPurchaseStep('checkout');
     } catch (error) {
-      console.error('Error placing order:', error);
-      toast.error('Failed to place order');
+      console.error('Error preparing order:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to prepare order');
     } finally {
       setProcessing(false);
     }
+  };
+
+  const handleResumePendingOrder = (order: DeviceOrder) => {
+    setActiveOrderId(order.id);
+    setActiveOrderAmount(order.device_price);
+    setShippingAddress(order.shipping_address || '');
+    setPurchaseStep('checkout');
+    setPurchaseOpen(true);
+  };
+
+  const handlePaymentSuccess = async (data?: { reference?: string; orderId?: string; paymentId?: string }) => {
+    const ref = data?.orderId || data?.reference || `ref_${Date.now()}`;
+    const orderIdToConfirm = activeOrderId;
+    
+    if (orderIdToConfirm) {
+      try {
+        await supabase
+          .from('iot_device_orders')
+          .update({
+            payment_status: 'confirmed',
+            payment_reference: ref,
+            payment_confirmed_at: new Date().toISOString(),
+          })
+          .eq('id', orderIdToConfirm);
+
+        // Send order notification for logistics fulfillment
+        try {
+          await supabase.functions.invoke('send-order-notification', {
+            body: {
+              orderId: orderIdToConfirm,
+              ownerEmail: user?.email,
+              ownerPhone: phone.trim() || null,
+              devicePrice: activeOrderAmount || pricing?.price,
+              currency: pricing?.currency ?? (currentRegion === 'nigeria' ? 'NGN' : 'USD'),
+              shippingAddress: shippingAddress.trim(),
+              paymentMethod: currentRegion === 'nigeria' ? 'Paystack / OPay' : 'PayPal',
+              paymentReference: ref,
+            }
+          });
+        } catch (notifyErr) {
+          console.warn('Fulfillment notification dispatched:', notifyErr);
+        }
+      } catch (err) {
+        console.error('Failed to update local order status:', err);
+      }
+    }
+
+    toast.success('Hardware order placed and paid successfully!', {
+      description: `Payment reference ${ref} confirmed. Logistics will dispatch your tracking device.`,
+    });
+    setPurchaseOpen(false);
+    setPurchaseStep('details');
+    setActiveOrderId(null);
+    setShippingAddress('');
+    setPhone('');
+    fetchData();
   };
 
   const handleConfirmDelivery = async () => {
@@ -336,24 +323,17 @@ export function IoTDevicePurchase() {
     }
   };
 
-  const copyBankDetails = () => {
-    const details = currentRegion === 'nigeria' ? BANK_DETAILS.nigeria : BANK_DETAILS.usa;
-    const text = currentRegion === 'nigeria'
-      ? `Bank: ${details.bankName}\nAccount Name: ${details.accountName}\nAccount Number: ${details.accountNumber}`
-      : `Bank: ${details.bankName}\nAccount Name: ${details.accountName}\nAccount Number: ${details.accountNumber}\nRouting: ${(details as typeof BANK_DETAILS.usa).routingNumber}`;
-    
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast.success('Bank details copied!');
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const getStatusBadge = (order: DeviceOrder) => {
     if (order.payment_status === 'pending') {
-      return <Badge variant="outline" className="text-yellow-600 border-yellow-600"><Clock className="h-3 w-3 mr-1" />Awaiting Payment</Badge>;
+      return (
+        <Badge variant="outline" className="text-amber-600 border-amber-600 bg-amber-50/50 dark:bg-amber-950/20">
+          <Clock className="h-3 w-3 mr-1" />
+          Pending Online Payment
+        </Badge>
+      );
     }
     if (order.payment_status === 'confirmed' && order.shipping_status === 'pending') {
-      return <Badge className="bg-blue-500"><Package className="h-3 w-3 mr-1" />Processing</Badge>;
+      return <Badge className="bg-blue-500"><Package className="h-3 w-3 mr-1" />Processing & Dispatch</Badge>;
     }
     if (order.shipping_status === 'shipped' && !order.delivery_confirmed_at) {
       return <Badge className="bg-purple-500"><Truck className="h-3 w-3 mr-1" />In Transit</Badge>;
@@ -367,7 +347,6 @@ export function IoTDevicePurchase() {
     return <Badge variant="secondary">{order.payment_status}</Badge>;
   };
 
-  const bankDetails = currentRegion === 'nigeria' ? BANK_DETAILS.nigeria : BANK_DETAILS.usa;
   const simProviders = currentRegion === 'nigeria' ? SIM_PROVIDERS.nigeria : SIM_PROVIDERS.usa;
 
   return (
@@ -381,7 +360,7 @@ export function IoTDevicePurchase() {
             </div>
             <div>
               <CardTitle>IoT Tracking Device</CardTitle>
-              <CardDescription>GPS tracking for your fleet vehicles</CardDescription>
+              <CardDescription>GPS tracking and remote telemetry for your fleet vehicles</CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -391,21 +370,21 @@ export function IoTDevicePurchase() {
               <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
               <div>
                 <p className="font-medium">Real-time Tracking</p>
-                <p className="text-sm text-muted-foreground">Monitor vehicle location 24/7</p>
+                <p className="text-sm text-muted-foreground">Live GPS telematics and trip logs 24/7</p>
               </div>
             </div>
             <div className="flex items-start gap-3">
               <Shield className="h-5 w-5 text-muted-foreground mt-0.5" />
               <div>
-                <p className="font-medium">Anti-theft Protection</p>
-                <p className="text-sm text-muted-foreground">Remote engine disable & alerts</p>
+                <p className="font-medium">Anti-theft Security</p>
+                <p className="text-sm text-muted-foreground">Geofencing & automated tamper alerts</p>
               </div>
             </div>
             <div className="flex items-start gap-3">
               <Truck className="h-5 w-5 text-muted-foreground mt-0.5" />
               <div>
-                <p className="font-medium">Free Shipping</p>
-                <p className="text-sm text-muted-foreground">Delivered to your address</p>
+                <p className="font-medium">Doorstep Courier</p>
+                <p className="text-sm text-muted-foreground">Free doorstep delivery included</p>
               </div>
             </div>
           </div>
@@ -415,15 +394,16 @@ export function IoTDevicePurchase() {
           {loading ? (
             <div className="text-center py-4 text-muted-foreground">Loading pricing...</div>
           ) : pricing ? (
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Device Price ({currentRegion.toUpperCase()})</p>
+                <p className="text-sm text-muted-foreground">Hardware Unit Price ({currentRegion.toUpperCase()})</p>
                 <p className="text-3xl font-bold">{formatCurrency(pricing.price, pricing.currency as 'USD' | 'NGN' | (string & {}))}</p>
-                {pricing.description && (
-                  <p className="text-sm text-muted-foreground mt-1">{pricing.description}</p>
-                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  Secure online payment via {currentRegion === 'nigeria' ? 'Paystack and OPay' : 'PayPal'}
+                </p>
               </div>
-              <Button size="lg" onClick={() => setPurchaseOpen(true)}>
+              <Button size="lg" onClick={handleStartPurchase}>
+                <CreditCard className="h-4 w-4 mr-2" />
                 Purchase Device
               </Button>
             </div>
@@ -440,13 +420,13 @@ export function IoTDevicePurchase() {
         <Card>
           <CardHeader>
             <CardTitle>Your Device Orders</CardTitle>
-            <CardDescription>Track your IoT device purchases and installations</CardDescription>
+            <CardDescription>Track hardware orders, courier shipments, and SIM installations</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               {orders.map((order) => (
                 <div key={order.id} className="p-4 border rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="space-y-1">
                       <p className="font-medium">IoT Tracking Device</p>
                       <p className="text-sm text-muted-foreground">
@@ -456,15 +436,48 @@ export function IoTDevicePurchase() {
                         {formatCurrency(order.device_price, order.currency as 'USD' | 'NGN' | (string & {}))}
                       </p>
                     </div>
-                    <div className="text-right space-y-2">
-                      {getStatusBadge(order)}
+                    <div className="text-left sm:text-right space-y-1.5">
+                      <div>{getStatusBadge(order)}</div>
+                      {order.payment_method && (
+                        <p className="text-xs text-muted-foreground uppercase font-semibold">
+                          Via {order.payment_method}
+                        </p>
+                      )}
                       {order.tracking_number && (
-                        <p className="text-sm text-muted-foreground">
-                          Tracking: {order.tracking_number}
+                        <p className="text-xs text-muted-foreground">
+                          Courier Tracking: <span className="font-mono font-medium text-foreground">{order.tracking_number}</span>
                         </p>
                       )}
                     </div>
                   </div>
+
+                  {order.payment_status === 'pending' && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-300">
+                          <Clock className="h-3.5 w-3.5 flex-shrink-0" />
+                          <span>Payment not completed</span>
+                        </div>
+                        <p className="text-muted-foreground">
+                          Complete checkout via {order.currency === 'USD' ? 'PayPal' : 'Paystack or OPay'} to release logistics dispatch.
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="h-8 text-xs shrink-0"
+                        onClick={() => handleResumePendingOrder(order)}
+                      >
+                        <CreditCard className="h-3.5 w-3.5 mr-1" />
+                        Complete Payment
+                      </Button>
+                    </div>
+                  )}
+
+                  {order.shipping_address && (
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">Delivery to:</span> {order.shipping_address}
+                    </p>
+                  )}
                   
                   {/* Action Buttons */}
                   <div className="flex gap-2 pt-2 border-t">
@@ -510,126 +523,177 @@ export function IoTDevicePurchase() {
       <Dialog open={purchaseOpen} onOpenChange={setPurchaseOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Purchase IoT Device</DialogTitle>
+            <DialogTitle>
+              {purchaseStep === 'details' ? 'Purchase IoT Hardware' : 'Complete Online Payment'}
+            </DialogTitle>
             <DialogDescription>
-              Complete your order for the GPS tracking device
+              {purchaseStep === 'details'
+                ? 'Provide delivery coordinates for courier fulfillment'
+                : 'Authorize payment using Rentmaikar approved payment channels'}
             </DialogDescription>
           </DialogHeader>
 
           {pricing && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               {/* Order Summary */}
               <div className="bg-muted p-4 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span>IoT Tracking Device</span>
-                  <span className="font-bold">{formatCurrency(pricing.price, pricing.currency as 'USD' | 'NGN' | (string & {}))}</span>
+                <div className="flex justify-between items-center text-sm">
+                  <span>IoT Tracking Hardware</span>
+                  <span className="font-semibold">{formatCurrency(activeOrderAmount || pricing.price, pricing.currency as 'USD' | 'NGN' | (string & {}))}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm text-muted-foreground mt-1">
-                  <span>Shipping</span>
-                  <span className="text-green-600">Free</span>
+                <div className="flex justify-between items-center text-xs text-muted-foreground mt-1">
+                  <span>Doorstep Courier Shipping</span>
+                  <span className="text-green-600 dark:text-green-400 font-medium">Free Included</span>
                 </div>
                 <Separator className="my-2" />
                 <div className="flex justify-between items-center font-bold">
-                  <span>Total</span>
-                  <span>{formatCurrency(pricing.price, pricing.currency as 'USD' | 'NGN' | (string & {}))}</span>
+                  <span>Total Amount Due</span>
+                  <span className="text-primary text-base">
+                    {formatCurrency(activeOrderAmount || pricing.price, pricing.currency as 'USD' | 'NGN' | (string & {}))}
+                  </span>
                 </div>
               </div>
 
-              {/* Payment Method */}
-              <div className="space-y-3">
-                <Label>Payment Method</Label>
-                <RadioGroup
-                  value={paymentMethod}
-                  onValueChange={(v) => setPaymentMethod(v as 'bank_transfer' | 'online')}
-                >
-                  <div className="flex items-center space-x-2 p-3 border rounded-lg">
-                    <RadioGroupItem value="bank_transfer" id="bank" />
-                    <Label htmlFor="bank" className="flex items-center gap-2 cursor-pointer flex-1">
-                      <Building2 className="h-4 w-4" />
-                      Bank Transfer
-                    </Label>
+              {purchaseStep === 'details' ? (
+                /* Step 1: Shipping Details */
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="address">Delivery Street Address *</Label>
+                    <Textarea
+                      id="address"
+                      placeholder="Street address, Apt/Suite, City, State/Province, ZIP/Postal code"
+                      value={shippingAddress}
+                      onChange={(e) => setShippingAddress(e.target.value)}
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Where the hardware unit and pre-configured SIM should be delivered.
+                    </p>
                   </div>
-                  <div className="flex items-center space-x-2 p-3 border rounded-lg">
-                    <RadioGroupItem value="online" id="online" />
-                    <Label htmlFor="online" className="flex items-center gap-2 cursor-pointer flex-1">
-                      <CreditCard className="h-4 w-4" />
-                      {currentRegion === 'nigeria' ? 'Pay with Paystack' : 'Pay with PayPal'}
-                    </Label>
-                  </div>
-                </RadioGroup>
-              </div>
 
-              {/* Bank Details */}
-              {paymentMethod === 'bank_transfer' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Bank Details</Label>
-                    <Button variant="ghost" size="sm" onClick={copyBankDetails}>
-                      <Copy className="h-4 w-4 mr-1" />
-                      {copied ? 'Copied!' : 'Copy'}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="phone">Phone Number (for courier dispatch) *</Label>
+                    <PhoneNumberInput
+                      id="phone"
+                      value={phone}
+                      onChange={setPhone}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Our dispatch driver will call this number prior to arrival.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-muted/60 rounded-lg border text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium text-foreground flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5 text-primary" />
+                      Rentmaikar Payment Policy
+                    </p>
+                    <p>
+                      Payments are strictly processed through {currentRegion === 'nigeria' ? 'Paystack and OPay' : 'PayPal'}.
+                      Funds are verified instantly and trigger automated courier dispatch.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Step 2: Online Payment Gateway Selection & Execution */
+                <div className="space-y-4">
+                  <div className="text-xs text-muted-foreground p-3 bg-muted/50 rounded-lg border flex justify-between items-center">
+                    <div>
+                      <span className="font-medium text-foreground">Delivery to: </span>
+                      <span className="truncate inline-block max-w-[250px] align-bottom">{shippingAddress}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs px-2"
+                      onClick={() => setPurchaseStep('details')}
+                    >
+                      Edit
                     </Button>
                   </div>
-                  <div className="bg-muted p-4 rounded-lg space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Bank:</span>
-                      <span className="font-medium">{bankDetails.bankName}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Account Name:</span>
-                      <span className="font-medium">{bankDetails.accountName}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Account Number:</span>
-                      <span className="font-medium">{bankDetails.accountNumber}</span>
-                    </div>
-                    {currentRegion === 'usa' && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Routing Number:</span>
-                        <span className="font-medium">{(bankDetails as typeof BANK_DETAILS.usa).routingNumber}</span>
+
+                  {currentRegion === 'usa' ? (
+                    /* USA: PayPal */
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/10 text-xs text-muted-foreground">
+                        <Shield className="h-4 w-4 text-primary shrink-0" />
+                        <span>Pay securely using your PayPal account, debit card, or credit card.</span>
                       </div>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="reference">Payment Reference / Receipt Number *</Label>
-                    <Input
-                      id="reference"
-                      placeholder="Enter your payment reference"
-                      value={paymentReference}
-                      onChange={(e) => setPaymentReference(e.target.value)}
-                    />
-                  </div>
+                      <PayPalCheckout
+                        amount={activeOrderAmount || pricing.price}
+                        purpose="iot_device"
+                        iotDeviceId={activeOrderId ?? undefined}
+                        description="Rentmaikar IoT Tracking Hardware"
+                        onSuccess={handlePaymentSuccess}
+                        onError={(err) => toast.error(err)}
+                      />
+                    </div>
+                  ) : (
+                    /* Nigeria: Paystack & OPay */
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/10 text-xs text-muted-foreground">
+                        <Shield className="h-4 w-4 text-primary shrink-0" />
+                        <span>Select your preferred authorized payment provider (Paystack or OPay).</span>
+                      </div>
+
+                      <Tabs defaultValue="paystack" className="w-full">
+                        <TabsList className="grid grid-cols-2 w-full">
+                          <TabsTrigger value="paystack">Paystack</TabsTrigger>
+                          <TabsTrigger value="opay">OPay</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="paystack" className="pt-3">
+                          <PaystackCheckout
+                            amount={activeOrderAmount || pricing.price}
+                            currency="NGN"
+                            purpose="iot_device"
+                            iotDeviceId={activeOrderId ?? undefined}
+                            description="Rentmaikar IoT Tracking Hardware"
+                            onSuccess={handlePaymentSuccess}
+                            onError={(err) => toast.error(err)}
+                          />
+                        </TabsContent>
+                        <TabsContent value="opay" className="pt-3">
+                          <OpayCheckout
+                            amount={activeOrderAmount || pricing.price}
+                            purpose="iot_device"
+                            iotDeviceId={activeOrderId ?? undefined}
+                            description="Rentmaikar IoT Tracking Hardware"
+                            onSuccess={handlePaymentSuccess}
+                            onError={(err) => toast.error(err)}
+                          />
+                        </TabsContent>
+                      </Tabs>
+                    </div>
+                  )}
                 </div>
               )}
-
-              {/* Shipping Info */}
-              <div className="space-y-3">
-                <Label htmlFor="address">Shipping Address *</Label>
-                <Textarea
-                  id="address"
-                  placeholder="Enter your full shipping address"
-                  value={shippingAddress}
-                  onChange={(e) => setShippingAddress(e.target.value)}
-                  rows={3}
-                />
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone Number (for delivery)</Label>
-                  <PhoneNumberInput
-                    id="phone"
-                    value={phone}
-                    onChange={setPhone}
-                  />
-                </div>
-              </div>
             </div>
           )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPurchaseOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handlePurchase} disabled={processing}>
-              {processing ? 'Processing...' : paymentMethod === 'online' ? 'Proceed to Payment' : 'Place Order'}
-            </Button>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            {purchaseStep === 'details' ? (
+              <>
+                <Button variant="outline" onClick={() => setPurchaseOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleProceedToPayment}
+                  disabled={processing || !shippingAddress.trim() || !phone.trim()}
+                >
+                  {processing ? 'Preparing Order...' : 'Continue to Payment'}
+                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => setPurchaseStep('details')}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1.5" />
+                Back to Shipping Details
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

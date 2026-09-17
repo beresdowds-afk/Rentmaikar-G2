@@ -28,7 +28,7 @@ export async function assignRole(
   try {
     await supabase.from('user_roles').upsert(
       { user_id: userId, role: role as any },
-      { onConflict: 'user_id,role' }
+      { onConflict: 'user_id' }
     );
   } catch (tableErr) {
     console.warn('Fallback user_roles assignment error:', tableErr);

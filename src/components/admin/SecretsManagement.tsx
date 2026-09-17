@@ -520,7 +520,7 @@ export function SecretsManagement() {
         _details: { secret: secretName, command } as any,
       });
       toast.success(
-        `Copied. Paste it into the Lovable chat — a secure form will open to enter the value.`,
+        `Copied "${secretName}". Set this in your platform environment or project settings.`,
         { duration: 7000 }
       );
     } catch (e: any) {
@@ -529,10 +529,10 @@ export function SecretsManagement() {
   };
 
   const requestRotation = (secretName: string) =>
-    copyChatCommand(`Rotate ${secretName}`, "requested_secret_rotation", secretName);
+    copyChatCommand(secretName, "requested_secret_rotation", secretName);
 
   const requestAddSecret = (secretName: string) =>
-    copyChatCommand(`Add secret ${secretName}`, "requested_secret_add", secretName);
+    copyChatCommand(secretName, "requested_secret_add", secretName);
 
 
 
@@ -769,10 +769,10 @@ export function SecretsManagement() {
         <Info className="h-4 w-4" />
         <AlertTitle>How saving works</AlertTitle>
         <AlertDescription>
-          Secret values are never stored in this app — they live in Lovable Cloud's encrypted vault
-          and are only readable by server-side edge functions. To add or update a value, use the
-          buttons here: they copy the exact chat command that opens a secure Lovable form. Pasting
-          the value into any UI in this app would expose it in the browser bundle.
+          Secret values are never stored in the browser bundle — they live in your secure deployment
+          environment or backend vault and are only readable by server-side functions. To configure or
+          rotate a secret, copy its key name and define it in your platform environment settings (.env /
+          Secrets). Pasting secrets into client-side code would expose them to users.
         </AlertDescription>
       </Alert>
 
@@ -1066,11 +1066,10 @@ export function SecretsManagement() {
             </div>
           </div>
           <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-            <li>Open the Lovable chat interface</li>
-            <li>Request to update the specific secret (e.g., "Update my Twilio API key")</li>
-            <li>Lovable will provide a secure form to enter the new value</li>
-            <li>Submit the form to update the secret</li>
-            <li>Return here to test the new configuration</li>
+            <li>Open your platform or deployment environment settings</li>
+            <li>Add or update the specific environment secret key and value</li>
+            <li>Save your environment configuration</li>
+            <li>Return here to test and verify gateway connectivity</li>
           </ol>
           <div className="pt-4 border-t">
             <p className="text-sm font-medium mb-2">Available Secrets:</p>
@@ -1105,9 +1104,8 @@ function AddSecretDialog({ onRequest }: { onRequest: (name: string) => void }) {
         <DialogHeader>
           <DialogTitle>Add a new secret</DialogTitle>
           <DialogDescription>
-            Enter the secret name (uppercase, underscores). We'll copy a chat command; paste it
-            into Lovable chat and a secure form will open to enter the value. Values are never
-            typed into this app.
+            Enter the secret name (uppercase, underscores). We'll copy the variable name to your clipboard
+            so you can set it in your environment settings or backend vault.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2 py-2">

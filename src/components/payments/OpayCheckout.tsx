@@ -12,12 +12,14 @@ interface OpayCheckoutProps {
   driverId?: string;
   paymentFrequency?: "daily" | "weekly";
   description?: string;
+  purpose?: string;
+  iotDeviceId?: string;
   onSuccess?: (r: { reference: string; paymentId?: string }) => void;
   onError?: (msg: string) => void;
 }
 
 export function OpayCheckout({
-  amount, rentalId, vehicleId, driverId, paymentFrequency, description, onSuccess, onError,
+  amount, rentalId, vehicleId, driverId, paymentFrequency, description, purpose, iotDeviceId, onSuccess, onError,
 }: OpayCheckoutProps) {
   const [loading, setLoading] = useState(false);
   const [configured, setConfigured] = useState(false);
@@ -40,10 +42,13 @@ export function OpayCheckout({
         body: {
           amount, rentalId, vehicleId, driverId, paymentFrequency, description,
           returnUrl,
+          purpose,
+          iotDeviceId,
+          metadata: iotDeviceId ? { iot_device_order_id: iotDeviceId } : undefined,
         },
         // Collapses double-clicks and network retries onto one Opay order.
         headers: idempotencyHeaders("opay_order", {
-          amount, rentalId, vehicleId, driverId, paymentFrequency,
+          amount, rentalId, vehicleId, driverId, paymentFrequency, purpose,
         }),
       });
       if (error || !data?.cashier_url) throw new Error(error?.message ?? data?.error ?? "Opay init failed");

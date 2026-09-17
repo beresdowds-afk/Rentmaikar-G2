@@ -26,7 +26,7 @@ export function PhoneOtpProviderSettings() {
       if (v === 'custom' || v === 'sent') {
         setProvider(v);
       } else {
-        // Replace legacy 'supabase' (Lovable Cloud) or unset with SENT.DM as primary
+        // Replace legacy 'supabase' or unset with SENT.DM as primary
         setProvider('sent');
       }
       setLoading(false);

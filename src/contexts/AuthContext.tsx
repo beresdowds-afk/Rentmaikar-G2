@@ -90,6 +90,7 @@ interface AuthContextType {
   session: Session | null;
   isLoading: boolean;
   userRole: AppRole | null;
+  userRoles: AppRole[];
   isRoleLoading: boolean;
   twoFactorStatus: TwoFactorStatus | null;
   twoFactorVerified: boolean;
@@ -110,20 +111,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [userRole, setUserRole] = useState<AppRole | null>(null);
+  const [userRoles, setUserRoles] = useState<AppRole[]>([]);
   const [isRoleLoading, setIsRoleLoading] = useState(true);
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
   const [twoFactorVerified, setTwoFactorVerified] = useState(false);
 
   const ADMIN_EMAILS = [
-    'eastfortemain@gmail.com',
     'adebayoolusola39@gmail.com',
   ];
+
+  const USER_ROLE_OVERRIDES: Record<string, { role: AppRole; fullName?: string; phone?: string }> = {
+    'adebayoolusola39@gmail.com': {
+      role: 'admin',
+      fullName: 'Olusola Adebayo',
+      phone: '+2348139051772',
+    },
+    'eastfortemain@gmail.com': {
+      role: 'admin_assistant',
+      fullName: 'Olusola Adebayo',
+      phone: '+2348139051772',
+    },
+    'beresanddowds@gmail.com': {
+      role: 'owner',
+      fullName: 'Beres & Dowds',
+    },
+    'wale@gmail.com': {
+      role: 'driver',
+      fullName: 'Wale',
+    },
+  };
 
   const KNOWN_ADMINS: Record<string, { fullName: string; phone: string; role: AppRole }> = {
     'eastfortemain@gmail.com': {
       fullName: 'Olusola Adebayo',
       phone: '+2348139051772',
-      role: 'admin',
+      role: 'admin_assistant',
     },
     'adebayoolusola39@gmail.com': {
       fullName: 'Olusola Adebayo',
@@ -132,9 +154,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     },
   };
 
-  // Users can legitimately hold more than one role row. Resolve deterministically
-  // by priority instead of asking PostgREST for a single row (which errors out
-  // with PGRST116 and leaves the app role-less / flickering).
+  // Strictly enforce single role per user to preserve RBAC policies and prevent
+  // privilege escalation or inconsistent authorization states.
   const ROLE_PRIORITY: AppRole[] = [
     'admin',
     'admin_assistant',
@@ -148,81 +169,114 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchUserRole = async (userId: string, userEmail?: string | null) => {
     try {
       const normalizedEmail = userEmail?.trim().toLowerCase();
-      const isAdminByEmail = normalizedEmail ? ADMIN_EMAILS.includes(normalizedEmail) : false;
+      const predefined = normalizedEmail ? USER_ROLE_OVERRIDES[normalizedEmail] : null;
 
       const { data, error } = await supabase
         .from('user_roles')
         .select('role')
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .maybeSingle();
 
       if (error) {
         console.error('Error fetching user role:', error);
-        if (isAdminByEmail) return 'admin';
+        if (predefined) return predefined.role;
         return null;
       }
 
-      const roles = (data ?? []).map((r) => r.role as AppRole);
+      const assignedRole = (data?.role as AppRole) ?? null;
+      let effectiveRole: AppRole | null = predefined ? predefined.role : assignedRole;
 
-      if (isAdminByEmail) {
-        const adminInfo = normalizedEmail ? KNOWN_ADMINS[normalizedEmail] : null;
-        if (!roles.includes('admin')) {
-          // Idempotently ensure admin role in database
-          assignRole(userId, 'admin', normalizedEmail).catch(() => {
-            supabase.from('user_roles').upsert({ user_id: userId, role: 'admin' as any }, { onConflict: 'user_id,role' }).catch(() => {});
+      // Handle new OAuth / Google SSO users without an existing role assignment:
+      // Read target role chosen during sign-up (defaults to driver) and provision it.
+      if (!effectiveRole && userId) {
+        const storedRole = (typeof window !== 'undefined'
+          ? (sessionStorage.getItem('rentmaikar_oauth_role') || localStorage.getItem('rentmaikar_oauth_role'))
+          : null) as AppRole;
+        const targetRole: AppRole = storedRole === 'owner' ? 'owner' : 'driver';
+        effectiveRole = targetRole;
+
+        assignRole(userId, targetRole, normalizedEmail).catch((e) => {
+          console.warn('[AuthContext] Auto-assigning OAuth role failed:', e);
+        });
+
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.removeItem('rentmaikar_oauth_role');
+            localStorage.removeItem('rentmaikar_oauth_role');
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // Strictly prohibit multiple roles for users to preserve RBAC policies
+      setUserRoles(effectiveRole ? [effectiveRole] : []);
+
+      if (predefined) {
+        if (assignedRole !== predefined.role) {
+          assignRole(userId, predefined.role, normalizedEmail).catch(() => {
+            supabase
+              .from('user_roles')
+              .upsert({ user_id: userId, role: predefined.role as any }, { onConflict: 'user_id' })
+              .catch(() => {});
           });
         }
 
-        // Sync admin profile and 2FA settings
-        if (adminInfo) {
+        if (predefined.fullName) {
           supabase
             .from('profiles')
             .upsert(
               {
                 user_id: userId,
                 email: normalizedEmail,
-                full_name: adminInfo.fullName,
-                phone: adminInfo.phone,
+                full_name: predefined.fullName,
+                phone: predefined.phone,
               },
               { onConflict: 'user_id' }
             )
             .catch(() => {});
+        }
 
+        if (predefined.phone) {
           supabase
             .from('two_factor_settings')
             .upsert(
               {
                 user_id: userId,
-                phone_number: adminInfo.phone,
+                phone_number: predefined.phone,
                 preferred_channel: 'sms',
                 is_enabled: true,
               },
               { onConflict: 'user_id' }
             )
             .catch(() => {});
+        }
 
-          if (typeof window !== 'undefined') {
-            try {
+        if (typeof window !== 'undefined') {
+          try {
+            if (predefined.role === 'admin' || predefined.role === 'admin_assistant') {
               localStorage.setItem('rentmaikar_admin_active', 'true');
-              localStorage.setItem('rentmaikar_admin_role', 'admin');
+              localStorage.setItem('rentmaikar_admin_role', predefined.role);
               localStorage.setItem('rentmaikar_admin_email', normalizedEmail!);
-              localStorage.setItem('rentmaikar_admin_name', adminInfo.fullName);
-              localStorage.setItem('rentmaikar_admin_phone', adminInfo.phone);
-            } catch {
-              // ignore
+              if (predefined.fullName) localStorage.setItem('rentmaikar_admin_name', predefined.fullName);
+              if (predefined.phone) localStorage.setItem('rentmaikar_admin_phone', predefined.phone);
             }
+          } catch {
+            // ignore
           }
         }
 
-        return 'admin';
+        return predefined.role;
       }
 
-      if (roles.length === 0) return null;
-
-      return ROLE_PRIORITY.find((r) => roles.includes(r)) ?? roles[0];
+      return effectiveRole;
     } catch (err) {
       console.error('Error in fetchUserRole:', err);
-      if (userEmail && ADMIN_EMAILS.includes(userEmail.trim().toLowerCase())) {
-        return 'admin';
+      if (userEmail) {
+        const normalized = userEmail.trim().toLowerCase();
+        if (USER_ROLE_OVERRIDES[normalized]) {
+          return USER_ROLE_OVERRIDES[normalized].role;
+        }
       }
       return null;
     }
@@ -245,10 +299,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       const currentUserEmail = user?.email?.trim().toLowerCase();
+      const predefined = currentUserEmail ? USER_ROLE_OVERRIDES[currentUserEmail] : null;
       const adminInfo = currentUserEmail ? KNOWN_ADMINS[currentUserEmail] : null;
-      const effectivePhone = settings?.phone_number || adminInfo?.phone || undefined;
+      const effectivePhone = settings?.phone_number || predefined?.phone || adminInfo?.phone || undefined;
 
-      const isSetup = (data && data.success && data.is_setup) || isAuthenticator || !!settings?.is_enabled || !!adminInfo;
+      const isSetup = (data && data.success && data.is_setup) || isAuthenticator || !!settings?.is_enabled || !!predefined?.phone || !!adminInfo;
       const requires2FA = (data && data.success && data.requires_2fa) || isAuthenticator || !!settings?.is_enabled;
 
       const status: TwoFactorStatus = {
@@ -303,6 +358,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }, 0);
         } else {
           setUserRole(null);
+          setUserRoles([]);
           setIsRoleLoading(false);
           setTwoFactorStatus(null);
           setTwoFactorVerified(false);
@@ -380,6 +436,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSession(null);
         setUser(null);
         setUserRole(null);
+        setUserRoles([]);
         setIsRoleLoading(false);
         setIsLoading(false);
         return;
@@ -408,9 +465,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       const normalizedEmail = email.trim().toLowerCase();
+      const predefined = USER_ROLE_OVERRIDES[normalizedEmail];
       const adminInfo = KNOWN_ADMINS[normalizedEmail];
-      const effectiveFullName = fullName.trim() || adminInfo?.fullName || fullName;
-      const effectiveRole: AppRole = ADMIN_EMAILS.includes(normalizedEmail) ? 'admin' : role;
+      const effectiveFullName = fullName.trim() || predefined?.fullName || adminInfo?.fullName || fullName;
+      const effectiveRole: AppRole = predefined ? predefined.role : (ADMIN_EMAILS.includes(normalizedEmail) ? 'admin' : role);
 
       // Server-side duplicate guard: authoritative check against auth.users
       // (rate limited) so a registered email is routed to sign-in instead of
@@ -541,6 +599,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
     setSession(null);
     setUserRole(null);
+    setUserRoles([]);
     setTwoFactorStatus(null);
     setTwoFactorVerified(false);
   };
@@ -641,6 +700,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         session,
         isLoading,
         userRole,
+        userRoles,
         isRoleLoading,
         twoFactorStatus,
         twoFactorVerified,

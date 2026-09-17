@@ -24,10 +24,10 @@ from playwright.async_api import async_playwright, Route, Request
 
 BASE = "http://localhost:8080"
 SUPABASE_URL = os.environ.get("VITE_SUPABASE_URL", "").rstrip("/")
-AUTH_STATUS = os.environ.get("LOVABLE_BROWSER_AUTH_STATUS", "")
-STORAGE_KEY = os.environ.get("LOVABLE_BROWSER_SUPABASE_STORAGE_KEY", "")
-SESSION_JSON = os.environ.get("LOVABLE_BROWSER_SUPABASE_SESSION_JSON", "")
-COOKIES_JSON = os.environ.get("LOVABLE_BROWSER_SUPABASE_COOKIES_JSON", "")
+AUTH_STATUS = os.environ.get("BROWSER_AUTH_STATUS") or os.environ.get("LOVABLE_BROWSER_AUTH_STATUS", "")
+STORAGE_KEY = os.environ.get("BROWSER_SUPABASE_STORAGE_KEY") or os.environ.get("LOVABLE_BROWSER_SUPABASE_STORAGE_KEY", "")
+SESSION_JSON = os.environ.get("BROWSER_SUPABASE_SESSION_JSON") or os.environ.get("LOVABLE_BROWSER_SUPABASE_SESSION_JSON", "")
+COOKIES_JSON = os.environ.get("BROWSER_SUPABASE_COOKIES_JSON") or os.environ.get("LOVABLE_BROWSER_SUPABASE_COOKIES_JSON", "")
 
 SCREENSHOTS = Path("/tmp/browser/document-validation")
 SCREENSHOTS.mkdir(parents=True, exist_ok=True)

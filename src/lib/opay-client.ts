@@ -50,22 +50,18 @@ export async function createOPayOrder(input: CreateOPayOrderInput): Promise<Crea
   // OPay international cashier uses amount in minor units (kobo, 100 kobo = 1 NGN)
   const amountInKobo = Math.round(input.amount * 100);
 
-  const { data, error } = await supabase.functions.invoke("create-opay-transaction", {
+  const { data, error } = await supabase.functions.invoke("create-opay-order", {
     body: {
       reference,
       amount: input.amount,
-      amount_kobo: amountInKobo,
-      currency: input.currency ?? "NGN",
-      rental_id: input.rentalId,
-      vehicle_id: input.vehicleId,
-      driver_id: input.driverId,
-      user_phone: input.userPhone,
-      user_email: input.userEmail,
-      product_name: input.productName ?? "RentMaikar Vehicle Rental",
-      product_desc: input.productDesc ?? "Weekly vehicle rental payment",
-      return_url: input.returnUrl ?? `${window.location.origin}/driver/wallet?payment_status=success`,
-      payment_frequency: input.paymentFrequency ?? "weekly",
-      ...input.metadata,
+      rentalId: input.rentalId,
+      vehicleId: input.vehicleId,
+      driverId: input.driverId,
+      description: input.productDesc ?? input.productName ?? "Rental payment",
+      returnUrl: input.returnUrl ?? `${window.location.origin}/driver/wallet?payment_status=success`,
+      paymentFrequency: input.paymentFrequency ?? "weekly",
+      purpose: (input.metadata?.purpose as string | undefined) ?? "rental",
+      metadata: input.metadata,
     },
     headers: idempotencyHeaders("charge.opay", {
       amount: input.amount,
@@ -101,7 +97,7 @@ export async function createOPayOrder(input: CreateOPayOrderInput): Promise<Crea
  * Endpoint: /api/v1/international/cashier/status
  */
 export async function queryOPayStatus(input: QueryOPayStatusInput): Promise<QueryOPayStatusResult> {
-  const { data, error } = await supabase.functions.invoke("verify-opay-transaction", {
+  const { data, error } = await supabase.functions.invoke("verify-opay-order", {
     body: {
       reference: input.reference,
       country: input.country ?? "NG",

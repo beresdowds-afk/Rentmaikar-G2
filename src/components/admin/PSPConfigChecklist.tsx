@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { CheckCircle2, AlertTriangle, Copy, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { PaymentGatewayHealthCard } from "@/components/admin/PaymentGatewayHealthCard";
 
 type Status = { paystack: { configured: boolean }; opay: { configured: boolean; environment: string } };
 
@@ -64,8 +65,11 @@ export function PSPConfigChecklist() {
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
+    <div className="space-y-6">
+      <PaymentGatewayHealthCard />
+
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
           <CardTitle>Payment Provider Configuration</CardTitle>
           <CardDescription>
@@ -134,5 +138,6 @@ export function PSPConfigChecklist() {
         )}
       </CardContent>
     </Card>
+    </div>
   );
 }

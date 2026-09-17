@@ -44,9 +44,29 @@ function escapeXml(unsafe: string): string {
     .replace(/'/g, "&apos;");
 }
 
+const DEFAULT_SUPABASE_URL = "https://jrsydiofzceoeddjogov.supabase.co";
+const DEFAULT_SUPABASE_KEY = "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
+const isLegacySupabase = (val?: string) => {
+  if (!val) return false;
+  if (val.includes("bwvocmhcledbwqlpcswp") || val.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return true;
+  try {
+    const parts = val.split(".");
+    if (parts.length === 3) {
+      const payload = JSON.parse(atob(parts[1]));
+      if (payload.ref === "bwvocmhcledbwqlpcswp") return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+};
+
 export async function fetchVehicleSitemapEntries(supabaseUrl?: string, supabaseKey?: string): Promise<SitemapEntry[]> {
-  const url = supabaseUrl || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co";
-  const key = supabaseKey || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+  const rawUrl = supabaseUrl || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
+  const url = (rawUrl && !isLegacySupabase(rawUrl)) ? rawUrl : DEFAULT_SUPABASE_URL;
+
+  const rawKey = supabaseKey || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+  const key = (rawKey && !isLegacySupabase(rawKey)) ? rawKey : DEFAULT_SUPABASE_KEY;
 
   if (!url || !key) {
     return [];

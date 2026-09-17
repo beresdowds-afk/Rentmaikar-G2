@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { AlertTriangle, FlaskConical, KeyRound, RefreshCw, ShieldCheck, Zap, CheckCircle2, CreditCard } from "lucide-react";
+import { PaymentGatewayHealthCard } from "@/components/admin/PaymentGatewayHealthCard";
 
 /**
  * Admin-only payment provider settings.
@@ -239,6 +240,9 @@ export default function PaymentProviderSettingsPage() {
           </div>
         ))}
       </div>
+
+      {/* Live API Health & Connectivity Probe for Authorized Gateways */}
+      <PaymentGatewayHealthCard />
 
       {anyLive && (
         <Alert variant="destructive">

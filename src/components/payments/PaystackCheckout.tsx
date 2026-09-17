@@ -14,6 +14,8 @@ interface PaystackCheckoutProps {
   driverId?: string;
   paymentFrequency?: "daily" | "weekly";
   description?: string;
+  purpose?: string;
+  iotDeviceId?: string;
   channels?: Array<"card" | "bank" | "ussd" | "bank_transfer" | "mobile_money" | "qr">;
   onSuccess?: (r: { reference: string; paymentId?: string }) => void;
   onError?: (msg: string) => void;
@@ -35,7 +37,7 @@ async function loadPaystack(): Promise<any> {
 
 export function PaystackCheckout({
   amount, currency, rentalId, vehicleId, driverId,
-  paymentFrequency, description, channels, onSuccess, onError,
+  paymentFrequency, description, channels, purpose, iotDeviceId, onSuccess, onError,
 }: PaystackCheckoutProps) {
   const [loading, setLoading] = useState(false);
   const [publicKey, setPublicKey] = useState<string>("");
@@ -50,8 +52,20 @@ export function PaystackCheckout({
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("create-paystack-transaction", {
-        body: { amount, currency, rentalId, vehicleId, driverId, paymentFrequency, description, channels },
-        headers: idempotencyHeaders("charge.paystack", { amount, currency, rentalId, vehicleId, driverId }),
+        body: {
+          amount,
+          currency,
+          rentalId,
+          vehicleId,
+          driverId,
+          paymentFrequency,
+          description,
+          channels,
+          purpose,
+          iotDeviceId,
+          metadata: iotDeviceId ? { iot_device_order_id: iotDeviceId } : undefined,
+        },
+        headers: idempotencyHeaders("charge.paystack", { amount, currency, rentalId, vehicleId, driverId, purpose }),
       });
       if (error) throw new Error(await readEdgeError(error, "Could not start the payment"));
       if (!data?.reference) throw new Error(data?.error ?? "Could not start the payment");

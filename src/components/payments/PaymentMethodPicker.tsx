@@ -15,8 +15,11 @@ interface PaymentMethodPickerProps {
   rentalId?: string;
   vehicleId?: string;
   driverId?: string;
+  ownerId?: string;
   paymentFrequency?: "daily" | "weekly";
   description?: string;
+  purpose?: string;
+  iotDeviceId?: string;
   onSuccess?: () => void;
   onError?: () => void;
   /** Optional preselected PSP tab (e.g. after a Retry from the status panel). */
@@ -30,8 +33,8 @@ const psplabels: Record<string, string> = {
 };
 
 export function PaymentMethodPicker({
-  country, amount, rentalId, vehicleId, driverId, paymentFrequency, description,
-  onSuccess, onError, preferredPSP,
+  country, amount, rentalId, vehicleId, driverId, ownerId, paymentFrequency, description,
+  purpose, iotDeviceId, onSuccess, onError, preferredPSP,
 }: PaymentMethodPickerProps) {
   const cc = resolveCountryCode(country);
   const currency = getRegionCurrency(country);
@@ -114,6 +117,7 @@ export function PaymentMethodPicker({
                 currency={currency as any}
                 rentalId={rentalId} vehicleId={vehicleId} driverId={driverId}
                 paymentFrequency={paymentFrequency} description={description}
+                purpose={purpose} iotDeviceId={iotDeviceId}
                 onSuccess={onSuccess} onError={() => onError?.()}
               />
             </TabsContent>
@@ -123,6 +127,7 @@ export function PaymentMethodPicker({
               <OpayCheckout
                 amount={amount} rentalId={rentalId} vehicleId={vehicleId} driverId={driverId}
                 paymentFrequency={paymentFrequency} description={description}
+                purpose={purpose} iotDeviceId={iotDeviceId}
                 onSuccess={onSuccess} onError={() => onError?.()}
               />
             </TabsContent>
@@ -131,8 +136,9 @@ export function PaymentMethodPicker({
             <TabsContent value="paypal" className="pt-4">
               <PayPalCheckout
                 amount={Number(amount.toFixed(2))}
-                rentalId={rentalId} vehicleId={vehicleId} driverId={driverId}
+                rentalId={rentalId} vehicleId={vehicleId} driverId={driverId} ownerId={ownerId}
                 paymentFrequency={paymentFrequency} description={description}
+                purpose={purpose} iotDeviceId={iotDeviceId}
                 onSuccess={onSuccess} onError={() => onError?.()}
               />
             </TabsContent>

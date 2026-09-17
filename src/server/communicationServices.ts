@@ -1021,7 +1021,21 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       const supabaseUrl = (rawUrl && !rawUrl.includes("bwvocmhcledbwqlpcswp")) ? rawUrl : DEFAULT_SUPABASE_URL;
 
       const rawKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-      const anonKey = (rawKey && !rawKey.includes("bwvocmhcledbwqlpcswp")) ? rawKey : DEFAULT_SUPABASE_KEY;
+      const isLegacy = (k?: string) => {
+        if (!k) return false;
+        if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return true;
+        try {
+          const parts = k.split(".");
+          if (parts.length === 3) {
+            const payload = JSON.parse(atob(parts[1]));
+            if (payload.ref === "bwvocmhcledbwqlpcswp") return true;
+          }
+        } catch {
+          // ignore
+        }
+        return false;
+      };
+      const anonKey = (rawKey && !isLegacy(rawKey)) ? rawKey : DEFAULT_SUPABASE_KEY;
 
       const verifyRes = await fetch(`${supabaseUrl}/auth/v1/verify`, {
         method: "POST",

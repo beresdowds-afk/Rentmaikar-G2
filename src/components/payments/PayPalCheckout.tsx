@@ -18,6 +18,8 @@ interface PayPalCheckoutProps {
   driverId?: string;
   paymentFrequency?: "daily" | "weekly";
   description?: string;
+  purpose?: string;
+  iotDeviceId?: string;
   onSuccess?: (data: { orderId: string; captureId?: string; paymentId?: string }) => void;
   onError?: (error: string) => void;
 }
@@ -30,6 +32,8 @@ export function PayPalCheckout({
   driverId,
   paymentFrequency = "weekly",
   description,
+  purpose,
+  iotDeviceId,
   onSuccess,
   onError,
 }: PayPalCheckoutProps) {
@@ -51,9 +55,11 @@ export function PayPalCheckout({
           owner_id: ownerId,
           driver_id: driverId,
           payment_frequency: paymentFrequency,
-          description: description ?? `Rentmaikar rental payment`,
+          description: description ?? `Rentmaikar payment`,
+          purpose,
+          iot_device_order_id: iotDeviceId,
         },
-        headers: idempotencyHeaders("charge.paypal", { amount, rentalId, vehicleId, driverId }),
+        headers: idempotencyHeaders("charge.paypal", { amount, rentalId, vehicleId, driverId, purpose }),
       });
 
       if (error || !data?.order_id) {

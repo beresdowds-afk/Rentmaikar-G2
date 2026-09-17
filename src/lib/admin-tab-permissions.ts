@@ -58,6 +58,7 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   inbox: 'can_view_communications',
   'call-center': 'can_view_communications',
   contacts: 'can_view_communications',
+  'task-portal': 'can_view_support_tasks',
   'support-tasks': 'can_view_support_tasks',
   insurance: 'can_view_support_tasks',
   'nigeria-verification': 'can_manage_users',

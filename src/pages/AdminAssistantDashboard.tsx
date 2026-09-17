@@ -176,14 +176,29 @@ const AdminAssistantDashboard = () => {
     : [];
 
   // Fallback: if the active tab is no longer permitted (e.g. permissions were
-  // revoked), bounce the user to the first tab they still have access to.
+  // revoked or unmapped), bounce the user to the first tab they still have access to.
   useEffect(() => {
     if (permsLoading) return;
     if (canAccessTab(activeTab)) return;
-    const fallback = ['inbox', 'expiry-notifications', 'contacts', 'approvals']
-      .find((t) => canAccessTab(t));
-    if (fallback) {
-      navigateTo('support', fallback);
+
+    // Ordered list of candidate fallback tabs with their respective portals
+    const fallbackCandidates: Array<{ portal: PortalType; tab: string }> = [
+      { portal: 'support', tab: 'task-portal' },
+      { portal: 'support', tab: 'inbox' },
+      { portal: 'support', tab: 'expiry-notifications' },
+      { portal: 'support', tab: 'contacts' },
+      { portal: 'crm', tab: 'applications' },
+      { portal: 'crm', tab: 'approvals' },
+      { portal: 'crm', tab: 'training' },
+      { portal: 'content', tab: 'faq' },
+      { portal: 'content', tab: 'policies' },
+      { portal: 'docs', tab: 'platform-features' },
+      { portal: 'docs', tab: 'glossary' },
+    ];
+
+    const allowed = fallbackCandidates.find((c) => canAccessTab(c.tab));
+    if (allowed) {
+      navigateTo(allowed.portal, allowed.tab);
     }
   }, [activeTab, canAccessTab, permsLoading, navigateTo]);
 
@@ -499,9 +514,27 @@ const AdminAssistantDashboard = () => {
                 <Lock className="h-6 w-6 text-muted-foreground" />
               </div>
               <h3 className="text-lg font-semibold mb-1">You don't have access to this section</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground mb-4">
                 Ask an administrator to grant the required permission from Role Management &rarr; Admin Assistants.
               </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const fallbackCandidates: Array<{ portal: PortalType; tab: string }> = [
+                    { portal: 'support', tab: 'task-portal' },
+                    { portal: 'support', tab: 'inbox' },
+                    { portal: 'support', tab: 'expiry-notifications' },
+                    { portal: 'crm', tab: 'applications' },
+                    { portal: 'content', tab: 'faq' },
+                    { portal: 'docs', tab: 'platform-features' },
+                  ];
+                  const allowed = fallbackCandidates.find((c) => canAccessTab(c.tab));
+                  if (allowed) navigateTo(allowed.portal, allowed.tab);
+                }}
+              >
+                Go to Available Portal
+              </Button>
             </Card>
           )}
 

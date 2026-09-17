@@ -11,7 +11,7 @@ export type AppRole =
 
 export const ROLE_HOME: Record<string, string> = {
   admin: '/admin',
-  admin_assistant: '/admin',
+  admin_assistant: '/admin-assistant',
   legal_support: '/portal/legal',
   iot_support: '/portal/iot',
   vehicle_support: '/portal/vehicle',
@@ -25,7 +25,7 @@ export const ROLE_ONBOARDING: Record<string, string> = {
   driver: '/driver/onboarding',
   owner: '/owner/onboarding',
   admin: '/admin',
-  admin_assistant: '/admin',
+  admin_assistant: '/admin-assistant',
 };
 
 export function isStaffRole(role?: AppRole | string | null): boolean {

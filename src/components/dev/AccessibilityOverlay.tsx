@@ -61,15 +61,13 @@ export const AccessibilityOverlay: React.FC = () => {
     []
   );
 
-  // Strict Admin Check & Inspector Permissions:
-  // Inspector tab and visual mapping are accessible to Admins, preview testers, or with ?a11y=1
+  // Strict Admin Check & Permissions:
+  // A11y inspector and controls are STRICTLY for full admin role only.
+  // Explicitly forbidden for admin assistants, drivers, owners, and non-admins.
   const isAdmin = useMemo(() => {
-    // 0. Development / Preview environment or URL query flag
-    if (import.meta.env.DEV) return true;
-    if (typeof window !== "undefined") {
-      const search = new URLSearchParams(window.location.search);
-      if (search.get("a11y") === "1" || search.get("a11y") === "true") return true;
-      if (window.location.pathname.startsWith("/admin")) return true;
+    // 0. Explicit rejection for admin assistants and regular roles
+    if (userRole === "admin_assistant" || hasRole("admin_assistant")) {
+      return false;
     }
 
     // 1. Direct role verification from Supabase auth state
@@ -85,8 +83,8 @@ export const AccessibilityOverlay: React.FC = () => {
 
     // 3. User metadata role check
     if (
-      user?.app_metadata?.role === "admin" ||
-      user?.user_metadata?.role === "admin"
+      (user?.app_metadata?.role === "admin" || user?.user_metadata?.role === "admin") &&
+      userRole !== "admin_assistant"
     ) {
       return true;
     }
@@ -96,10 +94,7 @@ export const AccessibilityOverlay: React.FC = () => {
       try {
         const storedRole = window.localStorage.getItem("rentmaikar_admin_role");
         const isAdminActive = window.localStorage.getItem("rentmaikar_admin_active") === "true";
-        if (storedRole === "admin" && isAdminActive) {
-          return true;
-        }
-        if (window.localStorage.getItem("rentmaikar_a11y_active") === "true") {
+        if (storedRole === "admin" && isAdminActive && userRole !== "admin_assistant") {
           return true;
         }
       } catch {

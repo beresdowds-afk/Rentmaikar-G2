@@ -45,6 +45,7 @@ const AppLiveSync = () => {
 // Lazy-loaded pages for code splitting
 const Index = lazy(() => import("./pages/Index"));
 const Auth = lazy(() => import("./pages/Auth"));
+const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const DriverRegistration = lazy(() => import("./pages/DriverRegistration"));
 const OwnerRegistration = lazy(() => import("./pages/OwnerRegistration"));
@@ -146,7 +147,7 @@ const VerificationStatusPage = lazy(() => import("./pages/VerificationStatusPage
 const PlatformReportPage = lazy(() => import("./pages/PlatformReportPage"));
 import { OnboardingStageToaster } from "@/components/onboarding/OnboardingStageToaster";
 import PhoneVerificationPrompt from "@/components/phone/PhoneVerificationPrompt";
-
+import { CommunicationsHubProvider, AdminCommunicationsHub } from "@/components/admin/communications-hub";
 
 const queryClient = new QueryClient();
 
@@ -174,6 +175,7 @@ const App = () => (
             <RouteProgressBar />
 
             <TooltipProvider>
+              <CommunicationsHubProvider>
 
               <AppLiveSync /> 
               <DynamicMetaTagManager />
@@ -208,6 +210,7 @@ const App = () => (
                     <Route path="/catalogue" element={<Navigate to="/catalogue/budget" replace />} />
                     <Route path="/vehicles/:id" element={<VehicleRedirect />} />
                     <Route path="/auth" element={<Auth />} />
+                    <Route path="/auth/callback" element={<AuthCallback />} />
                     <Route path="/driver/sign-in" element={<Navigate to="/auth" replace />} />
                     <Route path="/driver/signin" element={<Navigate to="/auth" replace />} />
                     <Route path="/owner/sign-in" element={<OwnerSignIn />} />
@@ -905,8 +908,10 @@ const App = () => (
                 </div>
 
                 <AccessibilityOverlay />
+                <AdminCommunicationsHub />
               </Suspense>
 
+              </CommunicationsHubProvider>
             </TooltipProvider>
 
           </BrowserRouter>

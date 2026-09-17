@@ -746,7 +746,7 @@ const ApiDocs = () => {
                   Communication Provider Secrets
                 </CardTitle>
                 <CardDescription>
-                  Required secrets for region-aware SMS/Voice routing. Configure these in Lovable Cloud → Secrets.
+                  Required secrets for region-aware SMS/Voice routing. Configure these in your platform environment settings or backend vault.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

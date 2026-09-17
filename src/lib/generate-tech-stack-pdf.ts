@@ -150,7 +150,7 @@ export const generateTechStackPDF = (): void => {
   yPos += 10;
 
   // Backend Stack
-  addSectionHeader('Backend Infrastructure (Lovable Cloud)');
+  addSectionHeader('Backend Infrastructure (Cloud Backend & Supabase)');
   addTableRow('Technology', 'Purpose', true);
   const backendStack = [
     { name: 'PostgreSQL', purpose: 'Primary relational database with advanced features' },

@@ -109,7 +109,7 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
       if (v === 'custom') {
         setProvider('custom');
       } else {
-        // 'sent', legacy 'supabase' (Lovable Cloud), or default all use SENT.DM primary
+        // 'sent', legacy 'supabase', or default all use SENT.DM primary
         setProvider('sent');
       }
     })();

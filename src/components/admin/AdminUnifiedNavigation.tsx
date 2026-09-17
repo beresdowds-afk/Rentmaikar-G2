@@ -205,7 +205,7 @@ export function AdminUnifiedNavigation({
       {/* Tier 1: Primary Portal Switcher + Admin Tools Menu + Notifications */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl border bg-card text-card-foreground shadow-xs">
         {/* Portal Pills */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5" data-tour="admin-portals">
           {portals.map((p) => {
             const isActive = activePortal === p.key || (p.key === 'content-editor' && activePortal === 'content');
             return (
@@ -241,6 +241,7 @@ export function AdminUnifiedNavigation({
                   size="sm"
                   className="gap-1.5 h-9 px-3 text-xs font-medium border-border/80"
                   aria-label="Open administrative tools menu"
+                  data-tour="admin-tools-menu"
                 >
                   <Wrench className="h-3.5 w-3.5 text-primary" />
                   <span className="hidden sm:inline">Admin Tools</span>
@@ -282,12 +283,14 @@ export function AdminUnifiedNavigation({
             </DropdownMenu>
           )}
 
-          <AdminNotificationsBell />
+          <div data-tour="admin-notifications">
+            <AdminNotificationsBell />
+          </div>
         </div>
       </div>
 
       {/* Tier 2: Contextual Active Portal Tab Strip */}
-      <div className="rounded-xl border bg-card/60 p-2 shadow-xs">
+      <div className="rounded-xl border bg-card/60 p-2 shadow-xs" data-tour="admin-tab-strip">
         <ScrollableStrip ariaLabel={`${currentPortalMeta?.label || 'Active portal'} tabs`} step={200}>
           <div className="flex items-center gap-1.5">
             {currentTabs.map((tab) => {

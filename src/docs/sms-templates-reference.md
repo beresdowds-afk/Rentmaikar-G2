@@ -36,7 +36,7 @@ const smsTemplates = {
     `Rentmaikar: Outstanding balance: ${amount}. Reply PAY to settle now.`,
 
   docStatus: (pending, missing) =>
-    `Rentmaikar: Docs - ${missing} missing, ${pending} pending review. Upload at rentmaikar.lovable.app/driver/dashboard`,
+    `Rentmaikar: Docs - ${missing} missing, ${pending} pending review. Upload at rentmaikar.com/driver/dashboard`,
 
   help: () =>
     `Rentmaikar: Commands - PAY: Pay now, STATUS: Rental info, BALANCE: Check due, DOC: Upload docs, STOP: Opt out. Call +1-608-384-3932`,

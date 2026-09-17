@@ -1,0 +1,257 @@
+import React, { useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
+import {
+  Phone,
+  PhoneCall,
+  MessageSquare,
+  Clock,
+  Sparkles,
+  X,
+  Minimize2,
+  Maximize2,
+  Headphones,
+  ShieldCheck,
+  Send,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCommunicationsHub, HubTab } from './CommunicationsHubContext';
+import { HubCallDialer } from './HubCallDialer';
+import { HubMessageComposer } from './HubMessageComposer';
+import { HubConversationHistory } from './HubConversationHistory';
+import { HubContextActions } from './HubContextActions';
+import { AdminCommunicationsHubErrorBoundary } from './AdminCommunicationsHubErrorBoundary';
+
+const ADMIN_EMAILS = [
+  'eastfortemain@gmail.com',
+  'adebayoolusola39@gmail.com',
+];
+
+export const AdminCommunicationsHub: React.FC = () => {
+  const location = useLocation();
+  const { user, userRole, hasRole } = useAuth();
+  const {
+    isOpen,
+    setIsOpen,
+    toggleOpen,
+    isMinimized,
+    setIsMinimized,
+    activeTab,
+    setActiveTab,
+    activeCall,
+    unreadCount,
+  } = useCommunicationsHub();
+
+  const [isExpandedFull, setIsExpandedFull] = React.useState(false);
+
+  // Strict Admin Authorization Check:
+  // Must only be accessible to authenticated Admin accounts.
+  const isAdmin = useMemo(() => {
+    if (!user) return false;
+    if (userRole === 'admin_assistant' || hasRole('admin_assistant')) {
+      return false; // Forbidden for assistants
+    }
+    if (userRole === 'admin' || hasRole('admin')) {
+      return true;
+    }
+    const email = user.email?.trim().toLowerCase();
+    if (email && ADMIN_EMAILS.includes(email)) {
+      return true;
+    }
+    if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+      return true;
+    }
+    return false;
+  }, [user, userRole, hasRole]);
+
+  // Ensure this Hub is active across the Admin Dashboard pages
+  const isAdminPath = useMemo(() => {
+    return (
+      location.pathname.startsWith('/admin') ||
+      location.pathname === '/report' ||
+      location.pathname === '/features-report'
+    );
+  }, [location.pathname]);
+
+  // If user is not an authenticated admin on admin pages, do not render
+  if (!isAdmin || !isAdminPath) {
+    return null;
+  }
+
+  const isCallInProgress = Boolean(activeCall && activeCall.status !== 'completed' && activeCall.status !== 'failed');
+
+  return (
+    <AdminCommunicationsHubErrorBoundary>
+      {/* Floating Trigger Launcher (Shown when Hub window is closed or minimized) */}
+      {(!isOpen || isMinimized) && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in zoom-in-95 duration-200">
+          <Button
+            type="button"
+            onClick={() => {
+              setIsOpen(true);
+              setIsMinimized(false);
+            }}
+            className={`h-11 px-4 rounded-full shadow-xl flex items-center gap-2.5 transition-all text-xs font-semibold ${
+              isCallInProgress
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse ring-4 ring-emerald-500/30'
+                : 'bg-primary hover:bg-primary/95 text-primary-foreground border border-primary/20'
+            }`}
+            title="Open Rentmaikar Admin Communications Hub"
+          >
+            {isCallInProgress ? (
+              <PhoneCall className="h-4 w-4 animate-bounce" />
+            ) : (
+              <Headphones className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {isCallInProgress ? 'Active Call In Progress' : 'Communications Hub'}
+            </span>
+
+            {/* Unread / Active Badge */}
+            {isCallInProgress && (
+              <span className="h-2 w-2 rounded-full bg-white" />
+            )}
+            {!isCallInProgress && unreadCount > 0 && (
+              <Badge variant="destructive" className="text-[10px] h-4 min-w-[16px] px-1 py-0 rounded-full font-mono">
+                {unreadCount}
+              </Badge>
+            )}
+          </Button>
+        </div>
+      )}
+
+      {/* Floating Window (Shown when Open & not Minimized) */}
+      {isOpen && !isMinimized && (
+        <div
+          className={`fixed z-50 bg-background border border-border shadow-2xl rounded-2xl flex flex-col overflow-hidden transition-all duration-200 ${
+            isExpandedFull
+              ? 'top-4 bottom-4 left-4 right-4 sm:top-10 sm:bottom-10 sm:left-1/4 sm:right-1/4 max-w-4xl mx-auto'
+              : 'bottom-6 right-6 w-[94vw] sm:w-[420px] max-h-[85vh] h-[600px]'
+          }`}
+          role="dialog"
+          aria-label="Rentmaikar Admin Communications Hub"
+        >
+          {/* Header Bar */}
+          <div className="px-4 py-3 bg-muted/60 border-b border-border/80 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                <Headphones className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-xs font-bold text-foreground">Communications Hub</h3>
+                  <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono bg-background">
+                    ADMIN
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate">
+                  Calls, SMS, WhatsApp, Email & Context Actions
+                </p>
+              </div>
+            </div>
+
+            {/* Window Controls */}
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsExpandedFull((prev) => !prev)}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                title={isExpandedFull ? 'Restore normal size' : 'Expand window'}
+              >
+                {isExpandedFull ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsMinimized(true)}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                title="Minimize to floating button"
+              >
+                <Minimize2 className="h-3.5 w-3.5 rotate-45" />
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsOpen(false)}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                title="Close Communications Hub"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Navigation Tabs Bar */}
+          <Tabs
+            value={activeTab}
+            onValueChange={(val) => setActiveTab(val as HubTab)}
+            className="flex-1 flex flex-col overflow-hidden"
+          >
+            <div className="px-3 pt-2.5 pb-2 border-b border-border/60 bg-background shrink-0">
+              <TabsList className="grid grid-cols-4 h-8 bg-muted/60 p-0.5 w-full">
+                <TabsTrigger value="call" className="text-xs h-7 gap-1 px-1">
+                  <Phone className="h-3.5 w-3.5 text-emerald-600" />
+                  <span className="truncate">Softphone</span>
+                  {isCallInProgress && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  )}
+                </TabsTrigger>
+
+                <TabsTrigger value="message" className="text-xs h-7 gap-1 px-1">
+                  <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
+                  <span className="truncate">Message</span>
+                </TabsTrigger>
+
+                <TabsTrigger value="history" className="text-xs h-7 gap-1 px-1">
+                  <Clock className="h-3.5 w-3.5 text-amber-600" />
+                  <span className="truncate">History</span>
+                </TabsTrigger>
+
+                <TabsTrigger value="context" className="text-xs h-7 gap-1 px-1">
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  <span className="truncate">Context</span>
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            {/* Scrollable Content Container */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <TabsContent value="call" className="mt-0 focus-visible:outline-hidden">
+                <HubCallDialer />
+              </TabsContent>
+
+              <TabsContent value="message" className="mt-0 focus-visible:outline-hidden">
+                <HubMessageComposer />
+              </TabsContent>
+
+              <TabsContent value="history" className="mt-0 focus-visible:outline-hidden">
+                <HubConversationHistory />
+              </TabsContent>
+
+              <TabsContent value="context" className="mt-0 focus-visible:outline-hidden">
+                <HubContextActions />
+              </TabsContent>
+            </div>
+          </Tabs>
+
+          {/* Footer Bar */}
+          <div className="px-4 py-2 bg-muted/30 border-t border-border/60 flex items-center justify-between text-[10px] text-muted-foreground shrink-0">
+            <div className="flex items-center gap-1.5 font-mono">
+              <ShieldCheck className="h-3 w-3 text-emerald-600" />
+              <span>Twilio • Sent.dm • Resend</span>
+            </div>
+            <span>Fail-isolated overlay</span>
+          </div>
+        </div>
+      )}
+    </AdminCommunicationsHubErrorBoundary>
+  );
+};

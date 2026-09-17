@@ -102,6 +102,49 @@ const Auth = () => {
     : null;
   const from = (isRestorablePath(fromState) ? fromState : readReturnTo()) || '/';
 
+  // Listen for OAuth success or error messages from popup windows
+  useEffect(() => {
+    const handleAuthMessage = async (event: MessageEvent) => {
+      if (
+        event.data?.type === 'OAUTH_AUTH_SUCCESS' ||
+        event.data?.type === 'GOOGLE_OAUTH_SUCCESS'
+      ) {
+        // Sync session established in popup
+        await supabase.auth.getSession();
+      } else if (event.data?.type === 'GOOGLE_OAUTH_ERROR') {
+        if (event.data.error) {
+          setError(event.data.error);
+        }
+      }
+    };
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, []);
+
+  // If this Auth page was opened inside a popup and authentication succeeds,
+  // notify the opener window and close the popup.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.opener && window.opener !== window) {
+      if (user) {
+        try {
+          window.opener.postMessage(
+            { type: 'OAUTH_AUTH_SUCCESS', provider: 'google' },
+            '*'
+          );
+          window.opener.postMessage(
+            { type: 'GOOGLE_OAUTH_SUCCESS', provider: 'google' },
+            '*'
+          );
+        } catch {
+          // ignore
+        }
+        setTimeout(() => {
+          window.close();
+        }, 300);
+      }
+    }
+  }, [user]);
+
   // Deep-link support: `/auth?forgot=1` opens the forgot-password view directly
   // (used from the "Request a new reset link" button on the ResetPassword page).
   // Also surfaces OAuth-provider errors coming back on the callback URL, e.g.
@@ -130,6 +173,19 @@ const Auth = () => {
         : null;
       const msg = dupHint || map[oauthError] || oauthDesc || 'Google sign-in failed. Please try again.';
       setError(msg);
+
+      // If in popup, notify opener and close
+      if (typeof window !== 'undefined' && window.opener && window.opener !== window) {
+        try {
+          window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: msg }, '*');
+        } catch {
+          // ignore
+        }
+        setTimeout(() => {
+          window.close();
+        }, 1200);
+      }
+
       // Clean the URL so the error doesn't stick on refresh.
       const url = new URL(window.location.href);
       ['error', 'error_code', 'error_description', 'state'].forEach(k => url.searchParams.delete(k));

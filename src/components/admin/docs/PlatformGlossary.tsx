@@ -114,7 +114,7 @@ const ENTRIES: GlossaryEntry[] = [
   // Technical
   { term: "Edge Function", category: "Technical", definition: "Deno-based serverless function running on Supabase for backend logic, webhooks, and cron tasks." },
   { term: "pg_cron", category: "Technical", definition: "Postgres extension used to schedule background jobs (debits, tasks, reminders, renewals)." },
-  { term: "Lovable Cloud", category: "Technical", definition: "Managed backend powering Rentmaikar (database, auth, storage, edge functions)." },
+  { term: "Supabase Cloud", category: "Technical", definition: "Managed backend powering Rentmaikar (database, auth, storage, edge functions)." },
   { term: "PWA", acronym: "PWA", category: "Technical", definition: "Progressive Web App. Rentmaikar self-installs via vite-plugin-pwa." },
   { term: "Webhook", category: "Technical", definition: "Provider callback (Twilio, Termii, Resend, Persona, etc.) that updates delivery/status data." },
   { term: "StatusCallback / notify_url", category: "Technical", definition: "Per-message callback URLs appended to outbound sends so providers report delivery status." },

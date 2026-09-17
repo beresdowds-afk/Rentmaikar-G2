@@ -22,6 +22,7 @@ import {
   Plus,
   ShieldCheck,
   Wallet,
+  Radio,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/contexts/ImpersonationContext';
@@ -30,6 +31,7 @@ import { useOwnerDashboard } from '@/hooks/useOwnerDashboard';
 import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency } from '@/lib/payment-config';
 import { format, startOfWeek, addWeeks, differenceInDays } from 'date-fns';
+import { OwnerFleetMapWidget } from './OwnerFleetMapWidget';
 
 interface Props {
   onNavigateTab: (tab: string) => void;
@@ -268,6 +270,9 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
         </Card>
       </div>
 
+      {/* Live Fleet Telemetry Map Widget (Traccar Integration) */}
+      <OwnerFleetMapWidget onNavigateTab={onNavigateTab} />
+
       {/* Weekly earnings chart */}
       <Card>
         <CardHeader className="pb-3">
@@ -327,7 +332,8 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
       </Card>
 
       {/* Quick actions */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <QuickAction icon={Radio} label="Live GPS Tracking" onClick={() => onNavigateTab('iot-device')} />
         <QuickAction icon={Plus} label="Add vehicle" onClick={() => onNavigateTab('vehicles')} />
         <QuickAction icon={Camera} label="Review inspections" onClick={() => onNavigateTab('inspections')} />
         <QuickAction icon={Home} label="List for Rent-to-Own" onClick={() => onNavigateTab('rent-to-own')} />

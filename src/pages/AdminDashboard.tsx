@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { warnTabPermissionDrift, getPortalForTab, getDefaultTabForPortal } from "@/lib/admin-tab-registry";
 
 import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones, LayoutGrid, UserPlus, ClipboardList } from "lucide-react";
@@ -150,7 +150,19 @@ const AdminDashboard = () => {
     setActiveTab,
     navigateTo,
   } = useDecoupledAdminPortal('support', 'task-portal', 'admin');
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isOpen: isTourOpen, completeTour, resetTour } = useAdminOnboardingTour();
+
+  // If ?tour=true or ?tour=1 is provided in URL, automatically trigger the tour
+  useEffect(() => {
+    const tourParam = searchParams.get('tour');
+    if (tourParam === 'true' || tourParam === '1') {
+      resetTour();
+      const updatedParams = new URLSearchParams(searchParams);
+      updatedParams.delete('tour');
+      setSearchParams(updatedParams, { replace: true });
+    }
+  }, [searchParams, resetTour, setSearchParams]);
 
   // Calculate converted values from live financial records
   const incomeNgnInUsd = convertToUSD(financials.income.ngn, 'NGN');
@@ -217,13 +229,15 @@ const AdminDashboard = () => {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <GlobalSearch 
-                onNavigate={(portal, tab) => {
-                  setPortalView(portal);
-                  setActiveTab(tab);
-                }}
-              />
-              <Button variant="outline" size="sm" onClick={resetTour} className="gap-2">
+              <div data-tour="admin-search">
+                <GlobalSearch 
+                  onNavigate={(portal, tab) => {
+                    setPortalView(portal);
+                    setActiveTab(tab);
+                  }}
+                />
+              </div>
+              <Button variant="outline" size="sm" onClick={resetTour} className="gap-2" data-tour="admin-tour-button">
                 <HelpCircle className="h-4 w-4" />
                 Tour
               </Button>
@@ -235,7 +249,7 @@ const AdminDashboard = () => {
           <AdminOperationsBar appName="Rentmaikar Admin" />
 
           {/* Operational & Fleet Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4" data-tour="admin-metrics">
             {/* Active Vehicles */}
             <Card className="p-5 border shadow-xs">
               <div className="flex items-center justify-between">
@@ -401,7 +415,7 @@ const AdminDashboard = () => {
           </div>
 
           {/* Daily To-Do List */}
-          <div className="mb-6">
+          <div className="mb-6" data-tour="admin-daily-tasks">
             <AdminDailyTodoList />
           </div>
 

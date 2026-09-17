@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ShieldCheck, ShieldAlert, Cpu, Download, Smartphone, ChevronDown, ChevronUp, Wrench, Zap, ZapOff } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Cpu, Download, Smartphone, ChevronDown, ChevronUp, Wrench, Zap, ZapOff, CreditCard, Headphones, PhoneCall } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,7 +8,10 @@ import { PersonaVerificationSettings } from '@/components/admin/PersonaVerificat
 import { FrontendBackendDisconnectSwitch } from '@/components/admin/FrontendBackendDisconnectSwitch';
 import { StaffOnboardingDownloads } from '@/components/staff/StaffOnboardingDownloads';
 import { InstallAppBanner } from '@/components/pwa/InstallAppBanner';
+import { PaymentGatewayStatusIndicator } from '@/components/admin/PaymentGatewayStatusIndicator';
+import { PaymentGatewayHealthCard } from '@/components/admin/PaymentGatewayHealthCard';
 import { useBackendBridge } from '@/hooks/useBackendBridge';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 
 interface AdminOperationsBarProps {
   appName?: string;
@@ -20,18 +23,30 @@ export function AdminOperationsBar({
   showDisconnectSwitch = true,
 }: AdminOperationsBarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('bridge');
+  const [activeTab, setActiveTab] = useState<string>('gateways');
   const { statusInfo } = useBackendBridge();
   const isBridgeConnected = !statusInfo.isDisconnected;
+  const hub = useCommunicationsHubSafe();
+  const isCallActive = Boolean(hub?.activeCall && hub.activeCall.status !== 'completed' && hub.activeCall.status !== 'failed');
 
   return (
-    <div className="space-y-3 mb-6">
+    <div className="space-y-3 mb-6" data-tour="admin-operations-bar">
       {/* Sleek Operations Status & Quick Actions Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-2.5 sm:px-4 rounded-xl border bg-card text-card-foreground shadow-xs">
         <div className="flex flex-wrap items-center gap-3">
           {/* Persona Verification Embedded Status */}
           <div className="flex items-center gap-2 pr-3 border-r border-border/60">
             <PersonaVerificationSettings compact />
+          </div>
+
+          {/* Payment Gateways (PayPal, Paystack, OPay) Health Indicator */}
+          <div className="flex items-center gap-2 pr-3 border-r border-border/60">
+            <PaymentGatewayStatusIndicator
+              onOpenDetailedCard={() => {
+                setIsExpanded(true);
+                setActiveTab('gateways');
+              }}
+            />
           </div>
 
           {/* Backend Direct Bridge Status Badge */}
@@ -57,8 +72,42 @@ export function AdminOperationsBar({
           )}
         </div>
 
-        {/* Expand Diagnostics Drawer Toggle */}
+        {/* Actions Cluster: Comms Hub & Diagnostics Drawer Toggle */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
+          {hub && (
+            <Button
+              type="button"
+              variant={isCallActive ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                hub.setIsOpen(true);
+                hub.setIsMinimized(false);
+              }}
+              className={`h-8 px-3 text-xs gap-1.5 font-medium border-border/80 ${
+                isCallActive
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse'
+                  : 'hover:bg-accent'
+              }`}
+              aria-label="Open Communications Hub"
+            >
+              {isCallActive ? (
+                <PhoneCall className="h-3.5 w-3.5 text-white" />
+              ) : (
+                <Headphones className="h-3.5 w-3.5 text-primary" />
+              )}
+              <span className="hidden xs:inline">Comms Hub</span>
+              {isCallActive ? (
+                <span className="h-2 w-2 rounded-full bg-white animate-ping ml-0.5" />
+              ) : (
+                hub.unreadCount > 0 && (
+                  <Badge variant="destructive" className="px-1.5 py-0 text-[10px] ml-0.5 font-mono">
+                    {hub.unreadCount}
+                  </Badge>
+                )
+              )}
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -69,7 +118,7 @@ export function AdminOperationsBar({
             <Wrench className="h-3.5 w-3.5 text-primary" />
             <span className="hidden xs:inline">Diagnostics & Packs</span>
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] ml-0.5">
-              {showDisconnectSwitch ? '3' : '2'}
+              {showDisconnectSwitch ? '4' : '3'}
             </Badge>
             {isExpanded ? (
               <ChevronUp className="h-3.5 w-3.5 ml-0.5" />
@@ -87,6 +136,10 @@ export function AdminOperationsBar({
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <div className="flex items-center justify-between pb-2 border-b border-border/60 mb-4 flex-wrap gap-2">
                 <TabsList className="bg-muted/60 p-0.5 h-8">
+                  <TabsTrigger value="gateways" className="text-xs gap-1.5 h-7 px-3">
+                    <CreditCard className="h-3.5 w-3.5" />
+                    Payment Gateways
+                  </TabsTrigger>
                   {showDisconnectSwitch && (
                     <TabsTrigger value="bridge" className="text-xs gap-1.5 h-7 px-3">
                       <Cpu className="h-3.5 w-3.5" />
@@ -106,6 +159,10 @@ export function AdminOperationsBar({
                   Advanced developer & administrative tooling
                 </span>
               </div>
+
+              <TabsContent value="gateways" className="mt-0 focus-visible:outline-none">
+                <PaymentGatewayHealthCard />
+              </TabsContent>
 
               {showDisconnectSwitch && (
                 <TabsContent value="bridge" className="mt-0 focus-visible:outline-none">

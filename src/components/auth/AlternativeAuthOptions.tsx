@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { lovable } from '@/integrations/lovable/index';
+import { useState, useEffect } from 'react';
+import { platformAuth } from '@/lib/auth/oauth';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, Smartphone } from 'lucide-react';
+import { Loader2, Smartphone, ExternalLink } from 'lucide-react';
 import PhoneOtpPanel from './PhoneOtpPanel';
 import { toast } from 'sonner';
 import VerificationFailureCard from '@/components/verification/VerificationFailureCard';
@@ -19,6 +20,21 @@ export function AlternativeAuthOptions({
   const [googleLoading, setGoogleLoading] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [googleFailure, setGoogleFailure] = useState<ClassifiedFailure | null>(null);
+  const [blockedAuthUrl, setBlockedAuthUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleAuthMessage = (event: MessageEvent) => {
+      if (
+        event.data?.type === 'OAUTH_AUTH_SUCCESS' ||
+        event.data?.type === 'GOOGLE_OAUTH_SUCCESS'
+      ) {
+        setGoogleLoading(false);
+        setBlockedAuthUrl(null);
+      }
+    };
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, []);
 
   const failGoogle = async (err: unknown, step: string) => {
     const failure = await reportVerificationFailure(err, { stage: 'oauth', step, provider: 'google' });
@@ -29,9 +45,19 @@ export function AlternativeAuthOptions({
 
   const handleGoogle = async () => {
     setGoogleFailure(null);
+    setBlockedAuthUrl(null);
     setGoogleLoading(true);
     const correlationId = getCorrelationId();
     try {
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem('rentmaikar_oauth_role', defaultRole);
+          localStorage.setItem('rentmaikar_oauth_role', defaultRole);
+        } catch {
+          // ignore storage quota/security errors
+        }
+      }
+
       // Catch the common browser-side blockers (cookies, storage, offline,
       // outdated engine) BEFORE bouncing the user to Google.
       const preflight = await runPreflight({ requireOAuth: true, skipClockCheck: true });
@@ -49,8 +75,8 @@ export function AlternativeAuthOptions({
 
       await logVerificationEvent({ stage: 'oauth', step: 'google_sign_in', outcome: 'started', provider: 'google', correlationId });
 
-      const redirectTarget = `${window.location.origin}/auth`;
-      const result = await lovable.auth.signInWithOAuth('google', {
+      const redirectTarget = `${window.location.origin}/auth/callback`;
+      const result = await platformAuth.signInWithOAuth('google', {
         redirect_uri: redirectTarget,
         extraParams: {
           // Minimum scopes per Google OAuth policy:
@@ -65,20 +91,41 @@ export function AlternativeAuthOptions({
           include_granted_scopes: 'true',
         },
       });
+
       if (result.error) {
+        if (result.error.message === 'POPUP_BLOCKED' && result.authUrl) {
+          setBlockedAuthUrl(result.authUrl);
+          toast.warning('Pop-up window was blocked by your browser', {
+            description: 'Click the "Open Google Sign-In" link below to continue.',
+          });
+          setGoogleLoading(false);
+          return;
+        }
         await failGoogle(result.error, 'google_sign_in');
         return;
       }
+
       await logVerificationEvent({
         stage: 'oauth', step: 'google_sign_in', outcome: 'succeeded', provider: 'google',
-        correlationId, context: { redirected: (result as { redirected?: boolean }).redirected ?? false },
+        correlationId, context: { redirected: result.redirected ?? false, isPopup: result.isPopup ?? false },
       });
-      // redirected === true → browser is navigating to Google.
-      // Otherwise the session is set and AuthContext's listener will route.
+
+      if (result.isPopup && result.popup) {
+        const checkInterval = setInterval(async () => {
+          if (result.popup?.closed) {
+            clearInterval(checkInterval);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+              setGoogleLoading(false);
+            }
+          }
+        }, 700);
+      }
     } catch (e) {
       await failGoogle(e, 'google_sign_in');
     }
   };
+
 
 
   return (
@@ -116,6 +163,21 @@ export function AlternativeAuthOptions({
         )}
       </div>
 
+
+      {blockedAuthUrl && (
+        <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs space-y-2">
+          <p className="font-medium">Pop-up window was blocked by your browser.</p>
+          <a
+            href={blockedAuthUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-500 text-black font-semibold hover:bg-amber-400 transition-colors"
+          >
+            <span>Open Google Sign-In</span>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      )}
 
       {googleFailure && (
         <div data-testid="google-sso-error" role="alert">

@@ -82,7 +82,9 @@ import {
   ImageIcon,
   Home,
   Upload,
+  Radio,
 } from 'lucide-react';
+import { OwnerVehicleTrackingMap } from '@/components/owner/OwnerVehicleTrackingMap';
 import { toast } from 'sonner';
 import { useDashboardAuthGate } from '@/components/auth/DashboardAuthGate';
 import { useRegistrationProgress } from '@/hooks/useRegistrationProgress';
@@ -138,6 +140,8 @@ export default function OwnerDashboard() {
   const [showFullDashboard, setShowFullDashboard] = useState(true);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
+  const [selectedTrackingVehicleId, setSelectedTrackingVehicleId] = useState<string | null>(null);
+  const [trackingSubTab, setTrackingSubTab] = useState<'map' | 'orders'>('map');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [calcCategory, setCalcCategory] = useState<string>('earnings-optimizer');
   const [calcRate, setCalcRate] = useState<string>(country === 'USA' ? '300' : '175000');
@@ -471,7 +475,10 @@ export default function OwnerDashboard() {
                 Pickup Locations
               </TabsTrigger>
               <TabsTrigger value="vehicle-status" data-tour="owner-vehicle-status">Vehicle Status</TabsTrigger>
-              <TabsTrigger value="iot-device" data-tour="owner-iot">Vehicle Tracking</TabsTrigger>
+              <TabsTrigger value="iot-device" data-tour="owner-iot" className="flex items-center gap-1.5">
+                <Radio className="h-3.5 w-3.5 text-emerald-500" />
+                Vehicle Tracking
+              </TabsTrigger>
               <TabsTrigger value="inspections" className="flex items-center gap-1" data-tour="owner-inspections">
                 <ImageIcon className="h-4 w-4" />
                 Inspections
@@ -535,12 +542,39 @@ export default function OwnerDashboard() {
               </PortalGate>
             </TabsContent>
 
-            {/* IoT Device Tab */}
-            <TabsContent value="iot-device">
-  <PortalGate portal="Vehicle Tracking" require="verification">
-    <IoTDevicePurchase />
-  </PortalGate>
-</TabsContent>
+            {/* IoT Device / Vehicle Tracking Tab */}
+            <TabsContent value="iot-device" className="space-y-4">
+              <PortalGate portal="Vehicle Tracking" require="verification">
+                <Tabs
+                  value={trackingSubTab}
+                  onValueChange={(val) => setTrackingSubTab(val as 'map' | 'orders')}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <TabsList className="bg-muted/80 p-1">
+                      <TabsTrigger value="map" className="gap-1.5 text-xs">
+                        <Radio className="h-3.5 w-3.5 text-emerald-500" />
+                        Live Fleet Map (Traccar GPS)
+                      </TabsTrigger>
+                      <TabsTrigger value="orders" className="text-xs">
+                        Hardware & Orders
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  <TabsContent value="map" className="mt-0 space-y-4">
+                    <OwnerVehicleTrackingMap
+                      initialVehicleId={selectedTrackingVehicleId}
+                      onSelectVehicle={(id) => setSelectedTrackingVehicleId(id)}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="orders" className="mt-0">
+                    <IoTDevicePurchase />
+                  </TabsContent>
+                </Tabs>
+              </PortalGate>
+            </TabsContent>
 
             {/* Inspections Tab */}
             <TabsContent value="inspections">
@@ -618,6 +652,19 @@ export default function OwnerDashboard() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                      onClick={() => {
+                        setSelectedTrackingVehicleId(vehicle.id);
+                        setTrackingSubTab('map');
+                        setActiveTab('iot-device');
+                      }}
+                    >
+                      <Radio className="h-3 w-3 text-emerald-500" />
+                      Track Live
+                    </Button>
                     <PublishVehicleButton
                       vehicle={vehicle as any}
                       onPublished={() => queryClient.invalidateQueries({ queryKey: ['owner-vehicles'] })}
