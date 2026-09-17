@@ -237,7 +237,17 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
   const region = to.startsWith("+234") ? "Nigeria" : "USA";
   const messageText = formatNotificationMessage(input);
   const providerOverride = input.providerOverride?.toLowerCase();
-  const isSandbox = Boolean(input.sandbox || process.env.SENT_SANDBOX_MODE === "true");
+  
+  // Verification codes are user-initiated authentication actions.
+  // Allow them to dispatch live to cellular carriers unless sandbox is explicitly requested.
+  const isVerification = input.notificationType === "verification_code" || Boolean(input.verificationCode);
+  const isSandbox = Boolean(
+    input.sandbox !== undefined
+      ? input.sandbox
+      : isVerification
+      ? process.env.SENT_FORCE_SANDBOX === "true"
+      : process.env.SENT_SANDBOX_MODE === "true"
+  );
 
   const sentApiKey = process.env.SENT_API_KEY;
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
@@ -249,6 +259,26 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
       const sanitized = sanitizeSentText(messageText);
       const idempotencyKey = `rm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+      // Use approved authentication template for OTP verification to pass 10DLC carrier compliance
+      const approvedOtpTemplateId = "efe28f88-ad8d-48a5-af69-33529169d58d";
+      const templatePayload = input.whatsappTemplateId
+        ? {
+            template: {
+              id: input.whatsappTemplateId,
+              parameters: input.whatsappTemplateParams || {},
+            },
+          }
+        : input.verificationCode
+        ? {
+            template_id: approvedOtpTemplateId,
+            template: {
+              id: approvedOtpTemplateId,
+              parameters: { var_1: String(input.verificationCode) },
+            },
+          }
+        : {};
+
+      const hasTemplate = Boolean(templatePayload.template);
       const res = await fetch("https://api.sent.dm/v3/messages", {
         method: "POST",
         headers: {
@@ -259,16 +289,9 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
         body: JSON.stringify({
           to: [to],
           channel: [channel],
-          text: sanitized,
+          ...(hasTemplate ? {} : { text: sanitized }),
           sandbox: isSandbox,
-          ...(input.whatsappTemplateId
-            ? {
-                template: {
-                  id: input.whatsappTemplateId,
-                  parameters: input.whatsappTemplateParams || {},
-                },
-              }
-            : {}),
+          ...templatePayload,
         }),
       });
 
@@ -831,9 +854,10 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
     try {
       await pool.query(
         `INSERT INTO public.verification_event_log (
-          id, stage, step, outcome, provider, message, context, created_at
-        ) VALUES (gen_random_uuid(), 'otp_dispatch', 'phone-otp-custom', $1, $2, $3, $4, NOW())`,
+          id, correlation_id, stage, step, outcome, provider, message, context, created_at
+        ) VALUES (gen_random_uuid(), $1, 'otp_dispatch', 'phone-otp-custom', $2, $3, $4, $5, NOW())`,
         [
+          `corr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           smsRes.success ? "success" : "failure",
           smsRes.provider || "sent",
           smsRes.success ? `OTP sent to ${phone}` : "Failed to deliver OTP",
