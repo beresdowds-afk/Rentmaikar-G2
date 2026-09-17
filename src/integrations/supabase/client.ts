@@ -124,15 +124,47 @@ async function callLocalGateway(functionName: string, options?: any) {
       body: options?.body ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body)) : undefined,
     });
 
-    const json = await res.json().catch(() => ({}));
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return {
+        data: null,
+        error: new Error(`Local gateway returned non-JSON response (${res.status} ${contentType})`),
+      };
+    }
+
+    const json = await res.json().catch(() => null);
+    if (!json) {
+      return {
+        data: null,
+        error: new Error(`Failed to parse JSON response from local gateway for '${functionName}'`),
+      };
+    }
+
     if (res.ok) {
+      if (json.ok === false || json.success === false) {
+        return {
+          data: json,
+          error: new Error(json.error || json.message || `Edge function '${functionName}' reported failure`),
+        };
+      }
       return { data: json, error: null };
     } else {
       const errorMsg = json?.error || json?.message || `Edge function '${functionName}' failed (HTTP ${res.status})`;
       return { data: null, error: new Error(errorMsg) };
     }
-  } catch (netErr) {
-    // Return safe fallback so client components do not crash if dev server is restarting
+  } catch (netErr: any) {
+    const isCritical =
+      functionName.includes("password") ||
+      functionName.includes("email") ||
+      functionName.includes("auth") ||
+      functionName.includes("otp");
+    if (isCritical) {
+      return {
+        data: null,
+        error: new Error(netErr?.message || `Network error connecting to function '${functionName}'`),
+      };
+    }
+    // Return safe fallback for non-critical informational widgets
     return {
       data: { ok: true, simulated: true, fallback: true, functionName },
       error: null,
