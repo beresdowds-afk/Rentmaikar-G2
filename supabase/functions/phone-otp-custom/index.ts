@@ -89,7 +89,7 @@ async function sendViaTwilio(to: string, body: string) {
   }
 }
 
-async function sendSms(to: string, body: string) {
+async function sendSms(to: string, body: string, otp?: string) {
   if (to.startsWith("+234") && Deno.env.get("TERMII_API_KEY")) {
     await sendViaTermii(to, body);
     return "termii";
@@ -100,10 +100,13 @@ async function sendSms(to: string, body: string) {
     await sendViaTwilio(to, body);
     return "twilio";
   }
+  const approvedTemplateId = "efe28f88-ad8d-48a5-af69-33529169d58d";
   const sent = await sendViaSent({
     to,
     channel: "sms",
     text: body,
+    template: otp ? { id: approvedTemplateId, parameters: { var_1: otp } } : undefined,
+    sandbox: false,
     metadata: { notification_type: "phone_otp" },
   });
   if (!sent.ok) {
@@ -256,6 +259,7 @@ Deno.serve(async (req) => {
       const via = await sendSms(
         phone,
         `Your Rentmaikar verification code is ${otp}. It expires in 5 minutes.`,
+        otp,
       );
       return jsonRes({ success: true, provider: via });
     }
