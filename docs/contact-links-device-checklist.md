@@ -27,7 +27,7 @@ checklist verifies the OS-level handoff we cannot unit-test.
 
 ## Per-device steps
 
-1. Open the published landing page: <https://rentmaikar.lovable.app>.
+1. Open the published landing page: <https://rentmaikar.com>.
 2. Confirm the WhatsApp and Text us buttons render on the left/right
    edges, above the vehicles, with no overlap on the vehicle hero image
    or the tagline. Rotate to landscape and re-check.

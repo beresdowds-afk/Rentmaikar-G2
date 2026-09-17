@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { componentTagger } from "lovable-tagger";
 import { visualizer } from "rollup-plugin-visualizer";
 
 // vite-plugin-pwa intentionally removed: the app-shell service worker was
@@ -49,7 +48,6 @@ export default defineConfig(({ mode }) => ({
 
   plugins: [
     react(),
-    mode === "development" && componentTagger(),
     {
       name: "server-side-sitemap-generator",
       configureServer(server: any) {
