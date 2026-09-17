@@ -113,6 +113,15 @@ Deno.serve(async (req) => {
         console.error("[paystack-webhook] settlement reconciliation failed", tx.payment_id, e);
       }
       await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
+
+      // Confirm IoT hardware orders if payment was for IoT device
+      await supabase
+        .from("iot_device_orders")
+        .update({
+          payment_status: "confirmed",
+          payment_confirmed_at: new Date().toISOString(),
+        })
+        .eq("payment_reference", reference);
       if (!alreadyCompleted) {
         await withRetry("paystack.receipt.email", async () => {
           const { error } = await supabase.functions.invoke("billing-portal", {

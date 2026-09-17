@@ -119,6 +119,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (captureStatus === "COMPLETED") {
+      await supa
+        .from("iot_device_orders")
+        .update({
+          payment_status: "confirmed",
+          payment_confirmed_at: new Date().toISOString(),
+        })
+        .eq("payment_reference", order_id);
+    }
+
     const { error: txError } = await supa
       .from("paypal_transactions")
       .update({

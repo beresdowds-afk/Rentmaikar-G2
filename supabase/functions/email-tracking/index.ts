@@ -123,7 +123,7 @@ serve(async (req) => {
     }
 
     // Redirect to actual URL
-    const redirectTo = targetUrl || "https://rentmaikar.lovable.app";
+    const redirectTo = targetUrl || "https://rentmaikar.com";
     return new Response(null, {
       status: 302,
       headers: { Location: redirectTo },

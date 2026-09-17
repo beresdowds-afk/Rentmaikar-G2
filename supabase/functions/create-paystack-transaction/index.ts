@@ -15,6 +15,9 @@ const BodySchema = z.object({
   channels: z.array(z.enum(["card", "bank", "ussd", "bank_transfer", "mobile_money", "qr"])).optional(),
   description: z.string().max(255).optional(),
   callbackUrl: z.string().url().optional(),
+  purpose: z.string().optional(),
+  iotDeviceId: z.string().uuid().optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 Deno.serve(async (req) => {
@@ -84,7 +87,11 @@ Deno.serve(async (req) => {
     const amountMinor = Math.round(body.amount * 100);
 
     const ctx = await resolvePaymentContext({
-      supabase, rentalId: body.rentalId, vehicleId: body.vehicleId, ownerId: undefined,
+      supabase,
+      rentalId: body.rentalId,
+      vehicleId: body.vehicleId,
+      ownerId: driverId,
+      purpose: body.purpose,
     });
     if ("error" in ctx) {
       return new Response(JSON.stringify({ error: ctx.error }), {
@@ -109,6 +116,8 @@ Deno.serve(async (req) => {
           driver_id: driverId,
           payment_frequency: body.paymentFrequency,
           description: body.description,
+          purpose: body.purpose,
+          ...body.metadata,
         },
       }),
     });
@@ -122,16 +131,17 @@ Deno.serve(async (req) => {
 
     // Create pending payment + paystack row
     const { data: payment, error: paymentError } = await supabase.from("payments").insert({
-      rental_id: ctx.rentalId,
+      rental_id: ctx.rentalId ?? null,
       driver_id: driverId,
-      owner_id: ctx.ownerId,
-      vehicle_id: ctx.vehicleId,
+      owner_id: ctx.ownerId ?? driverId,
+      vehicle_id: ctx.vehicleId ?? null,
       amount: body.amount,
       currency: body.currency,
       status: "pending",
       payment_method: "paystack",
       payment_frequency: body.paymentFrequency ?? "weekly",
       transaction_id: reference,
+      purpose: body.purpose ?? "rental",
     }).select("id").single();
 
     if (paymentError || !payment?.id) {
@@ -149,12 +159,20 @@ Deno.serve(async (req) => {
       currency: body.currency,
       amount: body.amount,
       status: "pending",
-      rental_id: ctx.rentalId,
+      rental_id: ctx.rentalId ?? null,
       driver_id: driverId,
-      vehicle_id: ctx.vehicleId,
+      vehicle_id: ctx.vehicleId ?? null,
       payment_id: payment.id,
       raw_payload: pay.data,
     });
+
+    const iotOrderId = body.iotDeviceId || (body.metadata?.iot_device_order_id as string | undefined);
+    if (iotOrderId) {
+      await supabase.from("iot_device_orders").update({
+        payment_reference: reference,
+        payment_method: "paystack",
+      }).eq("id", iotOrderId);
+    }
 
     const successBody = {
       reference,

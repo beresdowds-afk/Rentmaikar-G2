@@ -273,7 +273,7 @@ Deno.serve(async (req) => {
   if (!fresh.length || !notify) return json(200, summary);
 
   const dashboardUrl =
-    `${Deno.env.get("APP_URL") ?? "https://rentmaikar.lovable.app"}/admin?tab=contact-settings`;
+    `${Deno.env.get("APP_URL") ?? "https://rentmaikar.com"}/admin?tab=contact-settings`;
 
   // Recipients: explicit list, else every admin with an email on file.
   let recipients = cfg.email_recipients.filter(Boolean);

@@ -106,8 +106,8 @@ export function generateFollowUpSMS(
   const messages: Record<string, string> = {
     payment_default_day1: `We tried to reach you about your overdue payment of ${variables.amount || 'your balance'}. Please call ${callbackNumber} or visit your dashboard to pay.`,
     payment_default_day2: `URGENT: Your payment is 48 hours overdue. Your vehicle may be restricted. Call ${callbackNumber} immediately or pay via your dashboard.`,
-    document_expiry: `Your ${variables.document || 'document'} expires ${variables.date ? 'on ' + variables.date : 'soon'}. Upload a new copy at your dashboard: https://rentmaikar.lovable.app/driver-dashboard`,
-    welcome_call: `Welcome to Rentmaikar! 🚗 Complete your registration at https://rentmaikar.lovable.app. Need help? Call ${callbackNumber}.`,
+    document_expiry: `Your ${variables.document || 'document'} expires ${variables.date ? 'on ' + variables.date : 'soon'}. Upload a new copy at your dashboard: https://rentmaikar.com/driver-dashboard`,
+    welcome_call: `Welcome to Rentmaikar! 🚗 Complete your registration at https://rentmaikar.com. Need help? Call ${callbackNumber}.`,
   };
   return messages[scriptType] || `We tried to reach you regarding your Rentmaikar account. Please call ${callbackNumber} for assistance.`;
 }

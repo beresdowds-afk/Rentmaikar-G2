@@ -100,8 +100,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // Get the app URL
-    const appUrl = Deno.env.get("SUPABASE_URL")?.replace('.supabase.co', '.lovable.app') || 
-                   "https://id-preview--4011c747-3d97-471e-9350-01af2636bf43.lovable.app";
+    const appUrl = Deno.env.get("APP_URL") || "https://rentmaikar.com";
     
     const dashboardPath = userType === "driver" ? "/driver/dashboard" : "/owner/dashboard";
     const dashboardUrl = `${appUrl}${dashboardPath}`;

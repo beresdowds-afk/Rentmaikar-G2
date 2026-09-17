@@ -116,6 +116,14 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error("[opay-webhook] settlement reconciliation failed", tx.payment_id, e);
       }
+      // Confirm IoT hardware orders if payment was for IoT device
+      await supabase
+        .from("iot_device_orders")
+        .update({
+          payment_status: "confirmed",
+          payment_confirmed_at: new Date().toISOString(),
+        })
+        .eq("payment_reference", reference);
     } else if (status === "refunded") {
       // Shared handler: state transition + ledger reversal.
       await applyRefund(supabase, {

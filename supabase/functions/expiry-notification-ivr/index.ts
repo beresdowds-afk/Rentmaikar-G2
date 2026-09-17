@@ -51,7 +51,8 @@ const handler = async (req: Request): Promise<Response> => {
     switch (digits) {
       case "1": {
         // Press 1: Send document upload link via SMS (routed through centralized function)
-        const uploadLink = `${supabaseUrl.replace('.supabase.co', '.lovable.app')}/driver-dashboard?tab=documents`;
+        const appUrl = Deno.env.get("APP_URL") || "https://rentmaikar.com";
+        const uploadLink = `${appUrl}/driver-dashboard?tab=documents`;
         
         const cleanPhone = callerPhone.replace('whatsapp:', '');
 

@@ -26,7 +26,7 @@ if (VAPID_PUBLIC && VAPID_PRIVATE) {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 }
 
-const PUB_BASE = "https://rentmaikar.lovable.app";
+const PUB_BASE = "https://rentmaikar.com";
 
 interface Body {
   paymentId: string;

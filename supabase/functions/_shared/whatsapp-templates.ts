@@ -342,7 +342,7 @@ Your dashboard is ready:
 💰 Monitor earnings
 📊 View rental activity
 
-Visit: https://rentmaikar.lovable.app/owner/dashboard`;
+Visit: https://rentmaikar.com/owner/dashboard`;
 
 // ==================== PAYMENT CONFIRMATION ====================
 

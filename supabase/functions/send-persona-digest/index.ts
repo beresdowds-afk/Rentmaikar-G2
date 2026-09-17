@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
   }
 
   let sent = 0, users = 0, skipped = 0;
-  const statusUrl = `${Deno.env.get("APP_URL") ?? "https://rentmaikar.lovable.app"}/onboarding/verification-status`;
+  const statusUrl = `${Deno.env.get("APP_URL") ?? "https://rentmaikar.com"}/onboarding/verification-status`;
 
   for (const [userId, events] of byUser.entries()) {
     users++;

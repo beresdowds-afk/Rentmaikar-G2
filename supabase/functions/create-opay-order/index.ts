@@ -11,11 +11,15 @@ const BodySchema = z.object({
   amount: z.number().positive().max(50_000_000),
   rentalId: z.string().uuid().optional(),
   vehicleId: z.string().uuid().optional(),
+  ownerId: z.string().uuid().optional(),
   driverId: z.string().uuid().optional(),
   paymentFrequency: z.enum(["daily", "weekly"]).optional(),
   description: z.string().max(255).optional(),
   callbackUrl: z.string().url().optional(),
   returnUrl: z.string().url().optional(),
+  purpose: z.string().optional(),
+  iotDeviceId: z.string().uuid().optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 Deno.serve(async (req) => {
@@ -44,7 +48,11 @@ Deno.serve(async (req) => {
     }
 
     const ctx = await resolvePaymentContext({
-      supabase, rentalId: b.rentalId, vehicleId: b.vehicleId,
+      supabase,
+      rentalId: b.rentalId,
+      vehicleId: b.vehicleId,
+      ownerId: b.ownerId ?? driverId,
+      purpose: b.purpose,
     });
     if ("error" in ctx) return json({ error: ctx.error }, 400);
 
@@ -75,9 +83,9 @@ Deno.serve(async (req) => {
       cancelUrl: b.returnUrl,
       expireAt: 30,
       productList: [{
-        productId: b.rentalId ?? "rental",
-        name: b.description ?? "RentMaikar rental payment",
-        description: b.description ?? "Rental payment",
+        productId: b.rentalId ?? b.iotDeviceId ?? "payment",
+        name: b.description ?? "RentMaikar payment",
+        description: b.description ?? "Payment",
         price: amountMinor, quantity: 1, currency: "NGN",
       }],
       userInfo: { userId: driverId, userEmail: u.user.email ?? undefined },
@@ -89,11 +97,17 @@ Deno.serve(async (req) => {
     }
 
     const { data: payment, error: paymentError } = await supabase.from("payments").insert({
-      rental_id: ctx.rentalId, driver_id: driverId,
-      owner_id: ctx.ownerId, vehicle_id: ctx.vehicleId,
-      amount: b.amount, currency: "NGN",
-      status: "pending", payment_method: "opay",
-      payment_frequency: b.paymentFrequency ?? "weekly", transaction_id: reference,
+      rental_id: ctx.rentalId ?? null,
+      driver_id: driverId,
+      owner_id: ctx.ownerId ?? driverId,
+      vehicle_id: ctx.vehicleId ?? null,
+      amount: b.amount,
+      currency: "NGN",
+      status: "pending",
+      payment_method: "opay",
+      payment_frequency: b.paymentFrequency ?? "weekly",
+      transaction_id: reference,
+      purpose: b.purpose ?? "rental",
     }).select("id").single();
 
     if (paymentError || !payment?.id) {
@@ -104,10 +118,20 @@ Deno.serve(async (req) => {
     await supabase.from("opay_transactions").insert({
       reference, order_no: result.data?.orderNo, cashier_url: result.data?.cashierUrl,
       currency: "NGN", amount: b.amount, status: "pending",
-      rental_id: ctx.rentalId, driver_id: driverId, vehicle_id: ctx.vehicleId,
+      rental_id: ctx.rentalId ?? null,
+      driver_id: driverId,
+      vehicle_id: ctx.vehicleId ?? null,
       payment_id: payment.id, raw_payload: result.data,
       idempotency_key: idemKey ?? null,
     });
+
+    const iotOrderId = b.iotDeviceId || (b.metadata?.iot_device_order_id as string | undefined);
+    if (iotOrderId) {
+      await supabase.from("iot_device_orders").update({
+        payment_reference: reference,
+        payment_method: "opay",
+      }).eq("id", iotOrderId);
+    }
 
     return json({
       reference, order_no: result.data?.orderNo, cashier_url: result.data?.cashierUrl,

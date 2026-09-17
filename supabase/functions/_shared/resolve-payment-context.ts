@@ -7,12 +7,13 @@ export interface PaymentContextInput {
   rentalId?: string | null;
   vehicleId?: string | null;
   ownerId?: string | null;
+  purpose?: string | null;
 }
 
 export interface PaymentContext {
   rentalId: string | null;
-  vehicleId: string;
-  ownerId: string;
+  vehicleId: string | null;
+  ownerId: string | null;
 }
 
 export async function resolvePaymentContext(
@@ -21,6 +22,7 @@ export async function resolvePaymentContext(
   let vehicleId = input.vehicleId ?? null;
   let ownerId = input.ownerId ?? null;
   const rentalId = input.rentalId ?? null;
+  const purpose = input.purpose ?? null;
 
   if (rentalId) {
     const { data: rental } = await input.supabase
@@ -41,6 +43,11 @@ export async function resolvePaymentContext(
       .eq("id", vehicleId)
       .maybeSingle();
     if (vehicle) ownerId = vehicle.owner_id;
+  }
+
+  // IoT device purchases do not require vehicle_id or rental_id
+  if (purpose === "iot_device") {
+    return { rentalId, vehicleId, ownerId };
   }
 
   if (!vehicleId || !ownerId) {

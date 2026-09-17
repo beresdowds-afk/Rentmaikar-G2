@@ -345,7 +345,7 @@ async function sendRenewalWarningEmail(params: EmailParams) {
     <p style="margin:5px 0 0 0;font-size:13px;color:#666;"><strong>Expiry Date:</strong> ${expiryFormatted}</p>
   </div>
   <div style="text-align:center;margin-top:25px;">
-    <a href="https://rentmaikar.lovable.app" style="background:#1a1a2e;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">View Dashboard & Sign</a>
+    <a href="https://rentmaikar.com" style="background:#1a1a2e;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">View Dashboard & Sign</a>
   </div>
 </div>
 <div style="background:#f9f9f9;padding:15px;text-align:center;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 10px 10px;">
@@ -400,7 +400,7 @@ async function sendRenewalCreatedEmail(params: RenewalCreatedParams) {
     <p style="margin:5px 0 0 0;color:#555;font-size:13px;">Please log in and sign the renewal agreement promptly to maintain uninterrupted access.</p>
   </div>
   <div style="text-align:center;margin-top:25px;">
-    <a href="https://rentmaikar.lovable.app" style="background:#1a1a2e;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">Sign Renewal Agreement</a>
+    <a href="https://rentmaikar.com" style="background:#1a1a2e;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">Sign Renewal Agreement</a>
   </div>
 </div>
 <div style="background:#f9f9f9;padding:15px;text-align:center;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 10px 10px;">
@@ -445,7 +445,7 @@ async function sendExpiredBlockEmail(params: ExpiredBlockParams) {
     <p style="margin:0;font-size:13px;color:#666;"><strong>Agreement ID:</strong> ${agreementId}</p>
   </div>
   <div style="text-align:center;margin-top:25px;">
-    <a href="https://rentmaikar.lovable.app" style="background:#dc2626;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">Sign Now — Urgent</a>
+    <a href="https://rentmaikar.com" style="background:#dc2626;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">Sign Now — Urgent</a>
   </div>
 </div>
 <div style="background:#f9f9f9;padding:15px;text-align:center;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 10px 10px;">

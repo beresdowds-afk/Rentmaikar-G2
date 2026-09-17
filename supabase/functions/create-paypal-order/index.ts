@@ -18,6 +18,8 @@ const Body = z.object({
   driver_id: z.string().uuid().optional(),
   payment_frequency: z.enum(["daily", "weekly"]).default("weekly"),
   description: z.string().max(200).optional(),
+  purpose: z.string().optional(),
+  iot_device_order_id: z.string().uuid().optional(),
 });
 
 interface PayPalOrder {
@@ -79,7 +81,8 @@ Deno.serve(async (req) => {
       supabase: supa,
       rentalId: data.rental_id,
       vehicleId: data.vehicle_id,
-      ownerId: data.owner_id,
+      ownerId: data.owner_id ?? userId,
+      purpose: data.purpose,
     });
     if ("error" in ctx) {
       return new Response(JSON.stringify({ error: ctx.error }), {
@@ -137,15 +140,16 @@ Deno.serve(async (req) => {
 
     const paymentInsert: Record<string, unknown> = {
       driver_id: driverId,
-      owner_id: ctx.ownerId,
-      vehicle_id: ctx.vehicleId,
-      rental_id: ctx.rentalId,
+      owner_id: ctx.ownerId ?? driverId,
+      vehicle_id: ctx.vehicleId ?? null,
+      rental_id: ctx.rentalId ?? null,
       amount: data.amount,
       currency: data.currency.toUpperCase(),
       payment_frequency: data.payment_frequency,
       payment_method: "paypal",
       transaction_id: order.id,
       status: "pending",
+      purpose: data.purpose ?? "rental",
     };
 
     const { data: payment, error: paymentError } = await supa
@@ -165,10 +169,10 @@ Deno.serve(async (req) => {
 
     const txInsert: Record<string, unknown> = {
       payment_id: payment.id,
-      rental_id: ctx.rentalId,
+      rental_id: ctx.rentalId ?? null,
       driver_id: driverId,
-      owner_id: ctx.ownerId,
-      vehicle_id: ctx.vehicleId,
+      owner_id: ctx.ownerId ?? driverId,
+      vehicle_id: ctx.vehicleId ?? null,
       order_id: order.id,
       status: "created",
       amount: data.amount,
@@ -179,6 +183,13 @@ Deno.serve(async (req) => {
     const { error: txError } = await supa.from("paypal_transactions").insert(txInsert);
     if (txError) {
       console.error("[create-paypal-order] paypal transaction insert error:", txError);
+    }
+
+    if (data.iot_device_order_id) {
+      await supa.from("iot_device_orders").update({
+        payment_reference: order.id,
+        payment_method: "paypal",
+      }).eq("id", data.iot_device_order_id);
     }
 
     const successBody = {

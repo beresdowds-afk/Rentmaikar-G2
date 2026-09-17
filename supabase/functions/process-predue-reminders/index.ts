@@ -247,8 +247,7 @@ const handler = async (req: Request): Promise<Response> => {
 
       // Send email if enabled
       if (profile.notification_email && profile.email) {
-        const baseUrl = Deno.env.get("SUPABASE_URL")?.replace('.supabase.co', '.lovable.app') || 
-                        "https://rentmaikar.lovable.app";
+        const baseUrl = Deno.env.get("APP_URL") || "https://rentmaikar.com";
         const emailData = paymentReminderEmail({
           firstName: profile.full_name?.split(' ')[0] || 'Driver',
           amount: weeklyRate,

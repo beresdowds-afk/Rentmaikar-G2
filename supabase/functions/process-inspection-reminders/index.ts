@@ -169,7 +169,7 @@ const handler = async (req: Request): Promise<Response> => {
   </div>
 
   <div style="text-align:center;margin-top:25px;">
-    <a href="https://rentmaikar.lovable.app/driver" style="background:#1a1a2e;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">Go to Dashboard</a>
+    <a href="https://rentmaikar.com/driver" style="background:#1a1a2e;color:#fff;padding:12px 28px;text-decoration:none;border-radius:5px;font-weight:bold;">Go to Dashboard</a>
   </div>
 </div>
 <div style="background:#f9f9f9;padding:15px;text-align:center;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 10px 10px;">

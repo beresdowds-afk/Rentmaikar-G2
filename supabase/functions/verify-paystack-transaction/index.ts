@@ -62,7 +62,16 @@ Deno.serve(async (req) => {
       await syncPaymentStatus(supabase, {
         paymentId: tx.payment_id, status, failureReason: failureReason,
       });
+    }
 
+    if (status === "completed") {
+      await supabase
+        .from("iot_device_orders")
+        .update({
+          payment_status: "confirmed",
+          payment_confirmed_at: new Date().toISOString(),
+        })
+        .eq("payment_reference", reference);
     }
 
     return json({ status, reference, payment_id: tx?.payment_id ?? null });

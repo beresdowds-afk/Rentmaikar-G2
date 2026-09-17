@@ -439,8 +439,7 @@ const sendWhatsAppMessage = async (
 };
 
 const generatePaymentLink = (driverId: string, amount: number, currency: string): string => {
-  const baseUrl = Deno.env.get("SUPABASE_URL")?.replace(".supabase.co", ".lovable.app") ||
-    "https://rentmaikar.lovable.app";
+  const baseUrl = Deno.env.get("APP_URL") || "https://rentmaikar.com";
   const params = new URLSearchParams({
     driver: driverId, amount: amount.toString(), currency, ts: Date.now().toString(),
   });
@@ -592,7 +591,7 @@ const requestDocument = async (
     ``,
     `Please upload your ${docLabel}:`,
     `1️⃣ Send the file directly in this chat`,
-    `2️⃣ Or upload at: https://rentmaikar.lovable.app/driver/dashboard`,
+    `2️⃣ Or upload at: https://rentmaikar.com/driver/dashboard`,
     ``,
     `Supported: PDF, JPG, PNG (Max 10MB)`,
   ].filter(Boolean).join("\n");
@@ -821,7 +820,7 @@ const handler = async (req: Request): Promise<Response> => {
               `Please re-upload a valid document.`,
               `Supported formats: PDF, JPG, PNG (Max 10MB)`,
               ``,
-              `👉 Upload at: https://rentmaikar.lovable.app/driver/dashboard`,
+              `👉 Upload at: https://rentmaikar.com/driver/dashboard`,
               `Or send the file directly in this chat.`,
             ].join("\n"));
           }
@@ -910,7 +909,7 @@ const handler = async (req: Request): Promise<Response> => {
             `✅ Includes GPS tracking & insurance`,
             ``,
             `📱 *Book Now:*`,
-            `https://rentmaikar.lovable.app/catalogue?vehicle=${vehicle.id}`,
+            `https://rentmaikar.com/catalogue?vehicle=${vehicle.id}`,
             ``,
             `_Reply *1* for booking support or *4* to talk to an agent._`,
           ].filter(Boolean).join("\n");
@@ -999,10 +998,10 @@ const handler = async (req: Request): Promise<Response> => {
     if (!profile) {
       const lang = detectLanguage(from, region);
       const welcomeMsg = lang === "pcm"
-        ? "👋 Welcome to Rentmaikar!\n\nWe no know this number. Abeg register for https://rentmaikar.lovable.app make you start."
+        ? "👋 Welcome to Rentmaikar!\n\nWe no know this number. Abeg register for https://rentmaikar.com make you start."
         : lang === "yo"
-          ? "👋 Kaabo si Rentmaikar!\n\nA kò mọ nọ́mbà yìí. Jọ̀wọ́ forúkọsílẹ̀ ní https://rentmaikar.lovable.app."
-          : "👋 Welcome to Rentmaikar!\n\nWe don't recognize this number. Please register at https://rentmaikar.lovable.app to get started.";
+          ? "👋 Kaabo si Rentmaikar!\n\nA kò mọ nọ́mbà yìí. Jọ̀wọ́ forúkọsílẹ̀ ní https://rentmaikar.com."
+          : "👋 Welcome to Rentmaikar!\n\nWe don't recognize this number. Please register at https://rentmaikar.com to get started.";
       await sendWhatsAppMessage(from, welcomeMsg);
       return new Response("OK", { status: 200, headers: corsHeaders });
     }
@@ -1201,7 +1200,7 @@ const handler = async (req: Request): Promise<Response> => {
 
       case "1":
       case "BOOKING": {
-        responseMessage = `📋 Booking Support\n\nFor booking issues, please:\n1. Check your dashboard for booking details\n2. Reply *STATUS* to view current rental\n\nOr visit: https://rentmaikar.lovable.app/driver/dashboard`;
+        responseMessage = `📋 Booking Support\n\nFor booking issues, please:\n1. Check your dashboard for booking details\n2. Reply *STATUS* to view current rental\n\nOr visit: https://rentmaikar.com/driver/dashboard`;
         break;
       }
 
@@ -1272,7 +1271,7 @@ const handler = async (req: Request): Promise<Response> => {
           .limit(3);
 
         if (!negotiations || negotiations.length === 0) {
-          responseMessage = `🤝 *Price Negotiations*\n\nYou have no active negotiations at this time.\n\nTo start a new negotiation, visit your dashboard:\n🔗 rentmaikar.lovable.app`;
+          responseMessage = `🤝 *Price Negotiations*\n\nYou have no active negotiations at this time.\n\nTo start a new negotiation, visit your dashboard:\n🔗 rentmaikar.com`;
         } else {
           const negotiationLines = negotiations.map((n, i) =>
             `${i + 1}. ${n.negotiation_type === 'daily' ? 'Daily' : 'Weekly'} rate: ${n.proposed_rate} (${n.status.replace('_', ' ')})`
@@ -1285,7 +1284,7 @@ const handler = async (req: Request): Promise<Response> => {
           };
           const action = actionMap[command] || "view";
 
-          responseMessage = `🤝 *Price Negotiations*\n\nYou requested to *${action}*.\n\n📋 *Active Negotiations:*\n${negotiationLines.join('\n')}\n\n⚠️ Please log in to your dashboard to complete this action securely:\n🔗 rentmaikar.lovable.app\n\nOr reply *HUMAN* to speak with an agent.`;
+          responseMessage = `🤝 *Price Negotiations*\n\nYou requested to *${action}*.\n\n📋 *Active Negotiations:*\n${negotiationLines.join('\n')}\n\n⚠️ Please log in to your dashboard to complete this action securely:\n🔗 rentmaikar.com\n\nOr reply *HUMAN* to speak with an agent.`;
 
           // Create inbox conversation for admin visibility
           await supabase.from("inbox_conversations").insert({
@@ -1346,7 +1345,7 @@ const handler = async (req: Request): Promise<Response> => {
           lines.push(
             `📎 *How to upload:*`,
             `1. Send the file directly in this chat`,
-            `2. Or visit: https://rentmaikar.lovable.app/driver/dashboard`,
+            `2. Or visit: https://rentmaikar.com/driver/dashboard`,
             ``,
             `Supported: PDF, JPG, PNG (Max 10MB)`,
           );
@@ -1384,7 +1383,7 @@ const handler = async (req: Request): Promise<Response> => {
             ...vehicleLines,
             ``,
             `─────────────────`,
-            `📱 Full catalogue: https://rentmaikar.lovable.app/catalogue`,
+            `📱 Full catalogue: https://rentmaikar.com/catalogue`,
             ``,
             `_Reply with a vehicle number (e.g. *1*) for details,_`,
             `_or *4* to speak with an agent._`,
@@ -1411,7 +1410,7 @@ const handler = async (req: Request): Promise<Response> => {
             `No vehicles currently available in your region.`,
             ``,
             `Check back soon or browse online:`,
-            `📱 https://rentmaikar.lovable.app/catalogue`,
+            `📱 https://rentmaikar.com/catalogue`,
           ].join("\n");
         }
         break;
@@ -1459,7 +1458,7 @@ const handler = async (req: Request): Promise<Response> => {
                   `✅ Includes GPS tracking & insurance`,
                   ``,
                   `📱 *Book Now:*`,
-                  `https://rentmaikar.lovable.app/catalogue?vehicle=${vehicle.id}`,
+                  `https://rentmaikar.com/catalogue?vehicle=${vehicle.id}`,
                   ``,
                   `_Reply *CARS* to see other vehicles or *4* to speak with an agent._`,
                 ].filter(Boolean).join("\n");
@@ -1502,7 +1501,7 @@ const handler = async (req: Request): Promise<Response> => {
       await preloadTemplates(supabase);
       const managed = templateFromCache(templateKey, "whatsapp", countryCodeForPhone(from), {
         first_name: profile?.full_name?.split(" ")[0] || "there",
-        portal_link: "https://rentmaikar.lovable.app",
+        portal_link: "https://rentmaikar.com",
         support_phone: supportPhoneFor(region),
       });
       if (managed) responseMessage = managed;

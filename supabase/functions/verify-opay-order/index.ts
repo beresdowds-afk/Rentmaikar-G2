@@ -70,6 +70,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (status === "completed" || (terminal && ownTx?.status === "completed")) {
+      await supabase
+        .from("iot_device_orders")
+        .update({
+          payment_status: "confirmed",
+          payment_confirmed_at: new Date().toISOString(),
+        })
+        .eq("payment_reference", reference);
+    }
+
     return json({
       status: terminal ? ownTx?.status : status,
       opay_status: opayStatus,

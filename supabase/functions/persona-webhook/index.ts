@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
           const freq = (prof as { persona_notification_frequency?: string } | null)?.persona_notification_frequency ?? "realtime";
           if (prof?.email && freq === "realtime") {
             const firstName = (prof.full_name as string | null)?.split(" ")[0] ?? "";
-            const statusUrl = `${Deno.env.get("APP_URL") ?? "https://rentmaikar.lovable.app"}/onboarding/verification-status`;
+            const statusUrl = `${Deno.env.get("APP_URL") ?? "https://rentmaikar.com"}/onboarding/verification-status`;
             await supa.functions.invoke("send-outbound-email", {
               body: {
                 action: "send",
@@ -227,7 +227,7 @@ Deno.serve(async (req) => {
           }).then(() => {}, () => {});
 
           if (status === "approved") {
-            const link = `${Deno.env.get("APP_URL") ?? "https://rentmaikar.lovable.app"}/proxy/consent?token=${proxyRow.consent_token}`;
+            const link = `${Deno.env.get("APP_URL") ?? "https://rentmaikar.com"}/proxy/consent?token=${proxyRow.consent_token}`;
             const message = `${proxyRow.proxy_full_name}, your identity is verified. Please sign the proxy billing consent form: ${link}`;
             const prefs: any = proxyRow.notification_prefs ?? {};
             const events = prefs.events ?? {};

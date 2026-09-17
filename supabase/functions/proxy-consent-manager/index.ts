@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
     if (prev?.response) return json(200, prev.response as any);
   }
 
-  const APP_URL = Deno.env.get("APP_URL") ?? "https://rentmaikar.lovable.app";
+  const APP_URL = Deno.env.get("APP_URL") ?? "https://rentmaikar.com";
 
   try {
     if (p.action === "create") {

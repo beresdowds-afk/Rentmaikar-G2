@@ -149,10 +149,10 @@ const ov = (
 
 const SMS_TEMPLATES = {
   welcome: (name: string) =>
-    `Rentmaikar: Hi ${name}! Reply PAY, STATUS, BALANCE, DOC, HELP, or STOP. Visit rentmaikar.lovable.app`,
+    `Rentmaikar: Hi ${name}! Reply PAY, STATUS, BALANCE, DOC, HELP, or STOP. Visit rentmaikar.com`,
 
   unregistered: () =>
-    `Rentmaikar: We don't recognize this number. Register at rentmaikar.lovable.app to get started.`,
+    `Rentmaikar: We don't recognize this number. Register at rentmaikar.com to get started.`,
 
   paymentDue: (amount: string, vehicle: string, link: string) =>
     ov(
@@ -172,7 +172,7 @@ const SMS_TEMPLATES = {
     ),
 
   noRental: () =>
-    `Rentmaikar: No active rental found. Browse vehicles at rentmaikar.lovable.app/catalogue`,
+    `Rentmaikar: No active rental found. Browse vehicles at rentmaikar.com/catalogue`,
 
   balance: (amount: string) =>
     ov(
@@ -198,9 +198,9 @@ const SMS_TEMPLATES = {
       {
         pending_count: pending,
         missing_count: missing,
-        portal_link: "rentmaikar.lovable.app/driver/dashboard",
+        portal_link: "rentmaikar.com/driver/dashboard",
       },
-      `Rentmaikar: Docs - ${missing} missing, ${pending} pending review. Upload at rentmaikar.lovable.app/driver/dashboard`,
+      `Rentmaikar: Docs - ${missing} missing, ${pending} pending review. Upload at rentmaikar.com/driver/dashboard`,
     ),
 
   docsComplete: () =>
@@ -246,7 +246,7 @@ const SMS_TEMPLATES = {
     `Rentmaikar EMERGENCY: Your report has been received. Support is being notified. Call ${supportPhone} for immediate help.`,
 
   emergencyNoUser: (supportPhone: string) =>
-    `Rentmaikar EMERGENCY: Call ${supportPhone} immediately for assistance. Register at rentmaikar.lovable.app for faster support.`,
+    `Rentmaikar EMERGENCY: Call ${supportPhone} immediately for assistance. Register at rentmaikar.com for faster support.`,
 
   // ─── NLP-driven response templates ───
   intentPayment: () =>
@@ -256,7 +256,7 @@ const SMS_TEMPLATES = {
     `Rentmaikar: Need rental info? Reply STATUS for your active rental details.`,
 
   intentDocument: () =>
-    `Rentmaikar: For document questions, reply DOC to check your status or visit rentmaikar.lovable.app/driver/dashboard`,
+    `Rentmaikar: For document questions, reply DOC to check your status or visit rentmaikar.com/driver/dashboard`,
 
   intentSupport: (supportPhone: string) =>
     `Rentmaikar: Connecting you to a human agent. Reply HUMAN or call ${supportPhone} (8AM-10PM daily).`,
@@ -268,7 +268,7 @@ const SMS_TEMPLATES = {
     `Rentmaikar: We're sorry you're having trouble. An agent will review your message. Call ${supportPhone} for urgent issues.`,
 
   intentNegotiation: () =>
-    `Rentmaikar: To manage price negotiations, reply ACCEPT, REJECT, or COUNTER. Or visit your dashboard at rentmaikar.lovable.app`,
+    `Rentmaikar: To manage price negotiations, reply ACCEPT, REJECT, or COUNTER. Or visit your dashboard at rentmaikar.com`,
 
   intentNegotiationStatus: () =>
     `Rentmaikar: Your negotiation is being reviewed. Log in to your dashboard for full details and to respond.`,
@@ -558,7 +558,7 @@ const handleEmergency = async (
 // ═══════════════════════════════════════════════════════════
 
 const generatePaymentLink = (driverId: string, amount: number, currency: string): string => {
-  const baseUrl = "https://rentmaikar.lovable.app";
+  const baseUrl = "https://rentmaikar.com";
   const params = new URLSearchParams({
     driver: driverId, amount: amount.toString(), currency, ts: Date.now().toString(),
   });
