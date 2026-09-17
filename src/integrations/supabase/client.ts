@@ -11,28 +11,29 @@ const SUPABASE_URL = (rawUrl && !rawUrl.includes("bwvocmhcledbwqlpcswp"))
   ? rawUrl
   : DEFAULT_SUPABASE_URL;
 
-// Key selection: If connecting to jrsydiofzceoeddjogov, ensure we do not send the legacy project JWT
+// Key selection: Ensure publishable anon key is used and legacy/secret keys are rejected
 const rawPublishable = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const rawAnon = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const isLegacyKey = (k?: string) => {
+const isValidPublishableKey = (k?: string) => {
   if (!k) return false;
-  if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return true;
+  if (k.startsWith("sb_secret_")) return false;
+  if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return false;
   try {
     const parts = k.split(".");
     if (parts.length === 3) {
       const payload = JSON.parse(atob(parts[1]));
-      if (payload.ref === "bwvocmhcledbwqlpcswp") return true;
+      if (payload.ref === "bwvocmhcledbwqlpcswp") return false;
     }
   } catch {
     // ignore
   }
-  return false;
+  return true;
 };
 
 const SUPABASE_PUBLISHABLE_KEY = 
-  (!isLegacyKey(rawPublishable) && rawPublishable)
+  (isValidPublishableKey(rawPublishable) && rawPublishable)
     ? rawPublishable
-    : (!isLegacyKey(rawAnon) && rawAnon)
+    : (isValidPublishableKey(rawAnon) && rawAnon)
       ? rawAnon
       : DEFAULT_SUPABASE_KEY;
 
@@ -98,6 +99,8 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "persona-config",
   "referee-attestation",
   "notify-withdrawal",
+  "provision-user-account",
+  "send-2fa-code",
 ]);
 
 async function callLocalGateway(functionName: string, options?: any) {

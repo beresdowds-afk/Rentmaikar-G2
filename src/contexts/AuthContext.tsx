@@ -195,9 +195,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const targetRole: AppRole = storedRole === 'owner' ? 'owner' : 'driver';
         effectiveRole = targetRole;
 
-        assignRole(userId, targetRole, normalizedEmail).catch((e) => {
+        try {
+          await assignRole(userId, targetRole, normalizedEmail);
+        } catch (e) {
           console.warn('[AuthContext] Auto-assigning OAuth role failed:', e);
-        });
+        }
 
         if (typeof window !== 'undefined') {
           try {
@@ -315,8 +317,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         phone: effectivePhone,
       };
       setTwoFactorStatus(status);
+      if (!requires2FA) {
+        setTwoFactorVerified(true);
+      }
       return status;
     } catch {
+      setTwoFactorVerified(true);
       return null;
     }
   };
@@ -341,6 +347,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Watchdog: Ensure isRoleLoading can never hang indefinitely
+  useEffect(() => {
+    if (isRoleLoading) {
+      const timer = setTimeout(() => {
+        setIsRoleLoading(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isRoleLoading]);
+
   useEffect(() => {
     // Set up auth state listener FIRST — synchronous state, deferred side effects.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -350,12 +366,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (session?.user) {
           setIsRoleLoading(true);
-          setTimeout(() => {
-            fetchUserRole(session.user.id, session.user.email).then((role) => {
+          const uid = session.user.id;
+          const uemail = session.user.email;
+          fetchUserRole(uid, uemail)
+            .then((role) => {
               setUserRole(role);
+            })
+            .catch((err) => {
+              console.error('Failed to fetch role:', err);
+              setUserRole(null);
+            })
+            .finally(() => {
               setIsRoleLoading(false);
             });
-          }, 0);
+
+          check2FAStatus(uid).then((status) => {
+            if (!status || !status.requires_2fa) {
+              setTwoFactorVerified(true);
+            }
+          }).catch(() => {
+            setTwoFactorVerified(true);
+          });
         } else {
           setUserRole(null);
           setUserRoles([]);
@@ -447,11 +478,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (session?.user) {
         setIsRoleLoading(true);
-        fetchUserRole(session.user.id, session.user.email).then((role) => {
-          setUserRole(role);
-          setIsRoleLoading(false);
+        const uid = session.user.id;
+        const uemail = session.user.email;
+        fetchUserRole(uid, uemail)
+          .then((role) => {
+            setUserRole(role);
+          })
+          .catch((err) => {
+            console.error('Error fetching user role in getSession:', err);
+            setUserRole(null);
+          })
+          .finally(() => {
+            setIsRoleLoading(false);
+          });
+
+        check2FAStatus(uid).then((status) => {
+          if (!status || !status.requires_2fa) {
+            setTwoFactorVerified(true);
+          }
+        }).catch(() => {
+          setTwoFactorVerified(true);
         });
-        setTwoFactorVerified(true);
       } else {
         setIsRoleLoading(false);
       }

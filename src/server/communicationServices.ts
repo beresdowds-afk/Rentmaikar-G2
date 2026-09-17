@@ -1044,22 +1044,23 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       const rawUrl = process.env.VITE_SUPABASE_URL;
       const supabaseUrl = (rawUrl && !rawUrl.includes("bwvocmhcledbwqlpcswp")) ? rawUrl : DEFAULT_SUPABASE_URL;
 
-      const rawKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-      const isLegacy = (k?: string) => {
+      const rawKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const isValidKey = (k?: string) => {
         if (!k) return false;
-        if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return true;
+        if (k.startsWith("sb_secret_")) return false;
+        if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return false;
         try {
           const parts = k.split(".");
           if (parts.length === 3) {
             const payload = JSON.parse(atob(parts[1]));
-            if (payload.ref === "bwvocmhcledbwqlpcswp") return true;
+            if (payload.ref === "bwvocmhcledbwqlpcswp") return false;
           }
         } catch {
           // ignore
         }
-        return false;
+        return true;
       };
-      const anonKey = (rawKey && !isLegacy(rawKey)) ? rawKey : DEFAULT_SUPABASE_KEY;
+      const anonKey = (rawKey && isValidKey(rawKey)) ? rawKey : DEFAULT_SUPABASE_KEY;
 
       const verifyRes = await fetch(`${supabaseUrl}/auth/v1/verify`, {
         method: "POST",

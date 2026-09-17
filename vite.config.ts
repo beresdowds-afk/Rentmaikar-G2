@@ -29,6 +29,12 @@ export default defineConfig(({ mode }) => ({
         ? process.env.VITE_SUPABASE_PROJECT_ID
         : "jrsydiofzceoeddjogov"
     ),
+    "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(
+      process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p"
+    ),
+    "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(
+      process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p"
+    ),
     "import.meta.env.VITE_GOOGLE_CLIENT_ID": JSON.stringify(
       (process.env.VITE_GOOGLE_CLIENT_ID && process.env.VITE_GOOGLE_CLIENT_ID.includes(".apps.googleusercontent.com"))
         ? process.env.VITE_GOOGLE_CLIENT_ID

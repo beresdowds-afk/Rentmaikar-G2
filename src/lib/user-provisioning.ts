@@ -22,6 +22,15 @@ export async function assignRole(
     } as never);
     if (!error) return;
   } catch {
+    // Fall back to server function below
+  }
+
+  try {
+    const { data } = await supabase.functions.invoke('provision-user-account', {
+      body: { userId, role, email },
+    });
+    if (data?.ok) return;
+  } catch {
     // Fall back to direct table upsert below
   }
 
