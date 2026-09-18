@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAssistantPermissions } from "@/hooks/useAssistantPermissions";
 import {
   scanDomForAccessibility,
   A11yIssue,
@@ -38,10 +39,15 @@ import { toast } from "sonner";
 export const AccessibilityOverlay: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, userRole, hasRole } = useAuth();
+  const { user, userRole, hasRole, isRoleLoading } = useAuth();
+  const { isAssistant, isFullAdmin } = useAssistantPermissions();
 
   const [isOpen, setIsOpen] = useState(false);
-  const [highlightOnPage, setHighlightOnPage] = useState(true);
+  const [isDismissed, setIsDismissed] = useState(false);
+  const [highlightOnPage, setHighlightOnPage] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("rentmaikar_a11y_highlight") === "true";
+  });
   const [issues, setIssues] = useState<A11yIssue[]>([]);
   const [filterType, setFilterType] = useState<"all" | "labels" | "contrast" | "registration" | "dashboard">("all");
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
@@ -53,10 +59,19 @@ export const AccessibilityOverlay: React.FC = () => {
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [recentFixResults, setRecentFixResults] = useState<FixResult[]>([]);
 
-  const ADMIN_EMAILS = useMemo(
+  // Verified full administrator accounts (Strictly Full Admins, never assistants)
+  const FULL_ADMIN_EMAILS = useMemo(
     () => [
-      "eastfortemain@gmail.com",
       "adebayoolusola39@gmail.com",
+    ],
+    []
+  );
+
+  // Known assistant accounts that must NEVER have access to A11y inspector
+  const ASSISTANT_EMAILS = useMemo(
+    () => [
+      "ibrahimganiyu026@gmail.com",
+      "eastfortemain@gmail.com",
     ],
     []
   );
@@ -65,45 +80,69 @@ export const AccessibilityOverlay: React.FC = () => {
   // A11y inspector and controls are STRICTLY for full admin role only.
   // Explicitly forbidden for admin assistants, drivers, owners, and non-admins.
   const isAdmin = useMemo(() => {
-    // 0. Explicit rejection for admin assistants and regular roles
-    if (userRole === "admin_assistant" || hasRole("admin_assistant")) {
+    // 0. If auth or role is still loading, or no authenticated user exists, do not show
+    if (!user || isRoleLoading) {
       return false;
     }
 
-    // 1. Direct role verification from Supabase auth state
-    if (userRole === "admin" || hasRole("admin")) {
-      return true;
-    }
+    const email = user.email?.trim().toLowerCase();
 
-    // 2. Email verification against registered admin accounts
-    const email = user?.email?.trim().toLowerCase();
-    if (email && ADMIN_EMAILS.includes(email)) {
-      return true;
-    }
-
-    // 3. User metadata role check
+    // 1. Explicit rejection for admin assistants and assistant accounts
     if (
-      (user?.app_metadata?.role === "admin" || user?.user_metadata?.role === "admin") &&
-      userRole !== "admin_assistant"
+      userRole === "admin_assistant" ||
+      hasRole("admin_assistant") ||
+      isAssistant ||
+      (email && ASSISTANT_EMAILS.includes(email))
     ) {
+      return false;
+    }
+
+    // 2. Explicit rejection for non-admin domain roles
+    if (
+      userRole === "driver" ||
+      userRole === "owner" ||
+      userRole === "legal_support" ||
+      userRole === "iot_support" ||
+      userRole === "vehicle_support" ||
+      userRole === "insurance_support"
+    ) {
+      return false;
+    }
+
+    // 3. Direct role verification from Supabase auth state or permissions hook
+    if (userRole === "admin" || hasRole("admin") || isFullAdmin) {
       return true;
     }
 
-    // 4. Stored verified admin session
-    if (typeof window !== "undefined") {
-      try {
-        const storedRole = window.localStorage.getItem("rentmaikar_admin_role");
-        const isAdminActive = window.localStorage.getItem("rentmaikar_admin_active") === "true";
-        if (storedRole === "admin" && isAdminActive && userRole !== "admin_assistant") {
-          return true;
+    // 4. Email verification against registered admin accounts
+    if (email && FULL_ADMIN_EMAILS.includes(email)) {
+      return true;
+    }
+
+    // Never fall back to unverified localStorage for A11y inspector
+    return false;
+  }, [user, userRole, hasRole, isRoleLoading, isAssistant, isFullAdmin, ASSISTANT_EMAILS, FULL_ADMIN_EMAILS]);
+
+  // Immediate cleanup when user is not admin or changes
+  useEffect(() => {
+    if (!isAdmin) {
+      // Clear any DOM highlight classes
+      document.querySelectorAll(".a11y-target-pulse, .a11y-fixed-pulse").forEach((el) => {
+        el.classList.remove("a11y-target-pulse", "a11y-fixed-pulse");
+      });
+      // Correct any stale localStorage role if user is an assistant
+      if (typeof window !== "undefined") {
+        try {
+          const storedRole = window.localStorage.getItem("rentmaikar_admin_role");
+          if (storedRole === "admin" && (userRole === "admin_assistant" || isAssistant)) {
+            window.localStorage.setItem("rentmaikar_admin_role", "admin_assistant");
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
       }
     }
-
-    return false;
-  }, [user, userRole, hasRole, ADMIN_EMAILS]);
+  }, [isAdmin, userRole, isAssistant]);
 
   // Scroll & resize ticker to keep highlight pins anchored to elements during scroll
   const [, setScrollTick] = useState(0);
@@ -126,12 +165,25 @@ export const AccessibilityOverlay: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "a") {
         e.preventDefault();
+        setIsDismissed(false);
         setIsOpen((open) => !open);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isAdmin]);
+
+  const toggleHighlight = useCallback(() => {
+    setHighlightOnPage((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("rentmaikar_a11y_highlight", String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
 
   const runScan = useCallback(() => {
     if (!isAdmin) return;
@@ -338,7 +390,7 @@ export const AccessibilityOverlay: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  if (!isAdmin) {
+  if (!isAdmin || (isDismissed && !isOpen)) {
     return null;
   }
 
@@ -432,7 +484,7 @@ export const AccessibilityOverlay: React.FC = () => {
       >
         <button
           type="button"
-          onClick={() => setHighlightOnPage((prev) => !prev)}
+          onClick={toggleHighlight}
           className={`flex items-center justify-center h-8 px-2.5 rounded-full shadow-lg border backdrop-blur-md text-xs font-medium transition ${
             highlightOnPage
               ? "bg-primary text-primary-foreground border-primary"
@@ -475,6 +527,16 @@ export const AccessibilityOverlay: React.FC = () => {
           >
             {issues.length}
           </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsDismissed(true)}
+          className="flex items-center justify-center h-8 w-8 rounded-full shadow-lg border backdrop-blur-md bg-background/90 text-muted-foreground hover:text-foreground border-border transition"
+          title="Dismiss Accessibility Inspector for this session (press Ctrl+Alt+A to reopen)"
+          aria-label="Dismiss Accessibility Inspector"
+        >
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
 

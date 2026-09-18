@@ -131,6 +131,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       fullName: 'Olusola Adebayo',
       phone: '+2348139051772',
     },
+    'ibrahimganiyu026@gmail.com': {
+      role: 'admin_assistant',
+      fullName: 'Ibrahim Ganiyu',
+    },
     'beresanddowds@gmail.com': {
       role: 'owner',
       fullName: 'Beres & Dowds',
@@ -145,6 +149,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     'eastfortemain@gmail.com': {
       fullName: 'Olusola Adebayo',
       phone: '+2348139051772',
+      role: 'admin_assistant',
+    },
+    'ibrahimganiyu026@gmail.com': {
+      fullName: 'Ibrahim Ganiyu',
+      phone: '',
       role: 'admin_assistant',
     },
     'adebayoolusola39@gmail.com': {
@@ -183,7 +192,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return null;
       }
 
-      const assignedRole = (data?.role as AppRole) ?? null;
+      let assignedRole = (data?.role as AppRole) ?? null;
+      if (!assignedRole) {
+        // Also check admin_assistant_permissions in case user was provisioned as assistant
+        const { data: assistantRow } = await supabase
+          .from('admin_assistant_permissions')
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (assistantRow) {
+          assignedRole = 'admin_assistant';
+        }
+      }
       let effectiveRole: AppRole | null = predefined ? predefined.role : assignedRole;
 
       // Handle new OAuth / Google SSO users without an existing role assignment:
@@ -262,6 +282,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               localStorage.setItem('rentmaikar_admin_email', normalizedEmail!);
               if (predefined.fullName) localStorage.setItem('rentmaikar_admin_name', predefined.fullName);
               if (predefined.phone) localStorage.setItem('rentmaikar_admin_phone', predefined.phone);
+            } else {
+              localStorage.removeItem('rentmaikar_admin_active');
+              localStorage.removeItem('rentmaikar_admin_role');
+              localStorage.removeItem('rentmaikar_admin_email');
+              localStorage.removeItem('rentmaikar_admin_name');
+              localStorage.removeItem('rentmaikar_admin_phone');
             }
           } catch {
             // ignore
@@ -269,6 +295,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
 
         return predefined.role;
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          if (effectiveRole === 'admin' || effectiveRole === 'admin_assistant') {
+            localStorage.setItem('rentmaikar_admin_active', 'true');
+            localStorage.setItem('rentmaikar_admin_role', effectiveRole);
+            localStorage.setItem('rentmaikar_admin_email', normalizedEmail || '');
+          } else {
+            localStorage.removeItem('rentmaikar_admin_active');
+            localStorage.removeItem('rentmaikar_admin_role');
+            localStorage.removeItem('rentmaikar_admin_email');
+            localStorage.removeItem('rentmaikar_admin_name');
+            localStorage.removeItem('rentmaikar_admin_phone');
+          }
+        } catch {
+          // ignore
+        }
       }
 
       return effectiveRole;
@@ -649,6 +693,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUserRoles([]);
     setTwoFactorStatus(null);
     setTwoFactorVerified(false);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('rentmaikar_admin_active');
+        localStorage.removeItem('rentmaikar_admin_role');
+        localStorage.removeItem('rentmaikar_admin_email');
+        localStorage.removeItem('rentmaikar_admin_name');
+        localStorage.removeItem('rentmaikar_admin_phone');
+        localStorage.removeItem('rentmaikar_oauth_role');
+        sessionStorage.removeItem('rentmaikar_oauth_role');
+      } catch {
+        // ignore
+      }
+    }
   };
 
 
