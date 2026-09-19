@@ -171,7 +171,7 @@ export const PWAInstallPopupCTA: React.FC = () => {
       {viewMode === "collapsed" && (
         <div
           id="pwa-collapsed-cta-container"
-          className="fixed bottom-5 right-5 z-40 flex items-center gap-1.5 transition-all duration-300 transform animate-in fade-in slide-in-from-bottom-3"
+          className="fixed bottom-5 left-5 sm:bottom-6 sm:left-6 z-40 flex items-center gap-1.5 transition-all duration-300 transform animate-in fade-in slide-in-from-bottom-3"
         >
           {/* Main Self-Installation Trigger Button */}
           <button
@@ -228,8 +228,9 @@ export const PWAInstallPopupCTA: React.FC = () => {
         <aside
           id="pwa-install-popup-cta"
           aria-labelledby="pwa-install-cta-title"
-          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 max-w-[360px] sm:max-w-[390px] w-[calc(100vw-2rem)] rounded-2xl bg-card/98 backdrop-blur-md border border-border shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-4"
+          className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 z-40 max-w-[360px] sm:max-w-[390px] w-[calc(100vw-2rem)] rounded-2xl bg-card/98 backdrop-blur-md border border-border shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-4"
         >
+
           {/* Card Header & Controls */}
           <div className="p-4 sm:p-5 space-y-3.5">
             <div className="flex items-start justify-between gap-3">

@@ -11,6 +11,8 @@ import {
   FileText,
   User,
   BellRing,
+  Users,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,8 +25,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { useCommunicationsHub } from './CommunicationsHubContext';
+import { useNavigate } from 'react-router-dom';
 
 type MessageChannel = 'sms' | 'whatsapp' | 'email' | 'in_app';
+
+const ACTIVE_DRAFT_KEY = 'rentmaikar_active_composer_draft';
 
 interface QuickTemplate {
   id: string;
@@ -70,8 +75,9 @@ const TEMPLATES: QuickTemplate[] = [
 ];
 
 export const HubMessageComposer: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
-  const { prefillRecipient, clearPrefill } = useCommunicationsHub();
+  const { prefillRecipient, clearPrefill, openBulkMessaging, setActiveTab } = useCommunicationsHub();
 
   const [channel, setChannel] = useState<MessageChannel>('sms');
   const [recipientName, setRecipientName] = useState('');
@@ -86,7 +92,28 @@ export const HubMessageComposer: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Handle prefill
+  // Restore active draft on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_DRAFT_KEY);
+      if (saved && !prefillRecipient) {
+        const parsed = JSON.parse(saved);
+        if (parsed.body || parsed.subject) {
+          if (parsed.channel) setChannel(parsed.channel);
+          if (parsed.recipientName) setRecipientName(parsed.recipientName);
+          if (parsed.email && parsed.channel === 'email') setRecipientContact(parsed.email);
+          else if (parsed.phone) setRecipientContact(parsed.phone);
+          if (parsed.subject) setSubject(parsed.subject);
+          if (parsed.body) setBody(parsed.body);
+          if (parsed.recipientUserId) setRecipientUserId(parsed.recipientUserId);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }, [prefillRecipient]);
+
+  // Handle prefill from CommunicationsHubContext
   useEffect(() => {
     if (prefillRecipient) {
       if (prefillRecipient.name) setRecipientName(prefillRecipient.name);
@@ -108,6 +135,30 @@ export const HubMessageComposer: React.FC = () => {
       }
     }
   }, [prefillRecipient, channel]);
+
+  // Debounced auto-save active draft to localStorage
+  useEffect(() => {
+    if (!body && !subject && !recipientContact) return;
+    const timer = setTimeout(() => {
+      try {
+        const payload = {
+          channel,
+          recipientUserId,
+          recipientName,
+          email: channel === 'email' ? recipientContact : '',
+          phone: channel !== 'email' ? recipientContact : '',
+          subject,
+          body,
+          savedAt: new Date().toLocaleTimeString(),
+        };
+        localStorage.setItem(ACTIVE_DRAFT_KEY, JSON.stringify(payload));
+      } catch {
+        // Ignore
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [channel, recipientUserId, recipientName, recipientContact, subject, body]);
 
   // Adjust contact field when channel changes
   const handleChannelChange = (newChan: MessageChannel) => {
@@ -167,6 +218,21 @@ export const HubMessageComposer: React.FC = () => {
     setBody(tpl.body);
   };
 
+  const handleSwitchToBulk = () => {
+    const contact = recipientName || recipientContact ? [{
+      user_id: recipientUserId,
+      full_name: recipientName,
+      email: channel === 'email' ? recipientContact : null,
+      phone: channel !== 'email' ? recipientContact : null,
+    }] : [];
+
+    openBulkMessaging(null, contact, channel);
+  };
+
+  const handleOpenFullEditor = () => {
+    navigate('/admin?tab=inbox');
+  };
+
   const handleSendMessage = async () => {
     const trimmedBody = body.trim();
     if (!trimmedBody) {
@@ -208,7 +274,9 @@ export const HubMessageComposer: React.FC = () => {
           },
         });
 
-        if (error) throw error;
+        if (error || (data && data.ok === false)) {
+          throw new Error(data?.error || error?.message || 'Email dispatch failed');
+        }
         toast.success(`Email dispatched to ${recipientContact.trim()}`);
       } else {
         // SMS or WhatsApp
@@ -221,13 +289,16 @@ export const HubMessageComposer: React.FC = () => {
           },
         });
 
-        if (error) throw error;
+        if (error || (data && data.success === false)) {
+          throw new Error(data?.error || error?.message || `${channel.toUpperCase()} message failed`);
+        }
         toast.success(`${channel.toUpperCase()} message sent to ${recipientContact.trim()}`);
       }
 
       // Reset fields
       setBody('');
       setSubject('');
+      localStorage.removeItem(ACTIVE_DRAFT_KEY);
       clearPrefill();
     } catch (err: any) {
       console.error('Failed to send message:', err);
@@ -239,6 +310,35 @@ export const HubMessageComposer: React.FC = () => {
 
   return (
     <div className="space-y-3.5">
+      {/* Top Header Actions */}
+      <div className="flex items-center justify-between pb-1">
+        <span className="text-xs font-semibold text-foreground">Omnichannel Message Editor</span>
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleSwitchToBulk}
+            className="h-6 px-2 text-[10px] gap-1 text-primary hover:bg-primary/10"
+            title="Convert to Bulk Message"
+          >
+            <Users className="h-3 w-3" />
+            <span>Bulk Mode</span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleOpenFullEditor}
+            className="h-6 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+            title="Open in Central Messaging Center"
+          >
+            <ExternalLink className="h-3 w-3" />
+            <span className="hidden sm:inline">Full Editor</span>
+          </Button>
+        </div>
+      </div>
+
       {/* Channel Switcher */}
       <div className="flex items-center justify-between">
         <Tabs value={channel} onValueChange={(val) => handleChannelChange(val as MessageChannel)} className="w-full">
@@ -256,7 +356,7 @@ export const HubMessageComposer: React.FC = () => {
               <span>Email</span>
             </TabsTrigger>
             <TabsTrigger value="in_app" className="text-xs h-7 gap-1">
-              <BellRing className="h-3 w-3 text-amber-600" />
+              <BellRing className="h-3 w-3 text-purple-600" />
               <span>In-App</span>
             </TabsTrigger>
           </TabsList>
@@ -347,6 +447,32 @@ export const HubMessageComposer: React.FC = () => {
         />
       </div>
 
+      {/* Dynamic Placeholder Insertion */}
+      <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+        <span className="text-muted-foreground font-medium">Insert:</span>
+        <button
+          type="button"
+          onClick={() => setBody((prev) => `${prev} {{customer_name}}`.trimStart())}
+          className="px-2 py-0.5 rounded border bg-muted/60 hover:bg-muted text-foreground transition"
+        >
+          {'{customer_name}'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setBody((prev) => `${prev} {{first_name}}`.trimStart())}
+          className="px-2 py-0.5 rounded border bg-muted/60 hover:bg-muted text-foreground transition"
+        >
+          {'{first_name}'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setBody((prev) => `${prev} {{today}}`.trimStart())}
+          className="px-2 py-0.5 rounded border bg-muted/60 hover:bg-muted text-foreground transition"
+        >
+          {'{today}'}
+        </button>
+      </div>
+
       {/* Quick Templates Selector */}
       <div className="space-y-1 pt-0.5">
         <Label className="text-[10px] font-medium text-muted-foreground flex items-center gap-1">
@@ -392,3 +518,4 @@ export const HubMessageComposer: React.FC = () => {
     </div>
   );
 };
+

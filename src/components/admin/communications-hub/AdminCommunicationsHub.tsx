@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Phone,
   PhoneCall,
@@ -12,6 +12,10 @@ import {
   Headphones,
   ShieldCheck,
   Send,
+  Inbox,
+  PenSquare,
+  Users,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +26,8 @@ import { HubCallDialer } from './HubCallDialer';
 import { HubMessageComposer } from './HubMessageComposer';
 import { HubConversationHistory } from './HubConversationHistory';
 import { HubContextActions } from './HubContextActions';
+import { HubMessageConsole } from './HubMessageConsole';
+import { HubBulkMessaging } from './HubBulkMessaging';
 import { AdminCommunicationsHubErrorBoundary } from './AdminCommunicationsHubErrorBoundary';
 
 const ADMIN_EMAILS = [
@@ -31,6 +37,7 @@ const ADMIN_EMAILS = [
 
 export const AdminCommunicationsHub: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, userRole, hasRole } = useAuth();
   const {
     isOpen,
@@ -82,6 +89,9 @@ export const AdminCommunicationsHub: React.FC = () => {
 
   const isCallInProgress = Boolean(activeCall && activeCall.status !== 'completed' && activeCall.status !== 'failed');
 
+  // Normalize message tab for backward compatibility
+  const currentTab = activeTab === 'message' ? 'editor' : activeTab;
+
   return (
     <AdminCommunicationsHubErrorBoundary>
       {/* Floating Trigger Launcher (Shown when Hub window is closed or minimized) */}
@@ -127,8 +137,8 @@ export const AdminCommunicationsHub: React.FC = () => {
         <div
           className={`fixed z-50 bg-background border border-border shadow-2xl rounded-2xl flex flex-col overflow-hidden transition-all duration-200 ${
             isExpandedFull
-              ? 'top-4 bottom-4 left-4 right-4 sm:top-10 sm:bottom-10 sm:left-1/4 sm:right-1/4 max-w-4xl mx-auto'
-              : 'bottom-6 right-6 w-[94vw] sm:w-[420px] max-h-[85vh] h-[600px]'
+              ? 'top-4 bottom-4 left-4 right-4 sm:top-8 sm:bottom-8 sm:left-12 sm:right-12 max-w-5xl mx-auto'
+              : 'bottom-6 right-6 w-[94vw] sm:w-[480px] max-h-[88vh] h-[640px]'
           }`}
           role="dialog"
           aria-label="Rentmaikar Admin Communications Hub"
@@ -147,13 +157,25 @@ export const AdminCommunicationsHub: React.FC = () => {
                   </Badge>
                 </div>
                 <p className="text-[10px] text-muted-foreground truncate">
-                  Calls, SMS, WhatsApp, Email & Context Actions
+                  Console, Editor, Bulk Engine, VoIP & History
                 </p>
               </div>
             </div>
 
             {/* Window Controls */}
             <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/admin?tab=inbox')}
+                className="h-7 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground hidden sm:flex"
+                title="Open Central Messaging Center"
+              >
+                <ExternalLink className="h-3 w-3" />
+                <span>Center</span>
+              </Button>
+
               <Button
                 type="button"
                 variant="ghost"
@@ -191,45 +213,68 @@ export const AdminCommunicationsHub: React.FC = () => {
 
           {/* Navigation Tabs Bar */}
           <Tabs
-            value={activeTab}
+            value={currentTab}
             onValueChange={(val) => setActiveTab(val as HubTab)}
             className="flex-1 flex flex-col overflow-hidden"
           >
-            <div className="px-3 pt-2.5 pb-2 border-b border-border/60 bg-background shrink-0">
-              <TabsList className="grid grid-cols-4 h-8 bg-muted/60 p-0.5 w-full">
-                <TabsTrigger value="call" className="text-xs h-7 gap-1 px-1">
-                  <Phone className="h-3.5 w-3.5 text-emerald-600" />
+            <div className="px-3 pt-2 pb-1.5 border-b border-border/60 bg-background shrink-0 overflow-x-auto">
+              <TabsList className="grid grid-cols-6 h-8 bg-muted/60 p-0.5 min-w-[420px] w-full">
+                <TabsTrigger value="console" className="text-[11px] h-7 gap-1 px-1">
+                  <Inbox className="h-3 w-3 text-blue-600" />
+                  <span className="truncate">Console</span>
+                  {unreadCount > 0 && (
+                    <Badge variant="destructive" className="text-[8px] h-3.5 min-w-[12px] px-1 py-0 rounded-full font-mono">
+                      {unreadCount}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+
+                <TabsTrigger value="editor" className="text-[11px] h-7 gap-1 px-1">
+                  <PenSquare className="h-3 w-3 text-indigo-600" />
+                  <span className="truncate">Editor</span>
+                </TabsTrigger>
+
+                <TabsTrigger value="bulk" className="text-[11px] h-7 gap-1 px-1">
+                  <Users className="h-3 w-3 text-emerald-600" />
+                  <span className="truncate">Bulk</span>
+                </TabsTrigger>
+
+                <TabsTrigger value="call" className="text-[11px] h-7 gap-1 px-1">
+                  <Phone className="h-3 w-3 text-emerald-600" />
                   <span className="truncate">Softphone</span>
                   {isCallInProgress && (
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
                   )}
                 </TabsTrigger>
 
-                <TabsTrigger value="message" className="text-xs h-7 gap-1 px-1">
-                  <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
-                  <span className="truncate">Message</span>
-                </TabsTrigger>
-
-                <TabsTrigger value="history" className="text-xs h-7 gap-1 px-1">
-                  <Clock className="h-3.5 w-3.5 text-amber-600" />
+                <TabsTrigger value="history" className="text-[11px] h-7 gap-1 px-1">
+                  <Clock className="h-3 w-3 text-amber-600" />
                   <span className="truncate">History</span>
                 </TabsTrigger>
 
-                <TabsTrigger value="context" className="text-xs h-7 gap-1 px-1">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <TabsTrigger value="context" className="text-[11px] h-7 gap-1 px-1">
+                  <Sparkles className="h-3 w-3 text-primary" />
                   <span className="truncate">Context</span>
                 </TabsTrigger>
               </TabsList>
             </div>
 
             {/* Scrollable Content Container */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <TabsContent value="call" className="mt-0 focus-visible:outline-hidden">
-                <HubCallDialer />
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
+              <TabsContent value="console" className="mt-0 focus-visible:outline-hidden h-full">
+                <HubMessageConsole />
               </TabsContent>
 
-              <TabsContent value="message" className="mt-0 focus-visible:outline-hidden">
+              <TabsContent value="editor" className="mt-0 focus-visible:outline-hidden">
                 <HubMessageComposer />
+              </TabsContent>
+
+              <TabsContent value="bulk" className="mt-0 focus-visible:outline-hidden">
+                <HubBulkMessaging />
+              </TabsContent>
+
+              <TabsContent value="call" className="mt-0 focus-visible:outline-hidden">
+                <HubCallDialer />
               </TabsContent>
 
               <TabsContent value="history" className="mt-0 focus-visible:outline-hidden">
@@ -255,3 +300,4 @@ export const AdminCommunicationsHub: React.FC = () => {
     </AdminCommunicationsHubErrorBoundary>
   );
 };
+

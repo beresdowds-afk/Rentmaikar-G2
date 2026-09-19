@@ -8,7 +8,7 @@ import { SignJWT } from "jose";
 import { createClient } from "@supabase/supabase-js";
 import pg from "pg";
 import crypto from "crypto";
-import { sendEmailViaResend, SENDERS } from "./emailService";
+import { sendEmailViaResend, SENDERS, VERIFIED_DOMAIN } from "./emailService";
 
 let pgPool: pg.Pool | null = null;
 function getDbPool(): pg.Pool {
@@ -798,25 +798,46 @@ export async function handleSendInboxReply(body: any): Promise<{
 export async function handleSendEmailReply(body: any): Promise<{
   success: boolean;
   messageId: string;
+  error?: string;
 }> {
-  const { recipientEmail, messageContent, subject = "RentMaikar Support" } = body;
+  const {
+    recipientEmail,
+    to,
+    email,
+    messageContent,
+    body: messageBody,
+    text,
+    content,
+    subject = "RentMaikar Support",
+    fromAlias,
+    from: customFrom,
+  } = body || {};
 
-  if (recipientEmail) {
-    const res = await sendEmailViaResend({
-      from: SENDERS.support,
-      to: recipientEmail,
-      subject,
-      html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111; max-width: 600px; margin: 0 auto; padding: 20px;">${messageContent}</div>`,
-      templateName: "support_inbox_reply",
-      replyTo: "support@rentmaikar.com",
-    });
-
-    if (res.ok) {
-      return { success: true, messageId: res.messageId || `email_${Date.now()}` };
-    }
+  const targetEmail = (recipientEmail || to || email || "").trim();
+  if (!targetEmail) {
+    return { success: false, messageId: "", error: "Recipient email is required" };
   }
 
-  return { success: true, messageId: `email_sim_${Date.now()}` };
+  const textToRender = messageContent || messageBody || text || content || "";
+  const alias = (fromAlias || "support").toLowerCase().trim();
+  const from = customFrom || `Rentmaikar Support <${alias}@${VERIFIED_DOMAIN}>`;
+  const replyTo = `${alias}@rentmaikar.com`;
+
+  const res = await sendEmailViaResend({
+    from,
+    to: targetEmail,
+    subject,
+    html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111; max-width: 600px; margin: 0 auto; padding: 20px;">${String(textToRender).replace(/\n/g, "<br/>")}</div>`,
+    text: typeof textToRender === "string" ? textToRender : undefined,
+    templateName: "support_inbox_reply",
+    replyTo,
+  });
+
+  if (res.ok) {
+    return { success: true, messageId: res.messageId || `email_${Date.now()}` };
+  }
+
+  return { success: false, messageId: "", error: res.error || "Failed to dispatch email reply" };
 }
 
 // -----------------------------------------------------------------

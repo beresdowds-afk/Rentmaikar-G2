@@ -70,7 +70,10 @@ import {
   Bookmark,
   Tag,
   SlidersHorizontal,
+  Headphones,
 } from 'lucide-react';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
+
 import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -272,6 +275,8 @@ export const AdminMessageConsole = ({
   } = useInboxConversations();
 
   const staff = useInboxStaff();
+  const hub = useCommunicationsHubSafe();
+
 
   // Selection & UI state
   const [selectedConversation, setSelectedConversation] = useState<InboxConversation | null>(null);
@@ -884,7 +889,21 @@ export const AdminMessageConsole = ({
             Refresh
           </Button>
 
+          {hub && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => hub.openMessageConsole(current?.id || null)}
+              className="h-8 gap-1.5 text-xs text-primary border-primary/30 hover:bg-primary/5 shadow-sm"
+              title="Open inside the floating Communications Hub"
+            >
+              <Headphones className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Pop Out to Hub</span>
+            </Button>
+          )}
+
           {onComposeNew && (
+
             <Button
               size="sm"
               onClick={onComposeNew}
@@ -1478,8 +1497,44 @@ export const AdminMessageConsole = ({
                           </SelectItem>
                         </SelectContent>
                       </Select>
+
+                      {hub && (
+                        <div className="flex items-center gap-1 border-l pl-1.5 ml-0.5">
+                          {current.user_phone && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-2 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 gap-1"
+                              onClick={() =>
+                                hub.openWithRecipient({
+                                  name: current.user_name || 'Customer',
+                                  phone: current.user_phone,
+                                  email: current.user_email,
+                                  userId: current.user_id,
+                                  defaultAction: 'call',
+                                })
+                              }
+                              title="Call in Communications Hub Softphone"
+                            >
+                              <Phone className="h-3 w-3" />
+                              <span className="hidden xl:inline">Call in Hub</span>
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 px-2 text-xs text-primary border-primary/30 hover:bg-primary/5 gap-1"
+                            onClick={() => hub.openMessageConsole(current.id)}
+                            title="Open this conversation in floating Communications Hub"
+                          >
+                            <Headphones className="h-3 w-3" />
+                            <span className="hidden xl:inline">Pop Out</span>
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
+
 
                   {/* Subject line and In-thread search */}
                   <div className="flex items-center justify-between pt-2 border-t text-xs gap-3">

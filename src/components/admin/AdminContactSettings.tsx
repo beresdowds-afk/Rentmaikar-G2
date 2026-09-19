@@ -271,20 +271,22 @@ const EmailConfigRow = ({ entry, onSave }: {
   const handleTestRowVerification = async () => {
     setVerifying(true);
     try {
+      const { data: authData } = await supabase.auth.getUser();
+      const targetRecipient = authData?.user?.email || "support@rentmaikar.com";
       const res = await fetch("/api/email/test-delivery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "outbound",
           from: entry.email,
-          to: "support@rentmaikar.com",
+          to: targetRecipient,
           subject: `Verification for ${entry.email}`,
           content: `Test verification: Delivered as ${entry.email} through the verified outgoing domain notify.rentmaikar.com.`,
         }),
       });
       const data = await res.json();
       if (data.ok) {
-        toast.success(`Verified: ${entry.email} delivered through notify.rentmaikar.com (ID: ${data.messageId?.slice(0, 8)})`);
+        toast.success(`Verified: ${entry.email} delivered through notify.rentmaikar.com to ${targetRecipient} (ID: ${data.messageId?.slice(0, 8)})`);
       } else {
         toast.error(`Verification error for ${entry.email}: ${data.error || "Failed"}`);
       }

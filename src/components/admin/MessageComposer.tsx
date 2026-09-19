@@ -67,6 +67,9 @@ import {
   type ComposerDraft,
   type RecipientOption,
 } from '@/hooks/useMessageComposer';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
+import { Headphones } from 'lucide-react';
+
 
 const CHANNELS: { value: ComposerChannel; label: string; icon: typeof Mail; color: string }[] = [
   { value: 'email', label: 'Email', icon: Mail, color: 'text-blue-500' },
@@ -129,6 +132,8 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
   const { send, sendBulk, isSending, bulkProgress } = useSendComposedMessage();
   const { fetchByRole, isLoading: isLoadingAudience } = useRoleRecipients();
   const { replies } = useCannedReplies();
+  const hub = useCommunicationsHubSafe();
+
 
   // Restore active draft from localStorage on mount
   useEffect(() => {
@@ -358,7 +363,32 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {hub && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                hub.openMessageEditor({
+                  name: recipientName,
+                  phone,
+                  email,
+                  userId: recipientUserId,
+                  defaultChannel: channel,
+                  subject,
+                  suggestedBody: body,
+                })
+              }
+              className="h-7 text-xs gap-1 text-primary border-primary/30 hover:bg-primary/5"
+              title="Pop out this composer into Communications Hub"
+            >
+              <Headphones className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Pop Out to Hub</span>
+            </Button>
+          )}
+
           {lastAutoSaveTime && (
+
             <span className="text-xs text-muted-foreground flex items-center gap-1 mr-2">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               Auto-saved {lastAutoSaveTime}
@@ -856,7 +886,21 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
                   {bulk.length > 0 ? ` (${reachable} recipients)` : ''}
                 </Button>
 
+                {hub && bulk.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => hub.openBulkMessaging(audienceRole || null, bulk, channel)}
+                    className="gap-1.5 text-xs text-primary border-primary/30 hover:bg-primary/5"
+                    title="Transfer this bulk dispatch to floating Communications Hub"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    <span>Launch in Communications Hub</span>
+                  </Button>
+                )}
+
                 <Button
+
                   variant="outline"
                   onClick={() => {
                     const saved = saveDraft(currentDraft());
