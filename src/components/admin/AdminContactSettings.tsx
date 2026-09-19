@@ -6,9 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Mail, MessageSquare, Phone, Loader2, Save, Globe, Building2, Copy, CheckCircle, Plus, Trash2 } from 'lucide-react';
+import { Mail, MessageSquare, Phone, Loader2, Save, Globe, Building2, Copy, CheckCircle, Plus, Trash2, Send, Inbox, ShieldCheck } from 'lucide-react';
 import { useContactSettings, ContactSetting } from '@/hooks/useUnifiedInbox';
 import CompanyInfoRealtimeDebug from '@/components/admin/CompanyInfoRealtimeDebug';
+import { PlatformEmailDomainVerificationPanel } from '@/components/admin/PlatformEmailDomainVerificationPanel';
 
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -250,6 +251,7 @@ const EmailConfigRow = ({ entry, onSave }: {
   const [senderName, setSenderName] = useState(entry.sender_name || '');
   const [desc, setDesc] = useState(entry.description || '');
   const [saving, setSaving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
@@ -266,11 +268,40 @@ const EmailConfigRow = ({ entry, onSave }: {
     onSave();
   };
 
+  const handleTestRowVerification = async () => {
+    setVerifying(true);
+    try {
+      const res = await fetch("/api/email/test-delivery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "outbound",
+          from: entry.email,
+          to: "support@rentmaikar.com",
+          subject: `Verification for ${entry.email}`,
+          content: `Test verification: Delivered as ${entry.email} through the verified outgoing domain notify.rentmaikar.com.`,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(`Verified: ${entry.email} delivered through notify.rentmaikar.com (ID: ${data.messageId?.slice(0, 8)})`);
+      } else {
+        toast.error(`Verification error for ${entry.email}: ${data.error || "Failed"}`);
+      }
+    } catch (err: any) {
+      toast.error(`Verification request failed: ${err.message}`);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   if (editing) {
     return (
       <tr className="border-b border-border/50">
         <td className="p-2.5"><Badge variant="outline" className="font-normal">{entry.key}</Badge></td>
         <td className="p-2.5"><Input value={email} onChange={e => setEmail(e.target.value)} className="h-8 text-xs font-mono" /></td>
+        <td className="p-2.5 text-xs text-muted-foreground">notify.rentmaikar.com</td>
+        <td className="p-2.5 text-xs text-muted-foreground">backend.rentmaikar.com</td>
         <td className="p-2.5"><Input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" className="h-8 text-xs" /></td>
         <td className="p-2.5"><Input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Description" className="h-8 text-xs" /></td>
         <td className="p-2.5 text-right">
@@ -286,18 +317,39 @@ const EmailConfigRow = ({ entry, onSave }: {
   }
 
   return (
-    <tr className="border-b border-border/50 group">
+    <tr className="border-b border-border/50 group hover:bg-muted/20 transition-colors">
       <td className="p-2.5">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="font-normal">{entry.key}</Badge>
+          <Badge variant="outline" className="font-normal capitalize">{entry.key}</Badge>
           {!entry.is_active && <Badge variant="secondary" className="text-[10px]">Inactive</Badge>}
         </div>
       </td>
-      <td className="p-2.5 font-mono text-xs">{entry.email}</td>
+      <td className="p-2.5 font-mono text-xs font-medium text-foreground">{entry.email}</td>
+      <td className="p-2.5">
+        <Badge variant="outline" className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/5">
+          via notify.rentmaikar.com
+        </Badge>
+      </td>
+      <td className="p-2.5">
+        <Badge variant="outline" className="font-mono text-[10px] text-sky-700 dark:text-sky-300 border-sky-500/30 bg-sky-500/5">
+          via backend.rentmaikar.com
+        </Badge>
+      </td>
       <td className="p-2.5 text-muted-foreground text-xs">{entry.sender_name || '—'}</td>
       <td className="p-2.5 text-muted-foreground text-xs">{entry.description || '—'}</td>
       <td className="p-2.5 text-right">
         <div className="flex gap-1 justify-end items-center">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px] gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+            onClick={handleTestRowVerification}
+            disabled={verifying}
+            title="Verify Outbound Delivery via notify.rentmaikar.com"
+          >
+            {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+            Verify
+          </Button>
           <Switch checked={entry.is_active} onCheckedChange={handleToggle} className="scale-75" />
           <Button size="sm" variant="ghost" className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setEditing(true)}>Edit</Button>
           <CopyButton value={entry.email} />
@@ -489,6 +541,9 @@ export const AdminContactSettings = () => {
         </p>
       </div>
 
+      {/* Domain Delivery & Inbound Reception Verification Suite */}
+      <PlatformEmailDomainVerificationPanel onRefreshList={fetchEmailConfigs} />
+
       {/* Platform Email Directory - DB-driven editable */}
       <Card>
         <CardHeader>
@@ -497,7 +552,7 @@ export const AdminContactSettings = () => {
             Platform Email Addresses
           </CardTitle>
           <CardDescription>
-            Official @rentmaikar.com email addresses used across the platform. These define the email distribution endpoints used by the messaging router (Admin → Email Routing). Click Edit to modify.
+            Official @rentmaikar.com email addresses used across the platform. Outgoing emails are delivered through <strong>notify.rentmaikar.com</strong>, and inbound emails are received through <strong>backend.rentmaikar.com</strong> with automatic rule routing.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -507,12 +562,14 @@ export const AdminContactSettings = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead>
-                  <tr className="border-b border-border">
+                  <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="text-left p-2.5 font-semibold">Purpose</th>
-                    <th className="text-left p-2.5 font-semibold">Email Address</th>
+                    <th className="text-left p-2.5 font-semibold">Public Address</th>
+                    <th className="text-left p-2.5 font-semibold">Outgoing Gateway</th>
+                    <th className="text-left p-2.5 font-semibold">Inbound Route</th>
                     <th className="text-left p-2.5 font-semibold">Sender Name</th>
                     <th className="text-left p-2.5 font-semibold">Description</th>
-                    <th className="text-right p-2.5 font-semibold w-32"></th>
+                    <th className="text-right p-2.5 font-semibold w-48">Actions</th>
                   </tr>
                 </thead>
                 <tbody>

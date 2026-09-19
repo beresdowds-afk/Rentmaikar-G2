@@ -85,6 +85,22 @@ async function startServer() {
     }
   });
 
+  // Comprehensive Domain Routing & Delivery Verification
+  app.all(["/api/email/verify-domains", "/api/email/verify"], async (req, res) => {
+    try {
+      const { verifyPlatformEmailDomainRouting } = await import("./src/server/emailService");
+      const options = req.method === "POST" ? req.body : {
+        mailbox: req.query.mailbox as string,
+        recipient: req.query.recipient as string,
+        runLiveTest: req.query.runLiveTest === "true",
+      };
+      const result = await verifyPlatformEmailDomainRouting(options);
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   // Inbound & transactional email routes
   app.post(
     [
