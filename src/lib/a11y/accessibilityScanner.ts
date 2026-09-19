@@ -48,45 +48,87 @@ interface RGB {
 }
 
 /**
- * Parses CSS color string into RGBA
+ * Parses CSS color string into RGBA supporting modern space-delimited, slash-alpha,
+ * comma-delimited, float, hex, and fallback CSS color standards.
  */
 function parseColor(str: string): RGB | null {
+  if (!str) return null;
   const trimmed = str.trim().toLowerCase();
 
   // Transparent
-  if (trimmed === "transparent" || trimmed === "rgba(0, 0, 0, 0)") {
+  if (trimmed === "transparent" || trimmed === "rgba(0, 0, 0, 0)" || trimmed === "rgb(0 0 0 / 0)") {
     return { r: 0, g: 0, b: 0, a: 0 };
   }
 
-  // rgb(r, g, b) or rgba(r, g, b, a)
-  const rgbMatch = trimmed.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/);
-  if (rgbMatch) {
+  // Comma or space separated rgb / rgba:
+  // e.g. rgb(255, 255, 255), rgba(255, 255, 255, 0.5), rgb(255 255 255), rgb(255 255 255 / 0.5), rgb(255 255 255 / 50%)
+  const rgbPattern = /^rgba?\(\s*([\d.]+)(?:%?)[,\s]+([\d.]+)(?:%?)[,\s]+([\d.]+)(?:%?)(?:[\s,/]+([\d.]+)(%?))?\s*\)$/;
+  const match = trimmed.match(rgbPattern);
+  if (match) {
+    let r = parseFloat(match[1]);
+    let g = parseFloat(match[2]);
+    let b = parseFloat(match[3]);
+    let a = match[4] !== undefined ? parseFloat(match[4]) : 1;
+    if (match[5] === "%") a = a / 100;
+    // In case percentages were used for channels
+    if (trimmed.includes("%") && match[1].endsWith("%")) {
+      r = Math.round((r / 100) * 255);
+      g = Math.round((g / 100) * 255);
+      b = Math.round((b / 100) * 255);
+    }
     return {
-      r: parseInt(rgbMatch[1], 10),
-      g: parseInt(rgbMatch[2], 10),
-      b: parseInt(rgbMatch[3], 10),
-      a: rgbMatch[4] !== undefined ? parseFloat(rgbMatch[4]) : 1,
+      r: Math.min(255, Math.max(0, Math.round(r))),
+      g: Math.min(255, Math.max(0, Math.round(g))),
+      b: Math.min(255, Math.max(0, Math.round(b))),
+      a: Math.min(1, Math.max(0, Number(a.toFixed(3)))),
     };
   }
 
-  // Hex #rrggbb or #rgb
+  // Hex #rgb, #rgba, #rrggbb, #rrggbbaa
   if (trimmed.startsWith("#")) {
     const hex = trimmed.slice(1);
-    if (hex.length === 3) {
+    if (hex.length === 3 || hex.length === 4) {
       return {
         r: parseInt(hex[0] + hex[0], 16),
         g: parseInt(hex[1] + hex[1], 16),
         b: parseInt(hex[2] + hex[2], 16),
-        a: 1,
+        a: hex.length === 4 ? Number((parseInt(hex[3] + hex[3], 16) / 255).toFixed(3)) : 1,
       };
     }
-    if (hex.length === 6) {
+    if (hex.length === 6 || hex.length === 8) {
       return {
         r: parseInt(hex.slice(0, 2), 16),
         g: parseInt(hex.slice(2, 4), 16),
         b: parseInt(hex.slice(4, 6), 16),
-        a: 1,
+        a: hex.length === 8 ? Number((parseInt(hex.slice(6, 8), 16) / 255).toFixed(3)) : 1,
       };
+    }
+  }
+
+  // Named colors
+  if (trimmed === "white") return { r: 255, g: 255, b: 255, a: 1 };
+  if (trimmed === "black") return { r: 0, g: 0, b: 0, a: 1 };
+
+  // DOM Canvas / Computed Style Fallback for HSL / OKLCH / modern color functions
+  if (typeof document !== "undefined") {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (ctx) {
+        ctx.fillStyle = str;
+        ctx.fillRect(0, 0, 1, 1);
+        const data = ctx.getImageData(0, 0, 1, 1).data;
+        return {
+          r: data[0],
+          g: data[1],
+          b: data[2],
+          a: Number((data[3] / 255).toFixed(3)),
+        };
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -270,10 +312,12 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
     }
 
     if (!hasLabel) {
+      const issueId = `missing-label-${index}-${el.name || el.id || index}`;
+      try { el.setAttribute("data-a11y-id", issueId); } catch { /* ignore */ }
       if (placeholder && placeholder.trim()) {
         // Has placeholder, but no accessible label
         issues.push({
-          id: `missing-label-${index}-${el.name || el.id || index}`,
+          id: issueId,
           type: "placeholder-only",
           severity: "warning",
           wcagCriterion: "WCAG 2.1 AA (3.3.2 Labels or Instructions)",
@@ -288,7 +332,7 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
       } else {
         // Totally unlabelled
         issues.push({
-          id: `missing-label-${index}-${el.name || el.id || index}`,
+          id: issueId,
           type: "missing-label",
           severity: "violation",
           wcagCriterion: "WCAG 2.1 AA (4.1.2 Name, Role, Value / 1.3.1 Info and Relationships)",
@@ -346,8 +390,10 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
     }
 
     if (!hasVisibleText && !hasAriaLabel && !hasLabelledBy && !hasTitle && !hasImgWithAlt && !hasSvgWithTitle && !hasAssociatedLabel) {
+      const issueId = `missing-btn-${index}`;
+      try { btn.setAttribute("data-a11y-id", issueId); } catch { /* ignore */ }
       issues.push({
-        id: `missing-btn-${index}`,
+        id: issueId,
         type: "missing-button-label",
         severity: "violation",
         wcagCriterion: "WCAG 2.1 AA (4.1.2 Name, Role, Value)",
@@ -373,8 +419,10 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
   images.forEach((img, index) => {
     if (img.closest("[data-a11y-overlay]")) return;
     if (!img.hasAttribute("alt")) {
+      const issueId = `missing-alt-${index}`;
+      try { img.setAttribute("data-a11y-id", issueId); } catch { /* ignore */ }
       issues.push({
-        id: `missing-alt-${index}`,
+        id: issueId,
         type: "missing-image-alt",
         severity: "violation",
         wcagCriterion: "WCAG 2.1 AA (1.1.1 Non-text Content)",
@@ -436,9 +484,11 @@ export function scanDomForAccessibility(root: HTMLElement = document.body, curre
     if (ratio < requiredRatio) {
       const fgHex = `rgb(${effectiveFg.r}, ${effectiveFg.g}, ${effectiveFg.b})`;
       const bgHex = `rgb(${bgColor.r}, ${bgColor.g}, ${bgColor.b})`;
+      const issueId = `contrast-${index}`;
+      try { el.setAttribute("data-a11y-id", issueId); } catch { /* ignore */ }
 
       issues.push({
-        id: `contrast-${index}`,
+        id: issueId,
         type: ratio < 3.0 ? "contrast-violation" : "contrast-warning",
         severity: ratio < 3.0 ? "violation" : "warning",
         wcagCriterion: "WCAG 2.1 AA (1.4.3 Contrast Minimum)",

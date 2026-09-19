@@ -174,7 +174,17 @@ export function inferImageAlt(img: HTMLImageElement): string {
  * Applies an accessible fix to an individual DOM element
  */
 export function applyA11yFix(issue: A11yIssue): FixResult {
-  const el = issue.element;
+  let el = issue.element;
+  if (!el || !document.body.contains(el)) {
+    // Attempt dynamic re-resolution
+    const byId = document.querySelector<HTMLElement>(`[data-a11y-id="${issue.id}"]`);
+    const bySelector = issue.selector ? document.querySelector<HTMLElement>(issue.selector) : null;
+    el = byId || bySelector || el;
+    if (el) {
+      issue.element = el;
+    }
+  }
+
   if (!el || !document.body.contains(el)) {
     return {
       issueId: issue.id,

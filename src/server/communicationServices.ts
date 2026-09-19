@@ -60,12 +60,32 @@ async function logToUnifiedMessageLog(params: {
 const DEFAULT_SUPABASE_URL = "https://jrsydiofzceoeddjogov.supabase.co";
 const DEFAULT_SUPABASE_KEY = "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
 
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const SUPABASE_KEY =
+const isValidKey = (k?: string) => {
+  if (!k) return false;
+  if (k.startsWith("sb_secret_")) return false;
+  if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return false;
+  try {
+    const parts = k.split(".");
+    if (parts.length === 3) {
+      const payload = JSON.parse(atob(parts[1]));
+      if (payload.ref === "bwvocmhcledbwqlpcswp") return false;
+    }
+  } catch {
+    // ignore
+  }
+  return true;
+};
+
+const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = (rawUrl && !rawUrl.includes("bwvocmhcledbwqlpcswp")) ? rawUrl : DEFAULT_SUPABASE_URL;
+
+const rawKeyCandidate =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_ANON_KEY ||
   process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  DEFAULT_SUPABASE_KEY;
+  process.env.SUPABASE_PUBLISHABLE_KEY;
+
+const SUPABASE_KEY = (rawKeyCandidate && isValidKey(rawKeyCandidate)) ? rawKeyCandidate : DEFAULT_SUPABASE_KEY;
 
 export function getSupabase(token?: string) {
   return createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -212,7 +232,7 @@ export function formatNotificationMessage(input: SmsNotificationInput): string {
     case "device_tamper":
       return `SECURITY WARNING: Tamper sensor triggered on vehicle ${vehicleInfo || ""}.`;
     case "verification_code":
-      return `Your RentMaikar verification code is: ${verificationCode}. Valid for 10 minutes. Do not share this code.`;
+      return `${verificationCode} is your verification code.`;
     default:
       return `${greeting}You have an important update regarding your RentMaikar account. Log in to view details.`;
   }
@@ -253,13 +273,14 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const termiiApiKey = process.env.TERMII_API_KEY;
 
-  // 1. Try Sent.dm v3 if configured and not overridden
-  if (sentApiKey && providerOverride !== "twilio" && providerOverride !== "termii") {
+  // 1. All SMS and WhatsApp messages are to be routed through Sent.dm
+  if (sentApiKey) {
     try {
       const sanitized = sanitizeSentText(messageText);
       const idempotencyKey = `rm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      // Use approved authentication template for OTP verification to pass 10DLC carrier compliance
+      // Sent.dm Template SENT_VERIFY_CODE_2 (ID: efe28f88-ad8d-48a5-af69-33529169d58d)
+      // The message template is: {{6 digit code}} is your verification code.
       const approvedOtpTemplateId = "efe28f88-ad8d-48a5-af69-33529169d58d";
       const templatePayload = input.whatsappTemplateId
         ? {
@@ -273,7 +294,11 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
             template_id: approvedOtpTemplateId,
             template: {
               id: approvedOtpTemplateId,
-              parameters: { var_1: String(input.verificationCode) },
+              parameters: {
+                "6 digit code": String(input.verificationCode),
+                var_1: String(input.verificationCode),
+                code: String(input.verificationCode),
+              },
             },
           }
         : {};
@@ -819,8 +844,8 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
   // A. SEND / LINK_SEND OTP
   // ---------------------------------------------------------------
   if (action === "send" || action === "link_send") {
-    // Generate secure 6-digit code
-    const code = (Math.floor(100000 + Math.random() * 900000)).toString();
+    // Generate cryptographically secure 6-digit code
+    const code = crypto.randomInt(100000, 1000000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000;
     const expiresAtDate = new Date(expiresAt);
 

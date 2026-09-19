@@ -81,6 +81,8 @@ describe('Google SSO & OAuth Popup Flow', () => {
     const accounts = [
       { email: 'adebayoolusola39@gmail.com', expectedRole: 'admin' },
       { email: 'eastfortemain@gmail.com', expectedRole: 'admin_assistant' },
+      { email: 'ibrahimganiyu026@gmail.com', expectedRole: 'admin_assistant' },
+      { email: 'woleadebayo58@gmail.com', expectedRole: 'admin_assistant' },
       { email: 'beresanddowds@gmail.com', expectedRole: 'owner' },
       { email: 'wale@gmail.com', expectedRole: 'driver' },
     ];

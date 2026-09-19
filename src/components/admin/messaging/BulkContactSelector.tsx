@@ -68,21 +68,26 @@ export const BulkContactSelector = ({
   const [isPasteDialogOpen, setIsPasteDialogOpen] = useState(false);
   const [pasteInput, setPasteInput] = useState('');
 
-  // Fetch all registered contacts from profiles and user_roles
+  // Fetch all registered contacts from profiles and outreach_contacts
   const fetchContacts = async () => {
     setIsLoading(true);
     try {
-      const [{ data: profiles, error: pErr }, { data: roles, error: rErr }] = await Promise.all([
+      const [{ data: profiles, error: pErr }, { data: roles, error: rErr }, { data: outreach, error: oErr }] = await Promise.all([
         supabase
           .from('profiles')
           .select('user_id, full_name, email, phone, is_active, country')
           .order('full_name', { ascending: true })
           .limit(1500),
         supabase.from('user_roles').select('user_id, role'),
+        (supabase.from('outreach_contacts' as never) as any)
+          .select('id, full_name, email, phone_e164, raw_phone, source, notes, region, country_code, status, contact_type')
+          .order('full_name', { ascending: true })
+          .limit(2000),
       ]);
 
       if (pErr) throw pErr;
       if (rErr) throw rErr;
+      if (oErr) console.warn('Outreach contacts load warning:', oErr);
 
       const roleMap = new Map<string, string>();
       (roles || []).forEach((r) => {
@@ -101,7 +106,7 @@ export const BulkContactSelector = ({
         roleMap.set(r.user_id, mappedRole);
       });
 
-      const loadedContacts: UserContact[] = (profiles || []).map((p) => ({
+      const loadedProfileContacts: UserContact[] = (profiles || []).map((p) => ({
         user_id: p.user_id,
         full_name: p.full_name || 'Unnamed User',
         email: p.email || null,
@@ -111,7 +116,30 @@ export const BulkContactSelector = ({
         country: p.country || null,
       }));
 
-      setContacts(loadedContacts);
+      const loadedOutreachContacts: UserContact[] = (outreach || []).map((o: any) => ({
+        user_id: o.id,
+        full_name: o.full_name || 'Driver Contact',
+        email: o.email || null,
+        phone: o.phone_e164 || o.raw_phone || null,
+        role: o.contact_type === 'driver' || o.source?.toLowerCase().includes('driver') || o.notes?.toLowerCase().includes('driver') ? 'driver' : (o.source === 'driver_contacts_update_2026' ? 'driver_outreach_2026' : 'driver_outreach'),
+        is_active: o.status !== 'unreachable' && o.status !== 'declined',
+        country: o.country_code || (o.phone_e164?.startsWith('+234') ? 'NG' : 'US'),
+        source: o.source || '',
+        notes: o.notes || '',
+      }));
+
+      // Combine profile contacts + outreach contacts, deduplicating by email/phone/id
+      const seen = new Set<string>();
+      const combined: UserContact[] = [];
+      [...loadedProfileContacts, ...loadedOutreachContacts].forEach((c) => {
+        const key = c.email?.toLowerCase() || c.phone || c.user_id;
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          combined.push(c);
+        }
+      });
+
+      setContacts(combined);
     } catch (err) {
       console.error('Error fetching bulk contacts:', err);
       toast.error('Failed to load contacts list');
@@ -129,7 +157,8 @@ export const BulkContactSelector = ({
     return contacts.filter((contact) => {
       // Role Filter
       if (roleFilter !== 'all') {
-        if (roleFilter === 'driver' && contact.role !== 'driver') return false;
+        if (roleFilter === 'driver' && contact.role !== 'driver' && contact.role !== 'driver_outreach_2026' && contact.role !== 'driver_outreach') return false;
+        if (roleFilter === 'driver_outreach_2026' && contact.role !== 'driver_outreach_2026' && contact.source !== 'driver_contacts_update_2026') return false;
         if (roleFilter === 'owner' && contact.role !== 'owner') return false;
         if (roleFilter === 'admin' && contact.role !== 'admin') return false;
         if (roleFilter === 'applicant' && contact.role !== 'applicant') return false;
@@ -162,12 +191,50 @@ export const BulkContactSelector = ({
 
       // Search Query
       if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        const matchName = contact.full_name?.toLowerCase().includes(query);
-        const matchEmail = contact.email?.toLowerCase().includes(query);
-        const matchPhone = contact.phone?.toLowerCase().includes(query);
-        const matchRole = contact.role.toLowerCase().includes(query);
-        if (!matchName && !matchEmail && !matchPhone && !matchRole) return false;
+        const query = searchQuery.trim().toLowerCase();
+        const isDriverContactsAll = [
+          'driver contacts',
+          'driver contact',
+          'driver_contacts',
+          'driver-contacts',
+          'driver contacts list',
+          'all driver contacts',
+          'all drivers',
+          'drivers',
+        ].some((k) => query === k || query.includes('driver contact'));
+
+        const is2026BatchSearch = [
+          'driver_contacts_update_2026',
+          '#drivers-2026',
+          'drivers-2026',
+          'drivers_2026',
+          '2026 driver',
+        ].some((k) => query.includes(k));
+
+        if (isDriverContactsAll) {
+          const isDriver =
+            contact.role === 'driver' ||
+            contact.role === 'driver_outreach' ||
+            contact.role === 'driver_outreach_2026' ||
+            contact.source?.toLowerCase().includes('driver') ||
+            contact.notes?.toLowerCase().includes('driver');
+          if (!isDriver) return false;
+        } else if (is2026BatchSearch) {
+          const isBatchMatch =
+            contact.source === 'driver_contacts_update_2026' ||
+            contact.role === 'driver_outreach_2026' ||
+            contact.notes?.toLowerCase().includes('#drivers') ||
+            contact.notes?.toLowerCase().includes('driver_contacts_update_2026');
+          if (!isBatchMatch) return false;
+        } else {
+          const matchName = contact.full_name?.toLowerCase().includes(query);
+          const matchEmail = contact.email?.toLowerCase().includes(query);
+          const matchPhone = contact.phone?.toLowerCase().includes(query);
+          const matchRole = contact.role.toLowerCase().includes(query);
+          const matchSource = contact.source?.toLowerCase().includes(query);
+          const matchNotes = contact.notes?.toLowerCase().includes(query);
+          if (!matchName && !matchEmail && !matchPhone && !matchRole && !matchSource && !matchNotes) return false;
+        }
       }
 
       return true;
@@ -214,11 +281,31 @@ export const BulkContactSelector = ({
 
   // Quick segment selections
   const handleSelectSegment = (role: string) => {
-    const targetContacts = contacts.filter((c) => c.role === role);
+    let targetContacts: UserContact[] = [];
+    if (role === 'driver_contacts' || role === 'driver') {
+      targetContacts = contacts.filter(
+        (c) =>
+          c.role === 'driver' ||
+          c.role === 'driver_outreach' ||
+          c.role === 'driver_outreach_2026' ||
+          c.source?.toLowerCase().includes('driver') ||
+          c.notes?.toLowerCase().includes('driver')
+      );
+    } else if (role === 'driver_contacts_update_2026' || role === 'driver_roster_2026') {
+      targetContacts = contacts.filter(
+        (c) =>
+          c.source === 'driver_contacts_update_2026' ||
+          c.role === 'driver_outreach_2026' ||
+          c.notes?.includes('#drivers') ||
+          c.notes?.includes('driver_contacts_update_2026')
+      );
+    } else {
+      targetContacts = contacts.filter((c) => c.role === role);
+    }
     const existingIds = new Set(selectedRecipients.map((r) => r.user_id));
     const toAdd = targetContacts.filter((c) => !existingIds.has(c.user_id));
     onSelectedChange([...selectedRecipients, ...toAdd]);
-    toast.success(`Added ${toAdd.length} ${role.toUpperCase()} contacts to broadcast list`);
+    toast.success(`Added ${toAdd.length} contacts to broadcast list`);
   };
 
   // Channel Compatibility stats
@@ -311,10 +398,20 @@ export const BulkContactSelector = ({
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 text-xs px-2.5 gap-1 bg-background"
-            onClick={() => handleSelectSegment('driver')}
+            className="h-7 text-xs px-2.5 gap-1 bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-500/50 text-emerald-700 dark:text-emerald-400 font-bold shadow-sm"
+            onClick={() => handleSelectSegment('driver_contacts')}
+            title="Click to add all 600+ driver contacts to the broadcast list"
           >
-            🚗 All Drivers ({contacts.filter((c) => c.role === 'driver').length})
+            📋 DRIVER CONTACTS ({contacts.filter((c) => c.role === 'driver' || c.role === 'driver_outreach' || c.role === 'driver_outreach_2026' || c.source?.toLowerCase().includes('driver')).length || '600+'})
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs px-2.5 gap-1 bg-background"
+            onClick={() => handleSelectSegment('driver_contacts_update_2026')}
+          >
+            2026 Roster ({contacts.filter((c) => c.source === 'driver_contacts_update_2026' || c.notes?.includes('#drivers') || c.role === 'driver_outreach_2026').length || 35})
           </Button>
           <Button
             type="button"
@@ -358,37 +455,39 @@ export const BulkContactSelector = ({
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-        <div className="relative lg:col-span-2">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            placeholder="Search contacts by name, email, phone, or role..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-8 text-xs"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
+      <div className="space-y-1.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+          <div className="relative lg:col-span-2">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search contacts, or 'DRIVER CONTACTS'..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-8 text-xs"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
 
-        <Select value={roleFilter} onValueChange={setRoleFilter}>
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue placeholder="Role" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Roles</SelectItem>
-            <SelectItem value="driver">Drivers</SelectItem>
-            <SelectItem value="owner">Vehicle Owners</SelectItem>
-            <SelectItem value="applicant">Applicants</SelectItem>
-            <SelectItem value="admin">Admins & Staff</SelectItem>
-          </SelectContent>
-        </Select>
+          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Role" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Roles</SelectItem>
+              <SelectItem value="driver">🚗 Drivers (All 600+)</SelectItem>
+              <SelectItem value="driver_outreach_2026">📋 2026 Driver Roster (35)</SelectItem>
+              <SelectItem value="owner">Vehicle Owners</SelectItem>
+              <SelectItem value="applicant">Applicants</SelectItem>
+              <SelectItem value="admin">Admins & Staff</SelectItem>
+            </SelectContent>
+          </Select>
 
         <Select value={countryFilter} onValueChange={setCountryFilter}>
           <SelectTrigger className="h-8 text-xs">
@@ -419,6 +518,47 @@ export const BulkContactSelector = ({
           </SelectContent>
         </Select>
       </div>
+
+      {/* Quick Search Shortcut Tags */}
+      <div className="flex flex-wrap items-center gap-2 px-1 text-[11px] text-muted-foreground">
+        <span className="font-semibold text-foreground flex items-center gap-1">
+          Search Value:
+        </span>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-mono font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors shadow-sm"
+          onClick={() => setSearchQuery('DRIVER CONTACTS')}
+          title="Click to search and list all 600+ driver contacts"
+        >
+          📋 DRIVER CONTACTS (600+)
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 font-mono font-medium hover:bg-emerald-100/60 dark:hover:bg-emerald-900/50 transition-colors"
+          onClick={() => setSearchQuery('driver_contacts_update_2026')}
+          title="Click to search 2026 driver contact list"
+        >
+          2026 Roster (35)
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-muted-foreground/30 bg-muted/40 font-mono hover:bg-muted transition-colors"
+          onClick={() => setSearchQuery('#drivers-2026')}
+        >
+          #drivers-2026
+        </button>
+        {(searchQuery.toUpperCase() === 'DRIVER CONTACTS' || searchQuery.toLowerCase() === 'driver contacts' || searchQuery.toLowerCase() === 'drivers') && (
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold animate-pulse">
+            ✓ DRIVER CONTACTS active ({filteredContacts.length} drivers found)
+          </span>
+        )}
+        {searchQuery === 'driver_contacts_update_2026' && (
+          <span className="text-emerald-600 dark:text-emerald-400 font-medium animate-pulse">
+            ✓ 2026 Driver Roster active ({filteredContacts.length} contacts)
+          </span>
+        )}
+      </div>
+    </div>
 
       {/* Selection Action Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">

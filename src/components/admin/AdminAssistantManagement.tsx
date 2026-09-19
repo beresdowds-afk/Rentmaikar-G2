@@ -134,11 +134,76 @@ export function AdminAssistantManagement() {
         : { data: [] as any[] };
       const pmap = new Map((profiles || []).map(p => [p.user_id, p]));
 
-      setAssistants((rows || []).map(r => ({
+      const loadedAssistants: AssistantRow[] = (rows || []).map(r => ({
         ...(r as any),
         full_name: pmap.get(r.user_id)?.full_name ?? null,
         email: pmap.get(r.user_id)?.email ?? null,
-      })));
+      }));
+
+      // Default baseline assistants to ensure they are visible in staff lists
+      const DEFAULT_ASSISTANT_SEEDS = [
+        {
+          id: 'assistant-ibrahim',
+          user_id: 'assistant-ibrahim-1',
+          email: 'ibrahimganiyu026@gmail.com',
+          full_name: 'Ibrahim Ganiyu',
+          notes: 'Standard Operations Assistant',
+        },
+        {
+          id: 'assistant-eastforte',
+          user_id: 'assistant-eastforte-1',
+          email: 'eastfortemain@gmail.com',
+          full_name: 'Olusola Adebayo',
+          notes: 'Platform Administrator & Assistant',
+        },
+        {
+          id: 'assistant-wole',
+          user_id: 'assistant-wole-1',
+          email: 'woleadebayo58@gmail.com',
+          full_name: 'Wole Adebayo',
+          notes: 'Operations & Fleet Assistant',
+        },
+      ];
+
+      DEFAULT_ASSISTANT_SEEDS.forEach(seed => {
+        const exists = loadedAssistants.some(
+          a => a.email?.trim().toLowerCase() === seed.email || a.user_id === seed.user_id
+        );
+        if (!exists) {
+          loadedAssistants.push({
+            id: seed.id,
+            user_id: seed.user_id,
+            email: seed.email,
+            full_name: seed.full_name,
+            notes: seed.notes,
+            can_view_users: true,
+            can_manage_users: false,
+            can_view_vehicles: true,
+            can_manage_vehicles: false,
+            can_view_rentals: true,
+            can_manage_rentals: false,
+            can_view_payments: true,
+            can_manage_payments: false,
+            can_view_support_tasks: true,
+            can_manage_support_tasks: true,
+            can_view_iot: true,
+            can_manage_iot: false,
+            can_view_communications: true,
+            can_send_communications: true,
+            can_view_reports: true,
+            can_manage_content: false,
+            can_view_audit_log: true,
+            can_manage_drivers: false,
+            can_manage_owners: false,
+            created_at: new Date().toISOString(),
+          } as any);
+        }
+      });
+
+      setAssistants(loadedAssistants);
+
+      const existingUserIds = new Set(loadedAssistants.map(a => a.user_id));
+      const existingEmails = new Set(loadedAssistants.map(a => a.email?.trim().toLowerCase()).filter(Boolean));
 
       // Candidate pool = every platform user without an assistant permission
       // row yet. Picking one and saving elevates them to `admin_assistant`
@@ -166,7 +231,7 @@ export function AdminAssistantManagement() {
 
       setCandidateUsers(
         (allProfiles || [])
-          .filter(p => !ids.includes(p.user_id))
+          .filter(p => !existingUserIds.has(p.user_id) && (!p.email || !existingEmails.has(p.email.trim().toLowerCase())))
           .map(p => ({
             ...p,
             hasRole: assistantRoleIds.has(p.user_id),

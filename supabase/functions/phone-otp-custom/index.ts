@@ -89,28 +89,42 @@ async function sendViaTwilio(to: string, body: string) {
   }
 }
 
-async function sendSms(to: string, body: string, otp?: string) {
-  if (to.startsWith("+234") && Deno.env.get("TERMII_API_KEY")) {
-    await sendViaTermii(to, body);
-    return "termii";
-  }
-  // Twilio is approved for VoIP voice only — SMS goes via Sent.dm.
-  // (The legacy sendViaTwilio path stays below for when/if messaging approval lands.)
-  if (twilioMessagingEnabled()) {
-    await sendViaTwilio(to, body);
-    return "twilio";
-  }
+async function sendSms(to: string, body: string, otp?: string, channel: "sms" | "whatsapp" = "sms") {
+  // All SMS and WhatsApp messages are to be through Sent.dm.
+  // Template: SENT_VERIFY_CODE_2 (ID: efe28f88-ad8d-48a5-af69-33529169d58d)
+  // Message template: {{6 digit code}} is your verification code.
   const approvedTemplateId = "efe28f88-ad8d-48a5-af69-33529169d58d";
   const sent = await sendViaSent({
     to,
-    channel: "sms",
-    text: body,
-    template: otp ? { id: approvedTemplateId, parameters: { var_1: otp } } : undefined,
+    channel,
+    text: otp ? undefined : body,
+    template: otp
+      ? {
+          id: approvedTemplateId,
+          parameters: {
+            "6 digit code": otp,
+            var_1: otp,
+            code: otp,
+          },
+        }
+      : undefined,
     sandbox: false,
-    metadata: { notification_type: "phone_otp" },
+    metadata: {
+      notification_type: "phone_otp",
+      template_name: "SENT_VERIFY_CODE_2",
+      template_id: approvedTemplateId,
+    },
   });
   if (!sent.ok) {
-    throw new Error(`Could not send the SMS (Sent.dm: ${sent.error ?? "unavailable"})`);
+    if (to.startsWith("+234") && Deno.env.get("TERMII_API_KEY")) {
+      await sendViaTermii(to, body);
+      return "termii";
+    }
+    if (twilioMessagingEnabled()) {
+      await sendViaTwilio(to, body);
+      return "twilio";
+    }
+    throw new Error(`Could not send ${channel.toUpperCase()} (Sent.dm: ${sent.error ?? "unavailable"})`);
   }
   return "sent";
 }
@@ -142,7 +156,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { action, phone, code, full_name, role } = await req.json();
+    const { action, phone, code, full_name, role, channel } = await req.json();
     if (!phone || typeof phone !== "string" || !/^\+[1-9]\d{7,14}$/.test(phone)) {
       return jsonRes({ error: "Phone must be in international format, e.g. +2348012345678" }, 400);
     }
@@ -251,17 +265,19 @@ Deno.serve(async (req) => {
       const code_hash = await sha256(otp);
       const expires_at = new Date(Date.now() + 5 * 60_000).toISOString();
 
+      const selectedChannel = channel === "whatsapp" ? "whatsapp" : "sms";
       const { error: insertErr } = await admin.from("phone_otp_codes").insert({
-        phone, code_hash, channel: "sms", expires_at,
+        phone, code_hash, channel: selectedChannel, expires_at,
       });
       if (insertErr) throw insertErr;
 
       const via = await sendSms(
         phone,
-        `Your Rentmaikar verification code is ${otp}. It expires in 5 minutes.`,
+        `${otp} is your verification code.`,
         otp,
+        selectedChannel,
       );
-      return jsonRes({ success: true, provider: via });
+      return jsonRes({ success: true, provider: via, channel: selectedChannel });
     }
 
     if (action === "verify") {

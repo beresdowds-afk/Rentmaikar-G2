@@ -72,6 +72,7 @@ export const AccessibilityOverlay: React.FC = () => {
     () => [
       "ibrahimganiyu026@gmail.com",
       "eastfortemain@gmail.com",
+      "woleadebayo58@gmail.com",
     ],
     []
   );
@@ -80,8 +81,8 @@ export const AccessibilityOverlay: React.FC = () => {
   // A11y inspector and controls are STRICTLY for full admin role only.
   // Explicitly forbidden for admin assistants, drivers, owners, and non-admins.
   const isAdmin = useMemo(() => {
-    // 0. If auth or role is still loading, or no authenticated user exists, do not show
-    if (!user || isRoleLoading) {
+    // 0. If no authenticated user exists, do not show
+    if (!user) {
       return false;
     }
 
@@ -109,13 +110,18 @@ export const AccessibilityOverlay: React.FC = () => {
       return false;
     }
 
-    // 3. Direct role verification from Supabase auth state or permissions hook
-    if (userRole === "admin" || hasRole("admin") || isFullAdmin) {
+    // 3. Acceptance for registered primary admin accounts (stays active across route transitions & background revalidations)
+    if (email && FULL_ADMIN_EMAILS.includes(email)) {
       return true;
     }
 
-    // 4. Email verification against registered admin accounts
-    if (email && FULL_ADMIN_EMAILS.includes(email)) {
+    // If role is still loading and email is not explicitly recognized, wait for role resolution
+    if (isRoleLoading) {
+      return false;
+    }
+
+    // 4. Direct role verification from Supabase auth state or permissions hook
+    if (userRole === "admin" || hasRole("admin") || isFullAdmin) {
       return true;
     }
 
@@ -151,10 +157,10 @@ export const AccessibilityOverlay: React.FC = () => {
     const handleScrollOrResize = () => {
       setScrollTick((t) => (t + 1) % 10000);
     };
-    window.addEventListener("scroll", handleScrollOrResize, { passive: true });
+    window.addEventListener("scroll", handleScrollOrResize, { capture: true, passive: true });
     window.addEventListener("resize", handleScrollOrResize, { passive: true });
     return () => {
-      window.removeEventListener("scroll", handleScrollOrResize);
+      window.removeEventListener("scroll", handleScrollOrResize, { capture: true });
       window.removeEventListener("resize", handleScrollOrResize);
     };
   }, [highlightOnPage, isAdmin]);
@@ -199,25 +205,57 @@ export const AccessibilityOverlay: React.FC = () => {
       } finally {
         setIsScanning(false);
       }
-    }, 150);
+    }, 120);
   }, [isAdmin]);
 
-  // Re-scan when location changes (Only if user is Admin)
+  // Multi-phase sampling on location change to reliably capture lazy routes, portals, and async data
   useEffect(() => {
     if (!isAdmin) return;
-    runScan();
+    const t1 = setTimeout(() => runScan(), 100);
+    const t2 = setTimeout(() => runScan(), 600);
+    const t3 = setTimeout(() => runScan(), 1600);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
   }, [location.pathname, location.search, isAdmin, runScan]);
 
-  // MutationObserver to auto-update scan on modal / dynamic form updates (Only if user is Admin)
+  // MutationObserver with maxWait throttling to auto-update scan on modals & tabs without starvation loops
   useEffect(() => {
     if (!isAdmin) return;
 
-    let timeoutId: NodeJS.Timeout;
-    const observer = new MutationObserver(() => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        runScan();
-      }, 500);
+    let timeoutId: NodeJS.Timeout | null = null;
+    let maxWaitTimer: NodeJS.Timeout | null = null;
+
+    const triggerScan = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (maxWaitTimer) clearTimeout(maxWaitTimer);
+      timeoutId = null;
+      maxWaitTimer = null;
+      runScan();
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      // Ignore mutations originating entirely inside dev overlays, toasts, or announcers
+      const isInternal = mutations.every((m) => {
+        const target = m.target as HTMLElement | null;
+        if (!target) return false;
+        return (
+          target.closest?.("[data-a11y-overlay]") ||
+          target.closest?.("[data-sonner-toaster]") ||
+          target.id === "live-announcer"
+        );
+      });
+      if (isInternal) return;
+
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(triggerScan, 450);
+
+      // Throttled maxWait ceiling: guarantees scan runs even on continuous tickers/animations
+      if (!maxWaitTimer) {
+        maxWaitTimer = setTimeout(triggerScan, 1800);
+      }
     });
 
     observer.observe(document.body, {
@@ -227,7 +265,8 @@ export const AccessibilityOverlay: React.FC = () => {
     });
 
     return () => {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
+      if (maxWaitTimer) clearTimeout(maxWaitTimer);
       observer.disconnect();
     };
   }, [isAdmin, runScan]);
@@ -283,13 +322,23 @@ export const AccessibilityOverlay: React.FC = () => {
   // Scroll to and highlight element
   const locateElement = (issue: A11yIssue) => {
     setSelectedIssueId(issue.id);
-    if (issue.element && typeof issue.element.scrollIntoView === "function") {
-      issue.element.scrollIntoView({ behavior: "smooth", block: "center" });
+    let target = issue.element;
+    if (!target || !document.body.contains(target)) {
+      const byId = document.querySelector<HTMLElement>(`[data-a11y-id="${issue.id}"]`);
+      const bySelector = issue.selector ? document.querySelector<HTMLElement>(issue.selector) : null;
+      target = byId || bySelector || target;
+      if (target) {
+        issue.element = target;
+      }
+    }
+
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
 
       // Add temporary pulsating highlight
-      issue.element.classList.add("a11y-target-pulse");
+      target.classList.add("a11y-target-pulse");
       setTimeout(() => {
-        issue.element.classList.remove("a11y-target-pulse");
+        target.classList.remove("a11y-target-pulse");
       }, 3000);
     }
   };
@@ -425,7 +474,16 @@ export const AccessibilityOverlay: React.FC = () => {
       {highlightOnPage && (
         <div data-a11y-overlay="true" className="pointer-events-none fixed inset-0 z-[9998] overflow-hidden">
           {issues.map((issue) => {
-            const rect = issue.element.getBoundingClientRect();
+            let el = issue.element;
+            if (!el || !document.body.contains(el)) {
+              const byId = document.querySelector<HTMLElement>(`[data-a11y-id="${issue.id}"]`);
+              const bySelector = issue.selector ? document.querySelector<HTMLElement>(issue.selector) : null;
+              el = byId || bySelector || el;
+              if (el) issue.element = el;
+            }
+            if (!el || !document.body.contains(el)) return null;
+
+            const rect = el.getBoundingClientRect();
             if (rect.width === 0 && rect.height === 0) return null;
 
             const isLabelIssue =

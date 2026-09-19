@@ -76,6 +76,8 @@ const CHANNELS: { value: ComposerChannel; label: string; icon: typeof Mail; colo
 ];
 
 const AUDIENCES: { value: string; label: string }[] = [
+  { value: 'driver_contacts', label: '📋 DRIVER CONTACTS (All 600+ Drivers - outreach & registered)' },
+  { value: 'driver_contacts_update_2026', label: '📋 2026 Driver Roster (35 Contacts - driver_contacts_update_2026)' },
   { value: 'driver', label: 'All Drivers' },
   { value: 'owner', label: 'All Vehicle Owners' },
   { value: 'admin', label: 'All Admins' },
@@ -422,24 +424,69 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
 
               {/* Recipient Search & Selection */}
               <div className="space-y-2 pt-2 border-t">
-                <Label htmlFor="recipient-search" className="text-xs font-semibold">Recipient Search</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="recipient-search" className="text-xs font-semibold">Recipient Search</Label>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span className="text-muted-foreground font-medium">Quick Search:</span>
+                    <Badge
+                      variant={search === 'DRIVER CONTACTS' ? 'default' : 'outline'}
+                      className="cursor-pointer text-[10px] gap-1 hover:bg-primary/20 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold border-emerald-500/40"
+                      onClick={() => setSearch(search === 'DRIVER CONTACTS' ? '' : 'DRIVER CONTACTS')}
+                    >
+                      📋 DRIVER CONTACTS (600+)
+                    </Badge>
+                    <Badge
+                      variant={search === 'driver_contacts_update_2026' ? 'default' : 'outline'}
+                      className="cursor-pointer text-[10px] gap-1 hover:bg-primary/20"
+                      onClick={() => setSearch(search === 'driver_contacts_update_2026' ? '' : 'driver_contacts_update_2026')}
+                    >
+                      2026 Roster (35)
+                    </Badge>
+                    <Badge
+                      variant={search === '#drivers' ? 'default' : 'outline'}
+                      className="cursor-pointer text-[10px] hover:bg-primary/20"
+                      onClick={() => setSearch(search === '#drivers' ? '' : '#drivers')}
+                    >
+                      #drivers
+                    </Badge>
+                  </div>
+                </div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="recipient-search"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search customer by name, email, or phone number..."
+                    placeholder="Search by name, email, phone, or 'DRIVER CONTACTS'..."
                     className="pl-8 h-8 text-xs bg-background"
                   />
                 </div>
                 {isSearching && (
                   <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Searching platform users...
+                    <Loader2 className="h-3 w-3 animate-spin" /> Searching platform & outreach contacts...
                   </p>
                 )}
                 {results.length > 0 && (
-                  <div className="max-h-44 divide-y overflow-y-auto rounded-md border bg-card text-xs shadow-sm">
+                  <div className="max-h-52 divide-y overflow-y-auto rounded-md border bg-card text-xs shadow-sm">
+                    {results.length > 1 && (
+                      <div className="sticky top-0 z-10 flex items-center justify-between p-1.5 px-2 bg-muted/90 backdrop-blur border-b text-[11px] font-medium">
+                        <span className="text-foreground">
+                          {results.length} contacts found {search ? `for "${search}"` : ''}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="default"
+                          className="h-5 text-[10px] px-2 gap-1"
+                          onClick={() => {
+                            addRecipients(results);
+                            toast.success(`Added all ${results.length} recipients to bulk list`);
+                          }}
+                        >
+                          + Add All ({results.length}) to Bulk
+                        </Button>
+                      </div>
+                    )}
                     {results.map((r) => (
                       <div key={r.user_id} className="flex items-center justify-between p-2 hover:bg-muted/60">
                         <div className="min-w-0 pr-2">

@@ -118,17 +118,135 @@ export const useRecipientSearch = (query: string) => {
     let cancelled = false;
     const timer = setTimeout(async () => {
       setIsSearching(true);
-      const like = `%${q.replace(/[%,]/g, '')}%`;
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('user_id, full_name, email, phone')
-        .or(`full_name.ilike.${like},email.ilike.${like},phone.ilike.${like}`)
-        .limit(10);
-      if (cancelled) return;
-      if (error) console.error('Recipient search failed:', error);
-      setResults((data || []) as RecipientOption[]);
-      setIsSearching(false);
+      const cleanQ = q.replace(/[%,]/g, '').trim();
+      const like = `%${cleanQ}%`;
+      const normalizedQ = cleanQ.toLowerCase();
+
+      const isDriverContactsAll = [
+        'driver contacts',
+        'driver contact',
+        'driver_contacts',
+        'driver-contacts',
+        'driver contacts list',
+        'all driver contacts',
+        'all drivers',
+      ].some((k) => normalizedQ === k || normalizedQ.includes('driver contact'));
+
+      const is2026Batch = [
+        'driver_contacts_update_2026',
+        '#drivers',
+        'drivers-2026',
+        'drivers_2026',
+        'driver-roster',
+        'driver_roster',
+        '2026 driver',
+        '2026-driver',
+      ].some((k) => normalizedQ.includes(k)) || normalizedQ === 'drivers 2026';
+
+      try {
+        if (isDriverContactsAll) {
+          // Pull all 600+ driver contacts from outreach and platform profiles
+          const [outreachRes, profilesRes] = await Promise.all([
+            (supabase.from('outreach_contacts' as never) as any)
+              .select('id, full_name, email, phone_e164, raw_phone, source')
+              .eq('contact_type', 'driver')
+              .order('full_name', { ascending: true })
+              .limit(1500),
+            supabase
+              .from('user_roles')
+              .select('user_id, profiles(user_id, full_name, email, phone)')
+              .eq('role', 'driver')
+              .limit(500),
+          ]);
+
+          if (cancelled) return;
+
+          const outreachMapped: RecipientOption[] = ((outreachRes.data || []) as any[]).map((o) => ({
+            user_id: o.id,
+            full_name: o.full_name || 'Driver Contact',
+            email: o.email || null,
+            phone: o.phone_e164 || o.raw_phone || null,
+          }));
+
+          const profileMapped: RecipientOption[] = ((profilesRes.data || []) as any[])
+            .map((r: any) => r.profiles)
+            .filter(Boolean)
+            .map((p: any) => ({
+              user_id: p.user_id,
+              full_name: p.full_name || 'Registered Driver',
+              email: p.email || null,
+              phone: p.phone || null,
+            }));
+
+          const seen = new Set<string>();
+          const combined: RecipientOption[] = [];
+          for (const item of [...outreachMapped, ...profileMapped]) {
+            const key = item.phone || item.email?.toLowerCase() || item.user_id;
+            if (key && !seen.has(key)) {
+              seen.add(key);
+              combined.push(item);
+            }
+          }
+          setResults(combined);
+        } else if (is2026Batch) {
+          // Explicitly pull all 35 contacts from the 2026 driver roster batch
+          const { data: outreach, error: oErr } = await (supabase.from('outreach_contacts' as never) as any)
+            .select('id, full_name, email, phone_e164, raw_phone, source')
+            .or('source.eq.driver_contacts_update_2026,notes.ilike.%#drivers%')
+            .order('full_name', { ascending: true })
+            .limit(100);
+
+          if (cancelled) return;
+          if (oErr) console.error('Outreach batch search failed:', oErr);
+          const mapped: RecipientOption[] = (outreach || []).map((o: any) => ({
+            user_id: o.id,
+            full_name: o.full_name || 'Driver Contact',
+            email: o.email || null,
+            phone: o.phone_e164 || o.raw_phone || null,
+          }));
+          setResults(mapped);
+        } else {
+          // Query both profiles and outreach_contacts for unified discovery
+          const [profilesRes, outreachRes] = await Promise.all([
+            supabase
+              .from('profiles')
+              .select('user_id, full_name, email, phone')
+              .or(`full_name.ilike.${like},email.ilike.${like},phone.ilike.${like}`)
+              .limit(10),
+            (supabase.from('outreach_contacts' as never) as any)
+              .select('id, full_name, email, phone_e164, raw_phone, source, notes')
+              .or(`full_name.ilike.${like},email.ilike.${like},phone_e164.ilike.${like},raw_phone.ilike.${like},source.ilike.${like},notes.ilike.${like}`)
+              .limit(20),
+          ]);
+
+          if (cancelled) return;
+          const profileRecipients: RecipientOption[] = (profilesRes.data || []) as RecipientOption[];
+          const outreachRecipients: RecipientOption[] = ((outreachRes.data || []) as any[]).map((o) => ({
+            user_id: o.id,
+            full_name: o.full_name || 'Driver Outreach',
+            email: o.email || null,
+            phone: o.phone_e164 || o.raw_phone || null,
+          }));
+
+          // Deduplicate by email/phone or id
+          const seen = new Set<string>();
+          const combined: RecipientOption[] = [];
+          for (const item of [...profileRecipients, ...outreachRecipients]) {
+            const key = item.email?.toLowerCase() || item.phone || item.user_id;
+            if (key && !seen.has(key)) {
+              seen.add(key);
+              combined.push(item);
+            }
+          }
+          setResults(combined);
+        }
+      } catch (err) {
+        console.error('Recipient search failed:', err);
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
     }, 250);
+
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -138,12 +256,90 @@ export const useRecipientSearch = (query: string) => {
   return { results, isSearching };
 };
 
-/** Bulk audience helper: pull every contact holding a given platform role. */
+/** Bulk audience helper: pull every contact holding a given platform role or batch roster. */
 export const useRoleRecipients = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchByRole = useCallback(async (role: string, limit = 500): Promise<RecipientOption[]> => {
     setIsLoading(true);
+
+    // Special audience: All 600+ Driver Contacts (outreach + registered)
+    if (role === 'driver_contacts' || role === 'driver') {
+      try {
+        const [outreachRes, roleRowsRes] = await Promise.all([
+          (supabase.from('outreach_contacts' as never) as any)
+            .select('id, full_name, email, phone_e164, raw_phone')
+            .eq('contact_type', 'driver')
+            .order('full_name', { ascending: true })
+            .limit(1500),
+          supabase
+            .from('user_roles')
+            .select('user_id')
+            .eq('role', 'driver' as never)
+            .limit(500),
+        ]);
+
+        const outreachMapped: RecipientOption[] = ((outreachRes.data || []) as any[]).map((o) => ({
+          user_id: o.id,
+          full_name: o.full_name || 'Driver Contact',
+          email: o.email || null,
+          phone: o.phone_e164 || o.raw_phone || null,
+        }));
+
+        let profileMapped: RecipientOption[] = [];
+        const driverIds = (roleRowsRes.data || []).map((r) => r.user_id as string);
+        if (driverIds.length > 0) {
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('user_id, full_name, email, phone')
+            .in('user_id', driverIds)
+            .limit(500);
+          profileMapped = (profs || []) as RecipientOption[];
+        }
+
+        const seen = new Set<string>();
+        const combined: RecipientOption[] = [];
+        for (const item of [...outreachMapped, ...profileMapped]) {
+          const key = item.phone || item.email?.toLowerCase() || item.user_id;
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            combined.push(item);
+          }
+        }
+        return combined;
+      } catch (err) {
+        console.error('Failed to load all driver contacts audience:', err);
+        toast.error('Could not load driver contacts');
+        return [];
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    // Special roster audience: 2026 driver outreach update list
+    if (role === 'driver_contacts_update_2026' || role === 'driver_roster_2026') {
+      try {
+        const { data, error } = await (supabase.from('outreach_contacts' as never) as any)
+          .select('id, full_name, email, phone_e164, raw_phone')
+          .or('source.eq.driver_contacts_update_2026,notes.ilike.%#drivers%')
+          .order('full_name', { ascending: true })
+          .limit(limit);
+        if (error) throw error;
+        return (data || []).map((o: any) => ({
+          user_id: o.id,
+          full_name: o.full_name || 'Driver Contact',
+          email: o.email || null,
+          phone: o.phone_e164 || o.raw_phone || null,
+        }));
+      } catch (err) {
+        console.error('Failed to load 2026 driver roster audience:', err);
+        toast.error('Could not load 2026 driver contacts');
+        return [];
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
     try {
       const { data: roleRows, error: roleError } = await supabase
         .from('user_roles')

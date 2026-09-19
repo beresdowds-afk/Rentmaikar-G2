@@ -8,6 +8,8 @@ export interface UserContact {
   role: string;
   is_active?: boolean;
   country?: string | null;
+  source?: string | null;
+  notes?: string | null;
 }
 
 export interface BulkSendResult {

@@ -135,6 +135,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role: 'admin_assistant',
       fullName: 'Ibrahim Ganiyu',
     },
+    'woleadebayo58@gmail.com': {
+      role: 'admin_assistant',
+      fullName: 'Wole Adebayo',
+    },
     'beresanddowds@gmail.com': {
       role: 'owner',
       fullName: 'Beres & Dowds',
@@ -153,6 +157,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     },
     'ibrahimganiyu026@gmail.com': {
       fullName: 'Ibrahim Ganiyu',
+      phone: '',
+      role: 'admin_assistant',
+    },
+    'woleadebayo58@gmail.com': {
+      fullName: 'Wole Adebayo',
       phone: '',
       role: 'admin_assistant',
     },
@@ -236,12 +245,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (predefined) {
         if (assignedRole !== predefined.role) {
+          // If the user already had another role in user_roles, prune old roles to migrate them cleanly
+          if (assignedRole) {
+            supabase
+              .from('user_roles')
+              .delete()
+              .eq('user_id', userId)
+              .neq('role', predefined.role as any)
+              .catch(() => {});
+          }
           assignRole(userId, predefined.role, normalizedEmail).catch(() => {
             supabase
               .from('user_roles')
               .upsert({ user_id: userId, role: predefined.role as any }, { onConflict: 'user_id' })
               .catch(() => {});
           });
+        }
+
+        // If the predefined role is admin_assistant, ensure a permissions row exists
+        if (predefined.role === 'admin_assistant') {
+          supabase
+            .from('admin_assistant_permissions')
+            .select('id')
+            .eq('user_id', userId)
+            .maybeSingle()
+            .then(({ data: hasPerms }) => {
+              if (!hasPerms) {
+                supabase
+                  .from('admin_assistant_permissions')
+                  .insert({
+                    user_id: userId,
+                    can_view_users: true,
+                    can_view_rentals: true,
+                    can_view_payments: true,
+                    can_view_vehicles: true,
+                    can_view_iot: true,
+                    can_view_reports: true,
+                    can_view_support_tasks: true,
+                    can_view_communications: true,
+                    can_view_audit_log: true,
+                    notes: 'Default Admin Assistant baseline permissions',
+                  })
+                  .catch(() => {});
+              }
+            })
+            .catch(() => {});
         }
 
         if (predefined.fullName) {

@@ -172,12 +172,13 @@ export function RoleManagement() {
           const isEastforte = normalizedEmail === 'eastfortemain@gmail.com';
           const isAdebayo = normalizedEmail === 'adebayoolusola39@gmail.com';
           const isIbrahim = normalizedEmail === 'ibrahimganiyu026@gmail.com';
+          const isWole = normalizedEmail === 'woleadebayo58@gmail.com';
           const hasAssistantPerm = assistantPerms?.some(a => a.user_id === profile.user_id);
 
           let effectiveRole: AppRole | null = (userRole?.role as AppRole) ?? null;
           if (isAdebayo) {
             effectiveRole = 'admin';
-          } else if (isEastforte || isIbrahim || hasAssistantPerm) {
+          } else if (isEastforte || isIbrahim || isWole || hasAssistantPerm) {
             effectiveRole = 'admin_assistant';
           }
 
@@ -189,7 +190,9 @@ export function RoleManagement() {
               ? 'Olusola Adebayo'
               : isIbrahim
                 ? (profile.full_name || 'Ibrahim Ganiyu')
-                : profile.full_name,
+                : isWole
+                  ? (profile.full_name || 'Wole Adebayo')
+                  : profile.full_name,
             email: profile.email,
             role: effectiveRole,
             created_at: profile.created_at || '',
@@ -220,6 +223,34 @@ export function RoleManagement() {
           user_id: 'assistant-ibrahim-1',
           full_name: 'Ibrahim Ganiyu',
           email: 'ibrahimganiyu026@gmail.com',
+          role: 'admin_assistant',
+          created_at: new Date().toISOString(),
+          is_active: true,
+        });
+      }
+
+      // Ensure Eastforte at eastfortemain@gmail.com is listed as Admin Assistant
+      const hasEastforte = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'eastfortemain@gmail.com');
+      if (!hasEastforte) {
+        usersWithRoles.push({
+          id: 'assistant-eastforte',
+          user_id: 'assistant-eastforte-1',
+          full_name: 'Olusola Adebayo',
+          email: 'eastfortemain@gmail.com',
+          role: 'admin_assistant',
+          created_at: new Date().toISOString(),
+          is_active: true,
+        });
+      }
+
+      // Ensure Wole Adebayo at woleadebayo58@gmail.com is listed as Admin Assistant
+      const hasWole = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'woleadebayo58@gmail.com');
+      if (!hasWole) {
+        usersWithRoles.push({
+          id: 'assistant-wole',
+          user_id: 'assistant-wole-1',
+          full_name: 'Wole Adebayo',
+          email: 'woleadebayo58@gmail.com',
           role: 'admin_assistant',
           created_at: new Date().toISOString(),
           is_active: true,

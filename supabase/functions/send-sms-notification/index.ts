@@ -114,7 +114,7 @@ const getMessageContent = (data: SMSNotificationRequest): string => {
   switch (notificationType) {
     // Auth
     case 'verification_code':
-      return `Rentmaikar: Your verification code is ${verificationCode}. This code expires in 10 minutes. Do not share this code with anyone.`;
+      return `${verificationCode} is your verification code.`;
     case 'login_alert':
       return `Rentmaikar: New login to your account${device ? ` from ${sanitizeString(device)}` : ''}. If this wasn't you, secure your account immediately.`;
     case 'password_reset':
@@ -332,23 +332,43 @@ const handler = async (req: Request): Promise<Response> => {
     // (Nigeria) remain as automatic regional fallbacks.
     if (body.providerOverride !== 'twilio' && body.providerOverride !== 'termii') {
       const isWa = body.channel === 'whatsapp';
+      const approvedOtpTemplateId = "efe28f88-ad8d-48a5-af69-33529169d58d";
+      const isOtp = body.notificationType === 'verification_code' || Boolean(body.verificationCode);
       const waTemplateId = body.whatsappTemplateId || body.templateName;
+
       // Default to live cellular delivery unless the caller explicitly requests sandbox testing
       const isSandboxRequested = body.sandbox === true;
+
+      const templateConfig = isOtp
+        ? {
+            id: approvedOtpTemplateId,
+            parameters: {
+              "6 digit code": String(body.verificationCode || ""),
+              var_1: String(body.verificationCode || ""),
+              code: String(body.verificationCode || ""),
+            },
+          }
+        : isWa && waTemplateId
+        ? {
+            id: waTemplateId,
+            language: body.whatsappTemplateLanguage,
+            parameters: body.whatsappTemplateParams,
+          }
+        : undefined;
+
       const sentResult = await sendViaSent({
         to: body.phone,
         channel: isWa ? 'whatsapp' : 'sms',
-        text: message,
+        // Sent.dm validation requires providing exactly one of 'template' or 'text'
+        text: templateConfig ? undefined : message,
         sandbox: isSandboxRequested,
-        template: isWa && waTemplateId
-          ? {
-              id: waTemplateId,
-              language: body.whatsappTemplateLanguage,
-              parameters: body.whatsappTemplateParams,
-            }
-          : undefined,
+        template: templateConfig,
         mediaUrls: isWa ? body.mediaUrls : undefined,
-        metadata: { notification_type: body.notificationType, region: isNigeria ? 'NIGERIA' : 'USA' },
+        metadata: {
+          notification_type: body.notificationType,
+          region: isNigeria ? 'NIGERIA' : 'USA',
+          template_name: isOtp ? 'SENT_VERIFY_CODE_2' : (waTemplateId || body.notificationType),
+        },
       });
 
 

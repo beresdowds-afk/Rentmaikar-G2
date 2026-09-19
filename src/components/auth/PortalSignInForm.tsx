@@ -70,9 +70,13 @@ export default function PortalSignInForm({
 
       const normalized = email.trim().toLowerCase();
       const isAdminByEmail = ['eastfortemain@gmail.com', 'adebayoolusola39@gmail.com'].includes(normalized);
+      const isAssistantByEmail = ['ibrahimganiyu026@gmail.com', 'eastfortemain@gmail.com', 'woleadebayo58@gmail.com'].includes(normalized);
       const held = (roles ?? []).map((r) => r.role as AppRole);
       if (isAdminByEmail && !held.includes('admin')) {
         held.push('admin');
+      }
+      if (isAssistantByEmail && !held.includes('admin_assistant')) {
+        held.push('admin_assistant');
       }
       const match = held.find((r) => allowedRoles.includes(r));
       if (!match) {

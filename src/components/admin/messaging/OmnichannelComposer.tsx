@@ -231,31 +231,132 @@ export const OmnichannelComposer = ({
     const timer = setTimeout(async () => {
       setIsSearchingUsers(true);
       try {
-        const { data: profiles, error } = await supabase
-          .from('profiles')
-          .select('user_id, full_name, email, phone')
-          .or(`full_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%`)
-          .limit(10);
+        const cleanQuery = searchQuery.trim().replace(/[%,]/g, '');
+        const normalizedQ = cleanQuery.toLowerCase();
+        const isDriverContactsAll = [
+          'driver contacts',
+          'driver contact',
+          'driver_contacts',
+          'driver-contacts',
+          'driver contacts list',
+          'all driver contacts',
+          'all drivers',
+          'drivers',
+        ].some((k) => normalizedQ === k || normalizedQ.includes('driver contact'));
 
-        if (error) throw error;
+        const isBatchSearch = [
+          'driver_contacts_update_2026',
+          '#drivers-2026',
+          'drivers-2026',
+          'drivers_2026',
+          '2026 driver',
+        ].some((k) => normalizedQ.includes(k));
 
-        const userIds = (profiles || []).map((p) => p.user_id);
-        const { data: roles } = await supabase
-          .from('user_roles')
-          .select('user_id, role')
-          .in('user_id', userIds);
+        if (isDriverContactsAll) {
+          const [outreachRes, profilesRes] = await Promise.all([
+            (supabase.from('outreach_contacts' as never) as any)
+              .select('id, full_name, email, phone_e164, raw_phone, source, notes, contact_type')
+              .eq('contact_type', 'driver')
+              .order('full_name', { ascending: true })
+              .limit(1500),
+            supabase
+              .from('user_roles')
+              .select('user_id, profiles(user_id, full_name, email, phone)')
+              .eq('role', 'driver')
+              .limit(500),
+          ]);
 
-        const roleMap = new Map((roles || []).map((r) => [r.user_id, r.role]));
+          const outreachResults: UserContact[] = ((outreachRes.data || []) as any[]).map((o) => ({
+            user_id: o.id,
+            full_name: o.full_name || 'Driver Contact',
+            email: o.email || null,
+            phone: o.phone_e164 || o.raw_phone || null,
+            role: 'driver',
+            source: o.source,
+            notes: o.notes,
+          }));
 
-        const results: UserContact[] = (profiles || []).map((p) => ({
-          user_id: p.user_id,
-          full_name: p.full_name,
-          email: p.email,
-          phone: p.phone,
-          role: roleMap.get(p.user_id) || 'driver',
-        }));
+          const profileResults: UserContact[] = ((profilesRes.data || []) as any[])
+            .map((r: any) => r.profiles)
+            .filter(Boolean)
+            .map((p: any) => ({
+              user_id: p.user_id,
+              full_name: p.full_name || 'Registered Driver',
+              email: p.email || null,
+              phone: p.phone || null,
+              role: 'driver',
+            }));
 
-        setSearchResults(results);
+          const seen = new Set<string>();
+          const combined: UserContact[] = [];
+          for (const item of [...outreachResults, ...profileResults]) {
+            const key = item.phone || item.email?.toLowerCase() || item.user_id;
+            if (key && !seen.has(key)) {
+              seen.add(key);
+              combined.push(item);
+            }
+          }
+          setSearchResults(combined);
+        } else if (isBatchSearch) {
+          const { data: outreach } = await (supabase.from('outreach_contacts' as never) as any)
+            .select('id, full_name, email, phone_e164, raw_phone, source, notes')
+            .or('source.eq.driver_contacts_update_2026,notes.ilike.%#drivers%')
+            .order('full_name', { ascending: true })
+            .limit(100);
+
+          const results: UserContact[] = (outreach || []).map((o: any) => ({
+            user_id: o.id,
+            full_name: o.full_name || 'Driver Contact',
+            email: o.email || null,
+            phone: o.phone_e164 || o.raw_phone || null,
+            role: 'driver_roster_2026',
+            source: o.source,
+            notes: o.notes,
+          }));
+          setSearchResults(results);
+        } else {
+          const [profilesRes, outreachRes] = await Promise.all([
+            supabase
+              .from('profiles')
+              .select('user_id, full_name, email, phone')
+              .or(`full_name.ilike.%${cleanQuery}%,email.ilike.%${cleanQuery}%,phone.ilike.%${cleanQuery}%`)
+              .limit(10),
+            (supabase.from('outreach_contacts' as never) as any)
+              .select('id, full_name, email, phone_e164, raw_phone, source, notes')
+              .or(`full_name.ilike.%${cleanQuery}%,email.ilike.%${cleanQuery}%,phone_e164.ilike.%${cleanQuery}%,source.ilike.%${cleanQuery}%,notes.ilike.%${cleanQuery}%`)
+              .limit(10),
+          ]);
+
+          const userIds = (profilesRes.data || []).map((p) => p.user_id);
+          let roleMap = new Map<string, string>();
+          if (userIds.length > 0) {
+            const { data: roles } = await supabase
+              .from('user_roles')
+              .select('user_id, role')
+              .in('user_id', userIds);
+            roleMap = new Map((roles || []).map((r) => [r.user_id, r.role]));
+          }
+
+          const profileResults: UserContact[] = (profilesRes.data || []).map((p) => ({
+            user_id: p.user_id,
+            full_name: p.full_name,
+            email: p.email,
+            phone: p.phone,
+            role: roleMap.get(p.user_id) || 'driver',
+          }));
+
+          const outreachResults: UserContact[] = ((outreachRes.data || []) as any[]).map((o) => ({
+            user_id: o.id,
+            full_name: o.full_name || 'Driver Contact',
+            email: o.email || null,
+            phone: o.phone_e164 || o.raw_phone || null,
+            role: o.source === 'driver_contacts_update_2026' ? 'driver_roster_2026' : 'driver_outreach',
+            source: o.source,
+            notes: o.notes,
+          }));
+
+          setSearchResults([...profileResults, ...outreachResults]);
+        }
       } catch (err) {
         console.error('User search error:', err);
       } finally {
@@ -1050,21 +1151,36 @@ export const OmnichannelComposer = ({
                         </Button>
                       </div>
                     ) : (
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search drivers, owners, or applicants by name, email, or phone..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="pl-9 h-9"
-                        />
-                        {isSearchingUsers && (
-                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-                        )}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-muted-foreground font-medium">Quick Search:</span>
+                          <button
+                            type="button"
+                            className="font-mono text-emerald-600 dark:text-emerald-400 font-bold hover:underline"
+                            onClick={() => setSearchQuery('DRIVER CONTACTS')}
+                          >
+                            📋 DRIVER CONTACTS (600+)
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            placeholder="Search by name, email, phone, or 'DRIVER CONTACTS'..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-9 h-9"
+                          />
+                          {isSearchingUsers && (
+                            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
 
-                        {searchResults.length > 0 && (
-                          <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-popover rounded-md border shadow-lg max-h-48 overflow-y-auto">
-                            {searchResults.map((userContact) => (
+                          {searchResults.length > 0 && (
+                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-popover rounded-md border shadow-lg max-h-56 overflow-y-auto">
+                              <div className="sticky top-0 bg-muted/90 backdrop-blur px-2.5 py-1 text-[11px] font-semibold border-b flex justify-between items-center">
+                                <span>{searchResults.length} contacts found</span>
+                                {searchQuery && <span className="text-muted-foreground">for "{searchQuery}"</span>}
+                              </div>
+                              {searchResults.map((userContact) => (
                               <div
                                 key={userContact.user_id}
                                 className="p-2.5 hover:bg-accent cursor-pointer border-b last:border-0 flex items-center justify-between text-xs"
@@ -1090,6 +1206,7 @@ export const OmnichannelComposer = ({
                             ))}
                           </div>
                         )}
+                        </div>
                       </div>
                     )}
                   </div>
