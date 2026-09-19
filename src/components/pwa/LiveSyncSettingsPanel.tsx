@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { BatteryCharging, Cpu, CheckCircle2, RefreshCw } from "lucide-react";
 import { pwaWorkerManager } from "@/pwa/pwa-worker-manager";
 import { toast } from "sonner";
+import { PWAPlatformSyncCard } from "@/components/pwa/PWAPlatformSyncCard";
 import {
   DEFAULT_LIVE_SYNC_SETTINGS,
   LIVE_SYNC_LIMITS,
@@ -45,18 +46,20 @@ export default function LiveSyncSettingsPanel() {
   const update = (patch: Partial<LiveSyncSettings>) => setSettings(saveLiveSyncSettings(patch));
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <RefreshCw className="h-5 w-5 text-primary" aria-hidden />
-          Background sync
-        </CardTitle>
-        <CardDescription>
-          Control how often the app checks for new data and app updates while it runs in the background.
-          Slower schedules use less battery and mobile data.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <div className="space-y-6">
+      <PWAPlatformSyncCard />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <RefreshCw className="h-5 w-5 text-primary" aria-hidden />
+            Background Sync Schedule & Power Profiles
+          </CardTitle>
+          <CardDescription>
+            Configure background polling frequency and device power adaptation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
         <div className="grid gap-2 sm:grid-cols-3">
           {PROFILE_OPTIONS.map((opt) => {
             const active = settings.profile === opt.value;
@@ -204,5 +207,6 @@ export default function LiveSyncSettingsPanel() {
         </Button>
       </CardContent>
     </Card>
+  </div>
   );
 }

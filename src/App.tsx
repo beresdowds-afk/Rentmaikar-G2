@@ -11,6 +11,7 @@ import { BackendBridgeProvider } from "@/contexts/BackendBridgeContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import CookieConsent from "@/components/CookieConsent";
 import MessageConsent from "@/components/MessageConsent";
+import { PWAInstallPopupCTA } from "@/components/pwa/PWAInstallPopupCTA";
 import PageSkeleton from "@/components/PageSkeleton";
 import ErrorBoundary from "@/components/errors/ErrorBoundary";
 import CanonicalRedirects, { VehicleAliasRedirect as VehicleRedirect } from "@/components/seo/CanonicalRedirects";
@@ -191,6 +192,7 @@ const App = () => (
 
               <CookieConsent />
               <MessageConsent />
+              <PWAInstallPopupCTA />
 
               <Toaster />
               <Sonner />

@@ -153,6 +153,31 @@ async function startServer() {
     }
   });
 
+  // PWA Real-Time Platform Sync Endpoints
+  app.all(["/api/pwa/sync", "/api/sync/platform"], async (req, res) => {
+    try {
+      const { handlePwaSync } = await import("./src/server/pwaSyncService");
+      const result = await handlePwaSync({
+        method: req.method,
+        query: req.query,
+        body: req.body,
+      });
+      res.status(200).json(result);
+    } catch (e: any) {
+      console.error("PWA Sync API error:", e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.get(["/api/pwa/sync/status", "/api/sync/status"], async (_req, res) => {
+    try {
+      const { getPwaSyncStatus } = await import("./src/server/pwaSyncService");
+      res.status(200).json(getPwaSyncStatus());
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   // Development vs Production serving
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
