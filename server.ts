@@ -3,8 +3,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const filename = fileURLToPath(import.meta.url);
+const dirname = path.dirname(filename);
 
 async function startServer() {
   const app = express();
@@ -136,10 +136,124 @@ async function startServer() {
     }
   );
 
-  // Backend / Edge Functions dispatch router
+  // Backend / Edge Functions dispatch router with allowlist and Supabase Edge Function forwarding
   app.all(["/api/functions/:functionName", "/functions/v1/:functionName"], async (req, res) => {
     try {
       const functionName = req.params.functionName;
+
+      const SUPABASE_EDGE_FUNCTIONS_ALLOWLIST = new Set([
+        "send-email-reply",
+        "send-inbox-reply",
+        "send-outbound-email",
+        "send-transactional-email",
+        "send-agreement-email",
+        "send-price-notification",
+        "send-password-reset",
+        "send-verification-email",
+        "send-approval-notification",
+        "auth-email-hook",
+        "google-sso-auth-email",
+        "inbox-attachment-ocr",
+        "email-health",
+        "check-email-health",
+        "resend-events",
+        "reprocess-email-dlq",
+        "handle-email-unsubscribe",
+        "notify-training-review",
+        "sync-auth-identity",
+        "phone-otp-custom",
+        "verify-phone",
+        "verify-credentials",
+        "referee-attestation",
+        "hologram-admin",
+        "hologram-sync",
+        "sarekon-admin",
+        "traccar-admin",
+        "iot-admin",
+        "get-psp-config",
+        "get-paypal-config",
+        "create-paypal-order",
+        "capture-paypal-order",
+        "initiate-paypal-payout",
+        "create-paystack-transaction",
+        "verify-paystack-transaction",
+        "initiate-paystack-transfer",
+        "create-paystack-recipient",
+        "create-opay-order",
+        "verify-opay-order",
+        "check-payment-health",
+        "billing-portal",
+        "activate-subscription",
+        "subscribe-to-plan",
+        "persona-config",
+        "persona-reconcile",
+        "persona-create-inquiry",
+        "persona-retry-verification",
+        "persona-send-reverification",
+        "notify-withdrawal",
+        "send-2fa-code",
+        "voice-access-token",
+        "initiate-voip-call",
+        "end-voip-call",
+        "voice-call-request",
+        "voice-twiml-config",
+        "voice-twiml-dial",
+        "get-recording-url",
+        "create-call-in",
+        "renew-call-in",
+        "send-sms-notification",
+        "case-send-sms",
+        "reprocess-sms-dlq",
+        "twilio-test-send",
+        "booking-email-trigger",
+        "process-email-queue",
+      ]);
+
+      if (!SUPABASE_EDGE_FUNCTIONS_ALLOWLIST.has(functionName)) {
+        return res.status(404).json({
+          error: "Not Found",
+          message: `Function '${functionName}' is not in the authorized Edge Functions allowlist`,
+        });
+      }
+
+      const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co";
+      const supabaseUrl = rawSupabaseUrl.replace(/\/+$/, "");
+      const supabaseAnonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
+
+      // Preserve incoming authorization header: strictly preserve user JWT, never use service role
+      const clientAuth = req.headers["authorization"] || req.headers["Authorization"];
+      const authHeader = clientAuth ? String(clientAuth) : (supabaseAnonKey ? `Bearer ${supabaseAnonKey}` : "");
+
+      const forwardHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (authHeader) {
+        forwardHeaders["Authorization"] = authHeader;
+      }
+      if (supabaseAnonKey) {
+        forwardHeaders["apikey"] = supabaseAnonKey;
+      }
+      if (req.headers["x-client-info"]) {
+        forwardHeaders["x-client-info"] = String(req.headers["x-client-info"]);
+      }
+
+      // Forward request to Supabase Edge Function: ${SUPABASE_URL}/functions/v1/${functionName}
+      try {
+        const edgeUrl = `${supabaseUrl}/functions/v1/${functionName}`;
+        const edgeRes = await fetch(edgeUrl, {
+          method: req.method || "POST",
+          headers: forwardHeaders,
+          body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+        });
+
+        if (edgeRes.status !== 404) {
+          const edgeData = await edgeRes.json().catch(() => null);
+          return res.status(edgeRes.status).json(edgeData ?? {});
+        }
+      } catch (proxyErr: any) {
+        console.warn(`[Server Edge Proxy] Upstream proxy to Supabase failed for '${functionName}':`, proxyErr?.message || proxyErr);
+      }
+
       const { handleEdgeFunction } = await import("./src/server/functionsHandler");
       const response = await handleEdgeFunction(functionName, {
         body: req.body,
