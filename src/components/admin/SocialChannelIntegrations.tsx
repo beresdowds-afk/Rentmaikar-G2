@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Facebook, Instagram, Linkedin, Chrome, Inbox, Loader2, Copy, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { MarketingProviderStatusCard } from "./MarketingProviderStatusCard";
 
 interface ChannelConfig {
   id: string;
@@ -79,16 +80,19 @@ export const SocialChannelIntegrations = () => {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Inbox className="h-5 w-5 text-primary" /> Social channel integrations
-        </CardTitle>
-        <CardDescription>
-          Connect Meta (Facebook &amp; Instagram), LinkedIn and Google channels. Incoming messages are threaded
-          into the unified inbox so the team replies from one place.
-        </CardDescription>
-      </CardHeader>
+    <div className="space-y-6">
+      <MarketingProviderStatusCard />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Inbox className="h-5 w-5 text-primary" /> Social messaging channel integrations
+          </CardTitle>
+          <CardDescription>
+            Connect Meta (Facebook &amp; Instagram), LinkedIn and Google channels. Incoming messages are threaded
+            into the unified inbox so the team replies from one place.
+          </CardDescription>
+        </CardHeader>
       <CardContent className="space-y-4">
         <Alert>
           <AlertDescription className="text-xs space-y-1">
@@ -207,6 +211,7 @@ export const SocialChannelIntegrations = () => {
         )}
       </CardContent>
     </Card>
+  </div>
   );
 };
 

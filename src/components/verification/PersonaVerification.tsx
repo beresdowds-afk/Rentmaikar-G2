@@ -18,6 +18,7 @@ import { runPreflight } from "@/lib/verification-preflight";
 import { saveVerificationSession, clearVerificationSession } from "@/hooks/useVerificationResume";
 import { usePersonaEnabled } from "@/hooks/usePersonaEnabled";
 import { usePersonaIdPolicy } from "@/hooks/usePersonaIdClasses";
+import { marketingEngine } from "@/services/marketingEngine";
 
 
 
@@ -206,6 +207,14 @@ export default function PersonaVerification({
         correlationId, context: { subject, subjectRole, region: country },
       });
 
+      // Marketing Engine: Track KYC_STARTED
+      void marketingEngine.track("KYC_STARTED", {
+        subject,
+        subjectRole,
+        region: country,
+        correlationId,
+      });
+
       // Transient provider/network failures retry automatically with backoff.
       const data = await withRetry(async () => {
         const { data, error } = await supabase.functions.invoke("persona-create-inquiry", {
@@ -297,6 +306,13 @@ export default function PersonaVerification({
             void updateAttempt(attempt, {
               status: "completed", result: status ?? "completed",
               inquiry_id: id ?? inquiryId, completed_at: new Date().toISOString(),
+            });
+            // Marketing Engine: Track KYC_COMPLETED
+            void marketingEngine.track("KYC_COMPLETED", {
+              subject,
+              subjectRole,
+              inquiryId: id ?? inquiryId,
+              status,
             });
             toast.success(`Verification submitted (${status})`);
             onComplete?.(id ?? inquiryId);

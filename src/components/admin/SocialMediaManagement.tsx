@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { 
   Facebook, Instagram, Linkedin, Chrome, Plus, Eye, 
   Trash2, RefreshCw, TrendingUp, DollarSign, 
-  BarChart3, Play, Pause, Target, Globe
+  BarChart3, Play, Pause, Target, Globe, Copy, Archive,
+  Users, CheckCircle, Percent
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -22,7 +23,7 @@ interface Campaign {
   id: string;
   name: string;
   description: string | null;
-  platform: 'facebook' | 'instagram' | 'linkedin' | 'google';
+  platform: 'facebook' | 'instagram' | 'linkedin' | 'google' | 'tiktok';
   status: string;
   campaign_type: string;
   budget: number | null;
@@ -35,8 +36,21 @@ interface Campaign {
     clicks?: number;
     conversions?: number;
     spend?: number;
+    leads?: number;
   };
   created_at: string;
+}
+
+interface NormalizedTotals {
+  impressions: number;
+  clicks: number;
+  spend: number;
+  leads: number;
+  conversions: number;
+  costPerLead: number;
+  costPerConversion: number;
+  ctr: number;
+  cpc: number;
 }
 
 const platformConfig = {
@@ -44,15 +58,16 @@ const platformConfig = {
   instagram: { icon: Instagram, color: 'bg-gradient-to-br from-purple-600 to-pink-500', label: 'Instagram' },
   linkedin: { icon: Linkedin, color: 'bg-blue-700', label: 'LinkedIn' },
   google: { icon: Chrome, color: 'bg-emerald-500', label: 'Google Ads' },
+  tiktok: { icon: Globe, color: 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900', label: 'TikTok Ads' },
 };
 
 const statusConfig: Record<string, { color: string; label: string }> = {
   draft: { color: 'bg-muted text-muted-foreground', label: 'Draft' },
   scheduled: { color: 'bg-blue-500 text-white', label: 'Scheduled' },
-  active: { color: 'bg-success text-success-foreground', label: 'Active' },
+  active: { color: 'bg-emerald-600 text-white', label: 'Active' },
   paused: { color: 'bg-amber-500 text-white', label: 'Paused' },
   completed: { color: 'bg-primary text-primary-foreground', label: 'Completed' },
-  cancelled: { color: 'bg-destructive text-destructive-foreground', label: 'Cancelled' },
+  cancelled: { color: 'bg-destructive text-destructive-foreground', label: 'Archived' },
 };
 
 export const SocialMediaManagement = () => {
@@ -63,6 +78,7 @@ export const SocialMediaManagement = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [normalizedTotals, setNormalizedTotals] = useState<NormalizedTotals | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -80,7 +96,22 @@ export const SocialMediaManagement = () => {
 
   useEffect(() => {
     fetchCampaigns();
+    fetchReporting();
   }, []);
+
+  const fetchReporting = async () => {
+    try {
+      const res = await fetch('/api/marketing/reporting');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.reporting?.total) {
+          setNormalizedTotals(data.reporting.total);
+        }
+      }
+    } catch {
+      // Gracefully fall back to local aggregation
+    }
+  };
 
   const fetchCampaigns = async () => {
     try {
@@ -107,6 +138,33 @@ export const SocialMediaManagement = () => {
 
     setCreating(true);
     try {
+      // Step 1: Attempt provider creation if supported
+      let externalId: string | null = null;
+      try {
+        const providerRes = await fetch('/api/marketing/campaigns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            platform: formData.platform,
+            name: formData.name.trim(),
+            objective: formData.campaign_type,
+            budgetAmount: formData.budget ? parseFloat(formData.budget) : 0,
+            currency: formData.currency,
+            region: formData.region,
+          }),
+        });
+        const providerData = await providerRes.json();
+        if (providerData.ok) {
+          externalId = providerData.externalId || null;
+          toast.success(`Campaign created on ${formData.platform.toUpperCase()} (${externalId})`);
+        } else if (providerData.error?.includes('NOT CONNECTED')) {
+          toast.info(`${formData.platform.toUpperCase()} provider not connected: saved locally as draft.`);
+        }
+      } catch {
+        // Fallback to local
+      }
+
+      // Step 2: Store in local database
       const { error } = await supabase
         .from('social_media_campaigns')
         .insert({
@@ -121,11 +179,14 @@ export const SocialMediaManagement = () => {
           region: formData.region,
           content_text: formData.content_text.trim() || null,
           created_by: user?.id,
+          status: externalId ? 'active' : 'draft',
         });
 
       if (error) throw error;
 
-      toast.success('Campaign created successfully');
+      if (!externalId) {
+        toast.success('Campaign saved locally');
+      }
       setCreateDialogOpen(false);
       setFormData({
         name: '',
@@ -140,27 +201,114 @@ export const SocialMediaManagement = () => {
         content_text: '',
       });
       fetchCampaigns();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating campaign:', error);
-      toast.error('Failed to create campaign');
+      toast.error('Failed to create campaign: ' + error.message);
     } finally {
       setCreating(false);
     }
   };
 
-  const handleStatusChange = async (campaignId: string, newStatus: string) => {
+  const handleStatusChange = async (campaign: Campaign, newStatus: string) => {
     try {
+      // Send pause/resume instruction to provider adapter
+      try {
+        const res = await fetch(`/api/marketing/campaigns/${campaign.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            platform: campaign.platform, 
+            action: newStatus === 'active' ? 'resume' : 'pause',
+            status: newStatus 
+          }),
+        });
+        const data = await res.json();
+        if (data?.error && !data.ok && !data.error.includes('NOT CONNECTED')) {
+          toast.error(`Provider error: ${data.error}`);
+          return;
+        }
+      } catch {
+        // Provider call skipped/offline
+      }
+
       const { error } = await supabase
         .from('social_media_campaigns')
         .update({ status: newStatus })
-        .eq('id', campaignId);
+        .eq('id', campaign.id);
 
       if (error) throw error;
       toast.success(`Campaign ${newStatus}`);
       fetchCampaigns();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating campaign:', error);
-      toast.error('Failed to update campaign');
+      toast.error('Failed to update campaign: ' + error.message);
+    }
+  };
+
+  const handleArchive = async (campaign: Campaign) => {
+    if (!confirm(`Archive campaign "${campaign.name}"?`)) return;
+
+    try {
+      try {
+        await fetch(`/api/marketing/campaigns/${campaign.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform: campaign.platform, action: 'archive', status: 'archived' }),
+        });
+      } catch {
+        // Continue
+      }
+
+      const { error } = await supabase
+        .from('social_media_campaigns')
+        .update({ status: 'cancelled' })
+        .eq('id', campaign.id);
+
+      if (error) throw error;
+      toast.success('Campaign archived');
+      fetchCampaigns();
+    } catch (error: any) {
+      toast.error('Failed to archive: ' + error.message);
+    }
+  };
+
+  const handleDuplicate = async (campaign: Campaign) => {
+    const newName = window.prompt('Enter duplicate campaign name:', `${campaign.name} (Copy)`);
+    if (!newName || !newName.trim()) return;
+
+    try {
+      try {
+        await fetch(`/api/marketing/campaigns/${campaign.id}/duplicate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform: campaign.platform, newName: newName.trim() }),
+        });
+      } catch {
+        // Continue
+      }
+
+      const { error } = await supabase
+        .from('social_media_campaigns')
+        .insert({
+          name: newName.trim(),
+          description: campaign.description,
+          platform: campaign.platform,
+          campaign_type: campaign.campaign_type,
+          budget: campaign.budget,
+          currency: campaign.currency,
+          start_date: null,
+          end_date: null,
+          region: campaign.region,
+          status: 'draft',
+          content_text: (campaign as any).content_text || null,
+          created_by: user?.id,
+        });
+
+      if (error) throw error;
+      toast.success(`Duplicated as "${newName.trim()}"`);
+      fetchCampaigns();
+    } catch (error: any) {
+      toast.error('Failed to duplicate: ' + error.message);
     }
   };
 
@@ -266,7 +414,7 @@ export const SocialMediaManagement = () => {
       </div>
 
       {/* Platform Quick Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {Object.entries(platformConfig).map(([key, config]) => {
           const Icon = config.icon;
           const count = campaigns.filter(c => c.platform === key).length;
@@ -275,12 +423,12 @@ export const SocialMediaManagement = () => {
             <Card key={key} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => setFilterPlatform(key)}>
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg ${config.color} flex items-center justify-center`}>
+                  <div className={`w-10 h-10 rounded-lg ${config.color} flex items-center justify-center shrink-0`}>
                     <Icon className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <p className="font-medium">{config.label}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="font-medium text-sm">{config.label}</p>
+                    <p className="text-xs text-muted-foreground">
                       {count} campaigns • {active} active
                     </p>
                   </div>
@@ -290,6 +438,63 @@ export const SocialMediaManagement = () => {
           );
         })}
       </div>
+
+      {/* Normalized Cross-Provider Reporting (Meta, Google, TikTok, LinkedIn) */}
+      <Card className="border shadow-xs bg-card/60">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-primary" /> Normalized Multi-Channel Reporting
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Aggregated cross-network marketing performance metrics across all connected ad channels.
+              </CardDescription>
+            </div>
+            <Button size="sm" variant="outline" onClick={fetchReporting} className="h-7 text-xs gap-1">
+              <RefreshCw className="h-3 w-3" /> Sync Metrics
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Impressions</p>
+              <p className="text-lg font-bold mt-1">{(normalizedTotals?.impressions || stats.totalImpressions).toLocaleString()}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Clicks</p>
+              <p className="text-lg font-bold mt-1">{(normalizedTotals?.clicks || 0).toLocaleString()}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Total Spend</p>
+              <p className="text-lg font-bold mt-1 text-primary">${(normalizedTotals?.spend || stats.totalBudget).toLocaleString()}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Leads</p>
+              <p className="text-lg font-bold mt-1 text-emerald-600">{(normalizedTotals?.leads || 0).toLocaleString()}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Conversions</p>
+              <p className="text-lg font-bold mt-1 text-emerald-600">{(normalizedTotals?.conversions || 0).toLocaleString()}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Cost / Lead</p>
+              <p className="text-lg font-bold mt-1">${(normalizedTotals?.costPerLead || 0).toFixed(2)}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Cost / Conv (CPA)</p>
+              <p className="text-lg font-bold mt-1">${(normalizedTotals?.costPerConversion || 0).toFixed(2)}</p>
+            </div>
+            <div className="p-3 bg-muted/40 rounded-lg border text-center">
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">CTR / CPC</p>
+              <p className="text-sm font-bold mt-1">
+                {(normalizedTotals?.ctr || 0).toFixed(1)}% <span className="text-xs text-muted-foreground font-normal">/ ${(normalizedTotals?.cpc || 0).toFixed(2)}</span>
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Main Content */}
       <Card>
@@ -301,7 +506,7 @@ export const SocialMediaManagement = () => {
                 Social Media Campaigns
               </CardTitle>
               <CardDescription>
-                Manage marketing campaigns across Facebook, Instagram, LinkedIn, and Google
+                Manage marketing campaigns across Facebook, Instagram, LinkedIn, Google, and TikTok
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -314,7 +519,8 @@ export const SocialMediaManagement = () => {
                   <SelectItem value="facebook">Facebook</SelectItem>
                   <SelectItem value="instagram">Instagram</SelectItem>
                   <SelectItem value="linkedin">LinkedIn</SelectItem>
-                  <SelectItem value="google">Google</SelectItem>
+                  <SelectItem value="google">Google Ads</SelectItem>
+                  <SelectItem value="tiktok">TikTok Ads</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -374,6 +580,7 @@ export const SocialMediaManagement = () => {
                             <SelectItem value="instagram">Instagram</SelectItem>
                             <SelectItem value="linkedin">LinkedIn</SelectItem>
                             <SelectItem value="google">Google Ads</SelectItem>
+                            <SelectItem value="tiktok">TikTok Ads</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -527,18 +734,47 @@ export const SocialMediaManagement = () => {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         {campaign.status === 'active' ? (
-                          <Button variant="ghost" size="icon" onClick={() => handleStatusChange(campaign.id, 'paused')}>
-                            <Pause className="h-4 w-4" />
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            title="Pause Campaign"
+                            onClick={() => handleStatusChange(campaign, 'paused')}
+                          >
+                            <Pause className="h-4 w-4 text-amber-500" />
                           </Button>
                         ) : campaign.status !== 'completed' && campaign.status !== 'cancelled' ? (
-                          <Button variant="ghost" size="icon" onClick={() => handleStatusChange(campaign.id, 'active')}>
-                            <Play className="h-4 w-4" />
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            title="Resume Campaign"
+                            onClick={() => handleStatusChange(campaign, 'active')}
+                          >
+                            <Play className="h-4 w-4 text-emerald-500" />
                           </Button>
                         ) : null}
-                        <Button variant="ghost" size="icon">
-                          <BarChart3 className="h-4 w-4" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          title="Duplicate Campaign"
+                          onClick={() => handleDuplicate(campaign)}
+                        >
+                          <Copy className="h-4 w-4 text-primary" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(campaign.id)} className="text-destructive hover:text-destructive">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          title="Archive Campaign"
+                          onClick={() => handleArchive(campaign)}
+                        >
+                          <Archive className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          title="Delete Campaign"
+                          onClick={() => handleDelete(campaign.id)} 
+                          className="text-destructive hover:text-destructive"
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

@@ -12,6 +12,7 @@ import { Loader2, Check, AlertCircle, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useResendCooldown } from '@/hooks/useResendCooldown';
 import { normalizeToE164, PhoneValidationError } from '@/lib/phone-normalize';
+import { marketingEngine } from '@/services/marketingEngine';
 
 export type PhoneOtpMode = 'signin' | 'link';
 type Role = 'driver' | 'owner';
@@ -218,6 +219,12 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
         toast.success('Signed in');
       }
       setStep('done');
+      void marketingEngine.track('PHONE_VERIFIED', {
+        mode,
+        role: role || undefined,
+      }, {
+        phone: e164,
+      });
       onDone?.(e164);
     } catch (e) {
       const message = (e as Error).message || 'Verification failed. Please try again.';

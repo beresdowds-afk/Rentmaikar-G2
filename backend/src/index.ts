@@ -10,6 +10,7 @@ import { functionsRouter } from "./routes/functions";
 import { webhooksRouter } from "./routes/webhooks";
 import { portalApiRouter } from "./routes/portal";
 import { bridgeRouter } from "./routes/bridge";
+import { marketingRouter } from "./routes/marketing";
 import { renderPortalHtml } from "./portal/portalHtml";
 import { bridgeManager } from "./services/bridgeManager";
 import { platformHealthService } from "./services/platformHealth";
@@ -292,6 +293,7 @@ app.use("/api/portal", portalApiRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/cpaas", cpaasRouter);
 app.use("/api/functions", functionsRouter);
+app.use("/api/marketing", marketingRouter);
 
 // Bridge endpoints for Call, Listen (SSE), Respond, Polling, Telemetry, and Handshake
 app.use("/api/bridge", bridgeRouter);

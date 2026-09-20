@@ -7,6 +7,7 @@ import {
 } from './payment-config';
 import { supabase } from '@/integrations/supabase/client';
 import { idempotencyHeaders } from './idempotency';
+import { marketingEngine } from '@/services/marketingEngine';
 
 // PayPal types
 export interface PayPalConfig {
@@ -74,6 +75,17 @@ export class PaymentGateway {
     metadata?: Record<string, unknown>
   ): Promise<PaymentResult> {
     const breakdown = calculatePaymentBreakdown(baseAmount, this.currency);
+
+    // Marketing Engine: Observe payment started event
+    void marketingEngine.track('PAYMENT_STARTED', {
+      gateway: this.gateway,
+      currency: this.currency,
+      baseAmount,
+      driverTotal: breakdown.driverTotal,
+      driverId,
+      vehicleId,
+      rentalId,
+    });
     
     if (this.gateway === 'paypal') {
       return this.initializePayPalPayment(breakdown, driverId, vehicleId, rentalId, metadata);
@@ -206,13 +218,24 @@ export class PaymentGateway {
    * Verify payment completion
    */
   async verifyPayment(transactionId: string): Promise<PaymentResult> {
+    let res: PaymentResult;
     if (this.gateway === 'paypal') {
-      return this.verifyPayPalPayment(transactionId);
+      res = await this.verifyPayPalPayment(transactionId);
     } else if (this.gateway === 'opay') {
-      return this.verifyOPayPayment(transactionId);
+      res = await this.verifyOPayPayment(transactionId);
     } else {
-      return this.verifyPaystackPayment(transactionId);
+      res = await this.verifyPaystackPayment(transactionId);
     }
+
+    if (res.success) {
+      void marketingEngine.track('PAYMENT_COMPLETED', {
+        transactionId,
+        gateway: this.gateway,
+        currency: this.currency,
+      });
+    }
+
+    return res;
   }
 
   /**

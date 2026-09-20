@@ -40,6 +40,10 @@ import { NigeriaDriverVerification } from "@/components/admin/NigeriaDriverVerif
 import { PoliceReportVerification } from "@/components/admin/PoliceReportVerification";
 import { SocialMediaManagement } from "@/components/admin/SocialMediaManagement";
 import SocialChannelIntegrations from "@/components/admin/SocialChannelIntegrations";
+import { MarketingOverview } from "@/components/admin/marketing/MarketingOverview";
+import { MarketingLeadsSection } from "@/components/admin/marketing/MarketingLeadsSection";
+import { MarketingCommunicationsHub } from "@/components/admin/marketing/MarketingCommunicationsHub";
+import { MarketingAttributionSection } from "@/components/admin/marketing/MarketingAttributionSection";
 import { IoTDeviceOrders } from "@/components/admin/IoTDeviceOrders";
 import { DeviceOrderRevenue } from "@/components/admin/DeviceOrderRevenue";
 import { UserAccountsView } from "@/components/admin/UserAccountsView";
@@ -851,8 +855,14 @@ const AdminAssistantDashboard = () => {
           {activeTabAllowed && portalView === 'marketing' && (
             <SectionErrorBoundary section="MARKETING" onSwitchPortal={setPortalView}>
               <div className="space-y-6">
+                {(activeTab === 'overview' || !activeTab) && (
+                  <MarketingOverview onNavigateTab={(tab) => setActiveTab(tab)} />
+                )}
                 {activeTab === 'campaigns' && <SocialMediaManagement />}
-                {['facebook', 'instagram', 'linkedin', 'google'].includes(activeTab) && (
+                {activeTab === 'leads' && <MarketingLeadsSection />}
+                {activeTab === 'communications' && <MarketingCommunicationsHub />}
+                {activeTab === 'attribution' && <MarketingAttributionSection />}
+                {(activeTab === 'platforms' || ['facebook', 'instagram', 'linkedin', 'google', 'tiktok'].includes(activeTab)) && (
                   <>
                     <SocialChannelIntegrations />
                     <SocialMediaManagement />

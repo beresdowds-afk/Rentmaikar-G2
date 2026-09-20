@@ -29,6 +29,7 @@ import { resolvePostLoginDestination } from '@/lib/post-login-destination';
 import { isRestorablePath, readReturnTo, clearReturnTo } from '@/lib/return-to';
 import { logRegistrationEvent } from '@/lib/registration-audit';
 import { recordSmsConsentPair } from '@/lib/sms-consent';
+import { marketingEngine } from '@/services/marketingEngine';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -385,6 +386,17 @@ const Auth = () => {
             marketingConsent: !!data.smsMarketingConsent,
             source: 'signup',
           });
+
+          // RentMaikar Marketing Engine Canonical Event Dispatch
+          void marketingEngine.track('ACCOUNT_CREATED', {
+            role: data.role,
+            registration_origin: 'auth_signup',
+          }, {
+            email: data.email,
+            first_name: data.fullName.split(' ')[0],
+            last_name: data.fullName.split(' ').slice(1).join(' '),
+          });
+          void marketingEngine.track('ROLE_SELECTED', { role: data.role });
         }
       } catch (e) {
         console.warn('Could not persist consent preferences:', e);

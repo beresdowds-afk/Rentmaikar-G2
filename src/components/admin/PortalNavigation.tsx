@@ -108,11 +108,17 @@ export const supportTabs: PortalTab[] = [
 ];
 
 export const marketingTabs: PortalTab[] = [
+  { value: "overview", label: "Overview", icon: <BarChart3 className="h-4 w-4" /> },
   { value: "campaigns", label: "Campaigns", icon: <TrendingUp className="h-4 w-4" /> },
+  { value: "leads", label: "Unified Leads", icon: <Users className="h-4 w-4" /> },
+  { value: "communications", label: "Communications", icon: <MessageSquare className="h-4 w-4" /> },
+  { value: "platforms", label: "Ad Channels", icon: <Share2 className="h-4 w-4" /> },
+  { value: "attribution", label: "Attribution & ROI", icon: <Activity className="h-4 w-4" /> },
   { value: "facebook", label: "Facebook", icon: <Facebook className="h-4 w-4" /> },
   { value: "instagram", label: "Instagram", icon: <Instagram className="h-4 w-4" /> },
   { value: "linkedin", label: "LinkedIn", icon: <Linkedin className="h-4 w-4" /> },
   { value: "google", label: "Google Ads", icon: <Chrome className="h-4 w-4" /> },
+  { value: "tiktok", label: "TikTok Ads", icon: <Globe className="h-4 w-4" /> },
 ];
 
 export const docsTabs: PortalTab[] = [

@@ -4,6 +4,7 @@
 //   2. window CustomEvent `rentmaikar:onboarding-analytics` (tests + listeners)
 //   3. Meta Pixel (best-effort)
 import { trackEvent } from '@/lib/meta-pixel';
+import { marketingEngine } from '@/services/marketingEngine';
 
 export type OnboardingAnalyticsEvent =
   | 'onboarding_stage_completed'
@@ -67,6 +68,24 @@ export function trackOnboardingEvent(
       fields: payload.fields,
       ...(payload.extra ?? {}),
     });
+
+    // Marketing Engine: Observe stage completions & lead milestones
+    if (event === 'onboarding_stage_completed') {
+      if (payload.stage === 'approved' || payload.stage === 'completed') {
+        const canonicalName = payload.role === 'owner' ? 'OWNER_APPROVED' : 'DRIVER_APPROVED';
+        void marketingEngine.track(canonicalName, {
+          stage: payload.stage,
+          role: payload.role,
+          origin: payload.origin,
+        });
+      } else {
+        void marketingEngine.track('LEAD_CREATED', {
+          stage: payload.stage,
+          role: payload.role,
+          origin: payload.origin,
+        });
+      }
+    }
 
   } catch {
     /* analytics must never throw */

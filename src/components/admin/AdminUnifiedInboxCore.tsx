@@ -73,6 +73,7 @@ import {
 } from '@/hooks/useInboxAttachmentSearch';
 import { InboxSlaBadge, useNowTick } from '@/components/admin/InboxSlaBadge';
 import { getSlaInfo } from '@/lib/inbox-sla';
+import { MarketingInboxContextBadge } from '@/components/admin/marketing/MarketingInboxContextBadge';
 
 const channelIcons = {
   email: Mail,
@@ -373,6 +374,14 @@ const MessageThread = ({
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <InboxSlaBadge conversation={conversation} showElapsed />
+        </div>
+
+        <div className="mt-2">
+          <MarketingInboxContextBadge
+            email={conversation.user_email}
+            phone={conversation.user_phone}
+            userId={conversation.user_id}
+          />
         </div>
 
         {conversation.subject && (

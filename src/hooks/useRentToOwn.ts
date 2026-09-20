@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { marketingEngine } from '@/services/marketingEngine';
 
 export type RTOCurrency = 'USD' | 'NGN' | (string & {});
 
@@ -242,6 +243,16 @@ export function useRentToOwn() {
     }
 
     toast.success('Rent to Own listing submitted for admin approval');
+    
+    // Marketing Engine: Observe VEHICLE_LISTED event
+    void marketingEngine.track('VEHICLE_LISTED', {
+      listingId: newListing?.id,
+      vehicleId: data.vehicle_id,
+      totalPrice: data.total_price,
+      downPayment: data.down_payment,
+      currency: data.currency,
+    });
+
     return newListing;
   };
 
@@ -330,6 +341,12 @@ export function useRentToOwn() {
     }
 
     toast.success('Listing approved and now available to drivers');
+    // Marketing Engine: Observe VEHICLE_APPROVED event
+    void marketingEngine.track('VEHICLE_APPROVED', {
+      listingId,
+      vehicleId: listing.vehicle_id,
+      ownerId: listing.owner_id,
+    });
     await fetchListings('admin');
   };
 
@@ -417,6 +434,17 @@ export function useRentToOwn() {
       .update({ is_available: false, status: 'completed' })
       .eq('id', listingId);
 
+    // Marketing Engine: Observe RENTAL_REQUESTED event
+    void marketingEngine.track('RENTAL_REQUESTED', {
+      agreementId: newAgreement?.id,
+      listingId,
+      vehicleId: listing.vehicle_id,
+      driverId,
+      ownerId: listing.owner_id,
+      totalPrice: listing.total_price,
+      currency: listing.currency,
+    });
+
     toast.success('Rent to Own agreement created. Awaiting signatures.');
     return newAgreement;
   };
@@ -436,6 +464,13 @@ export function useRentToOwn() {
     }
 
     toast.success('Agreement signed successfully');
+    
+    // Marketing Engine: Observe RENTAL_COMPLETED event
+    void marketingEngine.track('RENTAL_COMPLETED', {
+      agreementId,
+      signedByRole: role,
+    });
+
     await fetchAgreements(role);
   };
 

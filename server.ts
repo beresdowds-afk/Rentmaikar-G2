@@ -31,6 +31,16 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Marketing Engine API routes
+  app.use("/api/marketing", async (req, res, next) => {
+    try {
+      const { marketingApiRouter } = await import("./src/server/marketing/routes");
+      return marketingApiRouter(req, res, next);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
   // Sitemap route
   app.get(["/sitemap.xml", "/sitemap"], async (_req, res) => {
     try {
