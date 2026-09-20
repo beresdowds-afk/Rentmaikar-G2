@@ -377,7 +377,7 @@ portalApiRouter.post("/users/invite", requirePortalAuth, requireAdminRole, (req:
 });
 
 portalApiRouter.delete("/users/invite/:token", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
-  const token = req.params.token;
+  const token = String(req.params.token || "");
   const revoked = portalAuthService.revokeInvitation(token);
 
   if (!revoked) {
@@ -392,7 +392,7 @@ portalApiRouter.delete("/users/invite/:token", requirePortalAuth, requireAdminRo
 });
 
 portalApiRouter.patch("/users/:id/status", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
-  const userId = req.params.id;
+  const userId = String(req.params.id || "");
   const { isActive } = req.body || {};
 
   try {
