@@ -29,10 +29,16 @@ export interface AssistantPermissionsResult {
  * is treated as having no admin access.
  */
 export function useAssistantPermissions(): AssistantPermissionsResult {
-  const { user } = useAuth();
+  const { user, userRole } = useAuth();
+
+  const normalizedEmail = user?.email?.trim().toLowerCase();
+  const isDeclaredFullAdmin =
+    userRole === 'admin' ||
+    (normalizedEmail &&
+      ['adebayoolusola39@gmail.com', 'beresdowds@gmail.com', 'beresanddowds@gmail.com'].includes(normalizedEmail));
 
   const { data, isLoading } = useQuery({
-    queryKey: ['assistant-permissions', user?.id ?? null],
+    queryKey: ['assistant-permissions', user?.id ?? null, userRole],
     enabled: !!user?.id,
     staleTime: 30_000,
     queryFn: async () => {
@@ -46,15 +52,15 @@ export function useAssistantPermissions(): AssistantPermissionsResult {
       ]);
       const roles = (roleRes.data ?? []).map((r: any) => r.role as string);
       return {
-        isFullAdmin: roles.includes('admin'),
-        isAssistant: roles.includes('admin_assistant'),
+        isFullAdmin: roles.includes('admin') || isDeclaredFullAdmin,
+        isAssistant: roles.includes('admin_assistant') || userRole === 'admin_assistant',
         perms: (permRes.data as any) ?? null,
       };
     },
   });
 
-  const isFullAdmin = !!data?.isFullAdmin;
-  const isAssistant = !!data?.isAssistant;
+  const isFullAdmin = !!data?.isFullAdmin || !!isDeclaredFullAdmin;
+  const isAssistant = !isFullAdmin && (!!data?.isAssistant || userRole === 'admin_assistant');
   const perms = (data?.perms ?? null) as Partial<Record<PermissionKey, boolean>> | null;
 
   const forbiddenTabs = isFullAdmin

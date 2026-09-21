@@ -171,12 +171,13 @@ export function RoleManagement() {
           const normalizedEmail = profile.email?.trim().toLowerCase();
           const isEastforte = normalizedEmail === 'eastfortemain@gmail.com';
           const isAdebayo = normalizedEmail === 'adebayoolusola39@gmail.com';
+          const isBeresDowds = normalizedEmail === 'beresdowds@gmail.com' || normalizedEmail === 'beresanddowds@gmail.com';
           const isIbrahim = normalizedEmail === 'ibrahimganiyu026@gmail.com';
           const isWole = normalizedEmail === 'woleadebayo58@gmail.com';
           const hasAssistantPerm = assistantPerms?.some(a => a.user_id === profile.user_id);
 
           let effectiveRole: AppRole | null = (userRole?.role as AppRole) ?? null;
-          if (isAdebayo) {
+          if (isAdebayo || isBeresDowds) {
             effectiveRole = 'admin';
           } else if (isEastforte || isIbrahim || isWole || hasAssistantPerm) {
             effectiveRole = 'admin_assistant';
@@ -188,11 +189,13 @@ export function RoleManagement() {
             user_id: profile.user_id,
             full_name: (isEastforte || isAdebayo)
               ? 'Olusola Adebayo'
-              : isIbrahim
-                ? (profile.full_name || 'Ibrahim Ganiyu')
-                : isWole
-                  ? (profile.full_name || 'Wole Adebayo')
-                  : profile.full_name,
+              : isBeresDowds
+                ? (profile.full_name || 'Beres & Dowds Admin')
+                : isIbrahim
+                  ? (profile.full_name || 'Ibrahim Ganiyu')
+                  : isWole
+                    ? (profile.full_name || 'Wole Adebayo')
+                    : profile.full_name,
             email: profile.email,
             role: effectiveRole,
             created_at: profile.created_at || '',
@@ -209,6 +212,23 @@ export function RoleManagement() {
           user_id: 'admin-adebayo-1',
           full_name: 'Olusola Adebayo',
           email: 'adebayoolusola39@gmail.com',
+          role: 'admin',
+          created_at: new Date().toISOString(),
+          is_active: true,
+        });
+      }
+
+      // Ensure Beres & Dowds at beresdowds@gmail.com is listed as active Admin
+      const hasBeresDowds = usersWithRoles.some(u => {
+        const email = u.email?.trim().toLowerCase();
+        return email === 'beresdowds@gmail.com' || email === 'beresanddowds@gmail.com';
+      });
+      if (!hasBeresDowds) {
+        usersWithRoles.splice(1, 0, {
+          id: 'admin-beresdowds',
+          user_id: 'admin-beresdowds-1',
+          full_name: 'Beres & Dowds Admin',
+          email: 'beresdowds@gmail.com',
           role: 'admin',
           created_at: new Date().toISOString(),
           is_active: true,
@@ -501,8 +521,20 @@ export function RoleManagement() {
     }
   };
 
+  const isProtectedAdminUser = (u?: UserWithRole | null) => {
+    if (!u?.email) return false;
+    const email = u.email.trim().toLowerCase();
+    return ['adebayoolusola39@gmail.com', 'beresdowds@gmail.com', 'beresanddowds@gmail.com'].includes(email);
+  };
+
   const handleChangeRole = async () => {
     if (!selectedUser || !newRole) return;
+
+    if (isProtectedAdminUser(selectedUser)) {
+      toast.error('Cannot modify primary Platform Administrator accounts');
+      setChangeRoleDialogOpen(false);
+      return;
+    }
 
     setIsUpdating(true);
     try {
@@ -544,6 +576,12 @@ export function RoleManagement() {
 
   const handleDeleteRole = async () => {
     if (!selectedUser) return;
+
+    if (isProtectedAdminUser(selectedUser)) {
+      toast.error('Cannot remove primary Platform Administrator accounts');
+      setDeleteRoleDialogOpen(false);
+      return;
+    }
 
     setIsUpdating(true);
     try {
@@ -777,23 +815,31 @@ export function RoleManagement() {
                                       )}
                                       Resend
                                     </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={(e) => { e.stopPropagation(); openChangeRoleDialog(user); }}
-                                      className="gap-1"
-                                    >
-                                      <UserPlus className="h-4 w-4" />
-                                      Change
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(e) => { e.stopPropagation(); openDeleteRoleDialog(user); }}
-                                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                    {isProtectedAdminUser(user) ? (
+                                      <Badge variant="outline" className="border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs py-0.5">
+                                        Primary Admin
+                                      </Badge>
+                                    ) : (
+                                      <>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={(e) => { e.stopPropagation(); openChangeRoleDialog(user); }}
+                                          className="gap-1"
+                                        >
+                                          <UserPlus className="h-4 w-4" />
+                                          Change
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => { e.stopPropagation(); openDeleteRoleDialog(user); }}
+                                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -861,51 +907,59 @@ export function RoleManagement() {
                             )}
                             Resend reset link
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openChangeRoleDialog(selectedUser)}
-                            className="gap-1"
-                          >
-                            <UserPlus className="h-4 w-4" />
-                            Change role
-                          </Button>
-                          <Button
-                            variant={selectedUser.is_active ? 'outline' : 'default'}
-                            size="sm"
-                            onClick={() => openActivationDialog(selectedUser)}
-                            className={`gap-1 ${
-                              selectedUser.is_active
-                                ? 'text-amber-600 border-amber-500/40 hover:bg-amber-500/10'
-                                : ''
-                            }`}
-                            title={
-                              selectedUser.is_active
-                                ? 'Block sign-in and hide this user\'s dashboard until reactivated'
-                                : 'Restore sign-in and dashboard access'
-                            }
-                          >
-                            {selectedUser.is_active ? (
-                              <>
-                                <PowerOff className="h-4 w-4" />
-                                Deactivate
-                              </>
-                            ) : (
-                              <>
-                                <Power className="h-4 w-4" />
-                                Activate
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openDeleteRoleDialog(selectedUser)}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Remove role
-                          </Button>
+                          {isProtectedAdminUser(selectedUser) ? (
+                            <Badge variant="outline" className="border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs py-1 px-2.5">
+                              Primary Platform Administrator (Protected)
+                            </Badge>
+                          ) : (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openChangeRoleDialog(selectedUser)}
+                                className="gap-1"
+                              >
+                                <UserPlus className="h-4 w-4" />
+                                Change role
+                              </Button>
+                              <Button
+                                variant={selectedUser.is_active ? 'outline' : 'default'}
+                                size="sm"
+                                onClick={() => openActivationDialog(selectedUser)}
+                                className={`gap-1 ${
+                                  selectedUser.is_active
+                                    ? 'text-amber-600 border-amber-500/40 hover:bg-amber-500/10'
+                                    : ''
+                                }`}
+                                title={
+                                  selectedUser.is_active
+                                    ? 'Block sign-in and hide this user\'s dashboard until reactivated'
+                                    : 'Restore sign-in and dashboard access'
+                                }
+                              >
+                                {selectedUser.is_active ? (
+                                  <>
+                                    <PowerOff className="h-4 w-4" />
+                                    Deactivate
+                                  </>
+                                ) : (
+                                  <>
+                                    <Power className="h-4 w-4" />
+                                    Activate
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openDeleteRoleDialog(selectedUser)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Remove role
+                              </Button>
+                            </>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">
                           Deactivating a user immediately blocks their sign-in, hides their dashboard,

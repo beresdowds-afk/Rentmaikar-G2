@@ -77,15 +77,20 @@ export async function ensureAuthUserForApplicant({
   requestedRole,
   emailRedirectTo,
 }: EnsureAuthUserArgs): Promise<string> {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // 1. If currently signed in, check if it matches the applicant's email
   const { data: sessionData } = await supabase.auth.getSession();
   const currentEmail = sessionData.session?.user?.email?.toLowerCase();
-  if (currentEmail && currentEmail !== email.toLowerCase()) {
+  if (currentEmail && currentEmail !== normalizedEmail) {
     await supabase.auth.signOut();
+  } else if (currentEmail === normalizedEmail && sessionData.session?.user?.id) {
+    const existingUserId = sessionData.session.user.id;
+    if (requestedRole) {
+      await assignRole(existingUserId, requestedRole, normalizedEmail);
+    }
+    return existingUserId;
   }
-
-  const { data: sessionAfter } = await supabase.auth.getSession();
-  const existingId = sessionAfter.session?.user?.id ?? null;
-  if (existingId) return existingId;
 
   if (!password || password.length < 8) {
     throw new Error(
@@ -93,8 +98,43 @@ export async function ensureAuthUserForApplicant({
     );
   }
 
+  // 2. Pre-check if email is already registered using email_signup_status RPC
+  try {
+    const { data: statusData } = await (supabase.rpc as any)('email_signup_status', {
+      _email: normalizedEmail,
+    });
+    if (statusData && typeof statusData === 'object' && (statusData as any).registered === true) {
+      // Email is already registered. Attempt sign-in with the password provided.
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (!signInError && signInData?.user?.id) {
+        const userId = signInData.user.id;
+        if (requestedRole) {
+          await assignRole(userId, requestedRole, normalizedEmail);
+        }
+        return userId;
+      }
+
+      // Password didn't match or sign-in failed
+      const duplicateError = new Error(
+        'An account with this email address already exists. Please sign in with your password to submit your application, or use the forgot password option.',
+      );
+      (duplicateError as any).code = 'EMAIL_ALREADY_EXISTS';
+      throw duplicateError;
+    }
+  } catch (rpcErr: any) {
+    if (rpcErr?.code === 'EMAIL_ALREADY_EXISTS' || rpcErr?.message?.includes('already exists')) {
+      throw rpcErr;
+    }
+    // Rate limited or RPC unavailable, continue to signUp attempt
+  }
+
+  // 3. Attempt to sign up the new user
   const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-    email,
+    email: normalizedEmail,
     password,
     options: {
       emailRedirectTo: emailRedirectTo ?? `${window.location.origin}/auth`,
@@ -104,9 +144,73 @@ export async function ensureAuthUserForApplicant({
       },
     },
   });
-  if (signUpError) throw signUpError;
+
+  if (signUpError) {
+    const msg = signUpError.message.toLowerCase();
+    if (
+      msg.includes('already registered') ||
+      msg.includes('already exists') ||
+      signUpError.status === 422
+    ) {
+      // Attempt sign-in with password in case account was already created
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+      if (!signInError && signInData?.user?.id) {
+        const userId = signInData.user.id;
+        if (requestedRole) {
+          await assignRole(userId, requestedRole, normalizedEmail);
+        }
+        return userId;
+      }
+
+      const duplicateError = new Error(
+        'An account with this email address already exists. Please sign in with your password to submit your application, or use the forgot password option.',
+      );
+      (duplicateError as any).code = 'EMAIL_ALREADY_EXISTS';
+      throw duplicateError;
+    }
+    throw signUpError;
+  }
+
+  // 4. Supabase enumeration protection check:
+  // If an account already exists, Supabase returns a dummy user object with identities: []
+  // We MUST NOT accept this dummy user id!
+  if (
+    signUpData.user &&
+    Array.isArray(signUpData.user.identities) &&
+    signUpData.user.identities.length === 0
+  ) {
+    // Attempt sign-in with password
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+    if (!signInError && signInData?.user?.id) {
+      const userId = signInData.user.id;
+      if (requestedRole) {
+        await assignRole(userId, requestedRole, normalizedEmail);
+      }
+      return userId;
+    }
+
+    const duplicateError = new Error(
+      'An account with this email address already exists. Please sign in with your password to submit your application, or use the forgot password option.',
+    );
+    (duplicateError as any).code = 'EMAIL_ALREADY_EXISTS';
+    throw duplicateError;
+  }
 
   const userId = signUpData.user?.id ?? null;
-  if (!userId) throw new Error('Could not create your account. Please try again.');
+  if (!userId) {
+    throw new Error('Could not create your account. Please try again.');
+  }
+
+  // 5. Ensure role and account setup is immediately provisioned
+  if (requestedRole) {
+    await assignRole(userId, requestedRole, normalizedEmail);
+  }
+
   return userId;
 }

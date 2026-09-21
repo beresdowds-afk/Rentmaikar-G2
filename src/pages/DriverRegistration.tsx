@@ -346,6 +346,7 @@ const DriverRegistration = () => {
       // Audit: registration data reached the database.
       void logRegistrationEvent("registration_upsert_succeeded", {
         email: data.email,
+        userId,
         applicationType: "driver",
         metadata: { country: data.country },
       });
@@ -357,9 +358,16 @@ const DriverRegistration = () => {
         console.warn('Could not advance registration stage:', e);
       }
 
-      toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
-      setSubmitError(null);
-      navigate("/driver/dashboard");
+      const { data: sessionNow } = await supabase.auth.getSession();
+      if (sessionNow.session) {
+        toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
+        setSubmitError(null);
+        navigate("/driver/dashboard");
+      } else {
+        toast.success("Application submitted! Please sign in or check your email to confirm your account.");
+        setSubmitError(null);
+        navigate("/auth?returnTo=/driver/dashboard");
+      }
     } catch (error) {
       console.error("Driver registration error:", error);
       const friendly = classifyRegistrationError(error);

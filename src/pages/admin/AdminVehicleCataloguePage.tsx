@@ -41,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { IoTLivenessCommandBar } from "@/components/admin/IoTLivenessCommandBar";
 import { IoTAuditLogFeed } from "@/components/admin/IoTAuditLogFeed";
 import { ServiceDisruptionDialog } from "@/components/admin/ServiceDisruptionDialog";
@@ -67,6 +68,9 @@ import {
   ShieldCheck,
   Radio,
   Info,
+  CheckSquare,
+  Sliders,
+  EyeOff,
 } from "lucide-react";
 
 import { toast } from "sonner";
@@ -172,6 +176,7 @@ const inferCountry = (v: VehicleRow): "USA" | "Nigeria" | (string & {}) => {
 
 const statusColors: Record<string, string> = {
   active: "bg-success/10 text-success border-success/20",
+  available: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
   pending: "bg-warning/10 text-warning border-warning/20",
   inactive: "bg-muted text-muted-foreground border-border",
   maintenance: "bg-destructive/10 text-destructive border-destructive/20",
@@ -190,9 +195,10 @@ export const hasVerifiedPhotos = (v: { photo_urls?: string[] | null }) =>
 const quickChips: QuickChip[] = [
   { id: "usa", label: "🇺🇸 USA", match: (v) => inferCountry(v) === "USA" },
   { id: "ng", label: "🇳🇬 Nigeria", match: (v) => inferCountry(v) === "Nigeria" },
-  { id: "active", label: "Active", match: (v) => v.status === "active" },
+  { id: "active", label: "Active / Available", match: (v) => v.status === "active" || v.status === "available" },
   { id: "disrupted", label: "🚨 Service Disrupted", match: (v) => getVehicleDisruptionInfo(v).isDisrupted },
   { id: "pending", label: "Pending", match: (v) => (v.status || "pending") === "pending" },
+  { id: "inactive", label: "Inactive", match: (v) => v.status === "inactive" },
   { id: "maintenance", label: "Maintenance", match: (v) => v.status === "maintenance" },
   { id: "no_photos", label: "📷 Missing owner photos", match: (v) => !hasVerifiedPhotos(v) },
   { id: "recent", label: "2020+", match: (v) => v.year >= 2020 },
@@ -216,6 +222,13 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
   const [countryFilter, setCountryFilter] = useState("all");
   const [makeFilter, setMakeFilter] = useState("");
   const [page, setPage] = useState(1);
+
+  // Batch selection and availability management state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchUpdating, setIsBatchUpdating] = useState(false);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
+  const [batchTargetStatus, setBatchTargetStatus] = useState<"available" | "active" | "inactive" | "maintenance" | "pending">("available");
+  const [batchTargetVisibility, setBatchTargetVisibility] = useState<"public" | "hidden" | "unchanged">("public");
 
   // Service Disruption management state
   const [disruptionVehicle, setDisruptionVehicle] = useState<VehicleRow | null>(null);
@@ -490,6 +503,52 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
   const currentPage = Math.min(page, totalPages);
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const allOnPageSelected = useMemo(
+    () => paged.length > 0 && paged.every((v) => selectedIds.has(v.id)),
+    [paged, selectedIds]
+  );
+
+  const someOnPageSelected = useMemo(
+    () => paged.some((v) => selectedIds.has(v.id)) && !allOnPageSelected,
+    [paged, selectedIds, allOnPageSelected]
+  );
+
+  const handleToggleSelectAll = () => {
+    if (allOnPageSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        paged.forEach((v) => next.delete(v.id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        paged.forEach((v) => next.add(v.id));
+        return next;
+      });
+    }
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedIds(new Set(filtered.map((v) => v.id)));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
   const toggleChip = (id: string) => {
     setPage(1);
     setActiveChips((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -623,6 +682,121 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
       toast.error("Bulk update failed", { description: e.message });
     } finally {
       setBulkBusy(false);
+    }
+  };
+
+  const batchUpdateVehicleAvailability = async (
+    targetStatus: "available" | "active" | "inactive" | "maintenance" | "pending",
+    isPublic?: boolean
+  ) => {
+    const idsToUpdate = Array.from(selectedIds);
+    if (!idsToUpdate.length) return;
+
+    setIsBatchUpdating(true);
+    try {
+      const selectedVehicles = (vehicles ?? []).filter((v) => selectedIds.has(v.id));
+
+      let eligibleForPublicIds = idsToUpdate;
+      let missingLocationCount = 0;
+
+      if (isPublic === true) {
+        const withLocation = selectedVehicles.filter((v) => Boolean(v.pickup_city?.trim() && v.pickup_location?.trim()));
+        missingLocationCount = selectedVehicles.length - withLocation.length;
+        eligibleForPublicIds = withLocation.map((v) => v.id);
+
+        if (withLocation.length === 0) {
+          toast.error("Pickup location required for public listing", {
+            description: "None of the selected vehicles have a designated pickup city and location. Vehicles must have pickup details before being made publicly visible on the catalogue.",
+          });
+          setIsBatchUpdating(false);
+          return;
+        }
+      }
+
+      if (isPublic === true) {
+        // Publish vehicles with designated locations
+        const publicPatch: { status: string; is_public: boolean; is_enabled: boolean } = {
+          status: targetStatus,
+          is_public: true,
+          is_enabled: true,
+        };
+        const { error: publicErr } = await supabase
+          .from("vehicles")
+          .update(publicPatch)
+          .in("id", eligibleForPublicIds);
+        if (publicErr) throw publicErr;
+
+        // If any selected vehicles lacked pickup location, set their operational status but leave is_public false
+        if (missingLocationCount > 0) {
+          const withoutLocationIds = selectedVehicles
+            .filter((v) => !v.pickup_city?.trim() || !v.pickup_location?.trim())
+            .map((v) => v.id);
+          const { error: withoutLocationErr } = await supabase
+            .from("vehicles")
+            .update({ status: targetStatus, is_enabled: true })
+            .in("id", withoutLocationIds);
+          if (withoutLocationErr) throw withoutLocationErr;
+        }
+      } else {
+        const patch: { status: string; is_public?: boolean; is_enabled?: boolean } = {
+          status: targetStatus,
+        };
+        if (isPublic !== undefined) {
+          patch.is_public = isPublic;
+        }
+        if (targetStatus === "available" || targetStatus === "active") {
+          patch.is_enabled = true;
+        } else if (targetStatus === "inactive") {
+          patch.is_enabled = false;
+        }
+
+        const { error } = await supabase
+          .from("vehicles")
+          .update(patch)
+          .in("id", idsToUpdate);
+        if (error) throw error;
+      }
+
+      // Record in admin audit log
+      await supabase.from("admin_audit_log").insert({
+        admin_id: user?.id ?? null,
+        target_id: idsToUpdate[0] || null,
+        action: "batch_vehicle_status_update",
+        details: {
+          count: idsToUpdate.length,
+          target_status: targetStatus,
+          is_public: isPublic,
+          vehicle_ids: idsToUpdate,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      const readableStatus =
+        targetStatus === "available" || targetStatus === "active"
+          ? isPublic === true
+            ? "Available & Publicly Listed"
+            : isPublic === false
+            ? "Available (Hidden)"
+            : "Available"
+          : targetStatus === "inactive"
+          ? isPublic === false
+            ? "Inactive & Hidden"
+            : "Inactive"
+          : targetStatus.charAt(0).toUpperCase() + targetStatus.slice(1);
+
+      toast.success(`Updated ${idsToUpdate.length} vehicle${idsToUpdate.length === 1 ? "" : "s"} to ${readableStatus}`, {
+        description: missingLocationCount > 0
+          ? `${eligibleForPublicIds.length} vehicle(s) published; ${missingLocationCount} kept unlisted due to missing pickup location.`
+          : "Fleet availability updated successfully.",
+      });
+
+      await refetchVehicles();
+      setSelectedIds(new Set());
+      setBatchDialogOpen(false);
+    } catch (err: any) {
+      toast.error("Batch update failed", { description: err.message });
+    } finally {
+      setIsBatchUpdating(false);
     }
   };
 
@@ -967,17 +1141,116 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                 )}
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
               ) : (
                 <>
+                  {/* Batch Availability & Status Action Toolbar */}
+                  {selectedIds.size > 0 && (
+                    <div
+                      id="batch-availability-toolbar"
+                      className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 p-3 rounded-lg border border-primary/20 bg-primary/5 text-foreground transition-all"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="default" className="gap-1 px-2.5 py-1 text-xs">
+                          <CheckSquare className="h-3.5 w-3.5" />
+                          {selectedIds.size} vehicle{selectedIds.size === 1 ? "" : "s"} selected
+                        </Badge>
+                        {filtered.length > paged.length && selectedIds.size < filtered.length && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleSelectAllFiltered}
+                            className="h-7 text-xs text-primary font-medium hover:underline p-0 px-2"
+                          >
+                            Select all {filtered.length} matching vehicles
+                          </Button>
+                        )}
+                        {selectedIds.size === filtered.length && filtered.length > paged.length && (
+                          <span className="text-xs text-muted-foreground">
+                            All {filtered.length} filtered vehicles selected
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          id="batch-set-available-btn"
+                          size="sm"
+                          disabled={isBatchUpdating}
+                          onClick={() => batchUpdateVehicleAvailability("available", true)}
+                          className="gap-1.5 h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                          title="Set status to Available and publish to public catalogue"
+                        >
+                          {isBatchUpdating ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          )}
+                          Set Available & List
+                        </Button>
+
+                        <Button
+                          id="batch-set-inactive-btn"
+                          size="sm"
+                          variant="outline"
+                          disabled={isBatchUpdating}
+                          onClick={() => batchUpdateVehicleAvailability("inactive", false)}
+                          className="gap-1.5 h-8 text-xs border-border hover:bg-muted"
+                          title="Set status to Inactive and hide from public catalogue"
+                        >
+                          {isBatchUpdating ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          )}
+                          Set Inactive & Hide
+                        </Button>
+
+                        <Button
+                          id="batch-custom-status-btn"
+                          size="sm"
+                          variant="secondary"
+                          disabled={isBatchUpdating}
+                          onClick={() => setBatchDialogOpen(true)}
+                          className="gap-1.5 h-8 text-xs"
+                          title="Configure custom operational status and visibility"
+                        >
+                          <Sliders className="h-3.5 w-3.5" />
+                          Batch Status...
+                        </Button>
+
+                        <Button
+                          id="batch-clear-selection-btn"
+                          size="sm"
+                          variant="ghost"
+                          disabled={isBatchUpdating}
+                          onClick={handleClearSelection}
+                          className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" />
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-12 px-3 text-center">
+                            <Checkbox
+                              id="batch-select-all-header"
+                              checked={allOnPageSelected ? true : someOnPageSelected ? "indeterminate" : false}
+                              onCheckedChange={handleToggleSelectAll}
+                              aria-label="Select all vehicles on current page"
+                            />
+                          </TableHead>
                           <TableHead>Vehicle</TableHead>
                           <TableHead>Plate / VIN</TableHead>
                           <TableHead>Location</TableHead>
@@ -993,15 +1266,26 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                           const country = inferCountry(v);
                           const dev = deviceMap?.get(v.id);
                           const disruptionInfo = getVehicleDisruptionInfo(v, recallMap);
+                          const isSelected = selectedIds.has(v.id);
                           return (
                             <TableRow
                               key={v.id}
                               className={
                                 disruptionInfo.isDisrupted
                                   ? "bg-destructive/[0.04] dark:bg-destructive/[0.08] border-l-4 border-l-destructive"
+                                  : isSelected
+                                  ? "bg-primary/[0.05] dark:bg-primary/[0.08]"
                                   : undefined
                               }
                             >
+                              <TableCell className="w-12 px-3 text-center">
+                                <Checkbox
+                                  id={`batch-select-vehicle-${v.id}`}
+                                  checked={isSelected}
+                                  onCheckedChange={() => handleToggleSelect(v.id)}
+                                  aria-label={`Select ${v.year} ${v.make} ${v.model} (${v.license_plate})`}
+                                />
+                              </TableCell>
                               <TableCell>
                                 <div className="font-medium">{v.year} {v.make} {v.model}</div>
                                 <div className="text-xs text-muted-foreground capitalize">{v.color || "—"}</div>
@@ -1100,7 +1384,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
                         })}
                         {!paged.length && (
                           <TableRow>
-                            <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                            <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                               No vehicles match these filters.
                             </TableCell>
                           </TableRow>
@@ -1411,6 +1695,108 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
     />
   );
 
+  const batchStatusDialog = (
+    <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sliders className="h-5 w-5 text-primary" /> Batch Status & Availability Update
+          </DialogTitle>
+          <DialogDescription>
+            Update operational status and catalogue availability for {selectedIds.size} selected vehicle{selectedIds.size === 1 ? "" : "s"}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {/* Target Status Selection */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Operational Status</label>
+            <Select
+              value={batchTargetStatus}
+              onValueChange={(val: any) => setBatchTargetStatus(val)}
+            >
+              <SelectTrigger id="batch-dialog-status-trigger">
+                <SelectValue placeholder="Select target status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="available">Available (Fleet Ready)</SelectItem>
+                <SelectItem value="active">Active (In Operation)</SelectItem>
+                <SelectItem value="inactive">Inactive (Delisted)</SelectItem>
+                <SelectItem value="maintenance">Maintenance (In Workshop)</SelectItem>
+                <SelectItem value="pending">Pending Review</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Public Catalogue Visibility */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">Public Catalogue Visibility</label>
+            <Select
+              value={batchTargetVisibility}
+              onValueChange={(val: any) => setBatchTargetVisibility(val)}
+            >
+              <SelectTrigger id="batch-dialog-visibility-trigger">
+                <SelectValue placeholder="Select visibility option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">Listed (Publicly Visible on Catalogue)</SelectItem>
+                <SelectItem value="hidden">Hidden (Unlisted from Catalogue)</SelectItem>
+                <SelectItem value="unchanged">Leave Visibility Unchanged</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Vehicles require a designated pickup city and location to appear on public listings.
+            </p>
+          </div>
+
+          <div className="p-3 bg-muted/40 rounded-lg text-xs space-y-1 border">
+            <div className="font-medium text-foreground">Workflow Summary</div>
+            <div className="text-muted-foreground">
+              {selectedIds.size} vehicle{selectedIds.size === 1 ? "" : "s"} will be set to{" "}
+              <strong className="text-foreground capitalize">{batchTargetStatus}</strong>
+              {batchTargetVisibility !== "unchanged" && (
+                <>
+                  {" "}and{" "}
+                  <strong className="text-foreground">
+                    {batchTargetVisibility === "public" ? "Publicly Listed" : "Hidden"}
+                  </strong>
+                </>
+              )}
+              .
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            id="batch-dialog-cancel-btn"
+            variant="ghost"
+            disabled={isBatchUpdating}
+            onClick={() => setBatchDialogOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            id="batch-dialog-apply-btn"
+            disabled={isBatchUpdating || selectedIds.size === 0}
+            onClick={() =>
+              batchUpdateVehicleAvailability(
+                batchTargetStatus,
+                batchTargetVisibility === "unchanged"
+                  ? undefined
+                  : batchTargetVisibility === "public"
+              )
+            }
+            className="gap-1.5"
+          >
+            {isBatchUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
+            Apply to {selectedIds.size} Vehicle{selectedIds.size === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   if (embedded) {
     return (
       <>
@@ -1419,6 +1805,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
         {previewDialog}
         {addDialog}
         {disruptionDialog}
+        {batchStatusDialog}
       </>
     );
   }
@@ -1432,6 +1819,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
       {previewDialog}
       {addDialog}
       {disruptionDialog}
+      {batchStatusDialog}
     </div>
   );
 }

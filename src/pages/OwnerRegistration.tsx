@@ -269,6 +269,7 @@ const OwnerRegistration = () => {
       // Audit: registration data reached the database.
       void logRegistrationEvent("registration_upsert_succeeded", {
         email: data.email,
+        userId,
         applicationType: "owner",
         metadata: { country: data.country },
       });
@@ -279,9 +280,16 @@ const OwnerRegistration = () => {
         console.warn('Could not advance registration stage:', e);
       }
 
-      toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
-      setSubmitError(null);
-      navigate("/owner/dashboard");
+      const { data: sessionNow } = await supabase.auth.getSession();
+      if (sessionNow.session) {
+        toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
+        setSubmitError(null);
+        navigate("/owner/dashboard");
+      } else {
+        toast.success("Application submitted! Please sign in or check your email to confirm your account.");
+        setSubmitError(null);
+        navigate("/auth?returnTo=/owner/dashboard");
+      }
     } catch (error) {
       console.error("Owner registration error:", error);
       const friendly = classifyRegistrationError(error);

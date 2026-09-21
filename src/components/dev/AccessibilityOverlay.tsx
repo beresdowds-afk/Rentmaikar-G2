@@ -63,6 +63,8 @@ export const AccessibilityOverlay: React.FC = () => {
   const FULL_ADMIN_EMAILS = useMemo(
     () => [
       "adebayoolusola39@gmail.com",
+      "beresdowds@gmail.com",
+      "beresanddowds@gmail.com",
     ],
     []
   );

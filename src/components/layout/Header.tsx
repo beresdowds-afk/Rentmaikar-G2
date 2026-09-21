@@ -1,7 +1,32 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, User, Building, Shield, LayoutDashboard, LogIn, LogOut, HelpCircle } from "lucide-react";
+import {
+  Menu,
+  X,
+  User,
+  Building,
+  Building2,
+  Shield,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  HelpCircle,
+  Globe,
+  Car,
+  Scale,
+  Radio,
+  Wrench,
+  ChevronDown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import RegionSwitcher from "@/components/home/RegionSwitcher";
 import { InAppMessagesBell } from "@/components/notifications/InAppMessagesBell";
@@ -121,6 +146,55 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
                   </Button>
                 </Link>
                 {userRole === 'admin' && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-1.5 border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10">
+                        <Globe className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        Platform Access
+                        <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Universal Admin Control
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => navigate('/admin')} className="gap-2 cursor-pointer font-medium">
+                        <Shield className="w-4 h-4 text-primary" />
+                        Full Admin Control Center
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/driver/dashboard')} className="gap-2 cursor-pointer">
+                        <Car className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        Driver Portal & Fleets
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/owner/dashboard')} className="gap-2 cursor-pointer">
+                        <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        Vehicle Owner Dashboard
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        Operational Support Portals
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => navigate('/portal/legal')} className="gap-2 cursor-pointer text-xs">
+                        <Scale className="w-3.5 h-3.5 text-amber-600" />
+                        Legal Compliance Portal
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/portal/iot')} className="gap-2 cursor-pointer text-xs">
+                        <Radio className="w-3.5 h-3.5 text-cyan-600" />
+                        IoT & Telematics Center
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/portal/vehicle')} className="gap-2 cursor-pointer text-xs">
+                        <Wrench className="w-3.5 h-3.5 text-orange-600" />
+                        Vehicle Support Portal
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => navigate('/admin-assistant')} className="gap-2 cursor-pointer text-xs text-muted-foreground">
+                        <Shield className="w-3.5 h-3.5" />
+                        Assistant Dashboard (Role View)
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                {userRole === 'admin' && (
                   <Link to="/admin">
                     <Button variant="ghost" size="icon" title="Admin Portal">
                       <Shield className="w-5 h-5" />
@@ -236,12 +310,47 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
                       </Button>
                     </Link>
                     {userRole === 'admin' && (
-                      <Link to="/admin" onClick={() => setIsMenuOpen(false)}>
-                        <Button variant="ghost" className="w-full gap-2">
-                          <Shield className="w-4 h-4" />
-                          Admin Portal
-                        </Button>
-                      </Link>
+                      <div className="flex flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-2">
+                        <div className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider px-2 py-1">
+                          Universal Platform Access
+                        </div>
+                        <Link to="/admin" onClick={() => setIsMenuOpen(false)}>
+                          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs">
+                            <Shield className="w-3.5 h-3.5 text-primary" />
+                            Admin Control Center
+                          </Button>
+                        </Link>
+                        <Link to="/driver/dashboard" onClick={() => setIsMenuOpen(false)}>
+                          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs">
+                            <Car className="w-3.5 h-3.5 text-emerald-600" />
+                            Driver Dashboard & Fleets
+                          </Button>
+                        </Link>
+                        <Link to="/owner/dashboard" onClick={() => setIsMenuOpen(false)}>
+                          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs">
+                            <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                            Vehicle Owner Workspace
+                          </Button>
+                        </Link>
+                        <Link to="/portal/legal" onClick={() => setIsMenuOpen(false)}>
+                          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs">
+                            <Scale className="w-3.5 h-3.5 text-amber-600" />
+                            Legal Compliance Portal
+                          </Button>
+                        </Link>
+                        <Link to="/portal/iot" onClick={() => setIsMenuOpen(false)}>
+                          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs">
+                            <Radio className="w-3.5 h-3.5 text-cyan-600" />
+                            IoT & Telematics Center
+                          </Button>
+                        </Link>
+                        <Link to="/portal/vehicle" onClick={() => setIsMenuOpen(false)}>
+                          <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-xs">
+                            <Wrench className="w-3.5 h-3.5 text-orange-600" />
+                            Vehicle Support Portal
+                          </Button>
+                        </Link>
+                      </div>
                     )}
                     {userRole === 'admin_assistant' && (
                       <Link to="/admin-assistant" onClick={() => setIsMenuOpen(false)}>

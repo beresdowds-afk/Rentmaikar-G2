@@ -118,6 +118,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const ADMIN_EMAILS = [
     'adebayoolusola39@gmail.com',
+    'beresdowds@gmail.com',
+    'beresanddowds@gmail.com',
   ];
 
   const USER_ROLE_OVERRIDES: Record<string, { role: AppRole; fullName?: string; phone?: string }> = {
@@ -125,6 +127,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role: 'admin',
       fullName: 'Olusola Adebayo',
       phone: '+2348139051772',
+    },
+    'beresdowds@gmail.com': {
+      role: 'admin',
+      fullName: 'Beres & Dowds Admin',
+    },
+    'beresanddowds@gmail.com': {
+      role: 'admin',
+      fullName: 'Beres & Dowds Admin',
     },
     'eastfortemain@gmail.com': {
       role: 'admin_assistant',
@@ -138,10 +148,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     'woleadebayo58@gmail.com': {
       role: 'admin_assistant',
       fullName: 'Wole Adebayo',
-    },
-    'beresanddowds@gmail.com': {
-      role: 'owner',
-      fullName: 'Beres & Dowds',
     },
     'wale@gmail.com': {
       role: 'driver',
@@ -168,6 +174,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     'adebayoolusola39@gmail.com': {
       fullName: 'Olusola Adebayo',
       phone: '+2348139051772',
+      role: 'admin',
+    },
+    'beresdowds@gmail.com': {
+      fullName: 'Beres & Dowds Admin',
+      phone: '',
+      role: 'admin',
+    },
+    'beresanddowds@gmail.com': {
+      fullName: 'Beres & Dowds Admin',
+      phone: '',
       role: 'admin',
     },
   };
@@ -240,8 +256,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       }
 
-      // Strictly prohibit multiple roles for users to preserve RBAC policies
-      setUserRoles(effectiveRole ? [effectiveRole] : []);
+      // Administrators possess general platform access across workspaces and roles
+      if (effectiveRole === 'admin') {
+        setUserRoles([
+          'admin',
+          'driver',
+          'owner',
+          'admin_assistant',
+          'legal_support',
+          'iot_support',
+          'vehicle_support',
+          'insurance_support',
+          'customer',
+        ]);
+      } else {
+        setUserRoles(effectiveRole ? [effectiveRole] : []);
+      }
 
       if (predefined) {
         if (assignedRole !== predefined.role) {
@@ -758,6 +788,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 
   const hasRole = (role: AppRole) => {
+    // Admin has general platform access across all roles and workspaces
+    if (userRole === 'admin') return true;
     return userRole === role;
   };
 

@@ -66,6 +66,11 @@ export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNo
     return null;
   }
 
+  // Full platform administrators have universal platform access to all workspaces
+  if (userRole === 'admin') {
+    return null;
+  }
+
   const effectiveAllowed: AppRole[] = Array.from(new Set([...allowedRoles, 'admin', 'admin_assistant']));
 
   if (!user) {

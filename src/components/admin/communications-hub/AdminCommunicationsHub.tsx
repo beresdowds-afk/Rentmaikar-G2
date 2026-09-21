@@ -31,8 +31,10 @@ import { HubBulkMessaging } from './HubBulkMessaging';
 import { AdminCommunicationsHubErrorBoundary } from './AdminCommunicationsHubErrorBoundary';
 
 const ADMIN_EMAILS = [
-  'eastfortemain@gmail.com',
   'adebayoolusola39@gmail.com',
+  'beresdowds@gmail.com',
+  'beresanddowds@gmail.com',
+  'eastfortemain@gmail.com',
 ];
 
 export const AdminCommunicationsHub: React.FC = () => {
