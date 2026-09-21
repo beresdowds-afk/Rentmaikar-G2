@@ -134,6 +134,25 @@ export const HubMessageConsole: React.FC = () => {
 
   useEffect(() => {
     fetchConversations();
+
+    const channel = supabase
+      .channel('hub_console_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inbox_conversations' },
+        () => fetchConversations()
+      )
+      .subscribe();
+
+    const handleUpdate = () => {
+      fetchConversations();
+    };
+    window.addEventListener('comms_activity_update', handleUpdate);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('comms_activity_update', handleUpdate);
+    };
   }, [fetchConversations]);
 
   // Fetch messages when a conversation is selected
@@ -178,8 +197,23 @@ export const HubMessageConsole: React.FC = () => {
 
     loadThread();
 
+    const msgChannel = supabase
+      .channel(`hub_thread_${selectedConversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'inbox_messages',
+          filter: `conversation_id=eq.${selectedConversationId}`,
+        },
+        () => loadThread()
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(msgChannel);
     };
   }, [selectedConversationId]);
 

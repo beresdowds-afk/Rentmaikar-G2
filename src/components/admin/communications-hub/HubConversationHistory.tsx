@@ -105,6 +105,35 @@ export const HubConversationHistory: React.FC = () => {
 
   useEffect(() => {
     fetchHistory();
+
+    const channel = supabase
+      .channel('hub_history_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inbox_conversations' },
+        () => fetchHistory()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inbox_messages' },
+        () => fetchHistory()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'voip_calls' },
+        () => fetchHistory()
+      )
+      .subscribe();
+
+    const handleUpdate = () => {
+      fetchHistory();
+    };
+    window.addEventListener('comms_activity_update', handleUpdate);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('comms_activity_update', handleUpdate);
+    };
   }, [fetchHistory]);
 
   const filteredItems = items.filter((item) => {

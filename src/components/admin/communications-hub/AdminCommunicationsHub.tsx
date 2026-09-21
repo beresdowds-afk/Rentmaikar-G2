@@ -55,41 +55,55 @@ export const AdminCommunicationsHub: React.FC = () => {
 
   const [isExpandedFull, setIsExpandedFull] = React.useState(false);
 
-  // Strict Admin Authorization Check:
-  // Must only be accessible to authenticated Admin accounts.
-  const isAdmin = useMemo(() => {
+  // Staff and Admin Authorization Check:
+  // Accessible to authenticated Admin and Admin Assistant staff accounts.
+  const isAuthorizedStaff = useMemo(() => {
     if (!user) return false;
-    if (userRole === 'admin_assistant' || hasRole('admin_assistant')) {
-      return false; // Forbidden for assistants
-    }
-    if (userRole === 'admin' || hasRole('admin')) {
+    if (
+      userRole === 'admin' ||
+      userRole === 'admin_assistant' ||
+      hasRole('admin') ||
+      hasRole('admin_assistant')
+    ) {
       return true;
     }
     const email = user.email?.trim().toLowerCase();
     if (email && ADMIN_EMAILS.includes(email)) {
       return true;
     }
-    if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+    if (
+      user.app_metadata?.role === 'admin' ||
+      user.user_metadata?.role === 'admin' ||
+      user.app_metadata?.role === 'admin_assistant' ||
+      user.user_metadata?.role === 'admin_assistant'
+    ) {
       return true;
     }
     return false;
   }, [user, userRole, hasRole]);
 
-  // Ensure this Hub is active across the Admin Dashboard pages
-  const isAdminPath = useMemo(() => {
+  const isCallInProgress = Boolean(activeCall && activeCall.status !== 'completed' && activeCall.status !== 'failed');
+
+  // Ensure this Hub is active across operational pages or when explicitly opened or in active call
+  const shouldRender = useMemo(() => {
+    if (!isAuthorizedStaff) return false;
+    // Always render if open, minimized, or when a telephony call is in progress
+    if (isOpen || isMinimized || isCallInProgress) return true;
+    // Render launcher across Admin, VoIP Call Center, Reports, and Operations pages
     return (
       location.pathname.startsWith('/admin') ||
+      location.pathname.startsWith('/m/') ||
+      location.pathname.startsWith('/call-center') ||
       location.pathname === '/report' ||
-      location.pathname === '/features-report'
+      location.pathname === '/features-report' ||
+      location.pathname.startsWith('/dashboard')
     );
-  }, [location.pathname]);
+  }, [isAuthorizedStaff, isOpen, isMinimized, isCallInProgress, location.pathname]);
 
-  // If user is not an authenticated admin on admin pages, do not render
-  if (!isAdmin || !isAdminPath) {
+  // If user is not authorized or not on an operational surface, do not render
+  if (!shouldRender) {
     return null;
   }
-
-  const isCallInProgress = Boolean(activeCall && activeCall.status !== 'completed' && activeCall.status !== 'failed');
 
   // Normalize message tab for backward compatibility
   const currentTab = activeTab === 'message' ? 'editor' : activeTab;

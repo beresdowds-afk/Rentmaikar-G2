@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, Users, ShieldCheck, Search, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Phone, Users, ShieldCheck, Search, Loader2, Sparkles, AlertCircle, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,7 +23,7 @@ interface ContactQuickPick {
 
 export const HubCallDialer: React.FC = () => {
   const { country } = useRegion();
-  const { prefillRecipient, clearPrefill, activeCall, setActiveCall } = useCommunicationsHub();
+  const { prefillRecipient, clearPrefill, activeCall, setActiveCall, openMessageEditor } = useCommunicationsHub();
   const { initiateCall, endCall, activeCall: hookActiveCall } = useVoIPCalls();
 
   const [region, setRegion] = useState<CallRegion>(
@@ -284,6 +284,24 @@ export const HubCallDialer: React.FC = () => {
             </>
           )}
         </Button>
+
+        {phoneNumber.trim() && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              openMessageEditor({
+                name: displayName.trim() || 'Contact',
+                phone: phoneNumber.trim(),
+                defaultAction: 'message',
+              });
+            }}
+            className="w-full h-8 text-xs font-medium gap-2 text-indigo-600 border-indigo-500/30 hover:bg-indigo-50"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            <span>Switch to Message Editor for this Contact</span>
+          </Button>
+        )}
       </div>
     </div>
   );

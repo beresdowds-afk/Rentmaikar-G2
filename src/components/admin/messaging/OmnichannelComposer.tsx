@@ -40,13 +40,15 @@ import {
   Globe,
   ChevronLeft,
   ChevronRight,
-  AlertTriangle
+  AlertTriangle,
+  Headphones
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCannedReplies } from '@/hooks/useCannedReplies';
 import { renderPlaceholders } from '@/lib/reply-placeholders';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 import { EMAIL_CONFIG, EMAIL_SENDER_NAMES } from '@/lib/email-config';
 import { EMAIL_TEMPLATES_CATALOG, type EmailTemplateDefinition } from '@/lib/email-templates-registry';
 import {
@@ -95,6 +97,7 @@ export const OmnichannelComposer = ({
   onDraftSaved,
 }: OmnichannelComposerProps) => {
   const { user } = useAuth();
+  const hub = useCommunicationsHubSafe();
   const { replies: cannedReplies } = useCannedReplies();
 
   // Channel & Target mode
@@ -657,91 +660,156 @@ export const OmnichannelComposer = ({
       }
       const subject = channel === 'email' ? renderPlaceholders(emailSubject, contactPlaceholders, { keepUnknown: false }) : `${channel.toUpperCase()} Outbound Message`;
 
-      // 1. Find or create conversation in `inbox_conversations`
+      // 1. Find or create conversation in `inbox_conversations` safely
       let conversationId: string | null = null;
-      let findQuery = supabase.from('inbox_conversations').select('id').eq('channel', channel);
+      const isValidAuthUserId = Boolean(
+        contact.user_id &&
+        !contact.user_id.startsWith('custom_') &&
+        !contact.user_id.startsWith('outreach_') &&
+        !(contact as any).source &&
+        contact.role !== 'driver_roster_2026' &&
+        contact.role !== 'driver_outreach'
+      );
+      const isNg = (contact.phone && contact.phone.startsWith('+234')) || contact.country === 'NG';
+      const dbRegion = isNg ? 'Nigeria' : 'USA';
 
-      if (contact.user_id && !contact.user_id.startsWith('custom_')) {
-        findQuery = findQuery.eq('user_id', contact.user_id);
-      } else if (channel === 'email' && contact.email) {
-        findQuery = findQuery.eq('user_email', contact.email);
-      } else if (contact.phone) {
-        findQuery = findQuery.eq('user_phone', contact.phone);
-      }
+      try {
+        let findQuery = supabase.from('inbox_conversations').select('id').eq('channel', channel);
 
-      const { data: existingConvs } = await findQuery.limit(1);
-
-      if (existingConvs && existingConvs.length > 0) {
-        conversationId = existingConvs[0].id;
-        await supabase
-          .from('inbox_conversations')
-          .update({
-            last_message_at: new Date().toISOString(),
-            status: 'pending',
-            subject: subject || existingConvs[0].subject || `${channel.toUpperCase()} Outbound Message`,
-          })
-          .eq('id', conversationId);
-      } else {
-        const isNg = (contact.phone && contact.phone.startsWith('+234')) || contact.country === 'NG';
-        const { data: newConv, error: createConvError } = await supabase
-          .from('inbox_conversations')
-          .insert({
-            channel,
-            user_id: contact.user_id && !contact.user_id.startsWith('custom_') ? contact.user_id : null,
-            user_name: contact.full_name || 'Recipient',
-            user_email: contact.email || null,
-            user_phone: contact.phone || null,
-            subject: subject || `${channel.toUpperCase()} Outbound Message`,
-            status: 'pending',
-            priority: emailPriority,
-            region: isNg ? 'NG' : 'US',
-            last_message_at: new Date().toISOString(),
-          })
-          .select('id')
-          .single();
-
-        if (createConvError || !newConv) {
-          throw new Error(createConvError?.message || 'Failed to create conversation record');
+        if (isValidAuthUserId) {
+          findQuery = findQuery.eq('user_id', contact.user_id);
+        } else if (channel === 'email' && contact.email) {
+          findQuery = findQuery.eq('user_email', contact.email);
+        } else if (contact.phone) {
+          findQuery = findQuery.eq('user_phone', contact.phone);
         }
-        conversationId = newConv.id;
+
+        const { data: existingConvs } = await findQuery.limit(1);
+
+        if (existingConvs && existingConvs.length > 0) {
+          conversationId = existingConvs[0].id;
+          await supabase
+            .from('inbox_conversations')
+            .update({
+              last_message_at: new Date().toISOString(),
+              status: 'pending',
+              subject: subject || existingConvs[0].subject || `${channel.toUpperCase()} Outbound Message`,
+            })
+            .eq('id', conversationId);
+        } else {
+          const { data: newConv, error: createConvError } = await supabase
+            .from('inbox_conversations')
+            .insert({
+              channel,
+              user_id: isValidAuthUserId ? contact.user_id : null,
+              user_name: contact.full_name || 'Recipient',
+              user_email: contact.email || null,
+              user_phone: contact.phone || null,
+              subject: subject || `${channel.toUpperCase()} Outbound Message`,
+              status: 'pending',
+              priority: emailPriority,
+              region: dbRegion,
+              last_message_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single();
+
+          if (!createConvError && newConv) {
+            conversationId = newConv.id;
+          } else if (createConvError) {
+            // Retry with user_id null to handle any potential auth.users FK constraint
+            const { data: retryConv } = await supabase
+              .from('inbox_conversations')
+              .insert({
+                channel,
+                user_id: null,
+                user_name: contact.full_name || 'Recipient',
+                user_email: contact.email || null,
+                user_phone: contact.phone || null,
+                subject: subject || `${channel.toUpperCase()} Outbound Message`,
+                status: 'pending',
+                priority: emailPriority,
+                region: dbRegion,
+                last_message_at: new Date().toISOString(),
+              })
+              .select('id')
+              .single();
+            if (retryConv) conversationId = retryConv.id;
+          }
+        }
+
+        // 2. Insert outbound message to `inbox_messages`
+        if (conversationId) {
+          const senderDisplayName = EMAIL_SENDER_NAMES[emailSenderAlias as keyof typeof EMAIL_SENDER_NAMES] || 'Rentmaikar Staff';
+          await supabase
+            .from('inbox_messages')
+            .insert({
+              conversation_id: conversationId,
+              sender_type: 'admin',
+              sender_id: user?.id || null,
+              sender_name: senderDisplayName,
+              content: body,
+              channel,
+              is_read: true,
+              read_at: new Date().toISOString(),
+              ...(uploadedAttachments.length > 0
+                ? { metadata: { attachments_detail: uploadedAttachments, from_alias: emailSenderAlias } as unknown as Record<string, never> }
+                : { metadata: { from_alias: emailSenderAlias } as unknown as Record<string, never> }),
+            });
+        }
+      } catch (dbErr) {
+        console.warn('Non-fatal conversation record creation error for contact:', contact.full_name, dbErr);
       }
 
-      // 2. Insert outbound message to `inbox_messages`
-      const senderDisplayName = EMAIL_SENDER_NAMES[emailSenderAlias as keyof typeof EMAIL_SENDER_NAMES] || 'Rentmaikar Staff';
-
-      const { error: msgError } = await supabase
-        .from('inbox_messages')
-        .insert({
-          conversation_id: conversationId,
-          sender_type: 'admin',
-          sender_id: user?.id || null,
-          sender_name: senderDisplayName,
-          content: body,
-          channel,
-          is_read: true,
-          read_at: new Date().toISOString(),
-          ...(uploadedAttachments.length > 0
-            ? { metadata: { attachments_detail: uploadedAttachments, from_alias: emailSenderAlias } as unknown as Record<string, never> }
-            : { metadata: { from_alias: emailSenderAlias } as unknown as Record<string, never> }),
-        });
-
-      if (msgError) throw msgError;
-
-      // 3. Trigger external delivery
+      // 3. Trigger external delivery with guaranteed fallback
       if (channel === 'email' && contact.email) {
+        let sentSuccessfully = false;
+        let deliveryError = '';
+
         try {
-          await supabase.functions.invoke('send-email-reply', {
+          const { data, error } = await supabase.functions.invoke('send-email-reply', {
             body: {
               conversationId,
               messageContent: body,
-              recipientEmail: contact.email,
+              recipientEmail: contact.email.trim(),
               subject,
               fromAlias: emailSenderAlias,
               attachments: uploadedAttachments,
             },
           });
-        } catch (e) {
-          console.warn('Edge email delivery warning for contact:', contact.email, e);
+
+          if (!error && (data?.success || data?.ok)) {
+            sentSuccessfully = true;
+          } else {
+            deliveryError = data?.error || error?.message || 'Edge function delivery warning';
+          }
+        } catch (e: any) {
+          deliveryError = e.message || 'Edge function invoke exception';
+        }
+
+        // Resilient fallback to direct local API bridge if edge function had an issue
+        if (!sentSuccessfully) {
+          try {
+            const fallbackRes = await fetch('/api/functions/send-email-reply', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipientEmail: contact.email.trim(),
+                subject,
+                messageContent: body,
+                fromAlias: emailSenderAlias,
+                attachments: uploadedAttachments,
+              }),
+            });
+            const fallbackJson = await fallbackRes.json();
+            if (fallbackRes.ok && (fallbackJson.success || fallbackJson.ok)) {
+              sentSuccessfully = true;
+            } else {
+              throw new Error(fallbackJson?.error || `Email delivery failed with HTTP ${fallbackRes.status}`);
+            }
+          } catch (fbErr: any) {
+            throw new Error(`Email delivery failed: ${fbErr.message || deliveryError}`);
+          }
         }
       } else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
         try {
@@ -947,6 +1015,15 @@ export const OmnichannelComposer = ({
 
         if (succeeded > 0) {
           toast.success(`Broadcast successfully sent to ${succeeded} recipient(s)!`);
+          try {
+            window.dispatchEvent(
+              new CustomEvent('comms_activity_update', {
+                detail: { type: 'bulk_broadcast', count: succeeded, channel },
+              })
+            );
+          } catch {
+            /* ignore */
+          }
         }
         return;
       }
@@ -978,6 +1055,16 @@ export const OmnichannelComposer = ({
           ? `Email dispatched to ${effectiveRecipient.email}`
           : `${channel.toUpperCase()} message sent to ${effectiveRecipient.phone}`,
       );
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: { type: 'outbound_message', channel, conversationId: result.conversationId },
+          })
+        );
+      } catch {
+        /* ignore */
+      }
 
       // Reset form
       setMessageContent('');
@@ -1016,6 +1103,19 @@ export const OmnichannelComposer = ({
               <Clock className="h-3 w-3 text-muted-foreground" />
               Auto-saved {lastAutoSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
+          )}
+          {hub && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => hub.setIsOpen(true)}
+              className="gap-1.5 h-8 text-xs text-primary border-primary/30 hover:bg-primary/5"
+              title="Open floating Communications Hub"
+            >
+              <Headphones className="h-3.5 w-3.5" />
+              <span>Communications Hub</span>
+            </Button>
           )}
           <Button
             size="sm"
@@ -1141,14 +1241,35 @@ export const OmnichannelComposer = ({
                             </div>
                           </div>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                          onClick={() => setSelectedUser(null)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          {selectedUser.phone && hub && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-2.5 text-xs gap-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-500/30"
+                              onClick={() => {
+                                hub.openWithRecipient({
+                                  name: selectedUser.full_name || 'Contact',
+                                  phone: selectedUser.phone,
+                                  defaultAction: 'call',
+                                });
+                              }}
+                              title="Call this recipient using Call Center / Hub Softphone"
+                            >
+                              <Phone className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Call Contact</span>
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => setSelectedUser(null)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-1.5">

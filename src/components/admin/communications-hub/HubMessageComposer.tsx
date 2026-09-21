@@ -13,6 +13,7 @@ import {
   BellRing,
   Users,
   ExternalLink,
+  Phone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -77,7 +78,7 @@ const TEMPLATES: QuickTemplate[] = [
 export const HubMessageComposer: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { prefillRecipient, clearPrefill, openBulkMessaging, setActiveTab } = useCommunicationsHub();
+  const { prefillRecipient, clearPrefill, openBulkMessaging, setActiveTab, openWithRecipient } = useCommunicationsHub();
 
   const [channel, setChannel] = useState<MessageChannel>('sms');
   const [recipientName, setRecipientName] = useState('');
@@ -300,6 +301,16 @@ export const HubMessageComposer: React.FC = () => {
       setSubject('');
       localStorage.removeItem(ACTIVE_DRAFT_KEY);
       clearPrefill();
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: { channel, type: 'hub_composer_sent' },
+          })
+        );
+      } catch {
+        /* ignore */
+      }
     } catch (err: any) {
       console.error('Failed to send message:', err);
       toast.error(err.message || 'Failed to dispatch message via provider');
@@ -314,6 +325,25 @@ export const HubMessageComposer: React.FC = () => {
       <div className="flex items-center justify-between pb-1">
         <span className="text-xs font-semibold text-foreground">Omnichannel Message Editor</span>
         <div className="flex items-center gap-1.5">
+          {recipientContact.trim() && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                openWithRecipient({
+                  name: recipientName || 'Contact',
+                  phone: recipientContact,
+                  defaultAction: 'call',
+                });
+              }}
+              className="h-6 px-2 text-[10px] gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-500/30"
+              title="Call this recipient using Call Center Softphone"
+            >
+              <Phone className="h-3 w-3" />
+              <span>Call Contact</span>
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"

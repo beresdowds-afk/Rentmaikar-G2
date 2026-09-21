@@ -17,7 +17,10 @@ import {
   Hash,
   Activity,
   UserCheck,
+  Headphones,
+  PenSquare,
 } from 'lucide-react';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 import { useVoIPCalls } from '@/hooks/useVoIPCalls';
 import { useVoiceCall } from '@/hooks/useVoiceCall';
 import { CallDialer } from './CallDialer';
@@ -86,6 +89,7 @@ export const CallCenterPage = () => {
   const voice = useVoiceDevice();
   const queueState = useCallQueue();
   const { userRole } = useAuth();
+  const hub = useCommunicationsHubSafe();
 
   const isAssistant = userRole === 'admin_assistant';
 
@@ -232,6 +236,30 @@ export const CallCenterPage = () => {
               <PhoneOff className="h-4 w-4" />
               End all calls ({activeCalls.length})
             </Button>
+          )}
+          {hub && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs text-primary border-primary/30 hover:bg-primary/5"
+                onClick={() => hub.setIsOpen(true)}
+                title="Open floating Communications Hub"
+              >
+                <Headphones className="h-3.5 w-3.5" />
+                <span>Communications Hub</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs text-indigo-600 border-indigo-500/30 hover:bg-indigo-50"
+                onClick={() => hub.openMessageEditor()}
+                title="Open Omnichannel Message Editor"
+              >
+                <PenSquare className="h-3.5 w-3.5" />
+                <span>Message Editor</span>
+              </Button>
+            </>
           )}
           <Badge variant="outline" className="flex items-center gap-1 text-xs">
             <span className="h-2 w-2 rounded-full bg-blue-500" />

@@ -94,6 +94,15 @@ export const useVoIPCalls = () => {
         description: `Calling ${recipients.length} recipient(s)...`,
       });
 
+      try {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: { type: 'voip_call', action: 'initiated' },
+          })
+        );
+      } catch {
+        /* ignore */
+      }
 
       await fetchCalls();
       return data;
@@ -119,6 +128,16 @@ export const useVoIPCalls = () => {
         title: 'Call Ended',
         description: 'The call has been terminated.',
       });
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: { type: 'voip_call', action: 'ended', callId },
+          })
+        );
+      } catch {
+        /* ignore */
+      }
 
       setActiveCall(null);
       await fetchCalls();
