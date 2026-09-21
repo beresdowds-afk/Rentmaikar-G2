@@ -531,6 +531,22 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/admin/applications"
+                    element={<Navigate to="/admin?portal=crm&tab=applications" replace />}
+                  />
+                  <Route
+                    path="/admin/application-management"
+                    element={<Navigate to="/admin?portal=crm&tab=applications" replace />}
+                  />
+                  <Route
+                    path="/admin-applications"
+                    element={<Navigate to="/admin?portal=crm&tab=applications" replace />}
+                  />
+                  <Route
+                    path="/applications-management"
+                    element={<Navigate to="/admin?portal=crm&tab=applications" replace />}
+                  />
+                  <Route
                     path="/admin/content"
                     element={<Navigate to="/admin?portal=crm&tab=content" replace />}
                   />

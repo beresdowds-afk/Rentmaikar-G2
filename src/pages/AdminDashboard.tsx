@@ -241,6 +241,19 @@ const AdminDashboard = () => {
                   }}
                 />
               </div>
+              <Button
+                variant={portalView === 'crm' && activeTab === 'applications' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  navigateTo('crm', 'applications');
+                }}
+                className="gap-2"
+                title="Manage Driver and Owner Applications"
+                data-tour="admin-applications-button"
+              >
+                <ClipboardList className="h-4 w-4" />
+                <span className="hidden sm:inline">Applications</span>
+              </Button>
               <Button variant="outline" size="sm" onClick={resetTour} className="gap-2" data-tour="admin-tour-button">
                 <HelpCircle className="h-4 w-4" />
                 Tour

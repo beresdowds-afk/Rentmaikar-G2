@@ -501,6 +501,7 @@ const AdminAssistantDashboard = () => {
               canContent: true,
               canReports: isFullAdmin || !!perms?.can_view_reports,
               canVehicles: isFullAdmin || !!perms?.can_view_vehicles,
+              canUsers: isFullAdmin || !!perms?.can_view_users,
             }}
           />
 
