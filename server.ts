@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 
@@ -57,6 +58,46 @@ async function startServer() {
       res.status(500).send("Error generating sitemap");
     }
   });
+
+  // 10DLC A2P Compliance Packet PDF Download & Inline View
+  app.get(
+    [
+      "/downloads/rentmaikar-10dlc-a2p-compliance-packet.pdf",
+      "/rentmaikar-10dlc-a2p-compliance-packet.pdf",
+      "/api/compliance/10dlc-pdf",
+      "/compliance/10dlc.pdf",
+    ],
+    async (req, res) => {
+      try {
+        const publicDownload = path.join(process.cwd(), "public/downloads/rentmaikar-10dlc-a2p-compliance-packet.pdf");
+        const publicRoot = path.join(process.cwd(), "public/rentmaikar-10dlc-a2p-compliance-packet.pdf");
+        const filePath = fs.existsSync(publicDownload) ? publicDownload : fs.existsSync(publicRoot) ? publicRoot : null;
+
+        const isDownload = req.query.download === "true" || req.query.download === "1";
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          isDownload
+            ? 'attachment; filename="rentmaikar-10dlc-a2p-compliance-packet.pdf"'
+            : 'inline; filename="rentmaikar-10dlc-a2p-compliance-packet.pdf"'
+        );
+        res.setHeader("Cache-Control", "public, max-age=3600");
+
+        if (filePath) {
+          fs.createReadStream(filePath).pipe(res);
+        } else {
+          // Dynamic fallback generation
+          const { build10DlcPdfDocument } = await import("./src/lib/generate-10dlc-pdf");
+          const doc = build10DlcPdfDocument();
+          const arrayBuffer = doc.output("arraybuffer");
+          res.send(Buffer.from(arrayBuffer));
+        }
+      } catch (err: any) {
+        console.error("10DLC PDF route error:", err);
+        res.status(500).json({ error: "Failed to generate 10DLC compliance PDF" });
+      }
+    }
+  );
 
   // Region qualification endpoint
   app.get("/api/region-qualification", async (req, res) => {
@@ -173,7 +214,7 @@ async function startServer() {
     }
   });
 
-  // Backend / Edge Functions dispatch router with Supabase Edge Function forwarding and local fallback
+  // Backend / Edge Functions dispatch router with integrated local execution and Supabase fallback
   app.all(["/api/functions/:functionName", "/functions/v1/:functionName"], async (req, res) => {
     try {
       const functionName = req.params.functionName;
@@ -186,6 +227,22 @@ async function startServer() {
         });
       }
 
+      // Priority 1: Execute integrated local edge function handler directly
+      // This eliminates upstream network latency (~1.5s), avoids 404s on un-deployed Supabase functions,
+      // and ensures all server-side environment secrets (RESEND_API_KEY, TWILIO, PG) are utilized natively.
+      const { handleEdgeFunction } = await import("./src/server/functionsHandler");
+      const localResponse = await handleEdgeFunction(functionName, {
+        body: req.body,
+        headers: req.headers as Record<string, string>,
+        method: req.method,
+      });
+
+      // If handled locally (status !== 404), return immediately
+      if (localResponse && localResponse.status !== 404) {
+        return res.status(localResponse.status).json(localResponse.data);
+      }
+
+      // Priority 2: Fall back to upstream Supabase Edge Function if not handled locally
       const candidateUrl = process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || process.env.VITE_SUPABASE_URL || "";
       const rawSupabaseUrl = (candidateUrl && !candidateUrl.includes("bwvocmhcledbwqlpcswp"))
         ? candidateUrl
@@ -210,9 +267,6 @@ async function startServer() {
         forwardHeaders["x-client-info"] = String(req.headers["x-client-info"]);
       }
 
-      // Forward request to Supabase Edge Function: ${SUPABASE_URL}/functions/v1/${functionName}
-      // If the function is not deployed on Supabase (404) or API key is not registered on Supabase (401/403),
-      // fall back seamlessly to the integrated local edge function handler
       try {
         const edgeUrl = `${supabaseUrl}/functions/v1/${functionName}`;
         const edgeRes = await fetch(edgeUrl, {
@@ -221,21 +275,12 @@ async function startServer() {
           body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
         });
 
-        if (edgeRes.ok || (edgeRes.status !== 404 && edgeRes.status !== 401 && edgeRes.status !== 403)) {
-          const edgeData = await edgeRes.json().catch(() => null);
-          return res.status(edgeRes.status).json(edgeData ?? {});
-        }
+        const edgeData = await edgeRes.json().catch(() => null);
+        return res.status(edgeRes.status).json(edgeData ?? {});
       } catch (proxyErr: any) {
         console.warn(`[Server Edge Proxy] Upstream proxy to Supabase failed for '${functionName}':`, proxyErr?.message || proxyErr);
+        return res.status(localResponse?.status || 500).json(localResponse?.data || { error: "Failed to dispatch edge function" });
       }
-
-      const { handleEdgeFunction } = await import("./src/server/functionsHandler");
-      const response = await handleEdgeFunction(functionName, {
-        body: req.body,
-        headers: req.headers as Record<string, string>,
-        method: req.method,
-      });
-      res.status(response.status).json(response.data);
     } catch (err: any) {
       console.error(`Error handling function ${req.params.functionName}:`, err);
       res.status(500).json({ error: err.message });

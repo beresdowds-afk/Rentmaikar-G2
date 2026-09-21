@@ -468,22 +468,90 @@ export const useSendComposedMessage = () => {
       }
       setIsSending(true);
       try {
-        const { data, error } = await supabase.functions.invoke('send-in-app-message', {
-          body: {
-            recipient_ids: [input.recipientUserId],
-            subject: renderedSubject || undefined,
-            body,
-            category: 'support',
-          },
-        });
-        if (error || data?.ok === false) {
-          const reason =
-            (data as { error?: string } | null)?.error ||
-            (error as { message?: string } | null)?.message ||
-            'In-app delivery failed';
-          notifyError(`Could not deliver the in-app message: ${reason}`);
-          return { saved: false, delivered: false, reason };
+        let delivered = false;
+        let deliverErr = '';
+
+        // Tier 1: Supabase edge function invoke
+        try {
+          const { data, error } = await supabase.functions.invoke('send-in-app-message', {
+            body: {
+              recipient_ids: [input.recipientUserId],
+              subject: renderedSubject || undefined,
+              body,
+              category: 'support',
+            },
+          });
+          if (!error && (data?.ok !== false && data?.success !== false)) {
+            delivered = true;
+          } else {
+            deliverErr = (data as any)?.error || (error as any)?.message || 'Edge function rejected in-app message';
+          }
+        } catch (invokeErr: any) {
+          deliverErr = invokeErr?.message || 'Edge function invoke error';
         }
+
+        // Tier 2: Resilient local API gateway fallback
+        if (!delivered) {
+          try {
+            const fallbackRes = await fetch('/api/functions/send-in-app-message', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient_ids: [input.recipientUserId],
+                subject: renderedSubject || undefined,
+                body,
+                category: 'support',
+              }),
+            });
+            const json = await fallbackRes.json().catch(() => null);
+            if (fallbackRes.ok && (json?.ok !== false && json?.success !== false)) {
+              delivered = true;
+              deliverErr = '';
+            } else {
+              deliverErr = json?.error || deliverErr || `In-app delivery failed (HTTP ${fallbackRes.status})`;
+            }
+          } catch (fbErr: any) {
+            deliverErr = fbErr?.message || deliverErr;
+          }
+        }
+
+        // Tier 3: Direct database insert fallback
+        if (!delivered && input.recipientUserId) {
+          try {
+            const { error: insertErr } = await supabase.from('in_app_messages' as never).insert({
+              recipient_id: input.recipientUserId,
+              sender_name: 'Rentmaikar Support',
+              category: 'support',
+              subject: renderedSubject || 'Support Notification',
+              body,
+            } as never);
+            if (!insertErr) {
+              delivered = true;
+              deliverErr = '';
+            }
+          } catch {
+            // direct insert failed
+          }
+        }
+
+        if (!delivered) {
+          notifyError(`Could not deliver the in-app message: ${deliverErr}`);
+          return { saved: false, delivered: false, reason: deliverErr };
+        }
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('comms_activity_update', {
+              detail: {
+                channel: 'in_app',
+                recipient: input.recipientUserId,
+                type: 'in_app_message_delivered',
+                timestamp: new Date().toISOString(),
+              },
+            })
+          );
+        }
+
         if (!silent) toast.success('In-app message delivered');
         return { saved: true, delivered: true };
       } catch (err) {
@@ -552,54 +620,147 @@ export const useSendComposedMessage = () => {
         .eq('id', conversationId);
 
       // ── Dispatch on the wire ──
-      const dispatch =
-        input.channel === 'email'
-          ? await supabase.functions.invoke('send-email-reply', {
-              body: {
-                conversationId,
-                messageContent: body,
-                recipientEmail: email,
-                subject: renderedSubject || undefined,
-              },
-            })
-          : await supabase.functions.invoke('send-inbox-reply', {
-              body: {
-                conversationId,
-                messageContent: body,
-                channel: input.channel,
-                recipientPhone: phone,
-                whatsappTemplateId: input.channel === 'whatsapp' ? input.whatsappTemplateId : undefined,
-              },
-            });
+      let dispatchOk = false;
+      let deliveryError: string | null = null;
+      let deliveredMessageId: string | undefined;
 
-      const { data, error } = dispatch;
-      if (error || data?.success === false) {
-        console.error('Dispatch failed:', error || data);
-        const payload = data as
-          | { error?: string; suppressed?: boolean; reason?: string }
-          | null;
-        // A suppressed send is a policy outcome, not a provider rejection —
-        // say so plainly so admins don't chase a phantom provider fault.
-        const suppressedReason =
-          payload?.suppressed || payload?.reason
-            ? payload?.reason === 'recipient_opted_out'
-              ? 'Recipient has opted out of messaging (replied STOP). They must text START to resume.'
-              : payload?.reason === 'outbound_paused'
-                ? 'Outbound messaging is paused for this channel/region in Contact Settings.'
-                : payload?.reason
-            : null;
-        const reason =
-          suppressedReason ||
-          payload?.error ||
-          (error as { message?: string } | null)?.message ||
-          'Provider rejected the message';
+      try {
+        if (input.channel === 'email') {
+          // Attempt 1: Invoke send-email-reply edge function
+          const { data, error } = await supabase.functions.invoke('send-email-reply', {
+            body: {
+              conversationId,
+              messageContent: body,
+              recipientEmail: email,
+              subject: renderedSubject || undefined,
+            },
+          });
+
+          if (!error && (data?.success || data?.ok)) {
+            dispatchOk = true;
+            deliveredMessageId = data?.messageId;
+          } else {
+            deliveryError = data?.error || error?.message || 'Edge function delivery warning';
+          }
+
+          // Attempt 2: Resilient direct local API gateway fallback
+          if (!dispatchOk) {
+            try {
+              const fallbackRes = await fetch('/api/functions/send-email-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  conversationId,
+                  recipientEmail: email,
+                  subject: renderedSubject || undefined,
+                  messageContent: body,
+                }),
+              });
+              const fallbackJson = await fallbackRes.json().catch(() => null);
+              if (fallbackRes.ok && (fallbackJson?.success || fallbackJson?.ok)) {
+                dispatchOk = true;
+                deliveredMessageId = fallbackJson?.messageId;
+                deliveryError = null;
+              } else {
+                deliveryError = fallbackJson?.error || `Email delivery failed with HTTP ${fallbackRes.status}`;
+              }
+            } catch (fbErr: any) {
+              deliveryError = fbErr.message || deliveryError || 'Email delivery failed';
+            }
+          }
+        } else {
+          // SMS or WhatsApp channel dispatch
+          const { data, error } = await supabase.functions.invoke('send-inbox-reply', {
+            body: {
+              conversationId,
+              messageContent: body,
+              channel: input.channel,
+              recipientPhone: phone,
+              whatsappTemplateId: input.channel === 'whatsapp' ? input.whatsappTemplateId : undefined,
+            },
+          });
+
+          if (!error && (data?.success || data?.ok)) {
+            dispatchOk = true;
+            deliveredMessageId = data?.messageId;
+          } else {
+            deliveryError = data?.error || error?.message || 'Provider rejected message';
+          }
+
+          // Direct local fallback for SMS/WhatsApp
+          if (!dispatchOk) {
+            try {
+              const fallbackRes = await fetch('/api/functions/send-inbox-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  conversationId,
+                  messageContent: body,
+                  channel: input.channel,
+                  recipientPhone: phone,
+                  whatsappTemplateId: input.channel === 'whatsapp' ? input.whatsappTemplateId : undefined,
+                }),
+              });
+              const fallbackJson = await fallbackRes.json().catch(() => null);
+              if (fallbackRes.ok && (fallbackJson?.success || fallbackJson?.ok)) {
+                dispatchOk = true;
+                deliveredMessageId = fallbackJson?.messageId;
+                deliveryError = null;
+              } else {
+                deliveryError = fallbackJson?.error || `Dispatch failed with HTTP ${fallbackRes.status}`;
+              }
+            } catch (fbErr: any) {
+              deliveryError = fbErr.message || deliveryError || 'Message delivery failed';
+            }
+          }
+        }
+      } catch (invokeErr: any) {
+        deliveryError = invokeErr?.message || 'Wire dispatch exception';
+      }
+
+      if (!dispatchOk) {
+        console.error('Dispatch failed for recipient:', { email, phone, error: deliveryError });
+        const reason = deliveryError || 'Provider rejected the message';
         notifyError(`Saved to the thread, but delivery failed: ${reason}`);
         return { saved: true, delivered: false, reason };
       }
 
+      // ── Update conversation state & synchronize activities across the application ──
+      try {
+        await supabase
+          .from('inbox_conversations')
+          .update({
+            last_message_at: new Date().toISOString(),
+            status: 'active',
+          })
+          .eq('id', conversationId);
+      } catch {
+        // Non-blocking
+      }
+
+      // Synchronize with Communications Hub and other listening consoles in real time
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: {
+              type: 'message_sent',
+              channel: input.channel,
+              recipient: email || phone,
+              conversationId,
+              messageId: deliveredMessageId,
+              timestamp: new Date().toISOString(),
+            },
+          })
+        );
+        window.dispatchEvent(
+          new CustomEvent('inbox_activity_sync', {
+            detail: { conversationId, channel: input.channel },
+          })
+        );
+      }
 
       if (!silent) toast.success(`Message sent via ${input.channel.toUpperCase()}`);
-      return { saved: true, delivered: true };
+      return { saved: true, delivered: true, messageId: deliveredMessageId };
     } catch (err) {
       console.error('Failed to send message:', err);
       const reason = err instanceof Error ? err.message : 'Unknown error';
@@ -645,18 +806,19 @@ export const useSendComposedMessage = () => {
     let sent = 0;
     let failed = 0;
     const failures: { recipient: string; reason: string }[] = [];
+    const batchId = `bulk-${Date.now()}`;
 
     // Sequential dispatch keeps us inside provider rate limits.
     for (const recipient of usable) {
       const label =
-        recipient.full_name || recipient.email || recipient.phone || 'Unknown recipient';
+        recipient.full_name?.trim() || recipient.email?.trim() || recipient.phone?.trim() || 'Recipient';
       const outcome = await send(
         {
           ...input,
           recipientUserId: recipient.user_id || null,
-          recipientName: label,
-          email: recipient.email || '',
-          phone: recipient.phone || '',
+          recipientName: (recipient.full_name || '').trim(),
+          email: recipient.email?.trim() || '',
+          phone: recipient.phone?.trim() || '',
         },
         { silent: true },
       );
@@ -667,10 +829,74 @@ export const useSendComposedMessage = () => {
         failed += 1;
         failures.push({ recipient: label, reason: outcome.reason || 'Delivery failed' });
       }
+
+      // Record in BulkMessageStatusTracker storage
+      const contactVal =
+        input.channel === 'email'
+          ? recipient.email
+          : input.channel === 'in_app'
+            ? recipient.user_id
+            : recipient.phone;
+
+      const trackerEntry = {
+        id: crypto.randomUUID(),
+        batchId,
+        userId: recipient.user_id || null,
+        recipientName: label,
+        contact: contactVal || 'Target',
+        channel: input.channel,
+        subject: input.subject,
+        body: input.body,
+        status: outcome.delivered ? 'delivered' : 'failed',
+        error: outcome.delivered ? undefined : outcome.reason || 'Delivery failed',
+        timestamp: new Date().toISOString(),
+        attempts: 1,
+      };
+
+      try {
+        const stored = localStorage.getItem('rentmaikar_bulk_tracker_items');
+        const list = stored ? JSON.parse(stored) : [];
+        list.unshift(trackerEntry);
+        localStorage.setItem('rentmaikar_bulk_tracker_items', JSON.stringify(list.slice(0, 300)));
+      } catch {
+        /* storage unavailable */
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: {
+              type: 'bulk_message_item',
+              batchId,
+              recipientName: label,
+              recipient: contactVal,
+              channel: input.channel,
+              status: outcome.delivered ? 'delivered' : 'failed',
+              error: outcome.delivered ? undefined : outcome.reason,
+              timestamp: new Date().toISOString(),
+            },
+          })
+        );
+      }
+
       setBulkProgress({ total: usable.length, completed: sent + failed, sent, failed, failures });
     }
 
     setIsSending(false);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('comms_activity_update', {
+          detail: {
+            type: 'bulk_broadcast_complete',
+            channel: input.channel,
+            totalSent: sent,
+            failed,
+            timestamp: new Date().toISOString(),
+          },
+        })
+      );
+    }
 
     if (failed === 0) {
       toast.success(

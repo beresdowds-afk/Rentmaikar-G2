@@ -408,8 +408,8 @@ export const HubBulkMessaging: React.FC = () => {
       }
 
       const contact = usableContacts[i];
-      const fullName = contact.full_name || 'Customer';
-      const firstName = fullName.split(' ')[0] || 'Customer';
+      const fullName = (contact.full_name || '').trim() || 'Customer';
+      const firstName = (contact.full_name || '').trim() ? fullName.split(' ')[0] : 'there';
 
       // Personalize content
       const renderedMsg = renderPlaceholders(
@@ -436,59 +436,265 @@ export const HubBulkMessaging: React.FC = () => {
 
       try {
         if (channel === 'email' && contact.email) {
-          const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-            body: {
-              to: contact.email.trim(),
-              subject: renderedSubj,
-              body: renderedMsg,
-              recipientName: fullName,
-            },
-          });
+          const emailTarget = contact.email.trim();
+          let emailSent = false;
+          let emailErr = '';
 
-          if (error || (data && data.ok === false)) {
-            throw new Error(data?.error || error?.message || 'Email rejection');
+          // Tier 1: Supabase edge function invoke
+          try {
+            const { data, error } = await supabase.functions.invoke('send-outbound-email', {
+              body: {
+                to: emailTarget,
+                subject: renderedSubj,
+                body: renderedMsg,
+                recipientName: fullName !== 'Customer' ? fullName : undefined,
+              },
+            });
+            if (!error && (data?.ok !== false && data?.success !== false)) {
+              emailSent = true;
+            } else {
+              emailErr = data?.error || error?.message || 'Edge function email rejection';
+            }
+          } catch (e: any) {
+            emailErr = e.message || 'Edge function invoke error';
+          }
+
+          // Tier 2: Resilient local API fallback (/api/functions/send-outbound-email)
+          if (!emailSent) {
+            try {
+              const res = await fetch('/api/functions/send-outbound-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  to: emailTarget,
+                  subject: renderedSubj,
+                  body: renderedMsg,
+                  recipientName: fullName !== 'Customer' ? fullName : undefined,
+                }),
+              });
+              const json = await res.json().catch(() => null);
+              if (res.ok && (json?.ok !== false && json?.success !== false)) {
+                emailSent = true;
+                emailErr = '';
+              } else {
+                emailErr = json?.error || emailErr || `Email delivery failed (HTTP ${res.status})`;
+              }
+            } catch (fbErr: any) {
+              emailErr = fbErr.message || emailErr;
+            }
+          }
+
+          // Tier 3: Alternative local API fallback (/api/functions/send-email-reply)
+          if (!emailSent) {
+            try {
+              const res2 = await fetch('/api/functions/send-email-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipientEmail: emailTarget,
+                  subject: renderedSubj,
+                  messageContent: renderedMsg,
+                  fromAlias: 'support',
+                }),
+              });
+              const json2 = await res2.json().catch(() => null);
+              if (res2.ok && (json2?.success || json2?.ok)) {
+                emailSent = true;
+                emailErr = '';
+              }
+            } catch {
+              // Ignore secondary fallback error
+            }
+          }
+
+          if (!emailSent) {
+            throw new Error(emailErr || 'Email delivery failed across all providers');
           }
           sent += 1;
+
+          // Non-blocking conversation logging for history
+          try {
+            await supabase.from('inbox_messages' as never).insert({
+              sender_type: 'admin',
+              sender_name: 'Rentmaikar Admin',
+              content: renderedMsg,
+              channel: 'email',
+              is_read: true,
+              metadata: { bulk: true, subject: renderedSubj, recipient_email: emailTarget },
+            } as never);
+          } catch {
+            /* non-fatal history log */
+          }
         } else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
-          const finalSmsBody = channel === 'sms' && smsOptOut
+          const phoneTarget = contact.phone.trim();
+          const isWhatsApp = channel === 'whatsapp';
+          const finalSmsBody = channel === 'sms' && smsOptOut && !renderedMsg.toLowerCase().includes('stop')
             ? `${renderedMsg}\n\nReply STOP to opt out`
             : renderedMsg;
 
-          const { data, error } = await supabase.functions.invoke('send-sms-notification', {
-            body: {
-              phone: contact.phone.trim(),
-              message: finalSmsBody,
-              channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
-              recipientName: fullName,
-            },
-          });
+          let smsSent = false;
+          let smsErr = '';
 
-          if (error || (data && data.success === false)) {
-            throw new Error(data?.error || error?.message || `${channel.toUpperCase()} dispatch failed`);
+          // Tier 1: Supabase edge function invoke
+          try {
+            const { data, error } = await supabase.functions.invoke('send-sms-notification', {
+              body: {
+                phone: phoneTarget,
+                message: finalSmsBody,
+                channel: isWhatsApp ? 'whatsapp' : 'sms',
+                recipientName: fullName !== 'Customer' ? fullName : undefined,
+              },
+            });
+            if (!error && (data?.success !== false && data?.ok !== false)) {
+              smsSent = true;
+            } else {
+              smsErr = data?.error || error?.message || `${channel.toUpperCase()} rejection`;
+            }
+          } catch (e: any) {
+            smsErr = e.message || 'Edge function invoke error';
+          }
+
+          // Tier 2: Resilient local API fallback (/api/functions/send-sms-notification)
+          if (!smsSent) {
+            try {
+              const res = await fetch('/api/functions/send-sms-notification', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  phone: phoneTarget,
+                  message: finalSmsBody,
+                  channel: isWhatsApp ? 'whatsapp' : 'sms',
+                  recipientName: fullName !== 'Customer' ? fullName : undefined,
+                }),
+              });
+              const json = await res.json().catch(() => null);
+              if (res.ok && (json?.success !== false && json?.ok !== false)) {
+                smsSent = true;
+                smsErr = '';
+              } else {
+                smsErr = json?.error || smsErr || `${channel.toUpperCase()} delivery failed (HTTP ${res.status})`;
+              }
+            } catch (fbErr: any) {
+              smsErr = fbErr.message || smsErr;
+            }
+          }
+
+          // Tier 3: Alternative local API fallback (/api/functions/send-inbox-reply)
+          if (!smsSent) {
+            try {
+              const res2 = await fetch('/api/functions/send-inbox-reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipientPhone: phoneTarget,
+                  messageContent: finalSmsBody,
+                  channel: isWhatsApp ? 'whatsapp' : 'sms',
+                }),
+              });
+              const json2 = await res2.json().catch(() => null);
+              if (res2.ok && (json2?.success || json2?.ok)) {
+                smsSent = true;
+                smsErr = '';
+              }
+            } catch {
+              // Ignore secondary fallback error
+            }
+          }
+
+          if (!smsSent) {
+            throw new Error(smsErr || `${channel.toUpperCase()} delivery failed across all providers`);
           }
           sent += 1;
-        } else if (channel === 'in_app' && contact.user_id) {
-          const { error } = await supabase.from('in_app_messages' as never).insert({
-            recipient_id: contact.user_id,
-            sender_name: 'Rentmaikar Admin',
-            category: 'admin_broadcast',
-            subject: renderedSubj,
-            body: renderedMsg,
-          } as never);
 
-          if (error) throw error;
+          // Non-blocking conversation logging for history
+          try {
+            await supabase.from('inbox_messages' as never).insert({
+              sender_type: 'admin',
+              sender_name: 'Rentmaikar Admin',
+              content: finalSmsBody,
+              channel,
+              is_read: true,
+              metadata: { bulk: true, recipient_phone: phoneTarget },
+            } as never);
+          } catch {
+            /* non-fatal history log */
+          }
+        } else if (channel === 'in_app' && contact.user_id) {
+          let inAppSent = false;
+          let inAppErr = '';
+
+          // Tier 1: Direct table insert
+          try {
+            const { error: insertErr } = await supabase.from('in_app_messages' as never).insert({
+              recipient_id: contact.user_id,
+              sender_name: 'Rentmaikar Admin',
+              category: 'admin_broadcast',
+              subject: renderedSubj,
+              body: renderedMsg,
+            } as never);
+            if (!insertErr) {
+              inAppSent = true;
+            } else {
+              inAppErr = insertErr.message;
+            }
+          } catch (e: any) {
+            inAppErr = e.message || 'Direct table insert error';
+          }
+
+          // Tier 2: Resilient local API fallback (/api/functions/send-in-app-message)
+          if (!inAppSent) {
+            try {
+              const res = await fetch('/api/functions/send-in-app-message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipient_ids: [contact.user_id],
+                  subject: renderedSubj,
+                  body: renderedMsg,
+                  category: 'admin_broadcast',
+                }),
+              });
+              const json = await res.json().catch(() => null);
+              if (res.ok && (json?.ok !== false && json?.success !== false)) {
+                inAppSent = true;
+                inAppErr = '';
+              } else {
+                inAppErr = json?.error || inAppErr || `In-app message failed (HTTP ${res.status})`;
+              }
+            } catch (fbErr: any) {
+              inAppErr = fbErr.message || inAppErr;
+            }
+          }
+
+          if (!inAppSent) {
+            throw new Error(inAppErr || 'In-app delivery failed');
+          }
           sent += 1;
         } else {
           failed += 1;
           failures.push({
-            recipient: fullName,
-            reason: 'Missing target channel information',
+            recipient: fullName !== 'Customer' ? fullName : (contact.email || contact.phone || 'Contact'),
+            reason: `Missing target ${channel.toUpperCase()} contact information`,
           });
+        }
+
+        // Emit item activity update for real-time consoles
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('comms_activity_update', {
+              detail: {
+                type: 'bulk_message_item',
+                channel,
+                recipient: contact.email || contact.phone || fullName,
+                timestamp: new Date().toISOString(),
+              },
+            })
+          );
         }
       } catch (err: any) {
         failed += 1;
         failures.push({
-          recipient: fullName,
+          recipient: fullName !== 'Customer' ? fullName : (contact.email || contact.phone || 'Contact'),
           reason: err.message || 'Dispatch error',
         });
       }
@@ -507,6 +713,20 @@ export const HubBulkMessaging: React.FC = () => {
     }
 
     setIsSending(false);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('comms_activity_update', {
+          detail: {
+            type: 'bulk_broadcast_complete',
+            channel,
+            totalSent: sent,
+            failed,
+            timestamp: new Date().toISOString(),
+          },
+        })
+      );
+    }
 
     if (failed === 0 && sent > 0) {
       toast.success(`Bulk dispatch complete: Delivered to all ${sent} contacts via ${channel.toUpperCase()}`);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Download, Loader2, RefreshCw, ShieldCheck, FileText, ExternalLink } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import {
   fetchSmsConsentAudit,
@@ -84,15 +85,35 @@ export default function AdminSmsConsentAuditPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <ShieldCheck className="w-6 h-6 text-primary" />
-          SMS consent audit trail
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          Every opt-in and opt-out with the exact keyword and timing disclosure that was on
-          screen. Export for the A2P 10DLC resubmission evidence pack.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-primary" />
+            SMS consent audit trail
+          </h1>
+          <p className="text-muted-foreground text-sm">
+            Every opt-in and opt-out with the exact keyword and timing disclosure that was on
+            screen. Export for the A2P 10DLC resubmission evidence pack.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="/downloads/rentmaikar-10dlc-a2p-compliance-packet.pdf"
+            download="rentmaikar-10dlc-a2p-compliance-packet.pdf"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3.5 py-2 text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            10DLC PDF Dossier
+          </a>
+          <Link
+            to="/compliance/10dlc"
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            View Full Dossier <ExternalLink className="w-3.5 h-3.5" />
+          </Link>
+        </div>
       </div>
 
       <Card>

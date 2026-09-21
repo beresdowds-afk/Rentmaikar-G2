@@ -21,8 +21,9 @@
     "git:push": "bash scripts/phased-git-push.sh",
     "diagnose": "npx tsx scripts/diagnose-build-env.ts",
     "prepare": "node -e \"if(require('fs').existsSync('.git')){try{require('child_process').execSync('husky install',{stdio:'inherit'})}catch(e){}}\"",
-    "predev": "npx tsx scripts/generate-sitemap.ts",
-    "prebuild": "npx tsx scripts/generate-sitemap.ts"
+    "predev": "npx tsx scripts/generate-sitemap.ts && npx tsx scripts/generate-10dlc-pdf.ts",
+    "prebuild": "npx tsx scripts/generate-sitemap.ts && npx tsx scripts/generate-10dlc-pdf.ts",
+    "generate:10dlc-pdf": "npx tsx scripts/generate-10dlc-pdf.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",

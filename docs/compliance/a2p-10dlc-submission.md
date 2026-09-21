@@ -1,6 +1,21 @@
 # Rentmaikar — A2P 10DLC Campaign Resubmission Packet
 
-Last updated: 2026-08-14
+Last updated: September 2026 (Audit Version: 2026-08-14.v1)
+
+## 0. Registered Business & Brand Identity (TCR Brand Registration)
+
+| Field | Value | Notes |
+|---|---|---|
+| Legal Business Name | **INTE-GRITTY LLC** | Registered in the United States |
+| Registered Corporate Owner | **INTE-GRITTY LLC USA** | Legal parent company & entity |
+| Doing Business As (DBA) | **Rentmaikar** | Vehicle rental & rideshare marketplace brand |
+| Corporate Relationship | **Rentmaikar is wholly owned and operated by INTE-GRITTY LLC USA** | Avoids TCR "Legal Name Mismatch" rejection |
+| Organization Type | **Limited Liability Company (LLC)** | United States Private Entity |
+| Primary Website | https://www.rentmaikar.com | Live production site |
+| Support Email | support@rentmaikar.com | Inquiries and dispute resolution |
+| Compliance Email | compliance@rentmaikar.com | Regulatory and carrier responses |
+| Support Phone | +1 (608) 548-9220 | Voice hotline |
+| Published 10DLC Number | +1 (608) 384-3932 | Twilio carrier route |
 
 ## 1. Brand / campaign basics
 
@@ -23,15 +38,15 @@ Last updated: 2026-08-14
 
 ## 2. Campaign description (paste as-is)
 
-> Rentmaikar is a vehicle rental platform connecting rideshare drivers with vehicle
-> owners in the United States and Nigeria. This campaign sends text messages only to
-> users who created an account on rentmaikar.com and explicitly checked an optional
-> SMS consent checkbox. Messages cover account and identity verification, rental
-> application and approval status, vehicle pickup and inspection scheduling, payment
-> reminders and receipts, agreement renewals, and customer support replies. A separate
-> optional checkbox covers promotional messages about vehicle availability and offers.
-> SMS consent is never a condition of creating an account, renting a vehicle, or using
-> any Rentmaikar service.
+> Rentmaikar (wholly owned and operated by INTE-GRITTY LLC USA) is a vehicle rental
+> platform connecting rideshare drivers with vehicle owners in the United States and
+> Nigeria. This campaign sends text messages only to users who created an account on
+> rentmaikar.com and explicitly checked an optional SMS consent checkbox. Messages cover
+> account and identity verification, rental application and approval status, vehicle
+> pickup and inspection scheduling, payment reminders and receipts, agreement renewals,
+> and customer support replies. A separate optional checkbox covers promotional messages
+> about vehicle availability and offers. SMS consent is never a condition of creating
+> an account, renting a vehicle, or using any Rentmaikar service.
 
 ## 3. Opt-in mechanism description (paste as-is)
 

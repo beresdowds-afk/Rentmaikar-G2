@@ -812,8 +812,11 @@ export const OmnichannelComposer = ({
           }
         }
       } else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
+        let msgSent = false;
+        let msgErr = '';
+
         try {
-          const { error: twilioErr } = await supabase.functions.invoke('send-inbox-reply', {
+          const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('send-inbox-reply', {
             body: {
               conversationId,
               messageContent: body,
@@ -827,20 +830,52 @@ export const OmnichannelComposer = ({
             },
           });
 
-          if (twilioErr) {
-            // Backup bridge via Sent.dm client
-            await sent.sendMessage({
-              to: contact.phone,
-              channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
-              text: body,
-              template:
-                channel === 'whatsapp' && selectedWhatsAppTemplate !== 'custom'
-                  ? { id: selectedWhatsAppTemplate }
-                  : undefined,
-            });
+          if (!edgeErr && (edgeData?.success !== false && edgeData?.ok !== false)) {
+            msgSent = true;
+          } else {
+            msgErr = edgeData?.error || edgeErr?.message || 'Edge function rejected message';
           }
-        } catch (e) {
-          console.warn('SMS/WhatsApp delivery warning for contact:', contact.phone, e);
+        } catch (e: any) {
+          msgErr = e.message || 'Edge function invoke error';
+        }
+
+        // Resilient fallback to direct local API gateway
+        if (!msgSent) {
+          try {
+            const fallbackRes = await fetch('/api/functions/send-inbox-reply', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                conversationId,
+                messageContent: body,
+                channel,
+                recipientPhone: contact.phone,
+                attachments: uploadedAttachments,
+                whatsappTemplateId:
+                  channel === 'whatsapp' && selectedWhatsAppTemplate !== 'custom'
+                    ? selectedWhatsAppTemplate
+                    : undefined,
+              }),
+            });
+            const fallbackJson = await fallbackRes.json().catch(() => null);
+            if (fallbackRes.ok && (fallbackJson?.success || fallbackJson?.ok)) {
+              msgSent = true;
+            } else {
+              // Third tier: Backup bridge via Sent.dm client
+              await sent.sendMessage({
+                to: contact.phone,
+                channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
+                text: body,
+                template:
+                  channel === 'whatsapp' && selectedWhatsAppTemplate !== 'custom'
+                    ? { id: selectedWhatsAppTemplate }
+                    : undefined,
+              });
+              msgSent = true;
+            }
+          } catch (e) {
+            console.warn('SMS/WhatsApp delivery warning for contact:', contact.phone, e);
+          }
         }
       }
 

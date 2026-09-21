@@ -21,6 +21,8 @@ import {
   Phone,
   MessageSquare,
   ArrowRight,
+  Layers,
+  RotateCcw,
 } from 'lucide-react';
 import type { BulkSendResult, MessagingChannel } from './types';
 
@@ -168,6 +170,24 @@ export const BulkDispatchProgressModal = ({
               <Button type="button" variant="outline" size="sm" onClick={onClose}>
                 Done
               </Button>
+              {progress.failed > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('tab', 'bulk-tracker');
+                    window.history.pushState({}, '', url.toString());
+                    window.dispatchEvent(new CustomEvent('comms_activity_update', { detail: { type: 'open_bulk_tracker' } }));
+                    onClose();
+                  }}
+                  className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Retry in Tracker ({progress.failed})
+                </Button>
+              )}
               {onViewInbox && (
                 <Button type="button" size="sm" onClick={onViewInbox} className="gap-1.5">
                   View in Unified Inbox

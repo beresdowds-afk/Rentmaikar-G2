@@ -255,44 +255,151 @@ export const HubMessageComposer: React.FC = () => {
           return;
         }
 
-        const { error } = await supabase.from('in_app_messages' as never).insert({
-          recipient_id: recipientUserId,
-          sender_name: 'Rentmaikar Admin',
-          category: 'admin_broadcast',
-          subject: subject.trim() || 'Notice from Rentmaikar Admin',
-          body: trimmedBody,
-        } as never);
+        let inAppSent = false;
+        let inAppErr = '';
 
-        if (error) throw error;
-        toast.success('In-app message sent to user inbox');
-      } else if (channel === 'email') {
-        const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-          body: {
-            to: recipientContact.trim(),
+        // Tier 1: Direct table insert
+        try {
+          const { error } = await supabase.from('in_app_messages' as never).insert({
+            recipient_id: recipientUserId,
+            sender_name: 'Rentmaikar Admin',
+            category: 'admin_broadcast',
             subject: subject.trim() || 'Notice from Rentmaikar Admin',
             body: trimmedBody,
-            recipientName: recipientName.trim() || undefined,
-          },
-        });
-
-        if (error || (data && data.ok === false)) {
-          throw new Error(data?.error || error?.message || 'Email dispatch failed');
+          } as never);
+          if (!error) {
+            inAppSent = true;
+          } else {
+            inAppErr = error.message;
+          }
+        } catch (e: any) {
+          inAppErr = e.message || 'Direct table insert error';
         }
+
+        // Tier 2: Resilient local API fallback
+        if (!inAppSent) {
+          try {
+            const res = await fetch('/api/functions/send-in-app-message', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient_ids: [recipientUserId],
+                subject: subject.trim() || 'Notice from Rentmaikar Admin',
+                body: trimmedBody,
+                category: 'admin_broadcast',
+              }),
+            });
+            const json = await res.json().catch(() => null);
+            if (res.ok && (json?.ok !== false && json?.success !== false)) {
+              inAppSent = true;
+            } else {
+              inAppErr = json?.error || inAppErr || `HTTP ${res.status}`;
+            }
+          } catch (fbErr: any) {
+            inAppErr = fbErr.message || inAppErr;
+          }
+        }
+
+        if (!inAppSent) throw new Error(inAppErr || 'In-app dispatch failed');
+        toast.success('In-app message sent to user inbox');
+      } else if (channel === 'email') {
+        let emailSent = false;
+        let emailErr = '';
+
+        // Tier 1: Invoke send-outbound-email
+        try {
+          const { data, error } = await supabase.functions.invoke('send-outbound-email', {
+            body: {
+              to: recipientContact.trim(),
+              subject: subject.trim() || 'Notice from Rentmaikar Admin',
+              body: trimmedBody,
+              recipientName: recipientName.trim() || undefined,
+            },
+          });
+          if (!error && (data?.ok !== false && data?.success !== false)) {
+            emailSent = true;
+          } else {
+            emailErr = data?.error || error?.message || 'Email dispatch failed';
+          }
+        } catch (e: any) {
+          emailErr = e.message || 'Edge function invoke error';
+        }
+
+        // Tier 2: Resilient local API fallback
+        if (!emailSent) {
+          try {
+            const res = await fetch('/api/functions/send-outbound-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: recipientContact.trim(),
+                subject: subject.trim() || 'Notice from Rentmaikar Admin',
+                body: trimmedBody,
+                recipientName: recipientName.trim() || undefined,
+              }),
+            });
+            const json = await res.json().catch(() => null);
+            if (res.ok && (json?.ok !== false && json?.success !== false)) {
+              emailSent = true;
+            } else {
+              emailErr = json?.error || emailErr || `Email dispatch failed (HTTP ${res.status})`;
+            }
+          } catch (fbErr: any) {
+            emailErr = fbErr.message || emailErr;
+          }
+        }
+
+        if (!emailSent) throw new Error(emailErr || 'Email dispatch failed');
         toast.success(`Email dispatched to ${recipientContact.trim()}`);
       } else {
         // SMS or WhatsApp
-        const { data, error } = await supabase.functions.invoke('send-sms-notification', {
-          body: {
-            phone: recipientContact.trim(),
-            message: trimmedBody,
-            channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
-            recipientName: recipientName.trim() || undefined,
-          },
-        });
+        let msgSent = false;
+        let msgErr = '';
 
-        if (error || (data && data.success === false)) {
-          throw new Error(data?.error || error?.message || `${channel.toUpperCase()} message failed`);
+        // Tier 1: Invoke send-sms-notification
+        try {
+          const { data, error } = await supabase.functions.invoke('send-sms-notification', {
+            body: {
+              phone: recipientContact.trim(),
+              message: trimmedBody,
+              channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
+              recipientName: recipientName.trim() || undefined,
+            },
+          });
+          if (!error && (data?.success !== false && data?.ok !== false)) {
+            msgSent = true;
+          } else {
+            msgErr = data?.error || error?.message || `${channel.toUpperCase()} message failed`;
+          }
+        } catch (e: any) {
+          msgErr = e.message || 'Edge function invoke error';
         }
+
+        // Tier 2: Resilient local API fallback
+        if (!msgSent) {
+          try {
+            const res = await fetch('/api/functions/send-sms-notification', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                phone: recipientContact.trim(),
+                message: trimmedBody,
+                channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
+                recipientName: recipientName.trim() || undefined,
+              }),
+            });
+            const json = await res.json().catch(() => null);
+            if (res.ok && (json?.success !== false && json?.ok !== false)) {
+              msgSent = true;
+            } else {
+              msgErr = json?.error || msgErr || `${channel.toUpperCase()} dispatch failed (HTTP ${res.status})`;
+            }
+          } catch (fbErr: any) {
+            msgErr = fbErr.message || msgErr;
+          }
+        }
+
+        if (!msgSent) throw new Error(msgErr || `${channel.toUpperCase()} message failed`);
         toast.success(`${channel.toUpperCase()} message sent to ${recipientContact.trim()}`);
       }
 

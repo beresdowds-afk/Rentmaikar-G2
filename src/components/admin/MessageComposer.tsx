@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Globe,
   FileText,
+  Layers,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -618,12 +619,30 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
                   </ScrollArea>
 
                   {bulkProgress && (
-                    <div className="space-y-1 pt-2 border-t">
+                    <div className="space-y-2 pt-2 border-t">
                       {isSending && <Progress value={(bulkProgress.completed / bulkProgress.total) * 100} />}
-                      <p className="text-[11px] text-muted-foreground">
-                        {bulkProgress.completed}/{bulkProgress.total} processed · {bulkProgress.sent} sent ·{' '}
-                        {bulkProgress.failed > 0 && <span className="text-destructive font-semibold">{bulkProgress.failed} failed</span>}
-                      </p>
+                      <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
+                        <p className="text-muted-foreground">
+                          {bulkProgress.completed}/{bulkProgress.total} processed · {bulkProgress.sent} sent ·{' '}
+                          {bulkProgress.failed > 0 && <span className="text-destructive font-semibold">{bulkProgress.failed} failed</span>}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('tab', 'bulk-tracker');
+                            window.history.pushState({}, '', url.toString());
+                            window.dispatchEvent(new CustomEvent('comms_activity_update', { detail: { type: 'open_bulk_tracker' } }));
+                            onSent?.();
+                          }}
+                          className="h-6 text-[10px] gap-1 px-2 text-primary"
+                        >
+                          <Layers className="h-3 w-3" />
+                          View in Bulk Tracker
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>

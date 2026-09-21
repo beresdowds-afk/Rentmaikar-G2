@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Smartphone, Info, CheckCircle2, Loader2 } from "lucide-react";
+import { Smartphone, Info, CheckCircle2, Loader2, Download, FileText, ExternalLink } from "lucide-react";
 import SmsConsentCheckboxes from "@/components/registration/SmsConsentCheckboxes";
 import SmsProgramDetails from "@/components/registration/SmsProgramDetails";
 import { useAuth } from "@/contexts/AuthContext";
@@ -175,6 +175,39 @@ const SmsOptIn = () => {
           <CardContent>
             <SmsProgramDetails bare />
           </CardContent>
+        </Card>
+
+        {/* Carrier Compliance & 10DLC Dossier Download */}
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" />
+                  A2P 10DLC Campaign Dossier &amp; Reviewer Evidence
+                </CardTitle>
+                <CardDescription>
+                  Download the official, comprehensive PDF packet containing all TCR brand and campaign registration parameters for Rentmaikar.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href="/downloads/rentmaikar-10dlc-a2p-compliance-packet.pdf"
+                  download="rentmaikar-10dlc-a2p-compliance-packet.pdf"
+                  className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Download PDF
+                </a>
+                <Link
+                  to="/compliance/10dlc"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent transition-colors"
+                >
+                  View Details <ExternalLink className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          </CardHeader>
         </Card>
       </main>
 
