@@ -6,6 +6,8 @@
  * from Supabase with resilient in-memory caching and zero-dependency fallbacks.
  */
 
+import { supabaseBackendService } from "./supabaseService";
+
 export interface SitemapRoute {
   path: string;
   changefreq?: "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never";
@@ -65,44 +67,21 @@ function escapeXml(unsafe: string): string {
  * Fetch published vehicles dynamically from Supabase
  */
 export async function fetchPublishedVehicleRoutes(): Promise<SitemapRoute[]> {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co";
-  const supabaseKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    return [];
-  }
-
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-    const res = await fetch(
-      `${supabaseUrl}/rest/v1/public_vehicle_listings?select=id,make,model,year,photo_urls,created_at&limit=5000`,
-      {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-          Accept: "application/json",
-        },
-        signal: controller.signal,
-      }
-    );
-
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      console.warn(`[Sitemap] Supabase returned status ${res.status}`);
-      return [];
-    }
-
-    const rows = (await res.json()) as Array<{
+    const res = await supabaseBackendService.executeRestQuery<Array<{
       id: string;
       make?: string;
       model?: string;
       year?: number;
       photo_urls?: string[];
       created_at?: string;
-    }>;
+    }>>("public_vehicle_listings?select=id,make,model,year,photo_urls,created_at&limit=5000");
+
+    if (!res.ok || !Array.isArray(res.data)) {
+      return [];
+    }
+
+    const rows = res.data;
 
     return rows
       .filter((r) => r && r.id)

@@ -2,6 +2,7 @@ import http from "http";
 import https from "https";
 import os from "os";
 import { bridgeManager } from "./bridgeManager";
+import { supabaseBackendService } from "./supabaseService";
 
 export interface SubsystemStatus {
   name: string;
@@ -183,34 +184,21 @@ class PlatformHealthService {
         : "Direct connection is disabled. Frontend traffic is currently rejected.",
     });
 
-    // 4. Supabase / Postgres Database
-    const rawSupabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseUrl = (rawSupabaseUrl && !rawSupabaseUrl.includes("bwvocmhcledbwqlpcswp"))
-      ? rawSupabaseUrl
-      : (process.env.SUPABASE_PROJECT_URL || process.env.SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co");
-    if (supabaseUrl) {
-      const dbPing = await this.pingUrl(`${supabaseUrl}/rest/v1/`, 4000);
-      subsystems.push({
-        name: "Supabase Relational Database & Auth",
-        category: "database",
-        status: dbPing.ok || dbPing.status === 401 ? "healthy" : "down",
-        latencyMs: dbPing.latencyMs,
-        lastChecked: new Date().toISOString(),
-        details: {
-          url: supabaseUrl.replace(/^(https?:\/\/[^/]+).*/, "$1"),
-          httpStatus: dbPing.status,
-        },
-        error: dbPing.error,
-      });
-    } else {
-      subsystems.push({
-        name: "Supabase Relational Database",
-        category: "database",
-        status: "unconfigured",
-        lastChecked: new Date().toISOString(),
-        details: { note: "SUPABASE_URL not declared in environment" },
-      });
-    }
+    // 4. Supabase / Postgres Database & Edge Functions Engine
+    const supabaseHealth = await supabaseBackendService.checkSupabaseHealth();
+    subsystems.push({
+      name: "Supabase Relational Database, Auth & Edge Engine",
+      category: "database",
+      status: supabaseHealth.healthy ? "healthy" : "down",
+      latencyMs: supabaseHealth.latencyMs,
+      lastChecked: supabaseHealth.timestamp,
+      details: {
+        url: supabaseHealth.url.replace(/^(https?:\/\/[^/]+).*/, "$1"),
+        httpStatus: supabaseHealth.restStatus,
+        edgeFunctionsAvailable: supabaseHealth.totalEdgeFunctionsAvailable,
+      },
+      error: supabaseHealth.healthy ? undefined : "Supabase endpoint unreachable",
+    });
 
     // 5. CPaaS Gateway (Sent.dm, Twilio, Termii)
     const hasSent = Boolean(process.env.SENT_API_KEY);

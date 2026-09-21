@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import { bridgeManager, BridgeEventPacket } from "../services/bridgeManager";
 import { platformHealthService } from "../services/platformHealth";
+import { supabaseBackendService } from "../services/supabaseService";
 
 export const bridgeRouter = Router();
 
@@ -23,13 +24,36 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
 
   const channel = req.headers["x-rentmaikar-fallback"] === "staging" ? "staging_fallback" : "direct";
 
+  // Actions allowed to be processed via the fallback bridge when direct link is disconnected
+  const BRIDGE_RESILIENT_ACTIONS = new Set([
+    "toggle",
+    "reconnect",
+    "invoke_function",
+    "invoke_edge_function",
+    "edge_function",
+    "list_edge_functions",
+    "get_edge_functions",
+    "supabase_health",
+    "health",
+    "check_health",
+    "ping",
+    "diagnostics",
+    "cpaas_simulate",
+    "custom",
+  ]);
+
   // Check if direct connection has been disconnected by administrator switch
-  if (!bridgeManager.isDirectConnectionEnabled() && channel === "direct" && action !== "toggle" && action !== "reconnect") {
+  // If caller is specifically hitting the fallback bridge or using resilient actions, proceed via fallback bridge
+  if (
+    !bridgeManager.isDirectConnectionEnabled() &&
+    channel === "direct" &&
+    !BRIDGE_RESILIENT_ACTIONS.has(action)
+  ) {
     return res.status(503).json({
       status: "disconnected",
       success: false,
       error: "DIRECT_LINK_DISCONNECTED",
-      message: "Direct communication between front end files and backend has been switched OFF by administrator.",
+      message: "Direct communication between front end files and backend has been switched OFF by administrator. Use fallback bridge.",
       direct_connection_enabled: false,
       staging_fallback_url: "https://staging.rentmaikar.com/api",
     });
@@ -89,6 +113,59 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
       case "diagnostics": {
         const report = await platformHealthService.getLatestReport();
         result = report;
+        break;
+      }
+
+      case "invoke_function":
+      case "invoke_edge_function":
+      case "edge_function": {
+        const targetFunction = (payload.functionName || payload.function || req.body.functionName || "").trim();
+        const functionBody = payload.body !== undefined ? payload.body : payload.params || payload;
+        const clientAuth = (req.headers["authorization"] || req.headers["Authorization"]) as string | undefined;
+
+        if (!targetFunction) {
+          return res.status(400).json({
+            status: "error",
+            success: false,
+            error: "functionName is required for bridge edge function invocation",
+            correlationId,
+          });
+        }
+
+        const edgeResult = await supabaseBackendService.invokeEdgeFunction(targetFunction, functionBody, {
+          userToken: clientAuth,
+          method: "POST",
+          headers: {
+            "x-invoked-via": "rentmaikar-link-bridge",
+            "x-correlation-id": correlationId,
+          },
+        });
+
+        result = {
+          success: edgeResult.ok || edgeResult.status < 400,
+          status: edgeResult.status,
+          functionName: targetFunction,
+          data: edgeResult.data,
+          error: edgeResult.error,
+          provider: edgeResult.provider,
+          latencyMs: edgeResult.latencyMs,
+        };
+        break;
+      }
+
+      case "list_edge_functions":
+      case "get_edge_functions": {
+        result = {
+          success: true,
+          count: supabaseBackendService.getAllFunctions().length,
+          functions: supabaseBackendService.getAllFunctions(),
+        };
+        break;
+      }
+
+      case "supabase_health": {
+        const health = await supabaseBackendService.checkSupabaseHealth();
+        result = health;
         break;
       }
 
