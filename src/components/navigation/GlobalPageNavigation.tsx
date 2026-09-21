@@ -59,7 +59,105 @@ export function resolvePageTitle(pathname: string): string {
   return "Page";
 }
 
-export const GlobalPageNavigation: React.FC = () => {
+export interface FlowRoute {
+  path: string;
+  title: string;
+}
+
+export const PRIMARY_NAVIGATION_FLOW: FlowRoute[] = [
+  { path: "/", title: "Home" },
+  { path: "/catalogue/budget", title: "Budget Cars" },
+  { path: "/catalogue/standard", title: "Standard Cars" },
+  { path: "/catalogue/premium", title: "Premium Cars" },
+  { path: "/how-it-works", title: "How It Works" },
+  { path: "/driver/register", title: "Driver Registration" },
+  { path: "/driver/onboarding", title: "Driver Onboarding" },
+  { path: "/owner/register", title: "Owner Registration" },
+  { path: "/owner/portal-access", title: "Owner Portal" },
+  { path: "/faq", title: "FAQ & Help" },
+  { path: "/terms", title: "Terms of Service" },
+  { path: "/privacy", title: "Privacy Policy" },
+];
+
+export function getSmartNavigationTargets(
+  currentPath: string,
+  historyStack: HistoryEntry[],
+  currentIndex: number
+): {
+  previousPath: string;
+  previousTitle: string;
+  nextPath: string;
+  nextTitle: string;
+  isStackPrevious: boolean;
+  isStackNext: boolean;
+} {
+  // Check if we have history backward
+  let previousPath = "";
+  let previousTitle = "";
+  let isStackPrevious = false;
+
+  if (currentIndex > 0 && historyStack[currentIndex - 1]) {
+    previousPath = historyStack[currentIndex - 1].path;
+    previousTitle = historyStack[currentIndex - 1].title;
+    isStackPrevious = true;
+  } else {
+    const cleanPath = currentPath.split("?")[0].split("#")[0];
+    const flowIdx = PRIMARY_NAVIGATION_FLOW.findIndex(
+      (r) => r.path === cleanPath || (r.path !== "/" && cleanPath.startsWith(r.path))
+    );
+    if (flowIdx > 0) {
+      const target = PRIMARY_NAVIGATION_FLOW[flowIdx - 1];
+      previousPath = target.path;
+      previousTitle = target.title;
+    } else if (flowIdx === 0) {
+      const target = PRIMARY_NAVIGATION_FLOW[PRIMARY_NAVIGATION_FLOW.length - 1];
+      previousPath = target.path;
+      previousTitle = target.title;
+    } else {
+      previousPath = "/";
+      previousTitle = "Home";
+    }
+  }
+
+  // Check if we have history forward
+  let nextPath = "";
+  let nextTitle = "";
+  let isStackNext = false;
+
+  if (currentIndex < historyStack.length - 1 && historyStack[currentIndex + 1]) {
+    nextPath = historyStack[currentIndex + 1].path;
+    nextTitle = historyStack[currentIndex + 1].title;
+    isStackNext = true;
+  } else {
+    const cleanPath = currentPath.split("?")[0].split("#")[0];
+    const flowIdx = PRIMARY_NAVIGATION_FLOW.findIndex(
+      (r) => r.path === cleanPath || (r.path !== "/" && cleanPath.startsWith(r.path))
+    );
+    if (flowIdx >= 0 && flowIdx < PRIMARY_NAVIGATION_FLOW.length - 1) {
+      const target = PRIMARY_NAVIGATION_FLOW[flowIdx + 1];
+      nextPath = target.path;
+      nextTitle = target.title;
+    } else if (flowIdx === PRIMARY_NAVIGATION_FLOW.length - 1) {
+      const target = PRIMARY_NAVIGATION_FLOW[0];
+      nextPath = target.path;
+      nextTitle = target.title;
+    } else {
+      nextPath = "/catalogue/budget";
+      nextTitle = "Budget Cars";
+    }
+  }
+
+  return {
+    previousPath,
+    previousTitle,
+    nextPath,
+    nextTitle,
+    isStackPrevious,
+    isStackNext,
+  };
+}
+
+export function useSmartPageNavigation() {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -95,14 +193,6 @@ export const GlobalPageNavigation: React.FC = () => {
     return 0;
   });
 
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(COLLAPSED_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
-
   // Keep sessionStorage in sync
   useEffect(() => {
     try {
@@ -119,12 +209,10 @@ export const GlobalPageNavigation: React.FC = () => {
     const pageTitle = resolvePageTitle(location.pathname);
 
     setHistoryStack((prevStack) => {
-      // If we are currently on the same path, do nothing
       if (prevStack[currentIndex] && prevStack[currentIndex].path === currentPath) {
         return prevStack;
       }
 
-      // Check if user clicked browser back or forward
       if (currentIndex > 0 && prevStack[currentIndex - 1]?.path === currentPath) {
         setCurrentIndex(currentIndex - 1);
         return prevStack;
@@ -134,7 +222,6 @@ export const GlobalPageNavigation: React.FC = () => {
         return prevStack;
       }
 
-      // New navigation: truncate forward history and append
       const nextStack = prevStack.slice(0, currentIndex + 1);
       nextStack.push({
         path: currentPath,
@@ -146,7 +233,7 @@ export const GlobalPageNavigation: React.FC = () => {
     });
   }, [location.pathname, location.search]);
 
-  // Listen to popstate (browser back/forward button clicks)
+  // Listen to popstate
   useEffect(() => {
     const handlePopState = () => {
       const currentPath = window.location.pathname + window.location.search;
@@ -163,10 +250,86 @@ export const GlobalPageNavigation: React.FC = () => {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  const targets = useMemo(() => {
+    return getSmartNavigationTargets(
+      location.pathname + location.search,
+      historyStack,
+      currentIndex
+    );
+  }, [location.pathname, location.search, historyStack, currentIndex]);
+
+  const currentTitle = useMemo(() => {
+    return historyStack[currentIndex]?.title || resolvePageTitle(location.pathname);
+  }, [historyStack, currentIndex, location.pathname]);
+
+  const handlePrevious = useCallback(() => {
+    if (currentIndex > 0 && historyStack[currentIndex - 1]) {
+      const prevEntry = historyStack[currentIndex - 1];
+      setCurrentIndex((idx) => Math.max(0, idx - 1));
+      navigate(prevEntry.path);
+      return;
+    }
+
+    const { previousPath } = getSmartNavigationTargets(
+      location.pathname + location.search,
+      historyStack,
+      currentIndex
+    );
+    if (previousPath) {
+      navigate(previousPath);
+    } else if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate("/");
+    }
+  }, [currentIndex, historyStack, location.pathname, location.search, navigate]);
+
+  const handleNext = useCallback(() => {
+    if (currentIndex < historyStack.length - 1 && historyStack[currentIndex + 1]) {
+      const nextEntry = historyStack[currentIndex + 1];
+      setCurrentIndex((idx) => Math.min(historyStack.length - 1, idx + 1));
+      navigate(nextEntry.path);
+      return;
+    }
+
+    const { nextPath } = getSmartNavigationTargets(
+      location.pathname + location.search,
+      historyStack,
+      currentIndex
+    );
+    if (nextPath) {
+      navigate(nextPath);
+    } else if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(1);
+    } else {
+      navigate("/catalogue/budget");
+    }
+  }, [currentIndex, historyStack, location.pathname, location.search, navigate]);
+
+  return {
+    historyStack,
+    currentIndex,
+    currentTitle,
+    targets,
+    handlePrevious,
+    handleNext,
+  };
+}
+
+export const GlobalPageNavigation: React.FC = () => {
+  const { currentTitle, targets, handlePrevious, handleNext } = useSmartPageNavigation();
+
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
   // Global Keyboard shortcuts: Alt + ArrowLeft (Previous), Alt + ArrowRight (Next)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is actively typing in an input or textarea
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -188,43 +351,7 @@ export const GlobalPageNavigation: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  });
-
-  const canGoPrevious = currentIndex > 0 || (typeof window !== "undefined" && window.history.length > 1);
-  const previousTitle = currentIndex > 0 ? historyStack[currentIndex - 1]?.title : "Previous Page";
-
-  const canGoNext = currentIndex < historyStack.length - 1;
-  const nextTitle = canGoNext ? historyStack[currentIndex + 1]?.title : "Next Page";
-
-  const currentTitle = useMemo(() => {
-    return historyStack[currentIndex]?.title || resolvePageTitle(location.pathname);
-  }, [historyStack, currentIndex, location.pathname]);
-
-  const handlePrevious = useCallback(() => {
-    if (currentIndex > 0) {
-      const prevEntry = historyStack[currentIndex - 1];
-      setCurrentIndex((idx) => Math.max(0, idx - 1));
-      if (prevEntry?.path) {
-        navigate(prevEntry.path);
-        return;
-      }
-    }
-    // Fallback: browser back
-    navigate(-1);
-  }, [currentIndex, historyStack, navigate]);
-
-  const handleNext = useCallback(() => {
-    if (currentIndex < historyStack.length - 1) {
-      const nextEntry = historyStack[currentIndex + 1];
-      setCurrentIndex((idx) => Math.min(historyStack.length - 1, idx + 1));
-      if (nextEntry?.path) {
-        navigate(nextEntry.path);
-        return;
-      }
-    }
-    // Fallback: browser forward
-    navigate(1);
-  }, [currentIndex, historyStack, navigate]);
+  }, [handlePrevious, handleNext]);
 
   const toggleCollapsed = () => {
     setIsCollapsed((prev) => {
@@ -245,7 +372,7 @@ export const GlobalPageNavigation: React.FC = () => {
       className="fixed bottom-4 left-4 z-40 print:hidden select-none transition-all duration-200"
     >
       <div className="flex items-center gap-1.5 p-1 bg-background/95 dark:bg-card/95 backdrop-blur-md border border-border/80 shadow-lg rounded-full text-foreground text-xs">
-        {/* Previous Page Button */}
+        {/* Previous Page Button - Always Enabled */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -253,23 +380,19 @@ export const GlobalPageNavigation: React.FC = () => {
               type="button"
               variant="ghost"
               size="sm"
-              disabled={!canGoPrevious}
               onClick={handlePrevious}
-              aria-label={`Go to previous page: ${previousTitle}`}
-              className="h-8 px-2.5 rounded-full text-xs font-medium gap-1 hover:bg-muted disabled:opacity-35 transition-colors"
+              aria-label={`Go to previous page: ${targets.previousTitle}`}
+              className="h-8 px-2.5 rounded-full text-xs font-semibold gap-1 hover:bg-muted text-foreground cursor-pointer transition-all active:scale-95 shadow-xs"
             >
               <ChevronLeft className="h-4 w-4 shrink-0 text-foreground" />
-              <span className={isCollapsed ? "sr-only" : "inline font-semibold"}>Previous</span>
+              <span className={isCollapsed ? "sr-only" : "inline"}>Previous</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">
-            {canGoPrevious ? (
-              <span>
-                Back to: <strong>{previousTitle}</strong> <kbd className="text-[10px] text-muted-foreground ml-1">Alt+←</kbd>
-              </span>
-            ) : (
-              <span>Start of session history</span>
-            )}
+            <span>
+              Previous: <strong>{targets.previousTitle}</strong>{" "}
+              <kbd className="text-[10px] text-muted-foreground ml-1">Alt+←</kbd>
+            </span>
           </TooltipContent>
         </Tooltip>
 
@@ -286,7 +409,7 @@ export const GlobalPageNavigation: React.FC = () => {
           </div>
         )}
 
-        {/* Next Page Button */}
+        {/* Next Page Button - Always Enabled */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -294,23 +417,19 @@ export const GlobalPageNavigation: React.FC = () => {
               type="button"
               variant="ghost"
               size="sm"
-              disabled={!canGoNext}
               onClick={handleNext}
-              aria-label={`Go to next page: ${nextTitle}`}
-              className="h-8 px-2.5 rounded-full text-xs font-medium gap-1 hover:bg-muted disabled:opacity-35 transition-colors"
+              aria-label={`Go to next page: ${targets.nextTitle}`}
+              className="h-8 px-2.5 rounded-full text-xs font-semibold gap-1 hover:bg-muted text-foreground cursor-pointer transition-all active:scale-95 shadow-xs"
             >
-              <span className={isCollapsed ? "sr-only" : "inline font-semibold"}>Next</span>
+              <span className={isCollapsed ? "sr-only" : "inline"}>Next</span>
               <ChevronRight className="h-4 w-4 shrink-0 text-foreground" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">
-            {canGoNext ? (
-              <span>
-                Forward to: <strong>{nextTitle}</strong> <kbd className="text-[10px] text-muted-foreground ml-1">Alt+→</kbd>
-              </span>
-            ) : (
-              <span>Latest page visited</span>
-            )}
+            <span>
+              Next: <strong>{targets.nextTitle}</strong>{" "}
+              <kbd className="text-[10px] text-muted-foreground ml-1">Alt+→</kbd>
+            </span>
           </TooltipContent>
         </Tooltip>
 

@@ -34,6 +34,7 @@ import RegionSwitcher from "@/components/home/RegionSwitcher";
 import { InAppMessagesBell } from "@/components/notifications/InAppMessagesBell";
 import { useUserType } from "@/contexts/UserTypeContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSmartPageNavigation } from "@/components/navigation/GlobalPageNavigation";
 import { toast } from "sonner";
 import rentmaikarLogo from "@/assets/rentmaikar-logo.jpg";
 import rentmaikarBanner from "@/assets/rentmaikar-banner.jpg";
@@ -48,6 +49,7 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
   const navigate = useNavigate();
   const { userType } = useUserType();
   const { user, userRole, signOut, isLoading } = useAuth();
+  const { handlePrevious, handleNext, targets } = useSmartPageNavigation();
 
   const navLinks = [
     { href: "/", label: "Home" },
@@ -96,20 +98,20 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 sm:h-8 sm:w-8 text-muted-foreground hover:text-foreground rounded-full"
-                onClick={() => navigate(-1)}
-                title="Go to previous page"
-                aria-label="Previous page"
+                className="h-7 w-7 sm:h-8 sm:w-8 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full active:scale-95 transition-all cursor-pointer"
+                onClick={handlePrevious}
+                title={`Go to previous page (${targets.previousTitle})`}
+                aria-label={`Previous page: ${targets.previousTitle}`}
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 sm:h-8 sm:w-8 text-muted-foreground hover:text-foreground rounded-full"
-                onClick={() => navigate(1)}
-                title="Go to next page"
-                aria-label="Next page"
+                className="h-7 w-7 sm:h-8 sm:w-8 text-muted-foreground hover:text-foreground hover:bg-muted/80 rounded-full active:scale-95 transition-all cursor-pointer"
+                onClick={handleNext}
+                title={`Go to next page (${targets.nextTitle})`}
+                aria-label={`Next page: ${targets.nextTitle}`}
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>

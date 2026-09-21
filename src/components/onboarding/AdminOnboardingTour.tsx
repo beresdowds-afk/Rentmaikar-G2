@@ -308,6 +308,8 @@ export const AdminOnboardingTour = ({ onComplete, isOpen }: AdminOnboardingTourP
   const handlePrev = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
+    } else if (tourSteps.length > 0) {
+      setCurrentStep(tourSteps.length - 1);
     }
   };
 
@@ -524,8 +526,8 @@ export const AdminOnboardingTour = ({ onComplete, isOpen }: AdminOnboardingTourP
               variant="outline"
               size="sm"
               onClick={handlePrev}
-              disabled={currentStep === 0}
-              className="h-8 px-2.5 text-xs gap-1"
+              className="h-8 px-2.5 text-xs gap-1 cursor-pointer hover:bg-accent"
+              title="Go back to previous step"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
               Back
