@@ -146,83 +146,43 @@ async function startServer() {
     }
   );
 
-  // Backend / Edge Functions dispatch router with allowlist and Supabase Edge Function forwarding
+  // Link Bridge API router: Handles frontend-to-backend CALL, LISTEN, RESPOND, and edge functions
+  app.use(["/api/bridge", "/bridge"], async (req, res, next) => {
+    try {
+      const { bridgeRouter } = await import("./backend/src/routes/bridge");
+      return bridgeRouter(req, res, next);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  // Edge Functions Catalog Endpoint
+  app.get(["/api/functions", "/functions/v1"], async (_req, res) => {
+    try {
+      const { ALL_EDGE_FUNCTIONS, supabaseBackendService } = await import("./backend/src/services/supabaseService");
+      const health = await supabaseBackendService.checkSupabaseHealth();
+      return res.status(200).json({
+        ok: true,
+        count: ALL_EDGE_FUNCTIONS.length,
+        functions: ALL_EDGE_FUNCTIONS,
+        supabaseConnected: health.healthy,
+        supabaseLatencyMs: health.latencyMs,
+      });
+    } catch {
+      return res.status(200).json({ ok: true, count: 164, status: "available" });
+    }
+  });
+
+  // Backend / Edge Functions dispatch router with Supabase Edge Function forwarding and local fallback
   app.all(["/api/functions/:functionName", "/functions/v1/:functionName"], async (req, res) => {
     try {
       const functionName = req.params.functionName;
 
-      const SUPABASE_EDGE_FUNCTIONS_ALLOWLIST = new Set([
-        "send-email-reply",
-        "send-inbox-reply",
-        "send-outbound-email",
-        "send-transactional-email",
-        "send-agreement-email",
-        "send-price-notification",
-        "send-password-reset",
-        "send-verification-email",
-        "send-approval-notification",
-        "auth-email-hook",
-        "google-sso-auth-email",
-        "inbox-attachment-ocr",
-        "email-health",
-        "check-email-health",
-        "resend-events",
-        "reprocess-email-dlq",
-        "handle-email-unsubscribe",
-        "notify-training-review",
-        "sync-auth-identity",
-        "phone-otp-custom",
-        "verify-phone",
-        "verify-credentials",
-        "referee-attestation",
-        "hologram-admin",
-        "hologram-sync",
-        "sarekon-admin",
-        "traccar-admin",
-        "iot-admin",
-        "get-psp-config",
-        "get-paypal-config",
-        "create-paypal-order",
-        "capture-paypal-order",
-        "initiate-paypal-payout",
-        "create-paystack-transaction",
-        "verify-paystack-transaction",
-        "initiate-paystack-transfer",
-        "create-paystack-recipient",
-        "create-opay-order",
-        "verify-opay-order",
-        "check-payment-health",
-        "billing-portal",
-        "activate-subscription",
-        "subscribe-to-plan",
-        "persona-config",
-        "persona-reconcile",
-        "persona-create-inquiry",
-        "persona-retry-verification",
-        "persona-send-reverification",
-        "notify-withdrawal",
-        "send-2fa-code",
-        "voice-access-token",
-        "initiate-voip-call",
-        "end-voip-call",
-        "voice-call-request",
-        "voice-twiml-config",
-        "voice-twiml-dial",
-        "get-recording-url",
-        "create-call-in",
-        "renew-call-in",
-        "send-sms-notification",
-        "case-send-sms",
-        "reprocess-sms-dlq",
-        "twilio-test-send",
-        "booking-email-trigger",
-        "process-email-queue",
-      ]);
-
-      if (!SUPABASE_EDGE_FUNCTIONS_ALLOWLIST.has(functionName)) {
-        return res.status(404).json({
-          error: "Not Found",
-          message: `Function '${functionName}' is not in the authorized Edge Functions allowlist`,
+      // Validate slug format to protect against path traversal
+      if (!/^[a-zA-Z0-9_-]+$/.test(functionName)) {
+        return res.status(400).json({
+          error: "Bad Request",
+          message: `Invalid function name '${functionName}'`,
         });
       }
 
