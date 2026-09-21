@@ -316,9 +316,10 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
         if (resendApiKey && targetEmail) {
           try {
+            const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "rentmaikar.com").trim();
             const alias = (body.fromAlias || "support").toLowerCase().trim();
-            const from = body.from || `Rentmaikar Support <${alias}@notify.rentmaikar.com>`;
-            const replyTo = "support@backend.rentmaikar.com";
+            const from = body.from || `Rentmaikar Support <${alias}@${defaultDomain}>`;
+            const replyTo = `support@${defaultDomain}`;
             const textToRender = body.messageContent || body.body || body.text || body.content || "";
             const subject = body.subject || "Reply from Rentmaikar Support";
 
@@ -370,11 +371,18 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       case "resend-events": {
-        return res.status(200).json({
-          ok: true,
-          configured: Boolean(process.env.RESEND_WEBHOOK_SIGNING_SECRET),
-          message: "Webhook event handled",
-        });
+        try {
+          const { handleResendWebhookEvent } = await import("../../../src/server/emailService");
+          const result = await handleResendWebhookEvent(body, req.headers as Record<string, string>);
+          return res.status(200).json(result);
+        } catch (e: any) {
+          return res.status(200).json({
+            ok: true,
+            configured: Boolean(process.env.RESEND_WEBHOOK_SIGNING_SECRET),
+            message: "Webhook event acknowledged",
+            error: e.message,
+          });
+        }
       }
 
       default: {

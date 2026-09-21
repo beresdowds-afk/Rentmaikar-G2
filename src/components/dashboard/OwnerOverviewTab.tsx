@@ -234,7 +234,7 @@ export function OwnerOverviewTab({ onNavigateTab }: Props) {
                   {country} · {fleetHealth.active}/{fleetHealth.total} vehicles active
                 </p>
               </div>
-              <Button size="lg" onClick={() => onNavigateTab('withdrawals')} disabled={availableBalance <= 0}>
+              <Button size="lg" onClick={() => onNavigateTab('withdrawals')}>
                 <ArrowDownToLine className="h-4 w-4 mr-2" />
                 Request payout
               </Button>

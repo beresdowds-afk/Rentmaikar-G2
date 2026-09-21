@@ -258,22 +258,32 @@ If you received this message, outbound transactional email delivery is functioni
               )}
             </div>
 
-            {/* Configured Sender Addresses */}
-            <div className="text-xs rounded-md bg-muted/40 p-3 border space-y-1.5">
-              <span className="font-medium text-foreground block">Active Sender Addresses (notify.rentmaikar.com):</span>
+            {/* Configured Sender Addresses & DNS Guidance */}
+            <div className="text-xs rounded-md bg-muted/40 p-3 border space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-foreground block">Active Sender Addresses ({health.domain}):</span>
+                <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
+                  <ShieldCheck className="h-3 w-3" /> Resend DKIM: resend._domainkey.{health.domain.includes("notify") ? "rentmaikar.com" : health.domain}
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-muted-foreground">
                 <div className="truncate">
                   <strong className="text-foreground">Security: </strong>
-                  <code>security@notify.rentmaikar.com</code>
+                  <code>security@{health.domain}</code>
                 </div>
                 <div className="truncate">
                   <strong className="text-foreground">Support: </strong>
-                  <code>support@notify.rentmaikar.com</code>
+                  <code>support@{health.domain}</code>
                 </div>
                 <div className="truncate">
                   <strong className="text-foreground">Notifications: </strong>
-                  <code>noreply@notify.rentmaikar.com</code>
+                  <code>noreply@{health.domain}</code>
                 </div>
+              </div>
+              <div className="text-[11px] text-muted-foreground pt-1 border-t border-border/50">
+                <span>
+                  <strong>Sender Authentication Note:</strong> For maximum inbox placement at Gmail and Yahoo, senders must pass SPF & DKIM. Domain <code className="text-foreground font-mono">rentmaikar.com</code> has active DKIM key in DNS. If sending from <code className="text-foreground font-mono">notify.rentmaikar.com</code>, add TXT record <code className="text-foreground font-mono">resend._domainkey.notify.rentmaikar.com</code> in DNS.
+                </span>
               </div>
             </div>
 

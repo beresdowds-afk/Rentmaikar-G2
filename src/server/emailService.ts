@@ -10,7 +10,7 @@ import crypto from "crypto";
 import pg from "pg";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
-export const VERIFIED_DOMAIN = "notify.rentmaikar.com";
+export const VERIFIED_DOMAIN = (process.env.RESEND_SENDING_DOMAIN || "rentmaikar.com").trim();
 export const INBOUND_DOMAIN = "backend.rentmaikar.com";
 
 export const SENDERS = {
@@ -55,12 +55,14 @@ export function parseEmailAddress(value: string): { name?: string; local: string
 }
 
 /**
- * Rewrites a sender onto the verified domain (notify.rentmaikar.com)
- * preserving the display name and original email as reply-to.
+ * Normalizes sender onto a verified domain preserving display name and original email as reply-to.
+ * Respects both rentmaikar.com and notify.rentmaikar.com.
  */
 export function rewriteSenderAddress(from?: string): { from: string; preservedReplyTo?: string } {
+  const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "rentmaikar.com").trim();
+
   if (!from || !from.trim()) {
-    return { from: SENDERS.support, preservedReplyTo: "support@rentmaikar.com" };
+    return { from: SENDERS.support, preservedReplyTo: `support@${defaultDomain}` };
   }
 
   const trimmed = from.trim();
@@ -71,24 +73,29 @@ export function rewriteSenderAddress(from?: string): { from: string; preservedRe
     const alias = aliasMatch[1].toLowerCase();
     const capitalized = alias.charAt(0).toUpperCase() + alias.slice(1);
     return {
-      from: `RentMaikar ${capitalized} <${alias}@${VERIFIED_DOMAIN}>`,
+      from: `RentMaikar ${capitalized} <${alias}@${defaultDomain}>`,
       preservedReplyTo: `${alias}@rentmaikar.com`,
     };
   }
 
   const parsed = parseEmailAddress(trimmed);
   if (!parsed) {
-    return { from: SENDERS.support, preservedReplyTo: "support@rentmaikar.com" };
+    return { from: SENDERS.support, preservedReplyTo: `support@${defaultDomain}` };
   }
 
-  // If already on the verified sending domain, keep it intact
-  if (parsed.domain.toLowerCase() === VERIFIED_DOMAIN.toLowerCase()) {
-    const originalFull = parsed.name ? `${parsed.name} <${parsed.local}@rentmaikar.com>` : `${parsed.local}@rentmaikar.com`;
+  // If already on an accepted sending domain (rentmaikar.com or notify.rentmaikar.com or defaultDomain), keep it intact!
+  const parsedDomain = parsed.domain.toLowerCase();
+  if (
+    parsedDomain === "rentmaikar.com" ||
+    parsedDomain === "notify.rentmaikar.com" ||
+    parsedDomain === defaultDomain.toLowerCase()
+  ) {
+    const originalFull = parsed.name ? `${parsed.name} <${parsed.local}@${parsedDomain}>` : `${parsed.local}@${parsedDomain}`;
     return { from: trimmed, preservedReplyTo: originalFull };
   }
 
-  // Rewrite apex or unverified domain to the verified sending subdomain
-  const rewrittenAddress = `${parsed.local}@${VERIFIED_DOMAIN}`;
+  // Rewrite unverified 3rd-party domain to the default verified sending domain
+  const rewrittenAddress = `${parsed.local}@${defaultDomain}`;
   const rewrittenFrom = parsed.name ? `${parsed.name} <${rewrittenAddress}>` : rewrittenAddress;
   const originalFullAddress = parsed.name ? `${parsed.name} <${parsed.local}@${parsed.domain}>` : `${parsed.local}@${parsed.domain}`;
 
@@ -260,6 +267,56 @@ async function logEmailSend(entry: {
   } catch (e: any) {
     console.warn(`[EmailService] Failed to write to email_send_log:`, e.message);
   }
+}
+
+/**
+ * Update email send log status when a delivery webhook is received (delivered, bounced, failed, complained)
+ */
+export async function updateEmailSendLogStatus(params: {
+  messageId?: string;
+  recipient?: string;
+  status: "sent" | "delivered" | "bounced" | "failed" | "complained";
+  errorMessage?: string;
+  eventData?: Record<string, any>;
+}): Promise<boolean> {
+  try {
+    const pool = getDbPool();
+    const eventPayload = JSON.stringify({
+      webhook_event: params.eventData || {},
+      updated_at: new Date().toISOString(),
+    });
+
+    if (params.messageId) {
+      const res = await pool.query(
+        `UPDATE public.email_send_log 
+         SET status = $1, 
+             error_message = COALESCE($2, error_message),
+             metadata = metadata || $3::jsonb
+         WHERE message_id = $4`,
+        [params.status, params.errorMessage || null, eventPayload, params.messageId]
+      );
+      if ((res.rowCount ?? 0) > 0) return true;
+    }
+
+    if (params.recipient) {
+      const res = await pool.query(
+        `UPDATE public.email_send_log 
+         SET status = $1, 
+             error_message = COALESCE($2, error_message),
+             metadata = metadata || $3::jsonb
+         WHERE id = (
+           SELECT id FROM public.email_send_log 
+           WHERE recipient_email = $4 
+           ORDER BY created_at DESC LIMIT 1
+         )`,
+        [params.status, params.errorMessage || null, eventPayload, params.recipient]
+      );
+      return (res.rowCount ?? 0) > 0;
+    }
+  } catch (e: any) {
+    console.warn(`[EmailService] Failed to update email_send_log status:`, e.message);
+  }
+  return false;
 }
 
 /**
@@ -1196,8 +1253,84 @@ export async function handleInboundEmailForward(
 }
 
 /**
+ * Resend Outbound Delivery & Lifecycle Webhook Event Handler
+ * Processes email.delivered, email.bounced, email.failed, email.complained, and email.sent
+ * Updates public.email_send_log status and stores bounce diagnostics.
+ */
+export async function handleResendWebhookEvent(payload: any, _headers?: Record<string, string>): Promise<{
+  ok: boolean;
+  event: string;
+  status?: string;
+  updated?: boolean;
+  error?: string;
+}> {
+  try {
+    const type = String(payload?.type || "");
+    const data = payload?.data || {};
+    const emailId = String(data?.email_id || data?.id || "");
+    const recipient = Array.isArray(data?.to) ? String(data.to[0] || "") : String(data?.to || "");
+
+    console.log(`[ResendWebhook] Received event: ${type} for emailId=${emailId || "unknown"} recipient=${recipient || "unknown"}`);
+
+    if (type === "email.received") {
+      const inboundRes = await handleInboundEmailWebhook(payload, _headers);
+      return { ok: inboundRes.ok, event: type, status: "forwarded" };
+    }
+
+    let mappedStatus: "delivered" | "bounced" | "failed" | "complained" | "sent" | null = null;
+    let errorMessage: string | undefined = undefined;
+
+    switch (type) {
+      case "email.delivered":
+        mappedStatus = "delivered";
+        break;
+      case "email.bounced":
+        mappedStatus = "bounced";
+        errorMessage = data?.bounce?.message || data?.reason || "Message bounced by recipient mail provider";
+        break;
+      case "email.failed":
+        mappedStatus = "failed";
+        errorMessage = data?.error || data?.message || "Delivery rejected by remote mail exchanger";
+        break;
+      case "email.complained":
+        mappedStatus = "complained";
+        errorMessage = "Recipient marked message as spam / abuse complaint";
+        break;
+      case "email.sent":
+        mappedStatus = "sent";
+        break;
+      case "email.delivery_delayed":
+        // Delay warning, keep sent or mark in metadata
+        mappedStatus = "sent";
+        errorMessage = "Delivery delayed by downstream mail exchanger";
+        break;
+      default:
+        return { ok: true, event: type, status: "acknowledged" };
+    }
+
+    const updated = await updateEmailSendLogStatus({
+      messageId: emailId,
+      recipient,
+      status: mappedStatus,
+      errorMessage,
+      eventData: {
+        type,
+        created_at: payload?.created_at,
+        data: payload?.data,
+      },
+    });
+
+    console.log(`[ResendWebhook] Processed ${type}: messageId=${emailId} -> status=${mappedStatus} (db updated: ${updated})`);
+    return { ok: true, event: type, status: mappedStatus, updated };
+  } catch (err: any) {
+    console.error("[ResendWebhook] Error handling event:", err);
+    return { ok: false, event: payload?.type || "unknown", error: err.message };
+  }
+}
+
+/**
  * Generic Inbound Webhook handler.
- * Accommodates Resend inbound webhook events (email.received) and direct payloads.
+ * Accommodates Resend inbound webhook events (email.received), delivery events, and direct payloads.
  */
 export async function handleInboundEmailWebhook(payload: any, _headers?: Record<string, string>): Promise<{
   ok: boolean;
@@ -1206,6 +1339,12 @@ export async function handleInboundEmailWebhook(payload: any, _headers?: Record<
   error?: string;
 }> {
   try {
+    // If payload is an outbound delivery lifecycle event (delivered, bounced, failed, etc.), route to event handler
+    if (payload?.type && payload.type !== "email.received") {
+      const eventRes = await handleResendWebhookEvent(payload, _headers);
+      return { ok: eventRes.ok, received: true, error: eventRes.error };
+    }
+
     let emailData: InboundEmailPayload | null = null;
 
     // 1. Resend webhook format: { type: "email.received", data: { ... } }

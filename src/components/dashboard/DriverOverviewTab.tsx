@@ -291,7 +291,7 @@ export function DriverOverviewTab({ onNavigateTab }: Props) {
                     : 'No active rental'}
                 </p>
               </div>
-              <Button size="lg" onClick={() => onNavigateTab('payments')} disabled={!nextPayment}>
+              <Button size="lg" onClick={() => onNavigateTab('payments')}>
                 <CreditCard className="h-4 w-4 mr-2" />
                 Pay now
               </Button>

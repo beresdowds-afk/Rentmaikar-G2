@@ -272,6 +272,14 @@ export const PortalNavigation = ({
               <DropdownMenuTrigger asChild>
                 <Button
                   variant={isPortalActive ? 'default' : 'outline'}
+                  onClick={() => {
+                    const targetTab = lastTab || tabs[0]?.value;
+                    onPortalChange(portal);
+                    if (targetTab) {
+                      onTabChange(targetTab);
+                      remember(portal, targetTab);
+                    }
+                  }}
                   className={cn(
                     "gap-2 min-w-[120px] min-h-11",
                     isPortalActive && "ring-2 ring-primary/20"
