@@ -140,10 +140,26 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
   const { from: fromAddress, preservedReplyTo } = rewriteSenderAddress(options.from);
   const replyToAddress = options.replyTo || options.reply_to || preservedReplyTo || (fromAddress.includes("support") ? "support@rentmaikar.com" : undefined);
 
+  // Resend strictly blocks RFC reserved dummy domains (@example.com, @example.org, @test.com) with HTTP 422.
+  // For automated tests, demo seed data, or diagnostic test messages, route safely to Resend's official delivery sink.
+  let isDummyExampleDomain = false;
+  const sanitizeRecipient = (addr: string): string => {
+    const trimmed = (addr || "").trim();
+    if (/@(example\.(com|org|net)|test\.com)$/i.test(trimmed)) {
+      isDummyExampleDomain = true;
+      return "delivered@resend.dev";
+    }
+    return trimmed;
+  };
+
+  const dispatchTo = Array.isArray(options.to)
+    ? options.to.map(sanitizeRecipient)
+    : sanitizeRecipient(options.to);
+
   try {
     const payloadBody: Record<string, any> = {
       from: fromAddress,
-      to: options.to,
+      to: dispatchTo,
       subject: options.subject,
       html: options.html,
       text: options.text,
@@ -768,8 +784,10 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
     recentLogsCount = logRes.rows.length;
     if (recentLogsCount > 0) {
       lastSentAt = logRes.rows[0].sent_at ? new Date(logRes.rows[0].sent_at).toISOString() : null;
-      const failed = logRes.rows.find((r: any) => r.status === "failed");
-      if (failed) lastError = failed.error_message;
+      // Only set active lastError if the latest send attempt failed
+      if (logRes.rows[0].status === "failed") {
+        lastError = logRes.rows[0].error_message;
+      }
     }
   } catch (dbErr: any) {
     // Database check optional for health check

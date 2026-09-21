@@ -278,27 +278,43 @@ If you received this message, outbound transactional email delivery is functioni
             </div>
 
             {/* One-click end-to-end test dispatch */}
-            <form onSubmit={handleSendTestEmail} className="pt-2 border-t flex flex-col sm:flex-row items-center gap-3">
-              <div className="flex-1 w-full">
-                <Input
-                  type="email"
-                  placeholder="Enter email to send live test message (e.g. admin@example.com)"
-                  value={testEmail}
-                  onChange={(e) => setTestEmail(e.target.value)}
-                  className="h-9 text-xs"
-                />
-              </div>
-              <Button
-                type="submit"
-                size="sm"
-                variant="secondary"
-                disabled={sendingTest || !testEmail}
-                className="gap-2 shrink-0 w-full sm:w-auto h-9 text-xs"
-              >
-                {sendingTest ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                Send Live Test Email
-              </Button>
-            </form>
+            <div className="pt-2 border-t space-y-2">
+              <form onSubmit={handleSendTestEmail} className="flex flex-col sm:flex-row items-center gap-3">
+                <div className="flex-1 w-full">
+                  <Input
+                    type="email"
+                    placeholder="Enter recipient email (e.g. you@gmail.com or delivered@resend.dev)"
+                    value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTestEmail("delivered@resend.dev")}
+                    className="h-9 text-xs whitespace-nowrap"
+                  >
+                    Test Sink
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="secondary"
+                    disabled={sendingTest || !testEmail}
+                    className="gap-2 shrink-0 flex-1 sm:flex-none h-9 text-xs whitespace-nowrap"
+                  >
+                    {sendingTest ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                    Send Live Test Email
+                  </Button>
+                </div>
+              </form>
+              <p className="text-[11px] text-muted-foreground">
+                Tip: Resend requires a verified destination or official test sink (<code className="text-foreground">delivered@resend.dev</code>). Standard RFC documentation domains (<code className="text-foreground">@example.com</code>) are disallowed by Resend.
+              </p>
+            </div>
           </div>
         ) : null}
       </CardContent>

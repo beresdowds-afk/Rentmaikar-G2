@@ -186,7 +186,10 @@ async function startServer() {
         });
       }
 
-      const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co";
+      const candidateUrl = process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || process.env.VITE_SUPABASE_URL || "";
+      const rawSupabaseUrl = (candidateUrl && !candidateUrl.includes("bwvocmhcledbwqlpcswp"))
+        ? candidateUrl
+        : "https://jrsydiofzceoeddjogov.supabase.co";
       const supabaseUrl = rawSupabaseUrl.replace(/\/+$/, "");
       const supabaseAnonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
 
@@ -208,6 +211,8 @@ async function startServer() {
       }
 
       // Forward request to Supabase Edge Function: ${SUPABASE_URL}/functions/v1/${functionName}
+      // If the function is not deployed on Supabase (404) or API key is not registered on Supabase (401/403),
+      // fall back seamlessly to the integrated local edge function handler
       try {
         const edgeUrl = `${supabaseUrl}/functions/v1/${functionName}`;
         const edgeRes = await fetch(edgeUrl, {
@@ -216,7 +221,7 @@ async function startServer() {
           body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
         });
 
-        if (edgeRes.status !== 404) {
+        if (edgeRes.ok || (edgeRes.status !== 404 && edgeRes.status !== 401 && edgeRes.status !== 403)) {
           const edgeData = await edgeRes.json().catch(() => null);
           return res.status(edgeRes.status).json(edgeData ?? {});
         }

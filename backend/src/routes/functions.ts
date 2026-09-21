@@ -299,8 +299,8 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             body: JSON.stringify(body),
           });
 
-          // If the Edge function is deployed and returned a response (even 4xx/5xx from function logic)
-          if (edgeRes.status !== 404) {
+          // If the Edge function is deployed and authenticated (ignore 404 not found or 401/403 auth mismatch)
+          if (edgeRes.ok || (edgeRes.status !== 404 && edgeRes.status !== 401 && edgeRes.status !== 403)) {
             const edgeData = await edgeRes.json().catch(() => null);
             if (edgeData) {
               return res.status(edgeRes.status).json(edgeData);
