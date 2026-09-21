@@ -20,6 +20,7 @@ import { RouteProgressBar, SuspenseProgressTracker } from "@/components/navigati
 import { AdminProfiler } from "@/components/profiling/AdminProfiler";
 import SkipToContent from "@/components/SkipToContent";
 import LiveAnnouncer from "@/components/LiveAnnouncer";
+import { GlobalPageNavigation } from "@/components/navigation/GlobalPageNavigation";
 import MetaPixelRouteTracker from "@/components/MetaPixelRouteTracker";
 import NativeDeepLinkBridge from "@/service/native/deep-links";
 import DocumentExpiryInAppNotifier from "@/components/notifications/DocumentExpiryInAppNotifier";
@@ -942,6 +943,7 @@ const App = () => (
 
                 <AccessibilityOverlay />
                 <AdminCommunicationsHub />
+                <GlobalPageNavigation />
               </Suspense>
 
               </CommunicationsHubProvider>

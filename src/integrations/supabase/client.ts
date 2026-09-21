@@ -48,67 +48,188 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   }
 });
 
-// Resilient Edge Function gateway: Routes communication, payment, and platform functions directly to local gateway
+// Resilient Edge Function gateway: Routes all available edge functions between frontend files and backend files
 const LOCAL_GATEWAY_FUNCTIONS = new Set([
-  "send-sms-notification",
-  "case-send-sms",
-  "reprocess-sms-dlq",
-  "phone-otp-custom",
-  "verify-phone",
-  "twilio-test-send",
-  "voice-access-token",
-  "initiate-voip-call",
-  "voice-call-request",
-  "voice-twiml-config",
-  "voice-twiml-dial",
-  "end-voip-call",
-  "get-recording-url",
-  "create-call-in",
-  "renew-call-in",
-  "send-in-app-message",
-  "send-inbox-reply",
-  "send-email-reply",
-  "inbox-attachment-ocr",
-  "hologram-admin",
-  "verify-credentials",
-  "resend-events",
-  "send-password-reset",
-  "google-sso-auth-email",
-  "send-verification-email",
-  "send-outbound-email",
-  "send-transactional-email",
-  "send-agreement-email",
-  "send-price-notification",
-  "notify-training-review",
-  "reprocess-email-dlq",
-  "handle-email-unsubscribe",
-  "test-email-delivery",
-  "test-email-forward",
+  "accident-emergency-dispatch",
+  "activate-subscription",
+  "admin-create-user",
+  "admin-delete-users",
+  "admin-set-user-active",
   "auth-email-hook",
-  "sync-auth-identity",
-  "email-health",
+  "auto-reply-simulate",
+  "auto-submit-for-review",
+  "billing-portal",
+  "booking-email-trigger",
+  "capture-paypal-order",
+  "case-send-sms",
   "check-email-health",
-  "send-approval-notification",
   "check-payment-health",
-  "get-psp-config",
+  "check-repeat-call-ins",
+  "comms-test-console",
+  "create-call-in",
+  "create-opay-order",
+  "create-paypal-order",
+  "create-paystack-recipient",
+  "create-paystack-transaction",
+  "dispatch-event-notifications",
+  "elevenlabs-agent-token",
+  "elevenlabs-stt",
+  "elevenlabs-test-audio-url",
+  "elevenlabs-tts",
+  "elevenlabs-tts-stream",
+  "elevenlabs-voices",
+  "email-domain-status-check",
+  "email-health",
+  "email-tracking",
+  "email-webhook",
+  "emqx-monitoring",
+  "emqx-secret-rotation",
+  "end-voip-call",
+  "enforce-call-in-geofence",
+  "expire-call-ins",
+  "expiry-notification-ivr",
+  "export-user-documents",
+  "generate-api-key",
+  "generate-daily-tasks",
+  "generate-inspection-pdf",
+  "generate-vehicle-mqtt-token",
   "get-paypal-config",
+  "get-psp-config",
+  "get-recording-url",
+  "get-vapid-public-key",
+  "google-sso-auth-email",
+  "gps-worker-watchdog",
+  "handle-email-suppression",
+  "handle-email-unsubscribe",
+  "hologram-admin",
+  "hologram-sync",
+  "inbox-attachment-ocr",
+  "incoming-call-forward",
   "initiate-paypal-payout",
   "initiate-paystack-transfer",
-  "create-paystack-transaction",
-  "verify-paystack-transaction",
-  "create-opay-order",
-  "verify-opay-order",
-  "create-paypal-order",
-  "capture-paypal-order",
-  "billing-portal",
-  "activate-subscription",
-  "persona-reconcile",
-  "persona-config",
-  "referee-attestation",
+  "initiate-voip-call",
+  "iot-accident-detection",
+  "iot-admin",
+  "iot-auto-provision",
+  "iot-offline-alerts",
+  "iot-scheduled-sync",
+  "manychat-webhook",
+  "mqtt-ingestion-worker",
+  "notify-referees",
+  "notify-training-review",
   "notify-withdrawal",
+  "opay-webhook",
+  "payment-default-ivr",
+  "paypal-webhook",
+  "paystack-webhook",
+  "persona-config",
+  "persona-create-inquiry",
+  "persona-expiry-scan",
+  "persona-provision-template",
+  "persona-reconcile",
+  "persona-retry-verification",
+  "persona-send-reverification",
+  "persona-webhook",
+  "phone-otp-custom",
+  "preview-transactional-email",
+  "process-agreement-renewals",
+  "process-call-recording",
+  "process-daily-debits",
+  "process-email-queue",
+  "process-expiry-notifications",
+  "process-inspection-reminders",
+  "process-owner-payouts",
+  "process-payment-defaults",
+  "process-payment-unlock",
+  "process-predue-reminders",
+  "provider-billing-sync",
+  "provider-health-alerts",
   "provision-user-account",
+  "proxy-consent-manager",
+  "reconcile-payments",
+  "reconcile-rental-terms",
+  "reconcile-settlements",
+  "recording-status-callback",
+  "referee-attestation",
+  "refresh-export-download-url",
+  "region-autobuild",
+  "renew-call-in",
+  "reprocess-email-dlq",
+  "reprocess-sms-dlq",
+  "resend-events",
+  "retry-event-notifications",
+  "sarekon-admin",
+  "sarekon-location-worker",
+  "save-push-subscription",
   "send-2fa-code",
+  "send-agreement-email",
+  "send-approval-notification",
+  "send-booking-reminders",
+  "send-email-reply",
+  "send-in-app-message",
+  "send-inbox-reply",
+  "send-incident-notification",
+  "send-meta-capi",
+  "send-order-notification",
+  "send-outbound-email",
+  "send-password-reset",
+  "send-payment-notification",
+  "send-persona-digest",
+  "send-price-notification",
+  "send-push-notification",
+  "send-reconciliation-alert",
+  "send-shipping-notification",
+  "send-sms-notification",
+  "send-task-notification",
+  "send-transactional-email",
+  "send-verification-email",
+  "sent-health",
+  "sent-inbound",
+  "sent-status",
+  "sent-webhook-config",
+  "shutdown-warning-ivr",
+  "sms-commands",
+  "social-inbox-webhook",
+  "subscribe-to-plan",
+  "sync-approved-vehicles",
+  "sync-auth-identity",
+  "telemetry-dispatch",
+  "telemetry-health-monitor",
+  "telemetry-ingest",
+  "termii-webhook",
+  "test-email-delivery",
+  "test-email-forward",
+  "traccar-admin",
+  "training-compliance-reminders",
+  "twilio-test-send",
+  "twilio-webhook",
+  "vehicle-return-ivr",
+  "vehicle-return-reminder",
+  "vehicle-shutdown-warning",
+  "verify-credentials",
+  "verify-opay-order",
+  "verify-paystack-transaction",
+  "verify-phone",
+  "verify-referees",
+  "voice-access-token",
+  "voice-call-request",
+  "voice-ivr-case",
+  "voice-twiml-config",
+  "voice-twiml-dial",
+  "voip-call-transcript-log",
+  "voip-status-callback",
+  "whatchimp-webhook",
+  "whatsapp-commands",
 ]);
+
+async function getLinkBridge() {
+  try {
+    const mod = await import("@/lib/backend-bridge");
+    return mod.backendBridge;
+  } catch {
+    return null;
+  }
+}
 
 async function callLocalGateway(functionName: string, options?: any) {
   let authHeader = options?.headers?.Authorization || options?.headers?.authorization;
@@ -136,6 +257,12 @@ async function callLocalGateway(functionName: string, options?: any) {
 
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
+      // Attempt bridge fallback if available
+      const bridge = await getLinkBridge();
+      if (bridge) {
+        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+      }
       return {
         data: null,
         error: new Error(`Local gateway returned non-JSON response (${res.status} ${contentType})`),
@@ -144,6 +271,11 @@ async function callLocalGateway(functionName: string, options?: any) {
 
     const json = await res.json().catch(() => null);
     if (!json) {
+      const bridge = await getLinkBridge();
+      if (bridge) {
+        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+      }
       return {
         data: null,
         error: new Error(`Failed to parse JSON response from local gateway for '${functionName}'`),
@@ -159,10 +291,28 @@ async function callLocalGateway(functionName: string, options?: any) {
       }
       return { data: json, error: null };
     } else {
+      // If 404 or server error on local gateway, try through Link Bridge
+      const bridge = await getLinkBridge();
+      if (bridge) {
+        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+      }
+
       const errorMsg = json?.error || json?.message || `Edge function '${functionName}' failed (HTTP ${res.status})`;
       return { data: null, error: new Error(errorMsg) };
     }
   } catch (netErr: any) {
+    // Loss of contact: dispatch seamlessly via Link Bridge RPC
+    try {
+      const bridge = await getLinkBridge();
+      if (bridge) {
+        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+      }
+    } catch {
+      // Ignore secondary bridge error
+    }
+
     const isCritical =
       functionName.includes("password") ||
       functionName.includes("email") ||
@@ -184,10 +334,9 @@ async function callLocalGateway(functionName: string, options?: any) {
 
 const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
 supabase.functions.invoke = (async (functionName: string, options?: any) => {
-  if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
-    const localRes = await callLocalGateway(functionName, options);
-    if (!localRes.error) return localRes;
-  }
+  // Always try local gateway / link bridge first for maximum speed and staging fallback
+  const localRes = await callLocalGateway(functionName, options);
+  if (!localRes.error) return localRes;
 
   try {
     const res = await originalInvoke(functionName, options);
@@ -209,5 +358,12 @@ supabase.functions.invoke = (async (functionName: string, options?: any) => {
     // Continue to fallback on any exception
   }
 
-  return await callLocalGateway(functionName, options);
+  // Final fallback through Link Bridge
+  const bridge = await getLinkBridge();
+  if (bridge) {
+    const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+    if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+  }
+
+  return localRes;
 }) as typeof supabase.functions.invoke;

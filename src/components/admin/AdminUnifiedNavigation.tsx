@@ -25,7 +25,8 @@ import {
   Scale,
   Receipt,
   PhoneForwarded,
-  ClipboardList
+  ClipboardList,
+  GraduationCap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -184,6 +185,8 @@ export function AdminUnifiedNavigation({
     { title: 'Persona Inquiries', href: '/admin/persona-inquiries', icon: <Users className="h-4 w-4 text-purple-500" />, category: 'Identity & Verification', allowed: allowedTools.canContent ?? true },
     { title: 'Persona Manual Review', href: '/admin/persona-review', icon: <UserCheck className="h-4 w-4 text-purple-600" />, category: 'Identity & Verification', allowed: allowedTools.canContent ?? true },
 
+    { title: 'Training Module Management', href: '/admin?portal=content-editor&tab=training', icon: <GraduationCap className="h-4 w-4 text-primary" />, category: 'Content & Training', allowed: allowedTools.canContent ?? true },
+    { title: 'Driver Training Review', href: '/admin/training-review', icon: <UserCheck className="h-4 w-4 text-emerald-600" />, category: 'Content & Training', allowed: allowedTools.canContent ?? true },
     { title: 'Legal Templates Preview', href: '/admin/legal-templates/preview', icon: <Scale className="h-4 w-4 text-slate-500" />, category: 'Content & Training', allowed: allowedTools.canContent ?? true },
     { title: 'Tour Step Configuration', href: '/admin/tour-config', icon: <Compass className="h-4 w-4 text-amber-500" />, category: 'Content & Training', allowed: allowedTools.canContent ?? true },
     { title: 'Tour Analytics', href: '/admin/tour-analytics', icon: <BarChart3 className="h-4 w-4 text-indigo-500" />, category: 'Content & Training', allowed: allowedTools.canReports ?? true },

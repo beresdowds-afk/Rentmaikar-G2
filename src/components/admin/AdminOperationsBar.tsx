@@ -12,6 +12,7 @@ import { PaymentGatewayStatusIndicator } from '@/components/admin/PaymentGateway
 import { PaymentGatewayHealthCard } from '@/components/admin/PaymentGatewayHealthCard';
 import { useBackendBridge } from '@/hooks/useBackendBridge';
 import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
+import { PlatformUpdateModal } from '@/components/admin/PlatformUpdateModal';
 
 interface AdminOperationsBarProps {
   appName?: string;
@@ -72,8 +73,9 @@ export function AdminOperationsBar({
           )}
         </div>
 
-        {/* Actions Cluster: Comms Hub & Diagnostics Drawer Toggle */}
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        {/* Actions Cluster: Platform Update, Comms Hub & Diagnostics Drawer Toggle */}
+        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+          <PlatformUpdateModal />
           {hub && (
             <Button
               type="button"

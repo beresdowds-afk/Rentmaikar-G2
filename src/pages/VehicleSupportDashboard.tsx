@@ -27,7 +27,7 @@ export default function VehicleSupportDashboard() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const matchesSearch = !searchQuery || 
-        task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (task.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         task.vehicle?.license_plate?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || task.vehicle_status === statusFilter;
       const matchesType = typeFilter === 'all' || task.task_type === typeFilter;

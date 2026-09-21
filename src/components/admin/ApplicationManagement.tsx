@@ -254,12 +254,15 @@ export const ApplicationManagement = () => {
 
   // Filter applications by search
   const filteredApps = applications.filter(app => {
-    const searchLower = searchQuery.toLowerCase();
+    if (!searchQuery.trim()) return true;
+    const searchLower = searchQuery.toLowerCase().trim();
     return (
-      app.first_name.toLowerCase().includes(searchLower) ||
-      app.last_name.toLowerCase().includes(searchLower) ||
-      app.email.toLowerCase().includes(searchLower) ||
-      app.city.toLowerCase().includes(searchLower)
+      (app.first_name || '').toLowerCase().includes(searchLower) ||
+      (app.last_name || '').toLowerCase().includes(searchLower) ||
+      (app.email || '').toLowerCase().includes(searchLower) ||
+      (app.city || '').toLowerCase().includes(searchLower) ||
+      (app.phone_number || '').toLowerCase().includes(searchLower) ||
+      (app.vehicle_plate || '').toLowerCase().includes(searchLower)
     );
   });
 

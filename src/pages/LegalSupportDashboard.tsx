@@ -27,7 +27,7 @@ export default function LegalSupportDashboard() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const matchesSearch = !searchQuery || 
-        task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (task.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         task.description?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || task.legal_status === statusFilter;
       return matchesSearch && matchesStatus;

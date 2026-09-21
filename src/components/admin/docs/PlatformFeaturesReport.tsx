@@ -17,6 +17,7 @@ import {
   Lock 
 } from "lucide-react";
 import { FEATURE_PILLARS } from "@/pages/PlatformReportPage";
+import { PlatformUpdateModal } from "@/components/admin/PlatformUpdateModal";
 
 export default function PlatformFeaturesReport() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -210,6 +211,7 @@ export default function PlatformFeaturesReport() {
           </div>
 
           <div className="flex items-center gap-2 w-full md:w-auto">
+            <PlatformUpdateModal />
             <Button
               variant="outline"
               size="sm"

@@ -66,12 +66,16 @@ const DriverTraining = () => {
     if (user) {
       setUserId(user.id);
 
+      const regionFilter = country === "Nigeria"
+        ? "region.eq.all,region.eq.NG,region.eq.Nigeria"
+        : "region.eq.all,region.eq.US,region.eq.USA";
+
       const [modulesRes, completionsRes] = await Promise.all([
         supabase
           .from("training_modules")
           .select("*")
           .eq("is_active", true)
-          .or(`region.eq.all,region.eq.${country}`)
+          .or(regionFilter)
           .order("module_order"),
         supabase
           .from("training_completions")

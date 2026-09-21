@@ -17,6 +17,8 @@ import {
   Radio,
   Wrench,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,14 +82,39 @@ const Header = ({ onRestartTour }: HeaderProps = {}) => {
     <header className="fixed top-0 left-0 right-0 z-50 glass-effect" role="banner">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16 md:h-20">
-          {/* Logo */}
-          <Link to="/" className="flex-shrink-0">
-            <img 
-              src={rentmaikarLogo} 
-              alt="Rentmaikar" 
-              className="h-9 md:h-11 w-auto object-contain"
-            />
-          </Link>
+          {/* Logo & Page History Navigation */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            <Link to="/" className="flex-shrink-0">
+              <img 
+                src={rentmaikarLogo} 
+                alt="Rentmaikar" 
+                className="h-9 md:h-11 w-auto object-contain"
+              />
+            </Link>
+
+            <div className="flex items-center gap-0.5 border-l border-border/60 pl-1 sm:pl-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 sm:h-8 sm:w-8 text-muted-foreground hover:text-foreground rounded-full"
+                onClick={() => navigate(-1)}
+                title="Go to previous page"
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 sm:h-8 sm:w-8 text-muted-foreground hover:text-foreground rounded-full"
+                onClick={() => navigate(1)}
+                title="Go to next page"
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
           {/* Banner - Between Logo and Menu Button (mobile/tablet only) */}
           <div className="flex-1 flex justify-center px-3 lg:hidden min-w-0">

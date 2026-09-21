@@ -843,6 +843,7 @@ const AdminAssistantDashboard = () => {
           {activeTabAllowed && (portalView === 'content-editor' || portalView === 'content') && (
             <SectionErrorBoundary section="CONTENT EDITOR" onSwitchPortal={setPortalView}>
               <div className="space-y-6">
+                {activeTab === 'training' && <TrainingModuleManagement />}
                 {(activeTab === 'faq' || activeTab === 'content') && <FAQManagement />}
                 {activeTab === 'policies' && <PolicyManagement />}
                 {activeTab === 'legal-templates' && <LegalAgreementTemplateManagement />}

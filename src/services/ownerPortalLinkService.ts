@@ -122,6 +122,51 @@ export const ownerPortalLinkService = {
   }> {
     if (!token) return { valid: false, reason: 'not_found' };
 
+    // 1. Try atomic Supabase RPC consume_owner_portal_token
+    try {
+      const { data: rpcData, error: rpcError } = await (supabase as any)
+        .rpc('consume_owner_portal_token', { p_token: token });
+
+      if (!rpcError && rpcData) {
+        if (rpcData.valid) {
+          const validRecord: OwnerPortalTokenRecord = rpcData.record;
+          const tokens = getStoredTokens();
+          tokens[token] = validRecord;
+          saveStoredTokens(tokens);
+
+          try {
+            localStorage.setItem(
+              ACTIVE_OWNER_KEY,
+              JSON.stringify({
+                userId: rpcData.owner_id,
+                name: rpcData.owner_name,
+                token,
+                authenticatedAt: new Date().toISOString(),
+              })
+            );
+          } catch {
+            // ignore
+          }
+
+          return {
+            valid: true,
+            ownerId: rpcData.owner_id,
+            ownerName: rpcData.owner_name,
+            targetTab: rpcData.target_tab,
+            record: validRecord,
+          };
+        } else if (rpcData.reason) {
+          return {
+            valid: false,
+            reason: rpcData.reason,
+            record: rpcData.record,
+          };
+        }
+      }
+    } catch (rpcErr) {
+      console.warn('RPC consume_owner_portal_token fallback to local/account_links:', rpcErr);
+    }
+
     let record: OwnerPortalTokenRecord | undefined = getStoredTokens()[token];
 
     // If not in local storage, look up in Supabase account_links

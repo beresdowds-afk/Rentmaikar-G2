@@ -27,6 +27,7 @@ import {
   Phone,
   Cpu,
   Keyboard,
+  GraduationCap,
 } from 'lucide-react';
 import { type PortalType } from './PortalNavigation';
 
@@ -36,7 +37,7 @@ interface GlobalSearchProps {
 
 interface SearchResult {
   id: string;
-  type: 'user' | 'vehicle' | 'task' | 'application' | 'agreement' | 'negotiation' | 'incident' | 'order';
+  type: 'user' | 'vehicle' | 'task' | 'application' | 'agreement' | 'negotiation' | 'incident' | 'order' | 'training';
   title: string;
   subtitle?: string;
   portal: PortalType;
@@ -200,6 +201,25 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
         });
       });
 
+      // Search training modules
+      const { data: trainingMods } = await supabase
+        .from('training_modules')
+        .select('id, title, description, region, duration_minutes')
+        .or(`title.ilike.%${search}%,description.ilike.%${search}%`)
+        .limit(4);
+
+      trainingMods?.forEach(tm => {
+        results.push({
+          id: tm.id,
+          type: 'training',
+          title: tm.title,
+          subtitle: `${tm.region === 'all' ? 'All Regions' : tm.region} • ${tm.duration_minutes || 0} mins`,
+          portal: 'content-editor',
+          tab: 'training',
+          icon: <GraduationCap className="h-4 w-4" />,
+        });
+      });
+
       return results;
     },
     enabled: search.length >= 2,
@@ -225,6 +245,7 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
       case 'task': return 'bg-purple-100 text-purple-700';
       case 'application': return 'bg-sky-100 text-sky-700';
       case 'incident': return 'bg-rose-100 text-rose-700';
+      case 'training': return 'bg-amber-100 text-amber-700';
       default: return 'bg-muted text-muted-foreground';
     }
   };
@@ -254,7 +275,7 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
       </button>
 
       {/* Search Dialog */}
-      <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={search.length < 2}>
         <CommandInput 
           placeholder="Search users, vehicles, tasks..." 
           value={search}
@@ -265,27 +286,27 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
             <>
               <CommandEmpty>Type at least 2 characters to search...</CommandEmpty>
               <CommandGroup heading="Quick Navigation">
-                <CommandItem onSelect={() => handleQuickNav('crm', 'applications')}>
+                <CommandItem value="crm-applications" onSelect={() => handleQuickNav('crm', 'applications')}>
                   <UserPlus className="mr-2 h-4 w-4" />
                   <span>Applications</span>
                   <Badge variant="outline" className="ml-auto">CRM</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('crm', 'accounts')}>
+                <CommandItem value="crm-accounts" onSelect={() => handleQuickNav('crm', 'accounts')}>
                   <User className="mr-2 h-4 w-4" />
                   <span>User Accounts</span>
                   <Badge variant="outline" className="ml-auto">CRM</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('crm', 'roles')}>
+                <CommandItem value="crm-roles" onSelect={() => handleQuickNav('crm', 'roles')}>
                   <Shield className="mr-2 h-4 w-4" />
                   <span>Role Management</span>
                   <Badge variant="outline" className="ml-auto">CRM</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('crm', 'negotiations')}>
+                <CommandItem value="crm-negotiations" onSelect={() => handleQuickNav('crm', 'negotiations')}>
                   <HandshakeIcon className="mr-2 h-4 w-4" />
                   <span>Negotiations</span>
                   <Badge variant="outline" className="ml-auto">CRM</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('crm', 'legal-agreements')}>
+                <CommandItem value="crm-legal-agreements" onSelect={() => handleQuickNav('crm', 'legal-agreements')}>
                   <FileText className="mr-2 h-4 w-4" />
                   <span>Legal Agreements</span>
                   <Badge variant="outline" className="ml-auto">CRM</Badge>
@@ -293,27 +314,27 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
               </CommandGroup>
               <CommandSeparator />
               <CommandGroup heading="Operations">
-                <CommandItem onSelect={() => handleQuickNav('erp', 'tracking')}>
+                <CommandItem value="erp-tracking" onSelect={() => handleQuickNav('erp', 'tracking')}>
                   <Car className="mr-2 h-4 w-4" />
                   <span>Vehicle Tracking</span>
                   <Badge variant="outline" className="ml-auto">ERP</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('erp', 'assets')}>
+                <CommandItem value="erp-assets" onSelect={() => handleQuickNav('erp', 'assets')}>
                   <ClipboardList className="mr-2 h-4 w-4" />
                   <span>Assets Registry</span>
                   <Badge variant="outline" className="ml-auto">ERP</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('erp', 'hardware')}>
+                <CommandItem value="erp-hardware" onSelect={() => handleQuickNav('erp', 'hardware')}>
                   <Cpu className="mr-2 h-4 w-4" />
                   <span>Hardware Management</span>
                   <Badge variant="outline" className="ml-auto">ERP</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('erp', 'incidents')}>
+                <CommandItem value="erp-incidents" onSelect={() => handleQuickNav('erp', 'incidents')}>
                   <Wrench className="mr-2 h-4 w-4" />
                   <span>Incidents</span>
                   <Badge variant="outline" className="ml-auto">ERP</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('erp', 'device-orders')}>
+                <CommandItem value="erp-device-orders" onSelect={() => handleQuickNav('erp', 'device-orders')}>
                   <Package className="mr-2 h-4 w-4" />
                   <span>Device Orders</span>
                   <Badge variant="outline" className="ml-auto">ERP</Badge>
@@ -321,20 +342,33 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
               </CommandGroup>
               <CommandSeparator />
               <CommandGroup heading="Support">
-                <CommandItem onSelect={() => handleQuickNav('support', 'task-portal')}>
+                <CommandItem value="support-task-portal" onSelect={() => handleQuickNav('support', 'task-portal')}>
                   <Headphones className="mr-2 h-4 w-4" />
                   <span>Task Portal</span>
                   <Badge variant="outline" className="ml-auto">Support</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('support', 'inbox')}>
+                <CommandItem value="support-inbox" onSelect={() => handleQuickNav('support', 'inbox')}>
                   <Inbox className="mr-2 h-4 w-4" />
                   <span>Unified Inbox</span>
                   <Badge variant="outline" className="ml-auto">Support</Badge>
                 </CommandItem>
-                <CommandItem onSelect={() => handleQuickNav('support', 'call-center')}>
+                <CommandItem value="support-call-center" onSelect={() => handleQuickNav('support', 'call-center')}>
                   <Phone className="mr-2 h-4 w-4" />
                   <span>Call Center</span>
                   <Badge variant="outline" className="ml-auto">Support</Badge>
+                </CommandItem>
+              </CommandGroup>
+              <CommandSeparator />
+              <CommandGroup heading="Content & Training">
+                <CommandItem value="content-training-modules" onSelect={() => handleQuickNav('content-editor', 'training')}>
+                  <GraduationCap className="mr-2 h-4 w-4 text-primary" />
+                  <span>Training Module Management</span>
+                  <Badge variant="outline" className="ml-auto">Content</Badge>
+                </CommandItem>
+                <CommandItem value="crm-driver-training" onSelect={() => handleQuickNav('crm', 'training')}>
+                  <GraduationCap className="mr-2 h-4 w-4" />
+                  <span>Driver Training (CRM)</span>
+                  <Badge variant="outline" className="ml-auto">CRM</Badge>
                 </CommandItem>
               </CommandGroup>
             </>
@@ -346,7 +380,8 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
             <CommandGroup heading={`Results (${searchResults.length})`}>
               {searchResults.map((result) => (
                 <CommandItem 
-                  key={`${result.type}-${result.id}`} 
+                  key={`${result.type}-${result.id}`}
+                  value={`${result.type}-${result.id}-${result.title}`}
                   onSelect={() => handleSelect(result)}
                   className="flex items-center gap-3"
                 >

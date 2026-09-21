@@ -20,7 +20,7 @@ export default function InsuranceSupportDashboard() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const matchesSearch = !searchQuery ||
-        task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (task.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         task.description?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || task.insurance_status === statusFilter;
       return matchesSearch && matchesStatus;

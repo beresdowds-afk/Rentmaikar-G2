@@ -29,7 +29,7 @@ export default function IoTSupportDashboard() {
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const matchesSearch = !searchQuery || 
-        task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (task.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         task.device?.serial_number?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || task.iot_status === statusFilter;
       const matchesType = typeFilter === 'all' || task.task_type === typeFilter;

@@ -94,6 +94,7 @@ import { EmailDocs } from "@/components/admin/docs/EmailDocs";
 import { VoIPDocs } from "@/components/admin/docs/VoIPDocs";
 import PlatformGlossary from "@/components/admin/docs/PlatformGlossary";
 import PlatformFeaturesReport from "@/components/admin/docs/PlatformFeaturesReport";
+import { PlatformUpdateModal } from "@/components/admin/PlatformUpdateModal";
 import { ServiceDisruptionDocs } from "@/components/admin/docs/ServiceDisruptionDocs";
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
 import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
@@ -241,6 +242,12 @@ const AdminDashboard = () => {
                   }}
                 />
               </div>
+              <PlatformUpdateModal
+                onUpdateComplete={() => {
+                  refetchRates();
+                  refreshApprovals();
+                }}
+              />
               <Button
                 variant={portalView === 'crm' && activeTab === 'applications' ? 'default' : 'outline'}
                 size="sm"
@@ -756,6 +763,7 @@ const AdminDashboard = () => {
           {(portalView === 'content-editor' || portalView === 'content') && (
             <SectionErrorBoundary section="CONTENT EDITOR" onSwitchPortal={setPortalView}>
               <div className="space-y-6">
+                {activeTab === 'training' && <TrainingModuleManagement />}
                 {(activeTab === 'faq' || activeTab === 'content') && <FAQManagement />}
                 {activeTab === 'policies' && <PolicyManagement />}
                 {activeTab === 'legal-templates' && <LegalAgreementTemplateManagement />}

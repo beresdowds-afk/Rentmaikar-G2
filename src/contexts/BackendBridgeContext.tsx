@@ -21,6 +21,11 @@ interface BackendBridgeContextValue {
   autoDisconnectTriggerCount: number;
   lastAutoDisconnectTrigger: any;
   call: <T = any>(endpoint: string, options?: BackendCallOptions) => Promise<T>;
+  invokeEdgeFunction: <T = any>(
+    functionName: string,
+    payload?: any,
+    options?: BackendCallOptions
+  ) => Promise<{ data: T | null; error: Error | null; status: number; handledBy: string }>;
   listen: (eventType: string, handler: (event: BridgeEventPacket) => void) => () => void;
   respond: (correlationId: string, eventType: string, payload?: any) => Promise<boolean>;
   ping: () => Promise<number>;
@@ -61,6 +66,13 @@ export const BackendBridgeProvider: React.FC<{ children: React.ReactNode }> = ({
   const call = useCallback(<T = any,>(endpoint: string, options?: BackendCallOptions) => {
     return backendBridge.call<T>(endpoint, options);
   }, []);
+
+  const invokeEdgeFunction = useCallback(
+    <T = any,>(functionName: string, payload?: any, options?: BackendCallOptions) => {
+      return backendBridge.invokeEdgeFunction<T>(functionName, payload, options);
+    },
+    []
+  );
 
   const listen = useCallback((eventType: string, handler: (event: BridgeEventPacket) => void) => {
     return backendBridge.listen(eventType, handler);
@@ -126,6 +138,7 @@ export const BackendBridgeProvider: React.FC<{ children: React.ReactNode }> = ({
     autoDisconnectTriggerCount: statusInfo.autoDisconnectTriggerCount,
     lastAutoDisconnectTrigger: statusInfo.lastAutoDisconnectTrigger,
     call,
+    invokeEdgeFunction,
     listen,
     respond,
     ping,

@@ -47,6 +47,7 @@ export const crmTabs: PortalTab[] = [
 
 export const contentEditorTabs: PortalTab[] = [
   { value: "content", label: "Overview", icon: <HelpCircle className="h-4 w-4" /> },
+  { value: "training", label: "Training Modules", icon: <GraduationCap className="h-4 w-4" /> },
   { value: "faq", label: "FAQ Management", icon: <HelpCircle className="h-4 w-4" /> },
   { value: "policies", label: "Policy Versions", icon: <FileText className="h-4 w-4" /> },
   { value: "legal-templates", label: "Legal Agreements", icon: <FileText className="h-4 w-4" /> },
