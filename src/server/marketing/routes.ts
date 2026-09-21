@@ -312,19 +312,10 @@ marketingApiRouter.post('/webhooks/:platform', async (req: Request, res: Respons
       // Handle regulatory opt-out compliance (STOP, UNSUBSCRIBE, etc.)
       if (result.isOptOut && result.sender) {
         console.log(`[SENT.dm Compliance] Opt-out requested by sender: ${result.sender}`);
-        const existingLeads = await marketingEngineServer.leads.getLeads({ search: result.sender });
-        for (const lead of existingLeads) {
-          await marketingEngineServer.leads.logActivity(lead.id, {
-            id: `act-optout-${Date.now()}`,
-            lead_id: lead.id,
-            activity_type: 'sms',
-            channel: 'SMS',
-            provider: 'sentdm',
-            direction: 'inbound',
-            summary: `Opt-out keyword received ("${result.inboundText || 'STOP'}"). Automatically marked unsubscribed.`,
-            created_at: new Date().toISOString(),
-          });
-        }
+        await marketingEngineServer.leads.handleOptOut(
+          { phone: result.sender },
+          `Inbound SMS keyword: ${result.inboundText || 'STOP'}`
+        );
       }
 
       return res.status(200).json(result);
@@ -333,6 +324,15 @@ marketingApiRouter.post('/webhooks/:platform', async (req: Request, res: Respons
     // 5. Twilio (Voice & VoIP call events)
     if (platform === 'twilio') {
       const result = await marketingEngineServer.twilio.handleWebhook(req.body, headers);
+      // Inbound SMS STOP check
+      const bodyText = (req.body?.Body || '').trim().toUpperCase();
+      const fromPhone = req.body?.From;
+      if (fromPhone && ['STOP', 'UNSUBSCRIBE', 'CANCEL', 'QUIT', 'END'].includes(bodyText)) {
+        await marketingEngineServer.leads.handleOptOut(
+          { phone: fromPhone },
+          `Inbound Twilio SMS keyword: ${bodyText}`
+        );
+      }
       return res.status(200).json(result);
     }
 
@@ -340,24 +340,13 @@ marketingApiRouter.post('/webhooks/:platform', async (req: Request, res: Respons
     if (platform === 'resend') {
       const result = await marketingEngineServer.resend.handleWebhook(req.body, headers);
 
-      // Log bounces and complaints to prevent future delivery
-      if ((result.isBounce || result.isComplaint) && result.recipient) {
-        console.warn(`[Resend Webhook] Email suppression triggered for ${result.recipient} (Bounce: ${result.isBounce}, Complaint: ${result.isComplaint})`);
-        const existingLeads = await marketingEngineServer.leads.getLeads({ search: result.recipient });
-        for (const lead of existingLeads) {
-          await marketingEngineServer.leads.logActivity(lead.id, {
-            id: `act-bounce-${Date.now()}`,
-            lead_id: lead.id,
-            activity_type: 'email',
-            channel: 'EMAIL',
-            provider: 'resend',
-            direction: 'system',
-            summary: result.isBounce
-              ? `Email delivery bounced. Delivery suppressed.`
-              : `Email marked as complaint. Sender suppressed.`,
-            created_at: new Date().toISOString(),
-          });
-        }
+      // Log bounces, complaints, and unsubscribes to prevent future delivery
+      if ((result.isBounce || result.isComplaint || result.isUnsubscribe) && result.recipient) {
+        console.warn(`[Resend Webhook] Email suppression triggered for ${result.recipient}`);
+        await marketingEngineServer.leads.handleOptOut(
+          { email: result.recipient },
+          `Resend event: ${result.isUnsubscribe ? 'Unsubscribe Link Clicked' : result.isBounce ? 'Bounced Email' : 'Spam Complaint'}`
+        );
       }
 
       return res.status(200).json(result);
@@ -513,6 +502,87 @@ marketingApiRouter.get('/overview', async (req: Request, res: Response) => {
       role: role as string,
     });
     res.json({ ok: true, overview });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * 13. Ingest 600+ Driver Contacts Roster as Initial Marketing Leads
+ */
+marketingApiRouter.post('/leads/import-driver-contacts', async (req: Request, res: Response) => {
+  try {
+    const { forceRefresh } = req.body || {};
+    const result = await marketingEngineServer.leads.importDriverContacts({ forceRefresh });
+    res.json({ ok: true, result });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * 14. Compliance Opt-Out Endpoint (STOP keyword or Unsubscribe Link)
+ */
+marketingApiRouter.post('/compliance/opt-out', async (req: Request, res: Response) => {
+  try {
+    const { phone, email, leadId, reason } = req.body;
+    if (!phone && !email && !leadId) {
+      return res.status(400).json({ ok: false, error: 'At least one identifier (phone, email, leadId) is required' });
+    }
+
+    const result = await marketingEngineServer.leads.handleOptOut({ phone, email, leadId }, reason);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * 15. Compliance Suppression Status Check
+ */
+marketingApiRouter.get('/compliance/status', async (req: Request, res: Response) => {
+  try {
+    const phone = req.query.phone as string | undefined;
+    const email = req.query.email as string | undefined;
+    const suppressed = await marketingEngineServer.leads.isSuppressed(email, phone);
+    res.json({ ok: true, suppressed });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * 16. Monthly Campaign Cycles (Once a Month Cadence)
+ */
+marketingApiRouter.get('/campaigns/cycles', async (_req: Request, res: Response) => {
+  try {
+    const cycles = await marketingEngineServer.leads.getCampaignCycles();
+    const upcoming = await marketingEngineServer.leads.getUpcomingCycle();
+    res.json({ ok: true, cycles, upcoming });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+marketingApiRouter.post('/campaigns/cycles/trigger', async (req: Request, res: Response) => {
+  try {
+    const { dryRun, force, cycleId, messageOverrides } = req.body || {};
+    const result = await marketingEngineServer.leads.triggerMonthlyCycle({
+      dryRun,
+      force,
+      cycleId,
+      messageOverrides,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+marketingApiRouter.post('/campaigns/cycles/schedule', async (_req: Request, res: Response) => {
+  try {
+    const nextCycle = await marketingEngineServer.leads.scheduleNextMonthlyCycle();
+    res.json({ ok: true, cycle: nextCycle });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
   }

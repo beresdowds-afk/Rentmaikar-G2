@@ -146,12 +146,22 @@ export class ResendAdapter {
         },
       };
 
+      const unsubscribeNotice = `\n\n---\nRentMaikar Fleet Operations | 100% CAN-SPAM & TCPA Compliant\nTo unsubscribe from monthly marketing updates, click here: https://rentmaikar.com/unsubscribe?email=${encodeURIComponent(to)}\nOr reply STOP to opt out.`;
+
       if (params.html) {
-        payload.html = params.html;
+        if (!params.html.toLowerCase().includes('unsubscribe')) {
+          payload.html = `${params.html}<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.5;"><p>You received this message as part of the RentMaikar driver roster monthly campaign.</p><p><a href="https://rentmaikar.com/unsubscribe?email=${encodeURIComponent(to)}" style="color:#0284c7;text-decoration:underline;">Unsubscribe from marketing updates</a> | Reply STOP to opt out.</p><p>RentMaikar Fleet Operations &bull; 100% CAN-SPAM Compliant</p></div>`;
+        } else {
+          payload.html = params.html;
+        }
       } else if (params.text) {
-        payload.text = params.text;
+        if (!params.text.toLowerCase().includes('unsubscribe') && !params.text.toLowerCase().includes('stop')) {
+          payload.text = `${params.text}${unsubscribeNotice}`;
+        } else {
+          payload.text = params.text;
+        }
       } else {
-        payload.text = 'RentMaikar Notification';
+        payload.text = `RentMaikar Fleet Notification${unsubscribeNotice}`;
       }
 
       if (params.replyTo) {

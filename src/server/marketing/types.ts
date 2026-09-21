@@ -141,7 +141,22 @@ export type LeadStage =
   | 'VEHICLE_LISTED'
   | 'VEHICLE_APPROVED'
   | 'RENTAL'
-  | 'CONVERTED';
+  | 'CONVERTED'
+  | 'OPTED_OUT'
+  | 'DISQUALIFIED';
+
+export const STAGE_ORDER: LeadStage[] = [
+  'NEW',
+  'CONTACTED',
+  'QUALIFIED',
+  'REGISTERED',
+  'VERIFIED',
+  'KYC_COMPLETED',
+  'VEHICLE_LISTED',
+  'VEHICLE_APPROVED',
+  'RENTAL',
+  'CONVERTED',
+];
 
 export type LeadSource =
   | 'meta'
@@ -154,7 +169,10 @@ export type LeadSource =
   | 'resend'
   | 'organic'
   | 'referral'
-  | 'direct';
+  | 'direct'
+  | 'outreach'
+  | 'roster'
+  | 'import';
 
 export type LeadTargetRole = 'driver' | 'owner' | 'renter' | 'corporate';
 
@@ -196,11 +214,50 @@ export interface UnifiedLead {
     calls: number;
     total: number;
   };
+  opted_out?: boolean;
+  opted_out_at?: string | null;
+  opt_out_reason?: string | null;
+  last_campaign_sent_at?: string | null;
+  campaign_cycle_id?: string | null;
   notes?: string | null;
   tags?: string[];
   metadata?: Record<string, any>;
   created_at: string;
   updated_at: string;
+}
+
+export interface CampaignCycle {
+  id: string;
+  cycle_name: string;
+  target_audience: string;
+  frequency: 'monthly';
+  status: 'scheduled' | 'in_progress' | 'completed' | 'paused' | 'failed';
+  cycle_month: string; // e.g. '2026-09'
+  scheduled_for: string;
+  executed_at?: string | null;
+  completed_at?: string | null;
+  total_recipients: number;
+  delivered_count: number;
+  opt_out_count: number;
+  failed_count: number;
+  channels: ('sms' | 'email' | 'whatsapp')[];
+  message_template: {
+    smsText?: string;
+    emailSubject?: string;
+    emailBody?: string;
+  };
+  compliance_statement: string;
+  metadata?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DriverImportResult {
+  totalScanned: number;
+  importedCount: number;
+  updatedCount: number;
+  optedOutCount: number;
+  sampleIds: string[];
 }
 
 export interface LeadActivity {

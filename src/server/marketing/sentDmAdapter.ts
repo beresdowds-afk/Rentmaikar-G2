@@ -145,11 +145,16 @@ export class SentDmAdapter {
       const channel = params.channel === 'whatsapp' ? 'whatsapp' : 'sms';
       const from = channel === 'whatsapp' ? this.whatsappNumber : this.senderId;
 
+      // TCPA & WhatsApp compliance: ensure opt-out instruction is present
+      const lowerText = (params.text || '').toLowerCase();
+      const hasOptOut = lowerText.includes('stop') || lowerText.includes('unsubscribe');
+      const compliantText = hasOptOut ? params.text : `${params.text}\n\nReply STOP to opt out. RentMaikar Fleet`;
+
       const payload: any = {
         to: cleanedTo,
         from,
         channel,
-        text: params.text,
+        text: compliantText,
         metadata: {
           leadId: params.leadId,
           ...(params.metadata || {}),

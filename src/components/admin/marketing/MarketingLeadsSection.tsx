@@ -45,8 +45,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { UnifiedLead, LeadStage, LeadSource, LeadTargetRole } from '@/server/marketing/types';
-import { STAGE_ORDER } from '@/server/marketing/leadService';
+import { UnifiedLead, LeadStage, LeadSource, LeadTargetRole, STAGE_ORDER } from '@/server/marketing/types';
 import { MarketingLeadDetailModal } from './MarketingLeadDetailModal';
 import { useToast } from '@/hooks/use-toast';
 

@@ -43,8 +43,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { UnifiedLead, LeadStage, LeadActivity } from '@/server/marketing/types';
-import { STAGE_ORDER } from '@/server/marketing/leadService';
+import { UnifiedLead, LeadStage, LeadActivity, STAGE_ORDER } from '@/server/marketing/types';
 import { useToast } from '@/hooks/use-toast';
 
 interface MarketingLeadDetailModalProps {

@@ -23,6 +23,7 @@ import LiveAnnouncer from "@/components/LiveAnnouncer";
 import MetaPixelRouteTracker from "@/components/MetaPixelRouteTracker";
 import NativeDeepLinkBridge from "@/service/native/deep-links";
 import DocumentExpiryInAppNotifier from "@/components/notifications/DocumentExpiryInAppNotifier";
+import { lazyWithRetry, AdminChunkErrorBoundary } from "@/lib/lazyWithRetry";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { useApplicationApprovalNotifier } from "@/hooks/useApplicationApprovalNotifier";
 import { useNativePush } from "@/hooks/useNativePush";
@@ -59,8 +60,18 @@ const AdminSignIn = lazy(() => import("./pages/AdminSignIn"));
 
 const Catalogue = lazy(() => import("./pages/Catalogue"));
 const VehicleDetails = lazy(() => import("./pages/VehicleDetails"));
-const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
-const AdminAssistantDashboard = lazy(() => import("./pages/AdminAssistantDashboard"));
+const AdminDashboard = lazyWithRetry(() => import("./pages/AdminDashboard"), {
+  chunkName: "AdminDashboard",
+  retries: 3,
+  initialDelayMs: 800,
+  backoffFactor: 1.5,
+});
+const AdminAssistantDashboard = lazyWithRetry(() => import("./pages/AdminAssistantDashboard"), {
+  chunkName: "AdminAssistantDashboard",
+  retries: 3,
+  initialDelayMs: 800,
+  backoffFactor: 1.5,
+});
 const ApiDocs = lazy(() => import("./pages/ApiDocs"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Privacy = lazy(() => import("./pages/Privacy"));
@@ -295,9 +306,11 @@ const App = () => (
                     path="/admin" 
                     element={
                       <ProtectedRoute allowedRoles={['admin']}>
-                        <AdminProfiler id="AdminDashboard">
-                          <AdminDashboard />
-                        </AdminProfiler>
+                        <AdminChunkErrorBoundary chunkName="Admin Dashboard">
+                          <AdminProfiler id="AdminDashboard">
+                            <AdminDashboard />
+                          </AdminProfiler>
+                        </AdminChunkErrorBoundary>
                       </ProtectedRoute>
                     } 
                   />
@@ -305,9 +318,11 @@ const App = () => (
                     path="/admin-assistant" 
                     element={
                       <ProtectedRoute allowedRoles={['admin_assistant', 'admin']}>
-                        <AdminProfiler id="AdminAssistantDashboard">
-                          <AdminAssistantDashboard />
-                        </AdminProfiler>
+                        <AdminChunkErrorBoundary chunkName="Admin Assistant Dashboard">
+                          <AdminProfiler id="AdminAssistantDashboard">
+                            <AdminAssistantDashboard />
+                          </AdminProfiler>
+                        </AdminChunkErrorBoundary>
                       </ProtectedRoute>
                     } 
                   />
