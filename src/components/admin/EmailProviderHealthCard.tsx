@@ -106,27 +106,53 @@ export function EmailProviderHealthCard() {
 
     setSendingTest(true);
     try {
-      const { data, error } = await supabase.functions.invoke("send-outbound-email", {
-        body: {
-          to: testEmail.trim(),
-          subject: "RentMaikar Email Provider Diagnostic Test",
-          templateName: "diagnostic-test",
-          content: `This is a live diagnostic verification email sent from the RentMaikar Credential Health dashboard.
+      const res = await fetch("/api/functions/send-outbound-email", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    action: "send",
+    to: testEmail.trim(),
+    subject: "RentMaikar Email Provider Diagnostic Test",
+    templateName: "diagnostic-test",
+    body: `This is a live diagnostic verification email sent from the RentMaikar Credential Health dashboard.
 
 Provider: ${health?.provider?.toUpperCase() || "RESEND"}
 Domain: ${health?.domain || "notify.rentmaikar.com"}
 Timestamp: ${new Date().toISOString()}
 
 If you received this message, outbound transactional email delivery is functioning normally.`,
-        },
-      });
+    content: `This is a live diagnostic verification email sent from the RentMaikar Credential Health dashboard.
 
-      if (error) throw error;
-      if (data && data.ok === false) throw new Error(data.error || "Delivery failed");
+Provider: ${health?.provider?.toUpperCase() || "RESEND"}
+Domain: ${health?.domain || "notify.rentmaikar.com"}
+Timestamp: ${new Date().toISOString()}
 
-      toast.success(`Diagnostic email dispatched to ${testEmail}!`, {
-        description: `Message ID: ${data?.messageId || "Queued"} · Checked via ${health?.domain || "notify.rentmaikar.com"}`,
-      });
+If you received this message, outbound transactional email delivery is functioning normally.`,
+    category: "diagnostic",
+  }),
+});
+
+const result = await res.json().catch(() => null);
+
+if (
+  !res.ok ||
+  result?.ok === false ||
+  result?.success === false
+) {
+  throw new Error(
+    result?.error ||
+      result?.message ||
+      `Email delivery failed with HTTP ${res.status}`
+  );
+}
+
+toast.success(`Diagnostic email dispatched to ${testEmail}!`, {
+  description: `Message ID: ${
+    result?.messageId || result?.id || "Queued"
+  } · Checked via ${health?.domain || "notify.rentmaikar.com"}`,
+});
       // Refresh audit logs
       fetchHealth(false);
     } catch (err: any) {
