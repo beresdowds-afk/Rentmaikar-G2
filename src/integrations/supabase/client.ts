@@ -389,8 +389,10 @@ if (!isNetworkOrNotFound && !isMethodRoutingFailure) {
     originalError = ex;
   }
 
-  // 2. Secondary fallback: Local gateway (only if available)
-  const localRes = await callLocalGateway(functionName, options);
+  // 2. Secondary fallback: Local gateway.
+// This is also used for HTTP 405 because a 405 can indicate
+// that the request was intercepted by an intermediate router/proxy.
+const localRes = await callLocalGateway(functionName, options);
   if (!localRes.error) return localRes;
 
   // 3. Final fallback through Link Bridge if configured
