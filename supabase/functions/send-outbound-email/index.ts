@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { EMAIL_CONFIG, formatSenderEmail } from "../_shared/email-config.ts";
 import { logMessagingEvent } from "../_shared/messaging-events.ts";
-import { requireServiceRole } from "../_shared/auth-guards.ts";
+import { requireServiceRoleOrRole } from "../_shared/auth-guards.ts";
 import { outboundPausedResponse } from "../_shared/channel-guard.ts";
 import { logOutboundDecision } from "../_shared/outbound-audit.ts";
 import {
@@ -142,26 +142,58 @@ function formatComposedEmailHtml(bodyText: string, recipientName?: string): stri
 
 // ─── Template Renderer ───
 function renderTemplate(
-  templateName: string,
+  templateName?: string | null,
   data: Record<string, unknown> = {}
 ): { subject: string; html: string; text?: string; from: string } | null {
-  // Support composed/custom emails with direct subject and body/html/text content
-  if (
-    templateName === "custom" ||
-    templateName === "composed" ||
-    !templateName ||
-    (data.subject && (data.body || data.html || data.content || data.text))
-  ) {
-    if (data.subject && (data.html || data.body || data.content || data.text)) {
-      const rawBody = (data.html || data.body || data.content || data.text || "") as string;
-      const htmlContent = data.html
-        ? String(data.html)
-        : formatComposedEmailHtml(rawBody, (data.recipientName || data.firstName) as string | undefined);
+  const tData = (
+    (data.templateData && typeof data.templateData === "object" ? data.templateData : null) ||
+    {}
+  ) as Record<string, unknown>;
+
+  // Check templateData for subject and body first, then root data
+  const rawSubject = (
+    (tData.subject !== undefined && tData.subject !== null && String(tData.subject).trim() !== "")
+      ? String(tData.subject)
+      : (data.subject !== undefined && data.subject !== null ? String(data.subject) : "")
+  );
+
+  const rawBody = (
+    tData.body ||
+    tData.content ||
+    tData.html ||
+    tData.text ||
+    tData.message ||
+    tData.messageContent ||
+    data.html ||
+    data.body ||
+    data.content ||
+    data.text ||
+    data.message ||
+    data.messageContent ||
+    ""
+  ) as string;
+
+  const recipientName = (
+    tData.recipientName ||
+    tData.firstName ||
+    data.recipientName ||
+    data.firstName ||
+    (typeof data.name === "string" ? data.name : undefined)
+  ) as string | undefined;
+
+  // Fallback handler: Check for templateData (containing subject and body) when templateName is missing or direct/custom/composed
+  // Routes to the internal composed mail dispatch service without requiring a template ID or templateName
+  const hasTemplateDataContent = Boolean(rawSubject && rawBody);
+  if (!templateName || templateName === "custom" || templateName === "composed" || templateName === "direct") {
+    if (hasTemplateDataContent) {
+      const htmlContent = (data.html || tData.html)
+        ? String(data.html || tData.html)
+        : formatComposedEmailHtml(rawBody, recipientName);
       return {
-        subject: String(data.subject),
+        subject: String(rawSubject),
         html: htmlContent,
-        text: typeof data.text === "string" ? data.text : (typeof data.body === "string" ? data.body : undefined),
-        from: (typeof data.from === "string" && data.from) ? data.from : formatSenderEmail("support"),
+        text: typeof data.text === "string" ? data.text : (typeof tData.text === "string" ? tData.text : (typeof rawBody === "string" ? rawBody : undefined)),
+        from: (typeof data.from === "string" && data.from) ? data.from : ((typeof tData.from === "string" && tData.from) ? tData.from : formatSenderEmail("support")),
       };
     }
   }
@@ -253,9 +285,25 @@ function renderTemplate(
     event_notification: eventNotificationEmail,
   };
 
-  const fn = templateMap[templateName];
-  if (!fn) return null;
-  return fn(resolvedData);
+  if (templateName) {
+    const fn = templateMap[templateName];
+    if (fn) return fn(resolvedData);
+  }
+
+  // Fallback: If templateName wasn't found in templateMap, but subject and body are provided (via templateData or data)
+  if (rawSubject && rawBody) {
+    const htmlContent = (data.html || tData.html)
+      ? String(data.html || tData.html)
+      : formatComposedEmailHtml(rawBody, recipientName);
+    return {
+      subject: String(rawSubject),
+      html: htmlContent,
+      text: typeof data.text === "string" ? data.text : (typeof tData.text === "string" ? tData.text : (typeof rawBody === "string" ? rawBody : undefined)),
+      from: (typeof data.from === "string" && data.from) ? data.from : ((typeof tData.from === "string" && tData.from) ? tData.from : formatSenderEmail("support")),
+    };
+  }
+
+  return null;
 }
 
 // ─── Send Single Email via Resend ───
@@ -360,8 +408,16 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
-  const _authError = requireServiceRole(req);
-  if (_authError) return _authError;
+  const _auth = await requireServiceRoleOrRole(req, [
+    "admin",
+    "super_admin",
+    "admin_assistant",
+    "legal_support",
+    "iot_support",
+    "vehicle_support",
+    "insurance_support",
+  ]);
+  if (_auth instanceof Response) return _auth;
 
 
   try {
@@ -380,6 +436,7 @@ serve(async (req) => {
       const {
         to,
         templateName,
+        templateData = {},
         category = "general",
         data = {},
         priority = "normal",
@@ -396,24 +453,65 @@ serve(async (req) => {
         throw new Error("Missing required field: to");
       }
 
+      const tData = (
+        (templateData && typeof templateData === "object" ? templateData : null) ||
+        (data?.templateData && typeof data.templateData === "object" ? data.templateData : null) ||
+        {}
+      ) as Record<string, unknown>;
+
+      // Prioritize subject from templateData if provided, then direct subject or data.subject
+      const effectiveSubject =
+        (tData.subject !== undefined && tData.subject !== null && String(tData.subject).trim() !== "")
+          ? String(tData.subject)
+          : (subject !== undefined && subject !== null && String(subject).trim() !== ""
+              ? String(subject)
+              : (data?.subject ? String(data.subject) : undefined));
+
+      // Prioritize body from templateData if provided, then direct body/content/html/text
+      const effectiveBody =
+        tData.body ||
+        tData.content ||
+        tData.text ||
+        tData.html ||
+        tData.message ||
+        tData.messageContent ||
+        emailBody ||
+        content ||
+        html ||
+        text ||
+        body.message ||
+        body.messageContent ||
+        (data?.body as string | undefined) ||
+        (data?.content as string | undefined);
+
       const mergedData: Record<string, unknown> = {
         ...data,
-        ...(subject !== undefined ? { subject } : {}),
-        ...(emailBody !== undefined ? { body: emailBody } : {}),
-        ...(content !== undefined ? { content } : {}),
-        ...(html !== undefined ? { html } : {}),
-        ...(text !== undefined ? { text } : {}),
-        ...(recipientName !== undefined ? { recipientName, firstName: String(recipientName).split(" ")[0] } : {}),
+        ...tData,
+        templateData: tData,
+        ...(effectiveSubject !== undefined ? { subject: effectiveSubject } : {}),
+        ...(effectiveBody !== undefined ? { body: effectiveBody } : {}),
+        ...(content !== undefined ? { content } : (tData.content ? { content: tData.content } : {})),
+        ...(html !== undefined ? { html } : (tData.html ? { html: tData.html } : {})),
+        ...(text !== undefined ? { text } : (tData.text ? { text: tData.text } : {})),
+        ...(recipientName !== undefined
+          ? { recipientName, firstName: String(recipientName).split(" ")[0] }
+          : (tData.recipientName
+              ? { recipientName: tData.recipientName, firstName: String(tData.recipientName).split(" ")[0] }
+              : {})),
       };
 
-      const resolvedTemplate =
-        templateName ||
-        (mergedData.subject && (mergedData.body || mergedData.html || mergedData.content || mergedData.text)
-          ? "custom"
-          : null);
+      const hasDirectContent = Boolean(
+        mergedData.subject &&
+        (mergedData.body || mergedData.html || mergedData.content || mergedData.text)
+      );
 
-      if (!resolvedTemplate) {
-        throw new Error("Missing required fields: to, templateName (or subject and body)");
+      let resolvedTemplate: string;
+      if (hasDirectContent) {
+        resolvedTemplate = templateName || "composed";
+      } else if (templateName) {
+        resolvedTemplate = templateName;
+      } else {
+        throw new Error("Missing required fields: to, and either templateData (with subject and body), direct subject and body, or a templateName must be provided");
       }
 
       // ─── Admin outbound kill-switch (email, per region) ───
@@ -499,6 +597,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: result.success,
+          ok: result.success,
           messageId: result.messageId,
           error: result.error,
         }),
@@ -511,6 +610,7 @@ serve(async (req) => {
       const {
         recipients,
         templateName,
+        templateData = {},
         category = "general",
         baseData = {},
         priority = "normal",
@@ -525,36 +625,75 @@ serve(async (req) => {
         throw new Error("Missing required field: recipients");
       }
 
+      const tData = (
+        (templateData && typeof templateData === "object" ? templateData : null) ||
+        (baseData?.templateData && typeof baseData.templateData === "object" ? baseData.templateData : null) ||
+        {}
+      ) as Record<string, unknown>;
+
+      // Prioritize subject from templateData if provided, then direct subject or baseData.subject
+      const effectiveSubject =
+        (tData.subject !== undefined && tData.subject !== null && String(tData.subject).trim() !== "")
+          ? String(tData.subject)
+          : (subject !== undefined && subject !== null && String(subject).trim() !== ""
+              ? String(subject)
+              : (baseData?.subject ? String(baseData.subject) : undefined));
+
+      // Prioritize body from templateData if provided, then direct body/content/html/text
+      const effectiveBody =
+        tData.body ||
+        tData.content ||
+        tData.text ||
+        tData.html ||
+        tData.message ||
+        tData.messageContent ||
+        emailBody ||
+        content ||
+        html ||
+        text ||
+        body.message ||
+        body.messageContent ||
+        (baseData?.body as string | undefined) ||
+        (baseData?.content as string | undefined);
+
       const mergedBaseData: Record<string, unknown> = {
         ...baseData,
-        ...(subject !== undefined ? { subject } : {}),
-        ...(emailBody !== undefined ? { body: emailBody } : {}),
-        ...(content !== undefined ? { content } : {}),
-        ...(html !== undefined ? { html } : {}),
-        ...(text !== undefined ? { text } : {}),
+        ...tData,
+        templateData: tData,
+        ...(effectiveSubject !== undefined ? { subject: effectiveSubject } : {}),
+        ...(effectiveBody !== undefined ? { body: effectiveBody } : {}),
+        ...(content !== undefined ? { content } : (tData.content ? { content: tData.content } : {})),
+        ...(html !== undefined ? { html } : (tData.html ? { html: tData.html } : {})),
+        ...(text !== undefined ? { text } : (tData.text ? { text: tData.text } : {})),
       };
 
-      const resolvedTemplate =
-        templateName ||
-        (mergedBaseData.subject && (mergedBaseData.body || mergedBaseData.html || mergedBaseData.content || mergedBaseData.text)
-          ? "custom"
-          : null);
+      const hasBulkDirectContent = Boolean(
+        mergedBaseData.subject &&
+        (mergedBaseData.body || mergedBaseData.html || mergedBaseData.content || mergedBaseData.text)
+      );
 
-      if (!resolvedTemplate) {
-        throw new Error("Missing required fields: templateName or subject/body");
+      let resolvedTemplate: string;
+      if (hasBulkDirectContent) {
+        resolvedTemplate = templateName || "composed";
+      } else if (templateName) {
+        resolvedTemplate = templateName;
+      } else {
+        throw new Error("Missing required fields: recipients, and either templateData (with subject and body), direct subject and body, or a templateName must be provided");
       }
 
       const results: { email: string; success: boolean; messageId?: string; error?: string }[] = [];
 
       for (const recipient of recipients) {
+        const recTData = (recipient.templateData && typeof recipient.templateData === "object" ? recipient.templateData : {}) as Record<string, unknown>;
         const mergedData = {
           ...mergedBaseData,
           ...recipient.customData,
-          firstName: recipient.firstName || recipient.recipientName?.split(' ')[0] || mergedBaseData.firstName || "there",
-          recipientName: recipient.recipientName || recipient.name || mergedBaseData.recipientName,
-          ...(recipient.subject ? { subject: recipient.subject } : {}),
-          ...(recipient.body ? { body: recipient.body } : {}),
-          ...(recipient.html ? { html: recipient.html } : {}),
+          ...recTData,
+          firstName: recipient.firstName || recipient.recipientName?.split(' ')[0] || (recTData.firstName as string) || mergedBaseData.firstName || "there",
+          recipientName: recipient.recipientName || recipient.name || (recTData.recipientName as string) || mergedBaseData.recipientName,
+          ...(recipient.subject ? { subject: recipient.subject } : (recTData.subject ? { subject: recTData.subject } : {})),
+          ...(recipient.body ? { body: recipient.body } : (recTData.body ? { body: recTData.body } : {})),
+          ...(recipient.html ? { html: recipient.html } : (recTData.html ? { html: recTData.html } : {})),
         };
 
         const rendered = renderTemplate(resolvedTemplate, mergedData);
