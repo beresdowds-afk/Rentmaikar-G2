@@ -523,14 +523,23 @@ export const HubBulkMessaging: React.FC = () => {
             console.log('📌 Response Error:', invokeRes.error);
             console.groupEnd();
 
-            // Verify response.status: If 405 or any non-2xx code, mark as failed!
-            if (responseStatus === 405 || responseStatus < 200 || responseStatus >= 300) {
-              emailDelivered = false;
-              if (responseStatus === 405) {
-                emailErrorMsg = invokeRes.error?.message || 'HTTP 405 Method Not Allowed: Request rejected by server or intercepted by static proxy';
-              } else {
-                emailErrorMsg = invokeRes.error?.message || invokeRes.data?.error || invokeRes.data?.message || `API call failed with HTTP status ${responseStatus}`;
-              }
+            // A 405 reaching this component means all routing fallbacks have failed.
+// Do NOT treat 405 as success or suppress it.
+if (responseStatus < 200 || responseStatus >= 300) {
+  emailDelivered = false;
+
+  if (responseStatus === 405) {
+    emailErrorMsg =
+      invokeRes.error?.message ||
+      'HTTP 405 Method Not Allowed: all outbound-email routing paths rejected the POST request';
+  } else {
+    emailErrorMsg =
+      invokeRes.error?.message ||
+      invokeRes.data?.error ||
+      invokeRes.data?.message ||
+      `API call failed with HTTP status ${responseStatus}`;
+  }
+}
             } else if (invokeRes.error) {
               emailDelivered = false;
               emailErrorMsg = invokeRes.error.message || `Edge function returned error (HTTP ${responseStatus})`;
