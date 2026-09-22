@@ -393,6 +393,19 @@ if (!isNetworkOrNotFound && !isMethodRoutingFailure) {
 // This is also used for HTTP 405 because a 405 can indicate
 // that the request was intercepted by an intermediate router/proxy.
 const localRes = await callLocalGateway(functionName, options);
+ console.warn(
+  `[Supabase Functions] Primary invocation failed for '${functionName}'. ` +
+  `Attempting local gateway fallback.`,
+  {
+    status:
+      (originalError as any)?.context?.status ??
+      (originalError as any)?.status ??
+      null,
+    message:
+      originalError?.message ??
+      String(originalError ?? ''),
+  }
+);
   if (!localRes.error) return localRes;
 
   // 3. Final fallback through Link Bridge if configured
