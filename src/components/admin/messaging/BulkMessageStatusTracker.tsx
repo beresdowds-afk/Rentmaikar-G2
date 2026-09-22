@@ -319,43 +319,39 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
         let errMsg = '';
         let messageId = '';
 
-        // Authoritative dispatch: Supabase send-outbound-email edge function
-        try {
-          const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-            body: {
-              action: 'send',
-              to: emailTarget,
-              subject: subject || 'Notice from Rentmaikar Admin',
-              body,
-              recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
-              category: 'general',
-            },
-          });
-          if (!error && (data?.ok !== false && data?.success !== false)) {
-            delivered = true;
-            messageId = data?.messageId || data?.id || '';
-          } else {
-            errMsg = data?.error || error?.message || 'Email delivery rejection';
-          }
-        } catch (e: any) {
-          errMsg = e.message || 'Invoke error';
-        }
+        // Primary: Cloud Run application email gateway.
+// The backend gateway handles Supabase fallback.
+try {
+  const res = await fetch('/api/functions/send-outbound-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'send',
+      to: emailTarget,
+      subject: subject || 'Notice from Rentmaikar Admin',
+      body,
+      recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
+      category: 'general',
+    }),
+  });
 
-        // Secondary fallback to local API gateway proxy ONLY if running in local environment
-        if (!delivered && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-          try {
-            const res = await fetch('/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: 'send',
-                to: emailTarget,
-                subject: subject || 'Notice from Rentmaikar Admin',
-                body,
-                recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
-                category: 'general',
-              }),
-            });
+  const contentType = res.headers.get('content-type') || '';
+  const json = contentType.includes('application/json')
+    ? await res.json().catch(() => null)
+    : null;
+
+  if (res.ok && (json?.ok !== false && json?.success !== false)) {
+    delivered = true;
+    messageId = json?.messageId || json?.id || '';
+    errMsg = '';
+  } else {
+    errMsg =
+      json?.error ||
+      `Email delivery failed with HTTP ${res.status}`;
+  }
+} catch (e: any) {
+  errMsg = e.message || 'Email gateway request failed';
+}
             const contentType = res.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
               const json = await res.json().catch(() => null);
