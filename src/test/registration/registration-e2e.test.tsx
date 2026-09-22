@@ -33,18 +33,45 @@ vi.mock("react-router-dom", async () => {
 
 const insert = vi.fn();
 const rpc = vi.fn();
+let mockApplicationRecord: any = { id: "app-123", user_id: "user-123", application_type: "driver", email: "test@example.com" };
+
+const createQueryBuilder = () => {
+  const builder: any = {
+    eq: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    maybeSingle: async () => ({ data: mockApplicationRecord, error: null }),
+    select: () => builder,
+    update: () => builder,
+    insert: (...args: unknown[]) => insert(...args),
+    then: (resolve: any) => resolve({ data: [], error: null }),
+  };
+  return builder;
+};
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
-    from: (table?: string) => ({
-      insert: (...args: unknown[]) => {
-        if (!table || table === "applications") {
-          return insert(...args);
-        }
-        return Promise.resolve({ data: null, error: null });
-      },
-      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
-    }),
+    from: (table?: string) => {
+      if (!table || table === "applications") {
+        return createQueryBuilder();
+      }
+      const defaultBuilder: any = {
+        eq: () => defaultBuilder,
+        order: () => defaultBuilder,
+        limit: () => defaultBuilder,
+        maybeSingle: async () => ({ data: null, error: null }),
+        select: () => defaultBuilder,
+        update: () => defaultBuilder,
+        insert: () => Promise.resolve({ data: null, error: null }),
+        then: (resolve: any) => resolve({ data: [], error: null }),
+      };
+      return defaultBuilder;
+    },
     rpc: (...args: unknown[]) => rpc(...args),
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: { user: { id: "user-123" } } }, error: null }),
+      signOut: () => Promise.resolve({ error: null }),
+    },
     channel: () => {
       const ch: any = { on: () => ch, subscribe: () => ch, unsubscribe: () => Promise.resolve("ok") };
       return ch;
@@ -214,6 +241,7 @@ beforeEach(() => {
   insert.mockReset().mockResolvedValue({ error: null });
   rpc.mockReset().mockResolvedValue({ data: null, error: null });
   ensureAuthUserForApplicant.mockReset().mockResolvedValue("user-123");
+  mockApplicationRecord = { id: "app-123", user_id: "user-123", application_type: "driver", email: "test@example.com" };
 });
 
 // -------------------------------------------------------------- driver ----
@@ -285,6 +313,39 @@ describe("driver registration (e2e)", () => {
       expect(screen.getAllByText(/more characters?/i).length).toBeGreaterThan(0),
     );
     expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("blocks navigation and displays error when advance_registration_stage fails", async () => {
+    const user = userEvent.setup();
+    rpc.mockImplementation((name: string) => {
+      if (name === "advance_registration_stage") {
+        return Promise.resolve({ data: null, error: { message: "Database stage transition failure" } });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    renderPage(<DriverRegistration />);
+
+    await fillDriverForm(user, { address: "24 Ademola Street, Ikeja" });
+    await user.click(screen.getAllByRole("radio")[0]);
+    await user.click(screen.getByRole("button", { name: /submit (registration|vehicle for review)/i }));
+
+    await waitFor(() => expect(insert).toHaveBeenCalledTimes(1));
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("blocks navigation when application ownership verification fails", async () => {
+    const user = userEvent.setup();
+    mockApplicationRecord = { id: "app-diff", user_id: "different-user-id", application_type: "driver" };
+
+    renderPage(<DriverRegistration />);
+
+    await fillDriverForm(user, { address: "24 Ademola Street, Ikeja" });
+    await user.click(screen.getAllByRole("radio")[0]);
+    await user.click(screen.getByRole("button", { name: /submit (registration|vehicle for review)/i }));
+
+    await waitFor(() => expect(insert).toHaveBeenCalledTimes(1));
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
 

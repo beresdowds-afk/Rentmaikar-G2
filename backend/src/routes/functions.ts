@@ -86,14 +86,13 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             deliveryStatus: isSandbox ? "sandbox_delivered" : "queued",
           });
         } catch (sentErr: any) {
-          console.warn("[Backend Functions] Sent.dm failed, falling back to simulated dispatch:", sentErr.message);
-          return res.status(200).json({
-            success: true,
-            messageId: `sim_${Date.now()}`,
+          console.error("[Backend Functions] Sent.dm failed:", sentErr.message);
+          return res.status(502).json({
+            success: false,
+            error: "SMS delivery failed: upstream provider unavailable",
             channel,
-            provider: "fallback_simulation",
-            region: to.startsWith("+234") ? "Nigeria" : "USA",
-            deliveryStatus: "simulated_delivered",
+            provider: "sent",
+            deliveryStatus: "failed",
           });
         }
       }
@@ -156,24 +155,49 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         if (!phone) {
           return res.status(400).json({ success: false, error: "Valid phone number required" });
         }
-        const code = (Math.floor(100000 + Math.random() * 900000)).toString();
-        otpStore.set(phone, { code, expiresAt: Date.now() + 600000 });
-        return res.status(200).json({
-          success: true,
-          message: `Verification code sent to ${phone}`,
-          phone,
-        });
+        const action = body.action || "send";
+        if (action === "send" || action === "link_send") {
+          const code = (Math.floor(100000 + Math.random() * 900000)).toString();
+          otpStore.set(phone, { code, expiresAt: Date.now() + 300000 });
+          return res.status(200).json({
+            success: true,
+            message: `Verification code sent to ${phone}`,
+            phone,
+          });
+        }
+        if (action === "verify" || action === "link_verify") {
+          const code = (body.code || "").trim();
+          const record = otpStore.get(phone);
+          if (record && record.code === code && Date.now() <= record.expiresAt) {
+            otpStore.delete(phone);
+            return res.status(200).json({ success: true, valid: true, message: "Phone verified successfully" });
+          }
+          return res.status(400).json({ success: false, valid: false, error: "Invalid or expired verification code" });
+        }
+        return res.status(400).json({ error: "Unsupported action" });
       }
 
       case "verify-phone": {
         const phone = normalizeE164(body.phone || "");
         const code = (body.code || "").trim();
-        const record = otpStore.get(phone);
-        if ((record && record.code === code && Date.now() <= record.expiresAt) || code === "123456") {
-          otpStore.delete(phone);
-          return res.status(200).json({ valid: true, message: "Phone number verified successfully" });
+        const action = body.action || "verify_code";
+
+        if (!clientAuth) {
+          return res.status(401).json({ success: false, valid: false, error: "Authentication required for phone verification" });
         }
-        return res.status(400).json({ valid: false, message: "Invalid or expired verification code" });
+
+        if (action === "send_code") {
+          const newCode = (Math.floor(100000 + Math.random() * 900000)).toString();
+          otpStore.set(phone, { code: newCode, expiresAt: Date.now() + 300000 });
+          return res.status(200).json({ success: true, valid: true, message: "Verification code sent", expiresIn: 300 });
+        }
+
+        const record = otpStore.get(phone);
+        if (record && record.code === code && Date.now() <= record.expiresAt) {
+          otpStore.delete(phone);
+          return res.status(200).json({ success: true, valid: true, verified: true, message: "Phone number verified successfully" });
+        }
+        return res.status(400).json({ success: false, valid: false, verified: false, message: "Invalid or expired verification code" });
       }
 
       // -----------------------------------------------------------------
@@ -349,18 +373,75 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             } else {
               const errText = await resendRes.text().catch(() => "");
               console.warn("[Backend Functions] Direct Resend dispatch failed:", errText);
+              return res.status(resendRes.status || 502).json({
+                success: false,
+                error: `Resend dispatch failed: ${errText || "Unknown error"}`,
+                provider: "resend",
+              });
             }
           } catch (resendErr: any) {
             console.warn("[Backend Functions] Direct Resend error:", resendErr?.message || resendErr);
+            return res.status(500).json({
+              success: false,
+              error: `Direct Resend error: ${resendErr?.message || String(resendErr)}`,
+            });
           }
         }
 
-        // 3. Resilient simulation fallback if neither edge function nor provider key is reachable
-        return res.status(200).json({
-          success: true,
-          messageId: `email_${Date.now()}`,
-          provider: "resilient_simulation",
+        return res.status(502).json({
+          success: false,
+          error: "Email reply dispatch failed: Edge function and Resend provider both unavailable",
         });
+      }
+
+      case "send-outbound-email": {
+        const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
+        const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-outbound-email`;
+
+        // 1. Attempt to forward request to Supabase Edge Function
+        try {
+          const authHeader = req.headers["authorization"] || (supabaseAnonKey ? `Bearer ${supabaseAnonKey}` : "");
+          const proxyHeaders: Record<string, string> = {
+            "Content-Type": "application/json",
+          };
+          if (authHeader) {
+            proxyHeaders["Authorization"] = authHeader;
+          }
+          if (supabaseAnonKey) {
+            proxyHeaders["apikey"] = supabaseAnonKey;
+          }
+          if (req.headers["x-client-info"]) {
+            proxyHeaders["x-client-info"] = String(req.headers["x-client-info"]);
+          }
+
+          const edgeRes = await fetch(edgeFunctionUrl, {
+            method: "POST",
+            headers: proxyHeaders,
+            body: JSON.stringify(body),
+          });
+
+          if (edgeRes.ok || (edgeRes.status !== 404 && edgeRes.status !== 401 && edgeRes.status !== 403)) {
+            const edgeData = await edgeRes.json().catch(() => null);
+            if (edgeData) {
+              return res.status(edgeRes.status).json(edgeData);
+            }
+          }
+        } catch (proxyErr: any) {
+          console.warn("[Backend Functions] Supabase send-outbound-email proxy failed:", proxyErr?.message || proxyErr);
+        }
+
+        // 2. Direct Server-Side Email Service execution
+        try {
+          const { handleSendOutboundEmail } = await import("../../../src/server/emailService");
+          const result = await handleSendOutboundEmail(body);
+          return res.status(result.ok ? 200 : 502).json(result);
+        } catch (localErr: any) {
+          return res.status(500).json({
+            success: false,
+            error: `Server email dispatch failed: ${localErr?.message || String(localErr)}`,
+          });
+        }
       }
 
       case "inbox-attachment-ocr": {

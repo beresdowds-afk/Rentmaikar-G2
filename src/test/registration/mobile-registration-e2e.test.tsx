@@ -45,13 +45,30 @@ vi.mock("@capacitor/core", () => ({
 
 const insert = vi.fn();
 const rpc = vi.fn();
+let mockApplicationRecord: any = { id: "app-123", user_id: "user-123", application_type: "driver", email: "test@example.com" };
+
+const createQueryBuilder = () => {
+  const builder: any = {
+    eq: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    maybeSingle: async () => ({ data: mockApplicationRecord, error: null }),
+    select: () => builder,
+    update: () => builder,
+    insert: (...args: unknown[]) => insert(...args),
+    then: (resolve: any) => resolve({ data: [], error: null }),
+  };
+  return builder;
+};
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
-    from: () => ({
-      insert: (...args: unknown[]) => insert(...args),
-      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
-    }),
+    from: () => createQueryBuilder(),
     rpc: (...args: unknown[]) => rpc(...args),
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+      signOut: () => Promise.resolve({ error: null }),
+    },
     channel: () => {
       const ch: any = { on: () => ch, subscribe: () => ch, unsubscribe: () => Promise.resolve("ok") };
       return ch;

@@ -224,7 +224,12 @@ const OwnerRegistration = () => {
         requestedRole: 'owner',
       });
 
-      const { error } = await supabase.from('applications').insert({
+      const { data: currentSession } = (await supabase.auth?.getSession?.()) ?? { data: { session: null } };
+      if (currentSession?.session?.user?.id && currentSession.session.user.id !== userId) {
+        throw new Error('Authentication mismatch: applicant user ID does not match active session.');
+      }
+
+      const applicationPayload = {
         user_id: userId,
         application_type: 'owner' as const,
         first_name: data.firstName,
@@ -254,9 +259,80 @@ const OwnerRegistration = () => {
         messaging_channel: data.messagingChannel,
         data_sharing_consent: data.dataSharingConsent,
         consent_recorded_at: new Date().toISOString(),
-      });
+      };
 
-      if (error) throw error;
+      // 2) Idempotent check for existing application
+      const { data: existingApps } = await supabase
+        .from('applications')
+        .select('id, user_id, application_type, email')
+        .eq('user_id', userId)
+        .eq('application_type', 'owner');
+
+      let applicationId: string;
+
+      if (existingApps && existingApps.length > 0) {
+        applicationId = existingApps[0].id;
+        const { error: updateErr } = await supabase
+          .from('applications')
+          .update(applicationPayload)
+          .eq('id', applicationId);
+
+        if (updateErr) throw updateErr;
+
+        void logRegistrationEvent('registration_reconciled', {
+          email: data.email,
+          userId,
+          applicationId,
+          applicationType: 'owner',
+          metadata: { reconciled_existing_application: true },
+        });
+      } else {
+        const { error: insertErr } = await supabase
+          .from('applications')
+          .insert(applicationPayload);
+
+        if (insertErr) throw insertErr;
+
+        // Verify application was persisted and ownership matches authenticated user
+        const { data: verifiedApp, error: verifyAppErr } = await supabase
+          .from('applications')
+          .select('id, user_id, application_type, email')
+          .eq('user_id', userId)
+          .eq('application_type', 'owner')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (verifyAppErr || !verifiedApp) {
+          throw new Error('Application verification failed: application record was not persisted in database.');
+        }
+
+        if (!verifiedApp.user_id || verifiedApp.user_id !== userId) {
+          throw new Error(`Application ownership verification failed: application belongs to user "${verifiedApp.user_id}", expected "${userId}".`);
+        }
+
+        applicationId = verifiedApp.id;
+
+        void logRegistrationEvent('registration_upsert_succeeded', {
+          email: data.email,
+          userId,
+          applicationId,
+          applicationType: 'owner',
+          metadata: { country: data.country },
+        });
+      }
+
+      // 3) Move new signup to 'account_opened' — fail-closed on RPC failure
+      const { error: stageErr } = await supabase.rpc('advance_registration_stage', {
+        _target: 'account_opened',
+      });
+      if (stageErr) {
+        const { data: sessionCheck } = (await supabase.auth?.getSession?.()) ?? { data: { session: null } };
+        const isUnauthenticated = /not authenticated|jwt/i.test(stageErr.message);
+        if (sessionCheck?.session || !isUnauthenticated) {
+          throw new Error(`Registration stage update failed: ${stageErr.message}`);
+        }
+      }
 
       // A2P 10DLC: persist the exact SMS opt-in decisions with disclosure text.
       void recordSmsConsentPair({
@@ -266,22 +342,8 @@ const OwnerRegistration = () => {
         source: "owner-registration",
       });
 
-      // Audit: registration data reached the database.
-      void logRegistrationEvent("registration_upsert_succeeded", {
-        email: data.email,
-        userId,
-        applicationType: "owner",
-        metadata: { country: data.country },
-      });
-
-      try {
-        await supabase.rpc('advance_registration_stage', { _target: 'account_opened' });
-      } catch (e) {
-        console.warn('Could not advance registration stage:', e);
-      }
-
-      const { data: sessionNow } = await supabase.auth.getSession();
-      if (sessionNow.session) {
+      const { data: sessionNow } = (await supabase.auth?.getSession?.()) ?? { data: { session: null } };
+      if (sessionNow?.session) {
         toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
         setSubmitError(null);
         navigate("/owner/dashboard");

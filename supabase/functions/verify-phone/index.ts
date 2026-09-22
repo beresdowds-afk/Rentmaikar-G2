@@ -193,6 +193,19 @@ const handler = async (req: Request): Promise<Response> => {
         throw new Error("Failed to initiate verification");
       }
 
+      // Record in phone_otp_codes for unified state, attempt-throttling, and replay defense
+      try {
+        await supabase.from("phone_otp_codes").insert({
+          phone: cleanPhone,
+          code_hash: hashedCode,
+          channel: body.channel || "sms",
+          attempts: 0,
+          expires_at: expiresAt.toISOString(),
+        });
+      } catch (otpErr) {
+        console.warn("phone_otp_codes state tracking warning:", otpErr);
+      }
+
       if (body.channel === "voice") {
         await placeVoiceCall(cleanPhone, code);
       } else {
@@ -280,23 +293,87 @@ const handler = async (req: Request): Promise<Response> => {
         );
       }
 
+      // Check attempt threshold from phone_otp_codes
+      const { data: recentOtps } = await supabase
+        .from("phone_otp_codes")
+        .select("id, attempts")
+        .eq("phone", cleanPhone)
+        .is("consumed_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const recentOtp = recentOtps?.[0];
+      if (recentOtp && (recentOtp.attempts ?? 0) >= 5) {
+        await supabase
+          .from("profiles")
+          .update({
+            phone_verification_code: null,
+            phone_verification_expires_at: null,
+          })
+          .eq("user_id", user.id);
+
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Too many incorrect attempts. Please request a new code.",
+          }),
+          { status: 429, headers: { "Content-Type": "application/json", ...corsHeaders } },
+        );
+      }
+
       const isValid = bcrypt.compareSync(body.code, profile.phone_verification_code);
       if (!isValid) {
+        if (recentOtp?.id) {
+          const nextAttempts = (recentOtp.attempts ?? 0) + 1;
+          await supabase
+            .from("phone_otp_codes")
+            .update({ attempts: nextAttempts })
+            .eq("id", recentOtp.id);
+
+          if (nextAttempts >= 5) {
+            await supabase
+              .from("profiles")
+              .update({
+                phone_verification_code: null,
+                phone_verification_expires_at: null,
+              })
+              .eq("user_id", user.id);
+          }
+        }
         return new Response(
           JSON.stringify({ success: false, error: "Invalid verification code" }),
           { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
         );
       }
 
+      // Mark OTP record consumed immediately to eliminate replay attacks
+      if (recentOtp?.id) {
+        await supabase
+          .from("phone_otp_codes")
+          .update({ consumed_at: new Date().toISOString() })
+          .eq("id", recentOtp.id);
+      }
+
       const { error: verifyError } = await supabase
         .from("profiles")
         .update({
+          phone: cleanPhone,
           phone_verified: true,
           phone_verification_code: null,
           phone_verification_expires_at: null,
         })
         .eq("user_id", user.id);
       if (verifyError) throw new Error("Failed to verify phone");
+
+      // Synchronize auth identity layer to prevent split-brain states
+      try {
+        await supabase.auth.admin.updateUserById(user.id, {
+          phone: cleanPhone,
+          phone_confirm: true,
+        });
+      } catch (authSyncErr: any) {
+        console.warn("auth.users phone confirmation sync warning:", authSyncErr?.message || authSyncErr);
+      }
 
       console.log(`Phone ${cleanPhone} verified for user ${user.id}`);
 

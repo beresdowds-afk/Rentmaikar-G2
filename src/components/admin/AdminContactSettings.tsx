@@ -284,7 +284,14 @@ const EmailConfigRow = ({ entry, onSave }: {
           content: `Test verification: Delivered as ${entry.email} through the verified outgoing domain notify.rentmaikar.com.`,
         }),
       });
-      const data = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      let data: any;
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
+      }
       if (data.ok) {
         toast.success(`Verified: ${entry.email} delivered through notify.rentmaikar.com to ${targetRecipient} (ID: ${data.messageId?.slice(0, 8)})`);
       } else {

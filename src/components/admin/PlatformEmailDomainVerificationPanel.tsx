@@ -135,7 +135,14 @@ export function PlatformEmailDomainVerificationPanel({
           content: `Test confirmation: Outbound mail from ${outboundFrom} was successfully delivered through the verified domain notify.rentmaikar.com with SPF/DKIM/DMARC alignment.`,
         }),
       });
-      const result = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      let result: any;
+      if (contentType.includes("application/json")) {
+        result = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 120)}`);
+      }
       setLastLog(result);
       setShowConsole(true);
       if (result.ok) {
@@ -166,7 +173,14 @@ export function PlatformEmailDomainVerificationPanel({
           content: `Simulated customer inquiry directed to ${inboundMailbox}@rentmaikar.com, ingested through backend.rentmaikar.com and routed to destination contacts with reply-to preserved.`,
         }),
       });
-      const result = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      let result: any;
+      if (contentType.includes("application/json")) {
+        result = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 120)}`);
+      }
       setLastLog(result);
       setShowConsole(true);
       if (result.ok && result.forwarded) {

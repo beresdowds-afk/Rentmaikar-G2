@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { assignRole } from '@/lib/user-provisioning';
+import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 
 type AppRole = 'admin' | 'admin_assistant' | 'owner' | 'driver' | 'legal_support' | 'iot_support' | 'vehicle_support';
 
@@ -95,7 +95,13 @@ interface AuthContextType {
   twoFactorStatus: TwoFactorStatus | null;
   twoFactorVerified: boolean;
   setTwoFactorVerified: (verified: boolean) => void;
-  signUp: (email: string, password: string, fullName: string, role: AppRole) => Promise<{ error: Error | null; emailExists?: boolean }>;
+  signUp: (email: string, password: string, fullName: string, role: AppRole) => Promise<{
+    error: Error | null;
+    emailExists?: boolean;
+    user?: User | null;
+    userId?: string | null;
+    status?: 'success' | 'rejected' | 'ambiguous';
+  }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null; userId?: string }>;
   signOut: () => Promise<void>;
   hasRole: (role: AppRole) => boolean;
@@ -675,44 +681,60 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       if (error) {
-        await logAuthEvent('sign_up_failure', { email, errorCode: error.message });
+        await logAuthEvent('sign_up_failure', { email: normalizedEmail, errorCode: error.message });
         // The email is already registered: surface it as a routable signal so
         // the UI can send the user to sign-in instead of a dead-end error.
         if (/already|registered|exists/i.test(error.message)) {
           return {
             error: new Error('This email is already registered. Please sign in instead.'),
             emailExists: true,
+            status: 'rejected',
           };
         }
-        return { error };
+        return { error, status: 'rejected' };
       }
 
       // Supabase obfuscates duplicate sign-ups when email confirmation is on:
       // it returns a user object with an EMPTY identities array instead of an
       // error. Treat that as "already registered" and route to sign-in.
       if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-        await logAuthEvent('sign_up_failure', { email, errorCode: 'email_already_registered' });
+        await logAuthEvent('sign_up_failure', { email: normalizedEmail, errorCode: 'email_already_registered' });
         return {
           error: new Error('This email is already registered. Please sign in instead.'),
           emailExists: true,
+          status: 'rejected',
         };
       }
 
-      // Safety net only: the trigger already provisioned the account. Route
-      // through the single idempotent provisioning RPC instead of a raw upsert.
-      if (data.user) {
-        try {
-          await assignRole(data.user.id, effectiveRole, email.trim().toLowerCase());
-        } catch (roleError) {
-          console.error('Error assigning role:', roleError);
-        }
+      // Invariant: Supabase Auth must return a valid user identity
+      if (!data.user || !data.user.id) {
+        await logAuthEvent('sign_up_failure', { email: normalizedEmail, errorCode: 'auth_user_identity_missing' });
+        return {
+          error: new Error('Account creation failed: Supabase Auth did not return a valid user identity.'),
+          status: 'ambiguous',
+        };
       }
 
+      const uid = data.user.id;
 
-      await logAuthEvent('sign_up_success', { email, metadata: { role } });
-      return { error: null };
+      // Fail-closed verification: ensure profile exists and role is assigned in user_roles
+      try {
+        await verifyProfileExists(uid, effectiveRole, normalizedEmail);
+        await assignRole(uid, effectiveRole, normalizedEmail);
+      } catch (provisionError) {
+        console.error('Error provisioning account during signup:', provisionError);
+        await logAuthEvent('sign_up_failure', { email: normalizedEmail, errorCode: 'provisioning_failed' });
+        return {
+          error: provisionError instanceof Error ? provisionError : new Error(String(provisionError)),
+          userId: uid,
+          status: 'rejected',
+        };
+      }
+
+      await logAuthEvent('sign_up_success', { email: normalizedEmail, metadata: { role } });
+      return { error: null, user: data.user, userId: uid, status: 'success' };
     } catch (err) {
-      return { error: err as Error };
+      return { error: err as Error, status: 'rejected' };
     }
   };
 

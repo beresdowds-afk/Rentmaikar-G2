@@ -106,7 +106,14 @@ export function InboundEmailRoutingEditor({
           content: `This simulated message tests the inbound routing pipeline, external delivery, and reply-to preservation.`,
         }),
       });
-      const data = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      let data: any;
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
+      }
       setTestResult(data);
       if (data.forwarded || data.ok) {
         toast.success(`Forwarding simulation successful for ${testMailbox}@!`);

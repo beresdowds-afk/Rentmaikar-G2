@@ -336,7 +336,7 @@ const Auth = () => {
     setIsSubmitting(true);
     setError(null);
 
-    const { error, emailExists } = await signUp(data.email, data.password, data.fullName, data.role);
+    const { error, emailExists, userId } = await signUp(data.email, data.password, data.fullName, data.role);
 
     if (error) {
       const normalized = data.email.trim().toLowerCase();
@@ -359,57 +359,63 @@ const Auth = () => {
         setError(error.message);
       }
     } else {
-      // Drivers and owners must produce an `applications` record, otherwise the
-      // onboarding checklist has no stage to advance. Send them straight into
-      // the registration flow instead of leaving them on a dead-end account.
-      // Persist consent choices on the freshly created profile.
+      // Invariant: Auth user identity must exist
+      if (!userId) {
+        setError('Account could not be verified. Please try again.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Persist consent choices on the freshly created profile
       try {
-        const { data: session } = await supabase.auth.getUser();
-        const uid = session?.user?.id;
-        if (uid) {
-          await supabase
-            .from('profiles')
-            .update({
-              notification_email: true,
-              notification_sms: data.messagingChannel === 'sms',
-              notification_whatsapp: data.messagingChannel === 'whatsapp',
-              messaging_consent_at: new Date().toISOString(),
-              data_sharing_consent: data.dataSharingConsent,
-              data_sharing_consent_at: data.dataSharingConsent ? new Date().toISOString() : null,
-            })
-            .eq('user_id', uid);
+        await supabase
+          .from('profiles')
+          .update({
+            notification_email: true,
+            notification_sms: data.messagingChannel === 'sms',
+            notification_whatsapp: data.messagingChannel === 'whatsapp',
+            messaging_consent_at: new Date().toISOString(),
+            data_sharing_consent: data.dataSharingConsent,
+            data_sharing_consent_at: data.dataSharingConsent ? new Date().toISOString() : null,
+          })
+          .eq('user_id', userId);
 
-          // A2P 10DLC: auditable SMS opt-in record with the disclosure shown.
-          await recordSmsConsentPair({
-            userId: uid,
-            serviceConsent: !!data.smsServiceConsent,
-            marketingConsent: !!data.smsMarketingConsent,
-            source: 'signup',
-          });
+        // A2P 10DLC: auditable SMS opt-in record with the disclosure shown.
+        await recordSmsConsentPair({
+          userId,
+          serviceConsent: !!data.smsServiceConsent,
+          marketingConsent: !!data.smsMarketingConsent,
+          source: 'signup',
+        });
 
-          // RentMaikar Marketing Engine Canonical Event Dispatch
-          void marketingEngine.track('ACCOUNT_CREATED', {
-            role: data.role,
-            registration_origin: 'auth_signup',
-          }, {
-            email: data.email,
-            first_name: data.fullName.split(' ')[0],
-            last_name: data.fullName.split(' ').slice(1).join(' '),
-          });
-          void marketingEngine.track('ROLE_SELECTED', { role: data.role });
-        }
+        // RentMaikar Marketing Engine Canonical Event Dispatch
+        void marketingEngine.track('ACCOUNT_CREATED', {
+          role: data.role,
+          registration_origin: 'auth_signup',
+        }, {
+          email: data.email,
+          first_name: data.fullName.split(' ')[0],
+          last_name: data.fullName.split(' ').slice(1).join(' '),
+        });
+        void marketingEngine.track('ROLE_SELECTED', { role: data.role });
       } catch (e) {
         console.warn('Could not persist consent preferences:', e);
       }
 
+      const { data: sessionData } = await supabase.auth.getSession();
       const registrationPath =
         data.role === 'owner' ? '/owner/register' : '/driver/register';
 
-      toast.success('Account created successfully!', {
-        description: 'Next: complete your registration details.',
-      });
-      signupForm.reset();
-      navigate(registrationPath, { replace: true });
+      if (sessionData?.session) {
+        toast.success('Account created successfully!', {
+          description: 'Next: complete your registration details.',
+        });
+        signupForm.reset();
+        navigate(registrationPath, { replace: true });
+      } else {
+        toast.success('Account created! Please check your email to confirm your account before signing in.');
+        signupForm.reset();
+      }
     }
 
 

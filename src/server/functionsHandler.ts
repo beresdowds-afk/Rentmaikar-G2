@@ -450,9 +450,10 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "verify-phone": {
       try {
         const result = await handleVerifyPhone(body, token);
-        return { status: 200, data: result };
+        return { status: result.valid ? 200 : 400, data: result };
       } catch (err: any) {
-        return { status: 400, data: { success: false, valid: false, error: err.message } };
+        const status = err.message?.includes("Authentication required") ? 401 : 400;
+        return { status, data: { success: false, valid: false, error: err.message } };
       }
     }
 

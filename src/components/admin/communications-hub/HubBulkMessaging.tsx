@@ -437,79 +437,24 @@ export const HubBulkMessaging: React.FC = () => {
       try {
         if (channel === 'email' && contact.email) {
           const emailTarget = contact.email.trim();
-          let emailSent = false;
-          let emailErr = '';
 
-          // Tier 1: Supabase edge function invoke
-          try {
-            const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-              body: {
-                to: emailTarget,
-                subject: renderedSubj,
-                body: renderedMsg,
-                recipientName: fullName !== 'Customer' ? fullName : undefined,
-              },
-            });
-            if (!error && (data?.ok !== false && data?.success !== false)) {
-              emailSent = true;
-            } else {
-              emailErr = data?.error || error?.message || 'Edge function email rejection';
-            }
-          } catch (e: any) {
-            emailErr = e.message || 'Edge function invoke error';
+          // Authoritative application-email dispatch path: send-outbound-email Edge Function
+          const { data, error } = await supabase.functions.invoke('send-outbound-email', {
+            body: {
+              action: 'send',
+              to: emailTarget,
+              subject: renderedSubj,
+              body: renderedMsg,
+              recipientName: fullName !== 'Customer' ? fullName : undefined,
+              category: 'general',
+            },
+          });
+
+          if (error || data?.success === false || data?.ok === false) {
+            const emailErr = data?.error || error?.message || 'Email delivery failed';
+            throw new Error(emailErr);
           }
 
-          // Tier 2: Resilient local API fallback (/api/functions/send-outbound-email)
-          if (!emailSent) {
-            try {
-              const res = await fetch('/api/functions/send-outbound-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  to: emailTarget,
-                  subject: renderedSubj,
-                  body: renderedMsg,
-                  recipientName: fullName !== 'Customer' ? fullName : undefined,
-                }),
-              });
-              const json = await res.json().catch(() => null);
-              if (res.ok && (json?.ok !== false && json?.success !== false)) {
-                emailSent = true;
-                emailErr = '';
-              } else {
-                emailErr = json?.error || emailErr || `Email delivery failed (HTTP ${res.status})`;
-              }
-            } catch (fbErr: any) {
-              emailErr = fbErr.message || emailErr;
-            }
-          }
-
-          // Tier 3: Alternative local API fallback (/api/functions/send-email-reply)
-          if (!emailSent) {
-            try {
-              const res2 = await fetch('/api/functions/send-email-reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipientEmail: emailTarget,
-                  subject: renderedSubj,
-                  messageContent: renderedMsg,
-                  fromAlias: 'support',
-                }),
-              });
-              const json2 = await res2.json().catch(() => null);
-              if (res2.ok && (json2?.success || json2?.ok)) {
-                emailSent = true;
-                emailErr = '';
-              }
-            } catch {
-              // Ignore secondary fallback error
-            }
-          }
-
-          if (!emailSent) {
-            throw new Error(emailErr || 'Email delivery failed across all providers');
-          }
           sent += 1;
 
           // Non-blocking conversation logging for history

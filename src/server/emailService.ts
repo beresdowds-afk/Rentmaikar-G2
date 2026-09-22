@@ -197,13 +197,6 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
         metadata: options.metadata,
       });
 
-      // If in sandbox/preview or non-production environment, provide graceful simulation to prevent blocking admin operations
-      if (process.env.NODE_ENV !== "production" || process.env.SENT_SANDBOX_MODE === "true") {
-        console.warn(`[EmailService] Resend call failed (${errMsg}), activating graceful sandbox delivery.`);
-        const fallbackId = `fallback_resend_${Date.now()}`;
-        return { ok: true, messageId: fallbackId };
-      }
-
       return { ok: false, error: errMsg };
     }
 
@@ -228,11 +221,6 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
       errorMessage: err.message,
       metadata: options.metadata,
     });
-
-    if (process.env.NODE_ENV !== "production" || process.env.SENT_SANDBOX_MODE === "true") {
-      const fallbackId = `err_fallback_${Date.now()}`;
-      return { ok: true, messageId: fallbackId };
-    }
 
     return { ok: false, error: err.message };
   }
@@ -726,7 +714,32 @@ export async function handleSendVerificationEmail(body: {
 /**
  * 4. General Outbound Transactional Email Handler (send-outbound-email)
  */
-export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean; success: boolean; messageId?: string; error?: string }> {
+export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean; success: boolean; messageId?: string; error?: string; results?: any[] }> {
+  // Support bulk send payload
+  if (body.action === "bulk" || Array.isArray(body.recipients)) {
+    const recipients = body.recipients || [];
+    if (!recipients.length) {
+      return { ok: false, success: false, error: "Recipients array required for bulk action" };
+    }
+    const results: any[] = [];
+    let sentCount = 0;
+    for (const r of recipients) {
+      const recipientEmail = typeof r === "string" ? r : (r.email || r.to);
+      const recipientSubj = r.subject || body.subject || "Notification from Rentmaikar";
+      const recipientContent = r.body || r.content || body.body || body.content || body.message;
+      const res = await handleSendOutboundEmail({
+        to: recipientEmail,
+        subject: recipientSubj,
+        body: recipientContent,
+        recipientName: r.name || r.recipientName,
+        data: { ...(body.data || {}), ...(r.customData || {}) },
+      });
+      if (res.ok) sentCount++;
+      results.push({ email: recipientEmail, success: res.ok, messageId: res.messageId, error: res.error });
+    }
+    return { ok: sentCount > 0, success: sentCount > 0, results };
+  }
+
   const to = body.to || body.recipientEmail || body.recipient || body.recipientContact || body.email;
   if (!to) {
     return { ok: false, success: false, error: "Recipient email required" };

@@ -8,39 +8,138 @@ import type { AppRole } from '@/lib/role-home';
  * RPC, which idempotently ensures profile + user_roles + two-factor settings +
  * wallet. Direct `user_roles` inserts/upserts from the UI are deprecated —
  * they duplicated logic and produced duplicate-key errors.
+ *
+ * Enforces fail-closed: verifies that user_roles actually contains the role
+ * after provisioning attempts.
  */
 export async function assignRole(
   userId: string,
   role: AppRole,
   email?: string | null,
 ): Promise<void> {
+  if (!userId) {
+    throw new Error('assignRole requires a valid userId');
+  }
+
+  let lastError: unknown = null;
+
+  // 1. provision_user_account RPC
   try {
     const { error } = await supabase.rpc('provision_user_account', {
       _user_id: userId,
       _role: role,
       ...(email ? { _email: email } : {}),
     } as never);
-    if (!error) return;
-  } catch {
-    // Fall back to server function below
+    if (error) {
+      lastError = error;
+    }
+  } catch (err) {
+    lastError = err;
   }
 
+  // 2. Fallback to server function
   try {
-    const { data } = await supabase.functions.invoke('provision-user-account', {
+    const { data, error: fnErr } = await supabase.functions.invoke('provision-user-account', {
       body: { userId, role, email },
     });
-    if (data?.ok) return;
-  } catch {
-    // Fall back to direct table upsert below
+    if (fnErr) {
+      lastError = fnErr;
+    }
+  } catch (err) {
+    lastError = err;
   }
 
+  // 3. Fallback to direct table upsert
   try {
-    await supabase.from('user_roles').upsert(
+    const { error: upsertErr } = await supabase.from('user_roles').upsert(
       { user_id: userId, role: role as any },
       { onConflict: 'user_id' }
     );
+    if (upsertErr) {
+      lastError = upsertErr;
+    }
   } catch (tableErr) {
-    console.warn('Fallback user_roles assignment error:', tableErr);
+    lastError = tableErr;
+  }
+
+  // Mandatory durable state verification:
+  // After fallback chain completes, verify user_roles contains the expected user_id + requested role.
+  const { data: roleRows, error: verifyError } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', userId);
+
+  const hasRoleDirect = Array.isArray(roleRows) && roleRows.some((r: any) => r.role === role);
+
+  if (!hasRoleDirect) {
+    // If direct select did not find the role (or was blocked by RLS), check has_role RPC
+    let hasRoleRpc = false;
+    try {
+      const { data: rpcRes, error: rpcErr } = await (supabase.rpc as any)('has_role', {
+        _user_id: userId,
+        _role: role,
+      });
+      if (!rpcErr && rpcRes === true) {
+        hasRoleRpc = true;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!hasRoleRpc) {
+      const roleFailError = new Error(
+        `Role verification failed: user_roles does not contain role "${role}" for user "${userId}".`,
+      );
+      (roleFailError as any).code = 'ROLE_VERIFICATION_FAILED';
+      (roleFailError as any).cause = verifyError || lastError;
+      throw roleFailError;
+    }
+  }
+}
+
+/**
+ * Verifies that a durable profile record exists for the given user.
+ * Attempts idempotent recovery via provision_user_account if absent.
+ * Fails closed if the profile cannot be confirmed.
+ */
+export async function verifyProfileExists(
+  userId: string,
+  requestedRole?: AppRole,
+  email?: string | null,
+): Promise<void> {
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (profile) return;
+
+  // Attempt recovery via provision_user_account RPC
+  try {
+    await supabase.rpc('provision_user_account', {
+      _user_id: userId,
+      ...(requestedRole ? { _role: requestedRole } : {}),
+      ...(email ? { _email: email } : {}),
+    } as never);
+  } catch {
+    // ignore
+  }
+
+  // Re-verify after recovery attempt
+  const { data: retryProfile, error: retryErr } = await supabase
+    .from('profiles')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!retryProfile) {
+    const err = new Error(
+      `Profile provisioning failed: durable profile record was not created for user ${userId}.`,
+    );
+    (err as any).code = 'PROFILE_PROVISIONING_FAILED';
+    (err as any).cause = retryErr || profileErr;
+    throw err;
   }
 }
 
@@ -64,11 +163,14 @@ export interface EnsureAuthUserArgs {
 
 /**
  * Ensures an auth user exists for an applicant and returns their id.
- * Shared by the driver and owner registration flows (previously duplicated
- * verbatim in both pages).
+ * Shared by the driver and owner registration flows.
  *
- * If a *different* user is signed in, they are signed out first so the new
- * application never gets linked to the wrong account.
+ * Enforces fail-closed semantics:
+ * - If a different user is signed in, they are signed out first.
+ * - Confirms valid Auth user identity (never returns null/undefined user ID).
+ * - Confirms profile existence.
+ * - Confirms role assignment in user_roles.
+ * - Reconciles existing registered accounts cleanly on duplicate submission without duplicating identities.
  */
 export async function ensureAuthUserForApplicant({
   email,
@@ -86,6 +188,7 @@ export async function ensureAuthUserForApplicant({
     await supabase.auth.signOut();
   } else if (currentEmail === normalizedEmail && sessionData.session?.user?.id) {
     const existingUserId = sessionData.session.user.id;
+    await verifyProfileExists(existingUserId, requestedRole, normalizedEmail);
     if (requestedRole) {
       await assignRole(existingUserId, requestedRole, normalizedEmail);
     }
@@ -112,6 +215,7 @@ export async function ensureAuthUserForApplicant({
 
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
+        await verifyProfileExists(userId, requestedRole, normalizedEmail);
         if (requestedRole) {
           await assignRole(userId, requestedRole, normalizedEmail);
         }
@@ -159,6 +263,7 @@ export async function ensureAuthUserForApplicant({
       });
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
+        await verifyProfileExists(userId, requestedRole, normalizedEmail);
         if (requestedRole) {
           await assignRole(userId, requestedRole, normalizedEmail);
         }
@@ -189,6 +294,7 @@ export async function ensureAuthUserForApplicant({
     });
     if (!signInError && signInData?.user?.id) {
       const userId = signInData.user.id;
+      await verifyProfileExists(userId, requestedRole, normalizedEmail);
       if (requestedRole) {
         await assignRole(userId, requestedRole, normalizedEmail);
       }
@@ -204,10 +310,15 @@ export async function ensureAuthUserForApplicant({
 
   const userId = signUpData.user?.id ?? null;
   if (!userId) {
-    throw new Error('Could not create your account. Please try again.');
+    const missingUserErr = new Error('Authentication failed: Supabase Auth did not return a valid user identity.');
+    (missingUserErr as any).code = 'AUTH_USER_MISSING';
+    throw missingUserErr;
   }
 
-  // 5. Ensure role and account setup is immediately provisioned
+  // 5. Verify profile exists (fails closed if missing)
+  await verifyProfileExists(userId, requestedRole, normalizedEmail);
+
+  // 6. Ensure role and account setup is immediately provisioned and verified in user_roles
   if (requestedRole) {
     await assignRole(userId, requestedRole, normalizedEmail);
   }

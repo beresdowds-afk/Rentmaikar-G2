@@ -34,9 +34,10 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 const assignRole = vi.fn(async () => {});
+const verifyProfileExists = vi.fn(async () => {});
 vi.mock("@/lib/user-provisioning", () => ({
   assignRole: (...args: unknown[]) => assignRole.apply(null, args as []),
-
+  verifyProfileExists: (...args: unknown[]) => verifyProfileExists.apply(null, args as []),
 }));
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";

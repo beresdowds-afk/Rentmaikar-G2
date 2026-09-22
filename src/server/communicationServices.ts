@@ -440,7 +440,24 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
     }
   }
 
-  // 4. Safe fallback in sandbox / simulated delivery
+  // 4. Fallback handling — OTP verification messages must fail closed!
+  const isOtpNotification =
+    input.notificationType === "verification_code" ||
+    input.notificationType === "phone_otp" ||
+    Boolean(input.verificationCode);
+
+  if (isOtpNotification) {
+    console.error(`[SMS Delivery] Critical: OTP delivery failed to ${to} across all configured providers. Failing closed.`);
+    return {
+      success: false,
+      messageId: `failed_${Date.now()}`,
+      channel,
+      provider: "none",
+      region,
+      deliveryStatus: "failed",
+    };
+  }
+
   const fallbackOutcome = {
     success: true,
     messageId: `sim_${Date.now()}`,
@@ -914,6 +931,10 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       console.warn("[verification_event_log] Warning:", logErr.message);
     }
 
+    if (!smsRes.success) {
+      throw new Error(`Failed to dispatch verification code: ${smsRes.error || "SMS provider unavailable"}`);
+    }
+
     return {
       success: true,
       provider: smsRes.provider || "sent",
@@ -932,14 +953,28 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       throw new Error("A 6-digit verification code is required");
     }
 
-    const isMasterDemo = rawCode === "123456";
-    let isCodeValid = isMasterDemo;
+    let isCodeValid = false;
 
     // Check in-memory store
     const mem = inMemoryOtpStore.get(phone);
-    if (mem && mem.code === rawCode && Date.now() <= mem.expiresAt) {
-      isCodeValid = true;
-      inMemoryOtpStore.delete(phone);
+    if (mem) {
+      if (Date.now() > mem.expiresAt) {
+        inMemoryOtpStore.delete(phone);
+        throw new Error("Verification code has expired. Please request a new one.");
+      }
+      if (mem.attempts >= 5) {
+        inMemoryOtpStore.delete(phone);
+        throw new Error("Too many incorrect attempts. Please request a new code.");
+      }
+      if (mem.code === rawCode) {
+        isCodeValid = true;
+        inMemoryOtpStore.delete(phone);
+      } else {
+        mem.attempts += 1;
+        if (mem.attempts >= 5) {
+          inMemoryOtpStore.delete(phone);
+        }
+      }
     }
 
     // Check PostgreSQL phone_otp_codes
@@ -947,25 +982,41 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
       try {
         const dbRes = await pool.query(
-          `SELECT id FROM public.phone_otp_codes
-           WHERE phone = $1 AND code_hash = $2 AND consumed_at IS NULL AND expires_at > NOW()
+          `SELECT id, code_hash, attempts, expires_at FROM public.phone_otp_codes
+           WHERE phone = $1 AND consumed_at IS NULL
            ORDER BY created_at DESC LIMIT 1`,
-          [phone, codeHash]
+          [phone]
         );
         if (dbRes.rows.length > 0) {
-          isCodeValid = true;
-          await pool.query(
-            `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`,
-            [dbRes.rows[0].id]
-          );
+          const row = dbRes.rows[0];
+          if (new Date(row.expires_at).getTime() <= Date.now()) {
+            throw new Error("Verification code has expired. Please request a new one.");
+          }
+          if ((row.attempts || 0) >= 5) {
+            throw new Error("Too many incorrect attempts. Please request a new code.");
+          }
+          if (row.code_hash === codeHash) {
+            isCodeValid = true;
+            await pool.query(
+              `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`,
+              [row.id]
+            );
+          } else {
+            await pool.query(
+              `UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`,
+              [row.id]
+            );
+          }
         }
       } catch (dbErr: any) {
+        if (dbErr.message?.includes("expired") || dbErr.message?.includes("attempts")) {
+          throw dbErr;
+        }
         console.warn("[phone_otp_codes] Verify query warning:", dbErr.message);
       }
     }
 
     if (!isCodeValid) {
-      if (mem) mem.attempts = (mem.attempts || 0) + 1;
       throw new Error("Invalid or expired verification code. Please check your messages and try again.");
     }
 
@@ -1178,39 +1229,7 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
   // C. LINK_VERIFY (Link verified phone to currently logged-in user)
   // ---------------------------------------------------------------
   if (action === "link_verify") {
-    const rawCode = String(body.code || "").trim();
-    const isMasterDemo = rawCode === "123456";
-    let isCodeValid = isMasterDemo;
-
-    const mem = inMemoryOtpStore.get(phone);
-    if (mem && mem.code === rawCode && Date.now() <= mem.expiresAt) {
-      isCodeValid = true;
-      inMemoryOtpStore.delete(phone);
-    }
-
-    if (!isCodeValid) {
-      const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
-      try {
-        const dbRes = await pool.query(
-          `SELECT id FROM public.phone_otp_codes
-           WHERE phone = $1 AND code_hash = $2 AND consumed_at IS NULL AND expires_at > NOW()
-           ORDER BY created_at DESC LIMIT 1`,
-          [phone, codeHash]
-        );
-        if (dbRes.rows.length > 0) {
-          isCodeValid = true;
-          await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [dbRes.rows[0].id]);
-        }
-      } catch (dbErr: any) {
-        console.warn("[phone_otp_codes] Link verify warning:", dbErr.message);
-      }
-    }
-
-    if (!isCodeValid) {
-      throw new Error("Invalid or expired verification code");
-    }
-
-    // Extract user ID from auth token if available
+    // Extract user ID from auth token - strictly required for linking
     let callerId: string | null = null;
     if (token) {
       try {
@@ -1219,15 +1238,83 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       } catch {}
     }
 
-    if (callerId) {
-      await pool.query(
-        `UPDATE public.profiles SET phone = $1, phone_verified = true, updated_at = NOW() WHERE user_id = $2`,
-        [phone, callerId]
-      );
+    if (!callerId) {
+      throw new Error("You must be signed in to link or verify a phone number");
+    }
+
+    const rawCode = String(body.code || "").trim();
+    if (!rawCode || rawCode.length < 6) {
+      throw new Error("A 6-digit verification code is required");
+    }
+
+    let isCodeValid = false;
+
+    const mem = inMemoryOtpStore.get(phone);
+    if (mem) {
+      if (Date.now() > mem.expiresAt) {
+        inMemoryOtpStore.delete(phone);
+        throw new Error("Verification code has expired. Please request a new one.");
+      }
+      if (mem.attempts >= 5) {
+        inMemoryOtpStore.delete(phone);
+        throw new Error("Too many incorrect attempts. Please request a new code.");
+      }
+      if (mem.code === rawCode) {
+        isCodeValid = true;
+        inMemoryOtpStore.delete(phone);
+      } else {
+        mem.attempts += 1;
+        if (mem.attempts >= 5) inMemoryOtpStore.delete(phone);
+      }
+    }
+
+    if (!isCodeValid) {
+      const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
+      try {
+        const dbRes = await pool.query(
+          `SELECT id, code_hash, attempts, expires_at FROM public.phone_otp_codes
+           WHERE phone = $1 AND consumed_at IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+          [phone]
+        );
+        if (dbRes.rows.length > 0) {
+          const row = dbRes.rows[0];
+          if (new Date(row.expires_at).getTime() <= Date.now()) {
+            throw new Error("Verification code has expired. Please request a new one.");
+          }
+          if ((row.attempts || 0) >= 5) {
+            throw new Error("Too many incorrect attempts. Please request a new code.");
+          }
+          if (row.code_hash === codeHash) {
+            isCodeValid = true;
+            await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+          } else {
+            await pool.query(`UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+          }
+        }
+      } catch (dbErr: any) {
+        if (dbErr.message?.includes("expired") || dbErr.message?.includes("attempts")) {
+          throw dbErr;
+        }
+        console.warn("[phone_otp_codes] Link verify warning:", dbErr.message);
+      }
+    }
+
+    if (!isCodeValid) {
+      throw new Error("Invalid or expired verification code");
+    }
+
+    await pool.query(
+      `UPDATE public.profiles SET phone = $1, phone_verified = true, updated_at = NOW() WHERE user_id = $2`,
+      [phone, callerId]
+    );
+    try {
       await pool.query(
         `UPDATE auth.users SET phone = $1, phone_confirmed_at = NOW() WHERE id = $2`,
         [phone.replace(/^\+/, ""), callerId]
       );
+    } catch (authErr: any) {
+      console.warn("[link_verify] Auth sync warning:", authErr.message);
     }
 
     return {
@@ -1249,8 +1336,58 @@ export async function handleVerifyPhone(body: any, token?: string): Promise<{
   expiresIn?: number;
 }> {
   const action = body.action || "verify_code";
+  const rawPhone = body.phone || "";
+  const phone = normalizeE164(rawPhone);
+  if (!phone) {
+    return {
+      success: false,
+      valid: false,
+      message: "Valid E.164 phone number required (e.g. +14155552671 or +2348012345678)",
+    };
+  }
+
+  // Extract authenticated caller ID from token (verify-phone is authoritative for existing users)
+  let callerId: string | null = null;
+  if (token) {
+    try {
+      const decoded = JSON.parse(Buffer.from(token.split(".")[1], "base64").toString());
+      callerId = decoded.sub || null;
+    } catch {}
+  }
+
+  if (!callerId) {
+    throw new Error("Authentication required for phone verification");
+  }
+
+  const pool = getDbPool();
+
   if (action === "send_code") {
-    const res = await handlePhoneOtp({ ...body, action: "send" }, token);
+    // Check if phone belongs to another account
+    try {
+      const existing = await pool.query(
+        `SELECT user_id FROM public.profiles WHERE phone = $1 AND user_id != $2 LIMIT 1`,
+        [phone, callerId]
+      );
+      if (existing.rows.length > 0) {
+        return {
+          success: false,
+          valid: false,
+          message: "That phone number is already linked to another account.",
+        };
+      }
+    } catch (e: any) {
+      console.warn("[verify-phone] Pre-flight uniqueness check warning:", e.message);
+    }
+
+    const res = await handlePhoneOtp({ ...body, action: "send", phone }, token);
+    if (!res.success) {
+      return {
+        success: false,
+        valid: false,
+        message: res.error || "Failed to send verification code",
+      };
+    }
+
     return {
       success: true,
       valid: true,
@@ -1259,52 +1396,93 @@ export async function handleVerifyPhone(body: any, token?: string): Promise<{
     };
   }
 
-  const phone = normalizeE164(body.phone || "");
   const code = (body.code || "").trim();
-
-  const isDemo = code === "123456";
-  const mem = inMemoryOtpStore.get(phone);
-  const memMatch = mem && mem.code === code && Date.now() <= mem.expiresAt;
-
-  let dbMatch = false;
-  const pool = getDbPool();
-  const codeHash = crypto.createHash("sha256").update(code).digest("hex");
-  try {
-    const row = await pool.query(
-      `SELECT id FROM public.phone_otp_codes
-       WHERE phone = $1 AND code_hash = $2 AND consumed_at IS NULL AND expires_at > NOW()
-       ORDER BY created_at DESC LIMIT 1`,
-      [phone, codeHash]
-    );
-    if (row.rows.length > 0) {
-      dbMatch = true;
-      await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.rows[0].id]);
-    }
-  } catch (err: any) {
-    console.warn("[verify-phone] DB check warning:", err.message);
+  if (!code || code.length < 6) {
+    return {
+      success: false,
+      valid: false,
+      message: "A 6-digit verification code is required",
+    };
   }
 
-  if (isDemo || memMatch || dbMatch) {
-    if (mem) inMemoryOtpStore.delete(phone);
-
-    let callerId: string | null = null;
-    if (token) {
-      try {
-        const decoded = JSON.parse(Buffer.from(token.split(".")[1], "base64").toString());
-        callerId = decoded.sub || null;
-      } catch {}
+  let isCodeValid = false;
+  const mem = inMemoryOtpStore.get(phone);
+  if (mem) {
+    if (Date.now() > mem.expiresAt) {
+      inMemoryOtpStore.delete(phone);
+      return {
+        success: false,
+        valid: false,
+        message: "Verification code expired. Please request a new one.",
+      };
     }
-
-    if (callerId) {
-      await pool.query(
-        `UPDATE public.profiles SET phone = $1, phone_verified = true, updated_at = NOW() WHERE user_id = $2`,
-        [phone, callerId]
-      );
+    if (mem.attempts >= 5) {
+      inMemoryOtpStore.delete(phone);
+      return {
+        success: false,
+        valid: false,
+        message: "Too many incorrect attempts. Please request a new code.",
+      };
+    }
+    if (mem.code === code) {
+      isCodeValid = true;
+      inMemoryOtpStore.delete(phone);
     } else {
-      await pool.query(
-        `UPDATE public.profiles SET phone_verified = true, updated_at = NOW() WHERE phone = $1 OR phone = $2`,
-        [phone, phone.replace(/^\+/, "")]
+      mem.attempts += 1;
+      if (mem.attempts >= 5) inMemoryOtpStore.delete(phone);
+    }
+  }
+
+  if (!isCodeValid) {
+    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+    try {
+      const row = await pool.query(
+        `SELECT id, code_hash, attempts, expires_at FROM public.phone_otp_codes
+         WHERE phone = $1 AND consumed_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [phone]
       );
+      if (row.rows.length > 0) {
+        const otpRow = row.rows[0];
+        if (new Date(otpRow.expires_at).getTime() <= Date.now()) {
+          return {
+            success: false,
+            valid: false,
+            message: "Verification code expired. Please request a new one.",
+          };
+        }
+        if ((otpRow.attempts || 0) >= 5) {
+          return {
+            success: false,
+            valid: false,
+            message: "Too many incorrect attempts. Please request a new code.",
+          };
+        }
+        if (otpRow.code_hash === codeHash) {
+          isCodeValid = true;
+          await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [otpRow.id]);
+        } else {
+          await pool.query(`UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [otpRow.id]);
+        }
+      }
+    } catch (err: any) {
+      console.warn("[verify-phone] DB check warning:", err.message);
+    }
+  }
+
+  if (isCodeValid) {
+    await pool.query(
+      `UPDATE public.profiles SET phone = $1, phone_verified = true, updated_at = NOW() WHERE user_id = $2`,
+      [phone, callerId]
+    );
+
+    try {
+      await pool.query(
+        `UPDATE auth.users SET phone = $1, phone_confirmed_at = NOW() WHERE id = $2`,
+        [phone.replace(/^\+/, ""), callerId]
+      );
+    } catch (authErr: any) {
+      console.warn("[verify-phone] auth.users sync warning:", authErr.message);
     }
 
     return {

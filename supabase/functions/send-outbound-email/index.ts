@@ -94,19 +94,76 @@ function getSourceAddress(category: string, country?: string): string {
   return formatSenderEmail("noreply");
 }
 
+// ─── Composed Email HTML Formatter ───
+function formatComposedEmailHtml(bodyText: string, recipientName?: string): string {
+  const greeting = recipientName && recipientName !== "Customer" && recipientName !== "there"
+    ? `<p style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #0f172a;">Hello ${recipientName},</p>`
+    : "";
+  const paragraphs = String(bodyText)
+    .split(/\n\n+/)
+    .map((p) => `<p style="margin: 0 0 16px 0; line-height: 1.6; color: #334155; font-size: 15px;">${p.replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <tr>
+            <td style="background-color:#0f172a;padding:24px 32px;text-align:left;">
+              <span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Rentmaikar</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;color:#334155;">
+              ${greeting}
+              ${paragraphs}
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #f1f5f9;text-align:center;font-size:12px;color:#64748b;">
+              <p style="margin:0 0 6px 0;">Rentmaikar Mobility Solutions &middot; Communications Hub</p>
+              <p style="margin:0;">Support: <a href="mailto:support@rentmaikar.com" style="color:#0284c7;text-decoration:none;">support@rentmaikar.com</a></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 // ─── Template Renderer ───
 function renderTemplate(
   templateName: string,
   data: Record<string, unknown> = {}
 ): { subject: string; html: string; text?: string; from: string } | null {
-  // If custom template is passed with subject & html
-  if (templateName === "custom" && data.subject && data.html) {
-    return {
-      subject: String(data.subject),
-      html: String(data.html),
-      text: typeof data.text === "string" ? data.text : undefined,
-      from: formatSenderEmail("support"),
-    };
+  // Support composed/custom emails with direct subject and body/html/text content
+  if (
+    templateName === "custom" ||
+    templateName === "composed" ||
+    !templateName ||
+    (data.subject && (data.body || data.html || data.content || data.text))
+  ) {
+    if (data.subject && (data.html || data.body || data.content || data.text)) {
+      const rawBody = (data.html || data.body || data.content || data.text || "") as string;
+      const htmlContent = data.html
+        ? String(data.html)
+        : formatComposedEmailHtml(rawBody, (data.recipientName || data.firstName) as string | undefined);
+      return {
+        subject: String(data.subject),
+        html: htmlContent,
+        text: typeof data.text === "string" ? data.text : (typeof data.body === "string" ? data.body : undefined),
+        from: (typeof data.from === "string" && data.from) ? data.from : formatSenderEmail("support"),
+      };
+    }
   }
 
   const now = new Date();
@@ -327,26 +384,52 @@ serve(async (req) => {
         data = {},
         priority = "normal",
         country,
+        subject,
+        body: emailBody,
+        content,
+        html,
+        text,
+        recipientName,
       } = body;
 
-      if (!to || !templateName) {
-        throw new Error("Missing required fields: to, templateName");
+      if (!to) {
+        throw new Error("Missing required field: to");
+      }
+
+      const mergedData: Record<string, unknown> = {
+        ...data,
+        ...(subject !== undefined ? { subject } : {}),
+        ...(emailBody !== undefined ? { body: emailBody } : {}),
+        ...(content !== undefined ? { content } : {}),
+        ...(html !== undefined ? { html } : {}),
+        ...(text !== undefined ? { text } : {}),
+        ...(recipientName !== undefined ? { recipientName, firstName: String(recipientName).split(" ")[0] } : {}),
+      };
+
+      const resolvedTemplate =
+        templateName ||
+        (mergedData.subject && (mergedData.body || mergedData.html || mergedData.content || mergedData.text)
+          ? "custom"
+          : null);
+
+      if (!resolvedTemplate) {
+        throw new Error("Missing required fields: to, templateName (or subject and body)");
       }
 
       // ─── Admin outbound kill-switch (email, per region) ───
       {
         const paused = await outboundPausedResponse(supabase, "email", country, corsHeaders, {
           recipient: to,
-          notificationType: templateName,
+          notificationType: resolvedTemplate,
           functionName: "send-outbound-email",
         });
         if (paused) return paused;
       }
 
       // Render template
-      const rendered = renderTemplate(templateName, data);
+      const rendered = renderTemplate(resolvedTemplate, mergedData);
       if (!rendered) {
-        throw new Error(`Unknown template: ${templateName}`);
+        throw new Error(`Unknown template: ${resolvedTemplate}`);
       }
 
       // Override from address based on category
@@ -361,7 +444,7 @@ serve(async (req) => {
         rendered.html,
         rendered.text,
         [
-          { name: "template", value: templateName },
+          { name: "template", value: resolvedTemplate },
           { name: "category", value: category },
           { name: "priority", value: priority },
         ]
@@ -371,7 +454,7 @@ serve(async (req) => {
       await logEmail(supabase, {
         messageId: result.messageId,
         recipient: to,
-        template: templateName,
+        template: resolvedTemplate,
         category,
         status: result.success ? "sent" : "failed",
         priority,
@@ -388,7 +471,7 @@ serve(async (req) => {
         region: country ?? null,
         provider: "resend",
         recipient: to,
-        notificationType: templateName,
+        notificationType: resolvedTemplate,
         messageId: result.messageId,
         functionName: "send-outbound-email",
       });
@@ -401,7 +484,7 @@ serve(async (req) => {
         direction: 'outbound',
         recipient: to,
         sender: fromAddress,
-        template_name: templateName,
+        template_name: resolvedTemplate,
         provider_message_id: result.messageId,
         error_message: result.error,
         metadata: { category, priority },
@@ -410,7 +493,7 @@ serve(async (req) => {
       if (!result.success) {
         console.error(`Email to ${to} failed:`, result.error);
       } else {
-        console.log(`Email sent to ${to} via template ${templateName}`);
+        console.log(`Email sent to ${to} via template ${resolvedTemplate}`);
       }
 
       return new Response(
@@ -431,24 +514,52 @@ serve(async (req) => {
         category = "general",
         baseData = {},
         priority = "normal",
+        subject,
+        body: emailBody,
+        content,
+        html,
+        text,
       } = body;
 
-      if (!recipients?.length || !templateName) {
-        throw new Error("Missing required fields: recipients, templateName");
+      if (!recipients?.length) {
+        throw new Error("Missing required field: recipients");
+      }
+
+      const mergedBaseData: Record<string, unknown> = {
+        ...baseData,
+        ...(subject !== undefined ? { subject } : {}),
+        ...(emailBody !== undefined ? { body: emailBody } : {}),
+        ...(content !== undefined ? { content } : {}),
+        ...(html !== undefined ? { html } : {}),
+        ...(text !== undefined ? { text } : {}),
+      };
+
+      const resolvedTemplate =
+        templateName ||
+        (mergedBaseData.subject && (mergedBaseData.body || mergedBaseData.html || mergedBaseData.content || mergedBaseData.text)
+          ? "custom"
+          : null);
+
+      if (!resolvedTemplate) {
+        throw new Error("Missing required fields: templateName or subject/body");
       }
 
       const results: { email: string; success: boolean; messageId?: string; error?: string }[] = [];
 
       for (const recipient of recipients) {
         const mergedData = {
-          ...baseData,
+          ...mergedBaseData,
           ...recipient.customData,
-          firstName: recipient.firstName || baseData.firstName || "there",
+          firstName: recipient.firstName || recipient.recipientName?.split(' ')[0] || mergedBaseData.firstName || "there",
+          recipientName: recipient.recipientName || recipient.name || mergedBaseData.recipientName,
+          ...(recipient.subject ? { subject: recipient.subject } : {}),
+          ...(recipient.body ? { body: recipient.body } : {}),
+          ...(recipient.html ? { html: recipient.html } : {}),
         };
 
-        const rendered = renderTemplate(templateName, mergedData);
+        const rendered = renderTemplate(resolvedTemplate, mergedData);
         if (!rendered) {
-          results.push({ email: recipient.email, success: false, error: `Unknown template: ${templateName}` });
+          results.push({ email: recipient.email, success: false, error: `Unknown template: ${resolvedTemplate}` });
           continue;
         }
 
@@ -462,7 +573,7 @@ serve(async (req) => {
           rendered.html,
           rendered.text,
           [
-            { name: "template", value: templateName },
+            { name: "template", value: resolvedTemplate },
             { name: "category", value: category },
           ]
         );
@@ -470,7 +581,7 @@ serve(async (req) => {
         await logEmail(supabase, {
           messageId: result.messageId,
           recipient: recipient.email,
-          template: templateName,
+          template: resolvedTemplate,
           category,
           status: result.success ? "sent" : "failed",
           priority,

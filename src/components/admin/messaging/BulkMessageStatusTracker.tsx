@@ -319,14 +319,16 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
         let errMsg = '';
         let messageId = '';
 
-        // Tier 1: Supabase edge function invoke
+        // Authoritative dispatch: Supabase send-outbound-email edge function
         try {
           const { data, error } = await supabase.functions.invoke('send-outbound-email', {
             body: {
+              action: 'send',
               to: emailTarget,
               subject: subject || 'Notice from Rentmaikar Admin',
               body,
               recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
+              category: 'general',
             },
           });
           if (!error && (data?.ok !== false && data?.success !== false)) {
@@ -339,17 +341,19 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
           errMsg = e.message || 'Invoke error';
         }
 
-        // Tier 2: Resilient local API fallback
+        // Secondary fallback to local API gateway proxy for send-outbound-email if edge function network fails
         if (!delivered) {
           try {
             const res = await fetch('/api/functions/send-outbound-email', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                action: 'send',
                 to: emailTarget,
                 subject: subject || 'Notice from Rentmaikar Admin',
                 body,
                 recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
+                category: 'general',
               }),
             });
             const json = await res.json().catch(() => null);
@@ -362,30 +366,6 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
             }
           } catch (fbErr: any) {
             errMsg = fbErr.message || errMsg;
-          }
-        }
-
-        // Tier 3: Local send-email-reply fallback
-        if (!delivered) {
-          try {
-            const res2 = await fetch('/api/functions/send-email-reply', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                recipientEmail: emailTarget,
-                subject: subject || 'Notice from Rentmaikar Admin',
-                messageContent: body,
-                fromAlias: 'support',
-              }),
-            });
-            const json2 = await res2.json().catch(() => null);
-            if (res2.ok && (json2?.success || json2?.ok)) {
-              delivered = true;
-              messageId = json2?.messageId || '';
-              errMsg = '';
-            }
-          } catch {
-            /* secondary fallback */
           }
         }
 

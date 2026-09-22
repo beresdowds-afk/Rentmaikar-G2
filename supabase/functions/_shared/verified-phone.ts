@@ -31,7 +31,8 @@ export async function requireVerifiedPhone(
       const authUser = authData?.user;
       if (authUser?.phone) {
         phone = authUser.phone;
-        if (authUser.phone_confirmed_at || authUser.user_metadata?.phone_verified) {
+        // Only trust authoritative auth confirmation, never unverified client user_metadata
+        if (authUser.phone_confirmed_at) {
           phoneVerified = true;
           // Sync back to profile to avoid future desyncs
           await supabase

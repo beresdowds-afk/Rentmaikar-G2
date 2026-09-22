@@ -164,14 +164,15 @@ async function startServer() {
     ],
     async (req, res) => {
       try {
-        if (req.path === "/api/email/forward") {
+        const normalizedPath = req.path.replace(/\/+$/, "");
+        if (normalizedPath === "/api/email/forward") {
           const { handleInboundEmailForward } = await import("./src/server/emailService");
           const result = await handleInboundEmailForward(req.body);
           res.status(result.ok ? 200 : 400).json(result);
           return;
         }
 
-        if (req.path === "/api/email/test" || req.path === "/api/email/test-delivery") {
+        if (normalizedPath === "/api/email/test" || normalizedPath === "/api/email/test-delivery") {
           const { testEmailDelivery } = await import("./src/server/emailService");
           const result = await testEmailDelivery(req.body);
           res.status(result.ok ? 200 : 400).json(result);
@@ -312,6 +313,16 @@ async function startServer() {
     }
   });
 
+  // Explicit catch-all for /api and /functions to guarantee JSON responses (never HTML)
+  app.use(["/api", "/functions"], (req, res) => {
+    res.status(404).json({
+      ok: false,
+      success: false,
+      error: "Not Found",
+      message: `API endpoint ${req.method} ${req.originalUrl || req.path} not found`,
+    });
+  });
+
   // Development vs Production serving
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -322,7 +333,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
+    app.use((_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
