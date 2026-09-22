@@ -50,6 +50,7 @@ import { useCommunicationsHub } from './CommunicationsHubContext';
 import { renderPlaceholders } from '@/lib/reply-placeholders';
 import { format } from 'date-fns';
 import { calculateSmsSegments } from '@/lib/sms-templates';
+import { cn } from '@/lib/utils';
 
 type BulkChannel = 'sms' | 'whatsapp' | 'email' | 'in_app';
 
@@ -134,6 +135,10 @@ export const HubBulkMessaging: React.FC = () => {
     skipped: number;
     failures: { recipient: string; reason: string }[];
   } | null>(null);
+
+  const [recipientStatuses, setRecipientStatuses] = useState<
+    Record<string, { status: 'idle' | 'sending' | 'success' | 'failed'; error?: string; httpStatus?: number }>
+  >({});
 
   const abortRef = useRef(false);
 
@@ -387,6 +392,16 @@ export const HubBulkMessaging: React.FC = () => {
     setIsSending(true);
     abortRef.current = false;
 
+    const initialStatuses: Record<
+      string,
+      { status: 'idle' | 'sending' | 'success' | 'failed'; error?: string; httpStatus?: number }
+    > = {};
+    usableContacts.forEach((c, idx) => {
+      const k = c.user_id || c.email || c.phone || `recipient-${idx}`;
+      initialStatuses[k] = { status: 'idle' };
+    });
+    setRecipientStatuses(initialStatuses);
+
     const initialProgress = {
       total: usableContacts.length,
       completed: 0,
@@ -408,8 +423,15 @@ export const HubBulkMessaging: React.FC = () => {
       }
 
       const contact = usableContacts[i];
+      const recipientKey = contact.user_id || contact.email || contact.phone || `recipient-${i}`;
       const fullName = (contact.full_name || '').trim() || 'Customer';
       const firstName = (contact.full_name || '').trim() ? fullName.split(' ')[0] : 'there';
+
+      // Mark recipient as currently dispatching
+      setRecipientStatuses((prev) => ({
+        ...prev,
+        [recipientKey]: { status: 'sending' },
+      }));
 
       // Personalize content
       const renderedMsg = renderPlaceholders(
@@ -438,24 +460,115 @@ export const HubBulkMessaging: React.FC = () => {
         if (channel === 'email' && contact.email) {
           const emailTarget = contact.email.trim();
 
-          // Authoritative application-email dispatch path: send-outbound-email Edge Function
-          const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-            body: {
-              action: 'send',
-              to: emailTarget,
+          const emailPayload = {
+            action: 'send',
+            to: emailTarget,
+            subject: renderedSubj,
+            body: renderedMsg,
+            recipientName: fullName !== 'Customer' ? fullName : undefined,
+            category: 'general',
+            templateData: {
               subject: renderedSubj,
               body: renderedMsg,
               recipientName: fullName !== 'Customer' ? fullName : undefined,
-              category: 'general',
             },
-          });
+          };
 
-          if (error || data?.success === false || data?.ok === false) {
-            const emailErr = data?.error || error?.message || 'Email delivery failed';
-            throw new Error(emailErr);
+          const supabaseBaseUrl = (supabase as any)?.supabaseUrl || 'https://jrsydiofzceoeddjogov.supabase.co';
+          const functionsBaseUrl = (supabase.functions as any)?.url || `${supabaseBaseUrl}/functions/v1`;
+          const exactRequestUrl = `${functionsBaseUrl}/send-outbound-email`;
+          const localProxyUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/functions/send-outbound-email`;
+
+          // Comprehensive logging before supabase.functions.invoke
+          console.group(`[HubBulkMessaging] 🚀 Outbound Email Request: send-outbound-email -> ${emailTarget}`);
+          console.log('📌 Exact Request URL (Edge Function Target):', exactRequestUrl);
+          console.log('📌 HTTP Method:', 'POST');
+          console.log('📌 Request Payload:', emailPayload);
+          console.log('📌 Potential Local Proxy / Fallback URL:', localProxyUrl);
+          console.log('📌 Supabase Client Configuration:', {
+            supabaseUrl: supabaseBaseUrl,
+            functionsUrl: (supabase.functions as any)?.url,
+            channel: 'email',
+            recipient: emailTarget,
+            timestamp: new Date().toISOString(),
+          });
+          console.groupEnd();
+
+          let emailDelivered = false;
+          let emailErrorMsg = '';
+          let responseStatus = 200;
+
+          // Invoke Edge Function
+          try {
+            const invokeRes = await supabase.functions.invoke('send-outbound-email', {
+              body: emailPayload,
+            });
+
+            // Extract HTTP status code from response
+            if ((invokeRes as any)?.status && typeof (invokeRes as any).status === 'number') {
+              responseStatus = (invokeRes as any).status;
+            } else if ((invokeRes.error as any)?.context?.status && typeof (invokeRes.error as any).context.status === 'number') {
+              responseStatus = (invokeRes.error as any).context.status;
+            } else if ((invokeRes.error as any)?.status && typeof (invokeRes.error as any).status === 'number') {
+              responseStatus = (invokeRes.error as any).status;
+            } else if ((invokeRes.data as any)?.status && typeof (invokeRes.data as any).status === 'number') {
+              responseStatus = (invokeRes.data as any).status;
+            } else if (invokeRes.error) {
+              responseStatus = 500;
+            }
+
+            console.group(`[HubBulkMessaging] 📥 Outbound Email Response: send-outbound-email -> ${emailTarget}`);
+            console.log('📌 Checked response.status:', responseStatus);
+            console.log('📌 Response Data:', invokeRes.data);
+            console.log('📌 Response Error:', invokeRes.error);
+            console.groupEnd();
+
+            // Verify response.status: If 405 or any non-2xx code, mark as failed!
+            if (responseStatus === 405 || responseStatus < 200 || responseStatus >= 300) {
+              emailDelivered = false;
+              if (responseStatus === 405) {
+                emailErrorMsg = invokeRes.error?.message || 'HTTP 405 Method Not Allowed: Request rejected by server or intercepted by static proxy';
+              } else {
+                emailErrorMsg = invokeRes.error?.message || invokeRes.data?.error || invokeRes.data?.message || `API call failed with HTTP status ${responseStatus}`;
+              }
+            } else if (invokeRes.error) {
+              emailDelivered = false;
+              emailErrorMsg = invokeRes.error.message || `Edge function returned error (HTTP ${responseStatus})`;
+            } else if (invokeRes.data?.success === false || invokeRes.data?.ok === false) {
+              emailDelivered = false;
+              responseStatus = typeof invokeRes.data?.status === 'number' ? invokeRes.data.status : 400;
+              emailErrorMsg = invokeRes.data?.error || invokeRes.data?.message || `Server reported delivery rejection (HTTP ${responseStatus})`;
+            } else if (invokeRes.data && (invokeRes.data.success || invokeRes.data.ok)) {
+              emailDelivered = true;
+              emailErrorMsg = '';
+            } else {
+              emailDelivered = false;
+              responseStatus = 500;
+              emailErrorMsg = 'Unexpected response format from email function';
+            }
+          } catch (invokeErr: any) {
+            responseStatus = (invokeErr as any)?.context?.status || (invokeErr as any)?.status || 500;
+            emailErrorMsg = invokeErr?.message || `Edge function invoke failed (HTTP ${responseStatus})`;
+            emailDelivered = false;
+          }
+
+          // Strict verification: Status code must be 2xx AND delivery confirmed
+          if (!emailDelivered || responseStatus === 405 || responseStatus < 200 || responseStatus >= 300) {
+            const formattedError = emailErrorMsg || `Email delivery failed (HTTP ${responseStatus})`;
+            console.error(`🚨 [HubBulkMessaging] Delivery failed for ${emailTarget}: ${formattedError} (Status: ${responseStatus})`);
+            const err = new Error(formattedError);
+            (err as any).status = responseStatus;
+            throw err;
           }
 
           sent += 1;
+          setRecipientStatuses((prev) => ({
+            ...prev,
+            [recipientKey]: {
+              status: 'success',
+              httpStatus: responseStatus,
+            },
+          }));
 
           // Non-blocking conversation logging for history
           try {
@@ -477,79 +590,95 @@ export const HubBulkMessaging: React.FC = () => {
             ? `${renderedMsg}\n\nReply STOP to opt out`
             : renderedMsg;
 
+          const smsPayload = {
+            phone: phoneTarget,
+            message: finalSmsBody,
+            channel: isWhatsApp ? 'whatsapp' : 'sms',
+            recipientName: fullName !== 'Customer' ? fullName : undefined,
+          };
+
+          const supabaseBaseUrl = (supabase as any)?.supabaseUrl || 'https://jrsydiofzceoeddjogov.supabase.co';
+          const functionsBaseUrl = (supabase.functions as any)?.url || `${supabaseBaseUrl}/functions/v1`;
+          const exactRequestUrl = `${functionsBaseUrl}/send-sms-notification`;
+          const localProxyUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/functions/send-sms-notification`;
+
+          // Comprehensive logging before supabase.functions.invoke
+          console.group(`[HubBulkMessaging] 🚀 Outbound SMS Request: send-sms-notification -> ${phoneTarget}`);
+          console.log('📌 Exact Request URL (Edge Function Target):', exactRequestUrl);
+          console.log('📌 HTTP Method:', 'POST');
+          console.log('📌 Request Payload:', smsPayload);
+          console.log('📌 Potential Local Proxy / Fallback URL:', localProxyUrl);
+          console.groupEnd();
+
           let smsSent = false;
           let smsErr = '';
+          let responseStatus = 200;
 
-          // Tier 1: Supabase edge function invoke
           try {
-            const { data, error } = await supabase.functions.invoke('send-sms-notification', {
-              body: {
-                phone: phoneTarget,
-                message: finalSmsBody,
-                channel: isWhatsApp ? 'whatsapp' : 'sms',
-                recipientName: fullName !== 'Customer' ? fullName : undefined,
-              },
+            const invokeRes = await supabase.functions.invoke('send-sms-notification', {
+              body: smsPayload,
             });
-            if (!error && (data?.success !== false && data?.ok !== false)) {
+
+            if ((invokeRes as any)?.status && typeof (invokeRes as any).status === 'number') {
+              responseStatus = (invokeRes as any).status;
+            } else if ((invokeRes.error as any)?.context?.status && typeof (invokeRes.error as any).context.status === 'number') {
+              responseStatus = (invokeRes.error as any).context.status;
+            } else if ((invokeRes.error as any)?.status && typeof (invokeRes.error as any).status === 'number') {
+              responseStatus = (invokeRes.error as any).status;
+            } else if ((invokeRes.data as any)?.status && typeof (invokeRes.data as any).status === 'number') {
+              responseStatus = (invokeRes.data as any).status;
+            } else if (invokeRes.error) {
+              responseStatus = 500;
+            }
+
+            console.group(`[HubBulkMessaging] 📥 Outbound SMS Response: send-sms-notification -> ${phoneTarget}`);
+            console.log('📌 Checked response.status:', responseStatus);
+            console.log('📌 Response Data:', invokeRes.data);
+            console.log('📌 Response Error:', invokeRes.error);
+            console.groupEnd();
+
+            if (responseStatus === 405 || responseStatus < 200 || responseStatus >= 300) {
+              smsSent = false;
+              smsErr = responseStatus === 405
+                ? 'HTTP 405 Method Not Allowed: Endpoint rejected request method or hit static proxy'
+                : (invokeRes.error?.message || invokeRes.data?.error || `${channel.toUpperCase()} delivery failed (HTTP ${responseStatus})`);
+            } else if (invokeRes.error) {
+              smsSent = false;
+              smsErr = invokeRes.error.message || `SMS Edge function returned error (HTTP ${responseStatus})`;
+            } else if (invokeRes.data?.success === false || invokeRes.data?.ok === false) {
+              smsSent = false;
+              responseStatus = typeof invokeRes.data?.status === 'number' ? invokeRes.data.status : 400;
+              smsErr = invokeRes.data?.error || invokeRes.data?.message || `${channel.toUpperCase()} delivery rejected (HTTP ${responseStatus})`;
+            } else if (invokeRes.data && (invokeRes.data.success || invokeRes.data.ok)) {
               smsSent = true;
+              smsErr = '';
             } else {
-              smsErr = data?.error || error?.message || `${channel.toUpperCase()} rejection`;
+              smsSent = false;
+              responseStatus = 500;
+              smsErr = `Unexpected response format from SMS function (HTTP ${responseStatus})`;
             }
           } catch (e: any) {
-            smsErr = e.message || 'Edge function invoke error';
+            responseStatus = (e as any)?.context?.status || (e as any)?.status || 500;
+            smsErr = e.message || `SMS Edge function invoke failed (HTTP ${responseStatus})`;
+            smsSent = false;
           }
 
-          // Tier 2: Resilient local API fallback (/api/functions/send-sms-notification)
-          if (!smsSent) {
-            try {
-              const res = await fetch('/api/functions/send-sms-notification', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  phone: phoneTarget,
-                  message: finalSmsBody,
-                  channel: isWhatsApp ? 'whatsapp' : 'sms',
-                  recipientName: fullName !== 'Customer' ? fullName : undefined,
-                }),
-              });
-              const json = await res.json().catch(() => null);
-              if (res.ok && (json?.success !== false && json?.ok !== false)) {
-                smsSent = true;
-                smsErr = '';
-              } else {
-                smsErr = json?.error || smsErr || `${channel.toUpperCase()} delivery failed (HTTP ${res.status})`;
-              }
-            } catch (fbErr: any) {
-              smsErr = fbErr.message || smsErr;
-            }
+          if (!smsSent || responseStatus === 405 || responseStatus < 200 || responseStatus >= 300) {
+            const formattedError = smsErr || `${channel.toUpperCase()} delivery failed (HTTP ${responseStatus})`;
+            console.error(`🚨 [HubBulkMessaging] Delivery failed for ${phoneTarget}: ${formattedError} (Status: ${responseStatus})`);
+            const err = new Error(formattedError);
+            (err as any).status = responseStatus;
+            throw err;
           }
 
-          // Tier 3: Alternative local API fallback (/api/functions/send-inbox-reply)
-          if (!smsSent) {
-            try {
-              const res2 = await fetch('/api/functions/send-inbox-reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipientPhone: phoneTarget,
-                  messageContent: finalSmsBody,
-                  channel: isWhatsApp ? 'whatsapp' : 'sms',
-                }),
-              });
-              const json2 = await res2.json().catch(() => null);
-              if (res2.ok && (json2?.success || json2?.ok)) {
-                smsSent = true;
-                smsErr = '';
-              }
-            } catch {
-              // Ignore secondary fallback error
-            }
-          }
-
-          if (!smsSent) {
-            throw new Error(smsErr || `${channel.toUpperCase()} delivery failed across all providers`);
-          }
           sent += 1;
+          setRecipientStatuses((prev) => ({
+            ...prev,
+            [recipientKey]: {
+              status: 'success',
+              httpStatus: responseStatus,
+            },
+          }));
 
           // Non-blocking conversation logging for history
           try {
@@ -586,41 +715,23 @@ export const HubBulkMessaging: React.FC = () => {
             inAppErr = e.message || 'Direct table insert error';
           }
 
-          // Tier 2: Resilient local API fallback (/api/functions/send-in-app-message)
-          if (!inAppSent) {
-            try {
-              const res = await fetch('/api/functions/send-in-app-message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipient_ids: [contact.user_id],
-                  subject: renderedSubj,
-                  body: renderedMsg,
-                  category: 'admin_broadcast',
-                }),
-              });
-              const json = await res.json().catch(() => null);
-              if (res.ok && (json?.ok !== false && json?.success !== false)) {
-                inAppSent = true;
-                inAppErr = '';
-              } else {
-                inAppErr = json?.error || inAppErr || `In-app message failed (HTTP ${res.status})`;
-              }
-            } catch (fbErr: any) {
-              inAppErr = fbErr.message || inAppErr;
-            }
-          }
-
           if (!inAppSent) {
             throw new Error(inAppErr || 'In-app delivery failed');
           }
+
           sent += 1;
+          setRecipientStatuses((prev) => ({
+            ...prev,
+            [recipientKey]: {
+              status: 'success',
+              httpStatus: 200,
+            },
+          }));
         } else {
-          failed += 1;
-          failures.push({
-            recipient: fullName !== 'Customer' ? fullName : (contact.email || contact.phone || 'Contact'),
-            reason: `Missing target ${channel.toUpperCase()} contact information`,
-          });
+          const noTargetErr = `Missing target ${channel.toUpperCase()} contact information`;
+          const err = new Error(noTargetErr);
+          (err as any).status = 400;
+          throw err;
         }
 
         // Emit item activity update for real-time consoles
@@ -638,9 +749,23 @@ export const HubBulkMessaging: React.FC = () => {
         }
       } catch (err: any) {
         failed += 1;
+        const errMsg = err?.message || 'Dispatch error';
+        const httpStatusMatch = errMsg.match(/HTTP\s+(\d{3})/i) || errMsg.match(/status\s+(\d{3})/i);
+        const parsedHttpStatus = (err as any)?.status || (httpStatusMatch ? parseInt(httpStatusMatch[1], 10) : 500);
+
+        // Update UI state to mark this specific recipient as 'failed'
+        setRecipientStatuses((prev) => ({
+          ...prev,
+          [recipientKey]: {
+            status: 'failed',
+            error: errMsg,
+            httpStatus: parsedHttpStatus,
+          },
+        }));
+
         failures.push({
-          recipient: fullName !== 'Customer' ? fullName : (contact.email || contact.phone || 'Contact'),
-          reason: err.message || 'Dispatch error',
+          recipient: fullName !== 'Customer' ? `${fullName} (${contact.email || contact.phone || 'Contact'})` : (contact.email || contact.phone || 'Contact'),
+          reason: errMsg,
         });
       }
 
@@ -650,7 +775,7 @@ export const HubBulkMessaging: React.FC = () => {
         sent,
         failed,
         skipped: bulkRecipients.length - usableContacts.length,
-        failures,
+        failures: [...failures],
       });
 
       // Small 120ms safety throttle to stay inside carrier/provider rate limits
@@ -679,6 +804,8 @@ export const HubBulkMessaging: React.FC = () => {
       toast.warning(`Bulk dispatch finished: ${sent} delivered, ${failed} failed.`);
     }
   };
+
+  const handleBulkSend = executeBulkDispatch;
 
   const handleAbort = () => {
     abortRef.current = true;
@@ -799,24 +926,46 @@ export const HubBulkMessaging: React.FC = () => {
 
         {/* Expandable Recipient Chip Roster */}
         {showRecipientList && bulkRecipients.length > 0 && (
-          <div className="max-h-28 overflow-y-auto p-2 bg-background rounded-lg border border-border/70 flex flex-wrap gap-1">
-            {bulkRecipients.slice(0, 100).map((r, i) => (
-              <span
-                key={r.user_id || r.phone || r.email || i}
-                className="inline-flex items-center gap-1 text-[10px] bg-muted/80 text-foreground px-1.5 py-0.5 rounded border"
-              >
-                <span>{r.full_name || r.phone || r.email || 'Contact'}</span>
-                {!isSending && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveRecipient(r.user_id || r.phone || r.email || '')}
-                    className="hover:text-destructive"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                )}
-              </span>
-            ))}
+          <div className="max-h-36 overflow-y-auto p-2 bg-background rounded-lg border border-border/70 flex flex-wrap gap-1.5">
+            {bulkRecipients.slice(0, 100).map((r, i) => {
+              const rKey = r.user_id || r.phone || r.email || `recipient-${i}`;
+              const rStatus = recipientStatuses[rKey];
+              return (
+                <span
+                  key={rKey}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-md border transition-colors',
+                    rStatus?.status === 'failed'
+                      ? 'bg-destructive/15 text-destructive border-destructive/40 font-medium'
+                      : rStatus?.status === 'success'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                        : rStatus?.status === 'sending'
+                          ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400 border-sky-500/30 animate-pulse'
+                          : 'bg-muted/80 text-foreground border-border'
+                  )}
+                  title={rStatus?.error ? `Server Error: ${rStatus.error}` : undefined}
+                >
+                  {rStatus?.status === 'sending' && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                  {rStatus?.status === 'success' && <CheckCircle2 className="h-2.5 w-2.5 text-emerald-600 dark:text-emerald-400" />}
+                  {rStatus?.status === 'failed' && <AlertCircle className="h-2.5 w-2.5 text-destructive" />}
+                  <span>{r.full_name || r.phone || r.email || 'Contact'}</span>
+                  {rStatus?.status === 'failed' && (
+                    <span className="text-[9px] bg-destructive/20 text-destructive px-1 rounded font-mono font-bold">
+                      {rStatus.httpStatus ? `HTTP ${rStatus.httpStatus}` : 'Failed'}
+                    </span>
+                  )}
+                  {!isSending && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRecipient(r.user_id || r.phone || r.email || '')}
+                      className="hover:text-destructive ml-0.5"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
             {bulkRecipients.length > 100 && (
               <span className="text-[10px] text-muted-foreground self-center px-1">
                 +{bulkRecipients.length - 100} more
@@ -1008,13 +1157,26 @@ export const HubBulkMessaging: React.FC = () => {
 
           {/* Failure Audit Log (if any) */}
           {progress.failures.length > 0 && (
-            <div className="mt-2 max-h-24 overflow-y-auto rounded border border-destructive/30 bg-destructive/10 p-1.5 text-[10px] space-y-0.5">
-              <div className="font-bold text-destructive">Dispatch Failures ({progress.failures.length}):</div>
-              {progress.failures.slice(0, 10).map((f, idx) => (
-                <div key={idx} className="text-muted-foreground truncate">
-                  <strong className="text-foreground">{f.recipient}:</strong> {f.reason}
-                </div>
-              ))}
+            <div className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-[11px] space-y-1">
+              <div className="flex items-center justify-between font-bold text-destructive">
+                <span className="flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Dispatch Failures ({progress.failures.length})
+                </span>
+                <span className="text-[10px] text-muted-foreground font-normal">
+                  Inspect details below or check browser console logs
+                </span>
+              </div>
+              <div className="space-y-1 pt-1 divide-y divide-destructive/20">
+                {progress.failures.map((f, idx) => (
+                  <div key={idx} className="pt-1 first:pt-0 flex flex-col gap-0.5">
+                    <span className="font-semibold text-foreground text-[10px]">{f.recipient}</span>
+                    <span className="text-[10px] text-destructive/90 font-mono break-words bg-background/50 px-1.5 py-0.5 rounded border border-destructive/20">
+                      {f.reason}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

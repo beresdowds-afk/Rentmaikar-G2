@@ -761,55 +761,25 @@ export const OmnichannelComposer = ({
         console.warn('Non-fatal conversation record creation error for contact:', contact.full_name, dbErr);
       }
 
-      // 3. Trigger external delivery with guaranteed fallback
+      // 3. Trigger external delivery via authoritative send-outbound-email Edge Function
       if (channel === 'email' && contact.email) {
-        let sentSuccessfully = false;
-        let deliveryError = '';
+        const emailTarget = contact.email.trim();
+        const { data, error } = await supabase.functions.invoke('send-outbound-email', {
+          body: {
+            action: 'send',
+            to: emailTarget,
+            subject,
+            body,
+            recipientName: contact.full_name !== 'Customer' ? contact.full_name : undefined,
+            fromAlias: emailSenderAlias,
+            category: 'general',
+            attachments: uploadedAttachments,
+          },
+        });
 
-        try {
-          const { data, error } = await supabase.functions.invoke('send-email-reply', {
-            body: {
-              conversationId,
-              messageContent: body,
-              recipientEmail: contact.email.trim(),
-              subject,
-              fromAlias: emailSenderAlias,
-              attachments: uploadedAttachments,
-            },
-          });
-
-          if (!error && (data?.success || data?.ok)) {
-            sentSuccessfully = true;
-          } else {
-            deliveryError = data?.error || error?.message || 'Edge function delivery warning';
-          }
-        } catch (e: any) {
-          deliveryError = e.message || 'Edge function invoke exception';
-        }
-
-        // Resilient fallback to direct local API bridge if edge function had an issue
-        if (!sentSuccessfully) {
-          try {
-            const fallbackRes = await fetch('/api/functions/send-email-reply', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                recipientEmail: contact.email.trim(),
-                subject,
-                messageContent: body,
-                fromAlias: emailSenderAlias,
-                attachments: uploadedAttachments,
-              }),
-            });
-            const fallbackJson = await fallbackRes.json();
-            if (fallbackRes.ok && (fallbackJson.success || fallbackJson.ok)) {
-              sentSuccessfully = true;
-            } else {
-              throw new Error(fallbackJson?.error || `Email delivery failed with HTTP ${fallbackRes.status}`);
-            }
-          } catch (fbErr: any) {
-            throw new Error(`Email delivery failed: ${fbErr.message || deliveryError}`);
-          }
+        if (error || data?.success === false || data?.ok === false) {
+          const emailErr = data?.error || error?.message || 'Email delivery failed';
+          throw new Error(emailErr);
         }
       } else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
         let msgSent = false;

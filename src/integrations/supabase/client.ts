@@ -263,9 +263,12 @@ async function callLocalGateway(functionName: string, options?: any) {
         const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
         if (bridgeRes.data) return { data: bridgeRes.data, error: null };
       }
+      const err = new Error(`Local gateway returned non-JSON response (${res.status} ${contentType})`);
+      (err as any).status = res.status;
+      (err as any).context = res;
       return {
         data: null,
-        error: new Error(`Local gateway returned non-JSON response (${res.status} ${contentType})`),
+        error: err,
       };
     }
 
@@ -276,17 +279,23 @@ async function callLocalGateway(functionName: string, options?: any) {
         const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
         if (bridgeRes.data) return { data: bridgeRes.data, error: null };
       }
+      const err = new Error(`Failed to parse JSON response from local gateway for '${functionName}'`);
+      (err as any).status = res.status;
+      (err as any).context = res;
       return {
         data: null,
-        error: new Error(`Failed to parse JSON response from local gateway for '${functionName}'`),
+        error: err,
       };
     }
 
     if (res.ok) {
       if (json.ok === false || json.success === false) {
+        const err = new Error(json.error || json.message || `Edge function '${functionName}' reported failure`);
+        (err as any).status = typeof json.status === "number" ? json.status : 400;
+        (err as any).context = res;
         return {
           data: json,
-          error: new Error(json.error || json.message || `Edge function '${functionName}' reported failure`),
+          error: err,
         };
       }
       return { data: json, error: null };
@@ -299,7 +308,10 @@ async function callLocalGateway(functionName: string, options?: any) {
       }
 
       const errorMsg = json?.error || json?.message || `Edge function '${functionName}' failed (HTTP ${res.status})`;
-      return { data: null, error: new Error(errorMsg) };
+      const err = new Error(errorMsg);
+      (err as any).status = res.status;
+      (err as any).context = res;
+      return { data: null, error: err };
     }
   } catch (netErr: any) {
     // Loss of contact: dispatch seamlessly via Link Bridge RPC
@@ -317,7 +329,12 @@ async function callLocalGateway(functionName: string, options?: any) {
       functionName.includes("password") ||
       functionName.includes("email") ||
       functionName.includes("auth") ||
-      functionName.includes("otp");
+      functionName.includes("otp") ||
+      functionName.includes("sms") ||
+      functionName.includes("message") ||
+      functionName.includes("bulk") ||
+      functionName.includes("inbox") ||
+      functionName.includes("notification");
     if (isCritical) {
       return {
         data: null,
@@ -334,35 +351,53 @@ async function callLocalGateway(functionName: string, options?: any) {
 
 const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
 supabase.functions.invoke = (async (functionName: string, options?: any) => {
-  // Always try local gateway / link bridge first for maximum speed and staging fallback
-  const localRes = await callLocalGateway(functionName, options);
-  if (!localRes.error) return localRes;
-
+  // 1. Prioritize authoritative Supabase Edge Function
+  let originalError: any = null;
   try {
     const res = await originalInvoke(functionName, options);
-    if (!res.error) return res;
+    if (!res.error) {
+      return res;
+    }
 
+    originalError = res.error;
     const errMsg = String(res.error?.message || "").toLowerCase();
-    const isRecoverable =
+    const isNetworkOrNotFound =
       errMsg.includes("404") ||
       errMsg.includes("not found") ||
       errMsg.includes("failed to send a request") ||
       errMsg.includes("failed to fetch") ||
       errMsg.includes("functionsfetcherror") ||
       errMsg.includes("network") ||
-      (res.error as any)?.context?.status === 404 ||
-      (res.error as any)?.context?.status >= 500;
+      (res.error as any)?.context?.status === 404;
 
-    if (!isRecoverable) return res;
-  } catch {
-    // Continue to fallback on any exception
+    if (!isNetworkOrNotFound) {
+      // Return authoritative response from Edge Function (e.g. business validation)
+      return res;
+    }
+  } catch (ex: any) {
+    originalError = ex;
   }
 
-  // Final fallback through Link Bridge
+  // 2. Secondary fallback: Local gateway (only if available)
+  const localRes = await callLocalGateway(functionName, options);
+  if (!localRes.error) return localRes;
+
+  // 3. Final fallback through Link Bridge if configured
   const bridge = await getLinkBridge();
   if (bridge) {
     const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
     if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+  }
+
+  // If local gateway failed with static HTML 405/404, prefer the original error or descriptive message
+  if (localRes.error && (localRes.error.message.includes("non-JSON") || localRes.error.message.includes("405"))) {
+    if (originalError) {
+      return { data: null, error: originalError instanceof Error ? originalError : new Error(String(originalError?.message || originalError)) };
+    }
+    return {
+      data: null,
+      error: new Error(`Edge function '${functionName}' is not reachable`),
+    };
   }
 
   return localRes;

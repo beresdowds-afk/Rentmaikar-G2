@@ -627,7 +627,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "send-outbound-email":
     case "send-transactional-email": {
       const result = await handleSendOutboundEmail(body);
-      return { status: 200, data: result };
+      return { status: result.ok ? 200 : 400, data: result };
     }
 
     case "auth-email-hook": {

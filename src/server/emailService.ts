@@ -129,18 +129,16 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
   const recipient = Array.isArray(options.to) ? options.to[0] : options.to;
 
   if (!apiKey) {
-    const isSandbox = process.env.NODE_ENV !== "production" || !process.env.RESEND_API_KEY || process.env.SENT_SANDBOX_MODE === "true";
-    const msg = `[EmailService] RESEND_API_KEY is not configured${isSandbox ? " (handling via sandbox simulation)" : ""}`;
-    console.warn(msg);
-    const mockId = `sim_resend_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const msg = "RESEND_API_KEY is not configured";
+    console.error(`[EmailService] ${msg}`);
     await logEmailSend({
       recipient,
       templateName: options.templateName || "raw_email",
-      status: "sent",
-      messageId: mockId,
-      metadata: { ...options.metadata, simulated: true, note: "Simulated sandbox delivery" },
+      status: "failed",
+      errorMessage: msg,
+      metadata: options.metadata,
     });
-    return { ok: true, messageId: mockId };
+    return { ok: false, error: msg };
   }
 
   // Ensure 'from' always uses the verified domain with name and reply-to preservation
@@ -745,20 +743,57 @@ export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean;
     return { ok: false, success: false, error: "Recipient email required" };
   }
 
-  const templateName = body.templateName || body.template || "transactional";
-  const data = body.data || body.template_data || {};
-  const subject = body.subject || `Notification from RentMaikar`;
+  const templateData = (body.templateData && typeof body.templateData === "object" ? body.templateData : (body.data?.templateData || {})) as Record<string, unknown>;
 
-  let html = body.html;
+  const effectiveSubject =
+    (templateData.subject !== undefined && templateData.subject !== null && String(templateData.subject).trim() !== "")
+      ? String(templateData.subject)
+      : (body.subject || (body.data?.subject as string | undefined));
+  const effectiveBody =
+    templateData.body ||
+    templateData.content ||
+    templateData.text ||
+    templateData.html ||
+    templateData.message ||
+    templateData.messageContent ||
+    body.body ||
+    body.content ||
+    body.messageContent ||
+    body.text ||
+    body.html ||
+    body.message ||
+    (body.data?.body as string | undefined);
+
+  const hasDirectContent = Boolean(effectiveSubject && effectiveBody);
+
+  const rawTemplate = body.templateName || body.template || templateData.templateName || templateData.template;
+  if (!rawTemplate && !hasDirectContent) {
+    return {
+      ok: false,
+      success: false,
+      error: "Missing required fields: either templateData (with subject and body), direct subject and body, or a templateName must be provided",
+    };
+  }
+
+  const templateName = hasDirectContent ? (rawTemplate || "composed") : rawTemplate;
+  const data = { ...(body.data || {}), ...templateData, ...(body.template_data || {}) };
+  const subject = effectiveSubject || (rawTemplate ? `Notification: ${rawTemplate}` : `Notification from Rentmaikar`);
+
+  let html = body.html || templateData.html;
   if (!html) {
     const textContent =
-      body.content ||
-      body.messageContent ||
-      body.body ||
-      body.message ||
-      body.text ||
-      (Object.keys(data).length > 0 ? JSON.stringify(data, null, 2) : "Notification from RentMaikar");
-    html = emailLayout(`<p>${String(textContent).replace(/\n/g, "<br/>")}</p>`, subject);
+      effectiveBody ||
+      (Object.keys(data).length > 0 ? JSON.stringify(data, null, 2) : "Notification from Rentmaikar");
+
+    const recipientName = body.recipientName || body.name || templateData.recipientName || templateData.name || (data.recipientName as string);
+    const greeting = recipientName && recipientName !== "Customer" && recipientName !== "there"
+      ? `<p style="margin: 0 0 16px 0; font-size: 16px; font-weight: 600; color: #0f172a;">Hello ${recipientName},</p>`
+      : "";
+    const paragraphs = String(textContent)
+      .split(/\n\n+/)
+      .map((p) => `<p style="margin: 0 0 16px 0; line-height: 1.6; color: #334155; font-size: 15px;">${p.replace(/\n/g, "<br/>")}</p>`)
+      .join("");
+    html = emailLayout(`${greeting}${paragraphs}`, subject);
   }
 
   const sender = body.from || body.sender || body.fromAlias || SENDERS.support;

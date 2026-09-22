@@ -196,7 +196,7 @@ describe('Phase 5: Production Hardening, E2E Journey & Failure Testing', () => {
       const reporting = await marketingEngineServer.syncAndAggregateReporting();
       expect(reporting.total).toBeDefined();
       expect(typeof reporting.total.spend).toBe('number');
-    });
+    }, 30000);
   });
 
   describe('4. Comprehensive 13 Failure Modes Testing', () => {

@@ -341,8 +341,8 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
           errMsg = e.message || 'Invoke error';
         }
 
-        // Secondary fallback to local API gateway proxy for send-outbound-email if edge function network fails
-        if (!delivered) {
+        // Secondary fallback to local API gateway proxy ONLY if running in local environment
+        if (!delivered && typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
           try {
             const res = await fetch('/api/functions/send-outbound-email', {
               method: 'POST',
@@ -356,16 +356,19 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
                 category: 'general',
               }),
             });
-            const json = await res.json().catch(() => null);
-            if (res.ok && (json?.ok !== false && json?.success !== false)) {
-              delivered = true;
-              messageId = json?.messageId || '';
-              errMsg = '';
-            } else {
-              errMsg = json?.error || errMsg || `HTTP ${res.status}`;
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const json = await res.json().catch(() => null);
+              if (res.ok && (json?.ok !== false && json?.success !== false)) {
+                delivered = true;
+                messageId = json?.messageId || '';
+                errMsg = '';
+              } else if (json?.error) {
+                errMsg = json.error;
+              }
             }
           } catch (fbErr: any) {
-            errMsg = fbErr.message || errMsg;
+            // Retain original Edge Function error
           }
         }
 
