@@ -474,103 +474,96 @@ export const HubBulkMessaging: React.FC = () => {
             },
           };
 
-          const supabaseBaseUrl = (supabase as any)?.supabaseUrl || 'https://jrsydiofzceoeddjogov.supabase.co';
-          const functionsBaseUrl = (supabase.functions as any)?.url || `${supabaseBaseUrl}/functions/v1`;
-          const exactRequestUrl = `${functionsBaseUrl}/send-outbound-email`;
-          const localProxyUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/functions/send-outbound-email`;
+                    const emailPayload = {
+            action: 'send',
+            to: emailTarget,
+            subject: renderedSubj,
+            body: renderedMsg,
+            recipientName: fullName !== 'Customer' ? fullName : undefined,
+            category: 'general',
+            templateData: {
+              subject: renderedSubj,
+              body: renderedMsg,
+              recipientName: fullName !== 'Customer' ? fullName : undefined,
+            },
+          };
 
-          // Comprehensive logging before supabase.functions.invoke
-          console.group(`[HubBulkMessaging] 🚀 Outbound Email Request: send-outbound-email -> ${emailTarget}`);
-          console.log('📌 Exact Request URL (Edge Function Target):', exactRequestUrl);
-          console.log('📌 HTTP Method:', 'POST');
-          console.log('📌 Request Payload:', emailPayload);
-          console.log('📌 Potential Local Proxy / Fallback URL:', localProxyUrl);
-          console.log('📌 Supabase Client Configuration:', {
-            supabaseUrl: supabaseBaseUrl,
-            functionsUrl: (supabase.functions as any)?.url,
-            channel: 'email',
-            recipient: emailTarget,
-            timestamp: new Date().toISOString(),
-          });
-          console.groupEnd();
-
+          // PRIMARY: Cloud Run application email gateway.
+          // The backend gateway handles Supabase as the secondary fallback.
           let emailDelivered = false;
           let emailErrorMsg = '';
           let responseStatus = 200;
 
-          // Invoke Edge Function
           try {
-            const invokeRes = await supabase.functions.invoke('send-outbound-email', {
-              body: emailPayload,
+            const res = await fetch('/api/functions/send-outbound-email', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(emailPayload),
             });
 
-            // Extract HTTP status code from response
-            if ((invokeRes as any)?.status && typeof (invokeRes as any).status === 'number') {
-              responseStatus = (invokeRes as any).status;
-            } else if ((invokeRes.error as any)?.context?.status && typeof (invokeRes.error as any).context.status === 'number') {
-              responseStatus = (invokeRes.error as any).context.status;
-            } else if ((invokeRes.error as any)?.status && typeof (invokeRes.error as any).status === 'number') {
-              responseStatus = (invokeRes.error as any).status;
-            } else if ((invokeRes.data as any)?.status && typeof (invokeRes.data as any).status === 'number') {
-              responseStatus = (invokeRes.data as any).status;
-            } else if (invokeRes.error) {
-              responseStatus = 500;
-            }
+            responseStatus = res.status;
 
-            console.group(`[HubBulkMessaging] 📥 Outbound Email Response: send-outbound-email -> ${emailTarget}`);
-            console.log('📌 Checked response.status:', responseStatus);
-            console.log('📌 Response Data:', invokeRes.data);
-            console.log('📌 Response Error:', invokeRes.error);
+            const contentType = res.headers.get('content-type') || '';
+            const result = contentType.includes('application/json')
+              ? await res.json().catch(() => null)
+              : null;
+
+            console.group(
+              `[HubBulkMessaging] 📥 Cloud Run Email Response: send-outbound-email -> ${emailTarget}`
+            );
+            console.log('📌 Gateway URL:', '/api/functions/send-outbound-email');
+            console.log('📌 HTTP Status:', responseStatus);
+            console.log('📌 Response:', result);
             console.groupEnd();
 
-            // A 405 reaching this component means all routing fallbacks have failed.
-// Do NOT treat 405 as success or suppress it.
-if (responseStatus < 200 || responseStatus >= 300) {
-  emailDelivered = false;
-
-  if (responseStatus === 405) {
-    emailErrorMsg =
-      invokeRes.error?.message ||
-      'HTTP 405 Method Not Allowed: all outbound-email routing paths rejected the POST request';
-  } else {
-    emailErrorMsg =
-      invokeRes.error?.message ||
-      invokeRes.data?.error ||
-      invokeRes.data?.message ||
-      `API call failed with HTTP status ${responseStatus}`;
-  }
-}
-            } else if (invokeRes.error) {
-              emailDelivered = false;
-              emailErrorMsg = invokeRes.error.message || `Edge function returned error (HTTP ${responseStatus})`;
-            } else if (invokeRes.data?.success === false || invokeRes.data?.ok === false) {
-              emailDelivered = false;
-              responseStatus = typeof invokeRes.data?.status === 'number' ? invokeRes.data.status : 400;
-              emailErrorMsg = invokeRes.data?.error || invokeRes.data?.message || `Server reported delivery rejection (HTTP ${responseStatus})`;
-            } else if (invokeRes.data && (invokeRes.data.success || invokeRes.data.ok)) {
+            if (
+              res.ok &&
+              result?.ok !== false &&
+              result?.success !== false
+            ) {
               emailDelivered = true;
               emailErrorMsg = '';
             } else {
               emailDelivered = false;
-              responseStatus = 500;
-              emailErrorMsg = 'Unexpected response format from email function';
+              emailErrorMsg =
+                result?.error ||
+                result?.message ||
+                `Email delivery failed with HTTP ${responseStatus}`;
             }
           } catch (invokeErr: any) {
-            responseStatus = (invokeErr as any)?.context?.status || (invokeErr as any)?.status || 500;
-            emailErrorMsg = invokeErr?.message || `Edge function invoke failed (HTTP ${responseStatus})`;
+            responseStatus =
+              invokeErr?.context?.status ||
+              invokeErr?.status ||
+              502;
+
             emailDelivered = false;
+            emailErrorMsg =
+              invokeErr?.message ||
+              `Cloud Run email gateway request failed (HTTP ${responseStatus})`;
           }
 
-          // Strict verification: Status code must be 2xx AND delivery confirmed
-          if (!emailDelivered || responseStatus === 405 || responseStatus < 200 || responseStatus >= 300) {
-            const formattedError = emailErrorMsg || `Email delivery failed (HTTP ${responseStatus})`;
-            console.error(`🚨 [HubBulkMessaging] Delivery failed for ${emailTarget}: ${formattedError} (Status: ${responseStatus})`);
+          // Strict verification: delivery must be confirmed by a successful
+          // Cloud Run gateway response. The backend itself owns the
+          // Supabase fallback.
+          if (
+            !emailDelivered ||
+            responseStatus < 200 ||
+            responseStatus >= 300
+          ) {
+            const formattedError =
+              emailErrorMsg ||
+              `Email delivery failed with HTTP ${responseStatus}`;
+
+            console.error(
+              `🚨 [HubBulkMessaging] Delivery failed for ${emailTarget}: ${formattedError} (Status: ${responseStatus})`
+            );
+
             const err = new Error(formattedError);
             (err as any).status = responseStatus;
             throw err;
-          }
-
-          sent += 1;
+          }             
           setRecipientStatuses((prev) => ({
             ...prev,
             [recipientKey]: {
