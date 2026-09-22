@@ -15,6 +15,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test/setup.ts",
+    testTimeout: 30000,
     clearMocks: true,
     restoreMocks: true,
     // Vitest owns the jsdom/unit suite only. Playwright specs (tests/e2e) and

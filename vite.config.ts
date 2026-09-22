@@ -201,7 +201,7 @@ export default defineConfig(({ mode }) => ({
             }
 
             try {
-              const functionName = req.url.replace(/^\/(?:api\/functions|functions\/v1)\//, "").split("?")[0];
+              const functionName = (req.url || "").replace(/^\/(?:api\/functions\/v1|api\/functions|functions\/v1)\//, "").split("?")[0].replace(/\/+$/, "");
 
               // Controlled allowlist of functions to execute/route via Supabase Edge Functions
               const SUPABASE_EDGE_FUNCTIONS_ALLOWLIST = new Set([
@@ -324,8 +324,8 @@ export default defineConfig(({ mode }) => ({
                     body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(body) : undefined,
                   });
 
-                  // If Supabase returned a response (even 4xx/5xx from function execution logic)
-                  if (edgeRes.status !== 404) {
+                  // If Supabase returned a valid business response (except 404 not found or 405 method not allowed)
+                  if (edgeRes.status !== 404 && edgeRes.status !== 405) {
                     const edgeData = await edgeRes.json().catch(() => null);
                     res.statusCode = edgeRes.status;
                     res.setHeader("Content-Type", "application/json");

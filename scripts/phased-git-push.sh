@@ -35,6 +35,7 @@ fi
 if [ -z "$(git config user.email 2>/dev/null || true)" ]; then
   git config user.email "beresdowds@gmail.com"
 fi
+git config --global --add safe.directory "*" 2>/dev/null || true
 git config advice.ignoredHook false 2>/dev/null || true
 
 # 3. Increase git HTTP buffers to 500MB to avoid large-pack dropouts and timeouts
@@ -150,11 +151,13 @@ git add -A \
   nginx.conf \
   package.json \
   package-lock.json \
+  bun.lock \
   playwright.config.ts \
   postcss.config.js \
   tailwind.config.ts \
   tsconfig*.json \
   vite.config.ts \
+  vitest.config.ts \
   server.ts \
   public/ \
   docs/ \
