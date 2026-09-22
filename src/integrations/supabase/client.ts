@@ -361,19 +361,30 @@ supabase.functions.invoke = (async (functionName: string, options?: any) => {
 
     originalError = res.error;
     const errMsg = String(res.error?.message || "").toLowerCase();
-    const isNetworkOrNotFound =
-      errMsg.includes("404") ||
-      errMsg.includes("not found") ||
-      errMsg.includes("failed to send a request") ||
-      errMsg.includes("failed to fetch") ||
-      errMsg.includes("functionsfetcherror") ||
-      errMsg.includes("network") ||
-      (res.error as any)?.context?.status === 404;
+    const errorStatus =
+  (res.error as any)?.context?.status ??
+  (res.error as any)?.status ??
+  undefined;
 
-    if (!isNetworkOrNotFound) {
-      // Return authoritative response from Edge Function (e.g. business validation)
-      return res;
-    }
+const isNetworkOrNotFound =
+  errMsg.includes("404") ||
+  errMsg.includes("not found") ||
+  errMsg.includes("failed to send a request") ||
+  errMsg.includes("failed to fetch") ||
+  errMsg.includes("functionsfetcherror") ||
+  errMsg.includes("network") ||
+  errorStatus === 404;
+
+const isMethodRoutingFailure =
+  errorStatus === 405 ||
+  errMsg.includes("405") ||
+  errMsg.includes("method not allowed");
+
+if (!isNetworkOrNotFound && !isMethodRoutingFailure) {
+  // Return authoritative response from Edge Function
+  // for genuine application/business errors.
+  return res;
+}
   } catch (ex: any) {
     originalError = ex;
   }
