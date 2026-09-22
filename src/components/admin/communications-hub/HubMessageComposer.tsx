@@ -306,48 +306,32 @@ export const HubMessageComposer: React.FC = () => {
         let emailSent = false;
         let emailErr = '';
 
-        // Tier 1: Invoke send-outbound-email
-        try {
-          const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-            body: {
-              to: recipientContact.trim(),
-              subject: subject.trim() || 'Notice from Rentmaikar Admin',
-              body: trimmedBody,
-              recipientName: recipientName.trim() || undefined,
-            },
-          });
-          if (!error && (data?.ok !== false && data?.success !== false)) {
-            emailSent = true;
-          } else {
-            emailErr = data?.error || error?.message || 'Email dispatch failed';
-          }
-        } catch (e: any) {
-          emailErr = e.message || 'Edge function invoke error';
-        }
+        // Primary: Cloud Run application email gateway.
+// The backend gateway handles Cloud Run → Supabase fallback.
+try {
+  const res = await fetch('/api/functions/send-outbound-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      to: recipientContact.trim(),
+      subject: subject.trim() || 'Notice from Rentmaikar Admin',
+      body: trimmedBody,
+      recipientName: recipientName.trim() || undefined,
+    }),
+  });
 
-        // Tier 2: Resilient local API fallback
-        if (!emailSent) {
-          try {
-            const res = await fetch('/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                to: recipientContact.trim(),
-                subject: subject.trim() || 'Notice from Rentmaikar Admin',
-                body: trimmedBody,
-                recipientName: recipientName.trim() || undefined,
-              }),
-            });
-            const json = await res.json().catch(() => null);
-            if (res.ok && (json?.ok !== false && json?.success !== false)) {
-              emailSent = true;
-            } else {
-              emailErr = json?.error || emailErr || `Email dispatch failed (HTTP ${res.status})`;
-            }
-          } catch (fbErr: any) {
-            emailErr = fbErr.message || emailErr;
-          }
-        }
+  const json = await res.json().catch(() => null);
+
+  if (res.ok && (json?.ok !== false && json?.success !== false)) {
+    emailSent = true;
+  } else {
+    emailErr =
+      json?.error ||
+      `Email dispatch failed (HTTP ${res.status})`;
+  }
+} catch (e: any) {
+  emailErr = e.message || 'Email gateway request failed';
+  }
 
         if (!emailSent) throw new Error(emailErr || 'Email dispatch failed');
         toast.success(`Email dispatched to ${recipientContact.trim()}`);
