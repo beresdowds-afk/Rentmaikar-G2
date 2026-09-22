@@ -26,6 +26,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   const body = req.body || {};
 
   // Extract authorization header from request if provided
+  const clientAuth = req.headers["authorization"] || "";
     // 1. Generic Supabase-first dispatch for all functions EXCEPT send-outbound-email.
   // send-outbound-email has a dedicated Cloud Run-primary -> Supabase-fallback path below.
   if (functionName !== "send-outbound-email") {
@@ -465,22 +466,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     });
   }
 }
-          const edgeRes = await fetch(edgeFunctionUrl, {
-            method: "POST",
-            headers: proxyHeaders,
-            body: JSON.stringify(body),
-          });
-
-          if (edgeRes.ok || (edgeRes.status !== 404 && edgeRes.status !== 401 && edgeRes.status !== 403)) {
-            const edgeData = await edgeRes.json().catch(() => null);
-            if (edgeData) {
-              return res.status(edgeRes.status).json(edgeData);
-            }
-          }
-        } catch (proxyErr: any) {
-          console.warn("[Backend Functions] Supabase send-outbound-email proxy failed:", proxyErr?.message || proxyErr);
-        }
-
+          
       case "inbox-attachment-ocr": {
         return res.status(200).json({
           success: true,
