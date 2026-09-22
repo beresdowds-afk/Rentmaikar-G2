@@ -26,27 +26,27 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   const body = req.body || {};
 
   // Extract authorization header from request if provided
-  const clientAuth = (req.headers["authorization"] || req.headers["Authorization"]) as string | undefined;
+    // 1. Generic Supabase-first dispatch for all functions EXCEPT send-outbound-email.
+  // send-outbound-email has a dedicated Cloud Run-primary -> Supabase-fallback path below.
+  if (functionName !== "send-outbound-email") {
+    try {
+      const upstreamResult = await supabaseBackendService.invokeEdgeFunction(functionName, body, {
+        userToken: clientAuth,
+        method: req.method || "POST",
+        headers: {
+          ...(req.headers["x-client-info"] ? { "x-client-info": String(req.headers["x-client-info"]) } : {}),
+        },
+        timeoutMs: 15000,
+      });
 
-  // 1. First attempt upstream execution on Supabase Edge Functions with full client JWT forwarding
-  try {
-    const upstreamResult = await supabaseBackendService.invokeEdgeFunction(functionName, body, {
-      userToken: clientAuth,
-      method: req.method || "POST",
-      headers: {
-        ...(req.headers["x-client-info"] ? { "x-client-info": String(req.headers["x-client-info"]) } : {}),
-      },
-      timeoutMs: 15000,
-    });
-
-    // If Supabase returned a valid response (and not a 404 missing function), forward it directly
-    if (upstreamResult.status !== 404 && upstreamResult.status !== 502 && upstreamResult.status !== 504) {
-      return res.status(upstreamResult.status).json(upstreamResult.data ?? {});
+      // If Supabase returned a valid response (and not a 404 missing function), forward it directly.
+      if (upstreamResult.status !== 404 && upstreamResult.status !== 502 && upstreamResult.status !== 504) {
+        return res.status(upstreamResult.status).json(upstreamResult.data ?? {});
+      }
+    } catch (proxyErr: any) {
+      console.warn(`[Backend Functions] Upstream Supabase dispatch for '${functionName}' failed, using local gateway:`, proxyErr?.message || proxyErr);
     }
-  } catch (proxyErr: any) {
-    console.warn(`[Backend Functions] Upstream Supabase dispatch for '${functionName}' failed, using local gateway:`, proxyErr?.message || proxyErr);
   }
-
   try {
     switch (functionName) {
       // -----------------------------------------------------------------
@@ -316,23 +316,6 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           if (req.headers["x-client-info"]) {
             proxyHeaders["x-client-info"] = String(req.headers["x-client-info"]);
           }
-
-          const edgeRes = await fetch(edgeFunctionUrl, {
-            method: "POST",
-            headers: proxyHeaders,
-            body: JSON.stringify(body),
-          });
-
-          // If the Edge function is deployed and authenticated (ignore 404 not found or 401/403 auth mismatch)
-          if (edgeRes.ok || (edgeRes.status !== 404 && edgeRes.status !== 401 && edgeRes.status !== 403)) {
-            const edgeData = await edgeRes.json().catch(() => null);
-            if (edgeData) {
-              return res.status(edgeRes.status).json(edgeData);
-            }
-          }
-        } catch (proxyErr: any) {
-          console.warn("[Backend Functions] Supabase Edge Function proxy failed:", proxyErr?.message || proxyErr);
-        }
 
         // 2. Direct Provider Execution Fallback (Resend API)
         const resendApiKey = process.env.RESEND_API_KEY;
