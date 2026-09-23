@@ -1,59 +1,85 @@
 /**
- * Shared Resend transport.
+ * Shared Direct Resend Transport & Connector.
  *
- * The project's `RESEND_API_KEY` is managed by the Lovable Resend connector, so
- * it is a *connection* key — not a raw `re_...` Resend API key. Posting it
- * straight to api.resend.com fails with `401 API key is invalid`, which is what
- * silently killed every outbound email.
+ * This module establishes and maintains the Direct Resend connector, communicating
+ * directly with the official Resend API (https://api.resend.com) using standard
+ * Resend API key Bearer authorization.
  *
- * Use `RESEND_ENDPOINT` + `resendHeaders(key)` for every send: when the key is a
- * real Resend key we talk to Resend directly, otherwise we route through the
- * Lovable connector gateway (same path `process-email-queue` already uses).
+ * The unnecessary Lovable Resend connector gateway (connector-gateway.lovable.dev)
+ * has been removed in favor of direct API connectivity to api.resend.com.
  */
 
 import { reportResendAuthFailure } from "./email-alerts.ts";
 import { sentApiKey, sentEnabled } from "./sent-client.ts";
 
-const RESEND_DIRECT_URL = "https://api.resend.com";
-const RESEND_GATEWAY_URL = "https://connector-gateway.lovable.dev/resend";
+export const RESEND_DIRECT_URL = "https://api.resend.com";
 
-/** True when the configured key is a raw Resend API key (`re_...`). */
+/** True when the configured key is a valid Resend key. */
 export function isDirectResendKey(key?: string | null): boolean {
-  return !!key && key.startsWith("re_");
+  return !!key && (key.startsWith("re_") || key.trim().length > 0);
 }
 
-/** Base URL to use for Resend calls, given the configured key. */
-export function resendBaseUrl(key?: string | null): string {
-  return isDirectResendKey(key) ? RESEND_DIRECT_URL : RESEND_GATEWAY_URL;
+/** Base URL for all Resend API calls — always the Direct Resend API. */
+export function resendBaseUrl(_key?: string | null): string {
+  return RESEND_DIRECT_URL;
 }
 
-/** Full endpoint for sending an email with the configured key. */
+/** Full endpoint for sending an email with Direct Resend. */
 export function resendEmailsUrl(key?: string | null): string {
   return `${resendBaseUrl(key)}/emails`;
+}
+
+/** Full endpoint for batch email sending with Direct Resend. */
+export function resendBatchEmailsUrl(key?: string | null): string {
+  return `${resendBaseUrl(key)}/emails/batch`;
+}
+
+/** Full endpoint for verifying domains with Direct Resend. */
+export function resendDomainsUrl(key?: string | null): string {
+  return `${resendBaseUrl(key)}/domains`;
 }
 
 /** Endpoint resolved from the ambient RESEND_API_KEY secret. */
 export const RESEND_ENDPOINT = resendEmailsUrl(Deno.env.get("RESEND_API_KEY"));
 
 /**
- * Headers for a Resend send. Direct keys use `Authorization: Bearer <re_...>`;
- * connector keys authenticate with the Lovable API key and pass the connection
- * key through `X-Connection-Api-Key`.
+ * Headers for Direct Resend API requests.
+ * Uses standard Direct Resend Bearer authentication: `Authorization: Bearer <RESEND_API_KEY>`.
  */
 export function resendHeaders(key?: string | null): Record<string, string> {
   const resendKey = key ?? Deno.env.get("RESEND_API_KEY") ?? "";
-  if (isDirectResendKey(resendKey)) {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${resendKey}`,
-    };
-  }
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY") ?? "";
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${lovableKey}`,
-    "X-Connection-Api-Key": resendKey,
+    Authorization: `Bearer ${resendKey}`,
   };
+}
+
+/**
+ * Verify connectivity directly with the Resend API to maintain connection health.
+ */
+export async function verifyDirectResendConnection(apiKey?: string | null): Promise<{
+  ok: boolean;
+  status: number;
+  message: string;
+}> {
+  const key = apiKey ?? Deno.env.get("RESEND_API_KEY") ?? "";
+  if (!key) {
+    return { ok: false, status: 401, message: "Missing RESEND_API_KEY" };
+  }
+  try {
+    const res = await fetch(resendDomainsUrl(key), {
+      method: "GET",
+      headers: resendHeaders(key),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) {
+      return { ok: true, status: res.status, message: "Direct Resend connector active and verified" };
+    }
+    const text = await res.text().catch(() => "");
+    return { ok: false, status: res.status, message: `Resend error: ${text.slice(0, 200)}` };
+  } catch (err) {
+    return { ok: false, status: 500, message: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /**

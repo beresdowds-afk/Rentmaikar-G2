@@ -27,19 +27,15 @@ Deno.test("leaves already-verified senders untouched", () => {
   assertEquals(resendFrom(from), from);
 });
 
-Deno.test("routes connector keys through the Lovable gateway", () => {
+Deno.test("establishes and maintains the Direct Resend connector", () => {
   assertEquals(isDirectResendKey("re_abc123"), true);
-  assertEquals(isDirectResendKey("conn_abc123"), false);
   assertEquals(resendEmailsUrl("re_abc123"), "https://api.resend.com/emails");
-  assertEquals(
-    resendEmailsUrl("conn_abc123"),
-    "https://connector-gateway.lovable.dev/resend/emails",
-  );
+  assertEquals(resendEmailsUrl("re_prod_999"), "https://api.resend.com/emails");
 
-  const direct = resendHeaders("re_abc123");
-  assertEquals(direct.Authorization, "Bearer re_abc123");
-  const gateway = resendHeaders("conn_abc123");
-  assertEquals(gateway["X-Connection-Api-Key"], "conn_abc123");
+  const headers = resendHeaders("re_abc123");
+  assertEquals(headers.Authorization, "Bearer re_abc123");
+  assertEquals(headers["Content-Type"], "application/json");
+  assertEquals("X-Connection-Api-Key" in headers, false);
 });
 
 Deno.test("send rewrites the sender and keeps the original as reply_to", async () => {

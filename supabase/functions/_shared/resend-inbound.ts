@@ -8,7 +8,7 @@
  *   GET /emails/receiving/{email_id}/attachments  -> attachment download URLs
  *
  * Both endpoints honour the same auth as sends, so we reuse the shared
- * resend-gateway helpers (direct `re_` key vs Lovable connector gateway).
+ * Direct Resend connector helpers (direct Resend API authentication).
  */
 
 import { resendBaseUrl, resendHeaders } from "./resend-gateway.ts";

@@ -49,19 +49,13 @@ Deno.test("sender rewrite: normalises unverified domains onto notify.rentmaikar.
   );
 });
 
-Deno.test("resend headers: distinguishes direct API key vs Lovable connection gateway key", () => {
-  // Raw Resend API keys start with re_
+Deno.test("resend headers: uses Direct Resend API key Bearer authorization", () => {
   const directKey = "re_test_123456789";
   assertEquals(isDirectResendKey(directKey), true);
   const directHeaders = resendHeaders(directKey);
   assertEquals(directHeaders["Authorization"], `Bearer ${directKey}`);
+  assertEquals(directHeaders["Content-Type"], "application/json");
   assertEquals("X-Connection-Api-Key" in directHeaders, false);
-
-  // Connector connection keys
-  const connKey = "conn_resend_987654321";
-  assertEquals(isDirectResendKey(connKey), false);
-  const connHeaders = resendHeaders(connKey);
-  assertEquals(connHeaders["X-Connection-Api-Key"], connKey);
 });
 
 Deno.test({
