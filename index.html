@@ -42,6 +42,165 @@
     <meta name="twitter:description" content="Peer-to-peer and fleet vehicle leasing platform with verified driver onboarding, owner management, and live IoT telemetry." />
     <meta name="twitter:image" content="https://rentmaikar.com/og-image.png" />
     <meta name="twitter:image:alt" content="Rentmaikar — rideshare-ready vehicle rentals in the USA and Nigeria" />
+
+    <!-- Structured Data (JSON-LD): Global Service Business for Local & Worldwide Search Visibility -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": ["AutoRental", "LocalBusiness"],
+          "@id": "https://rentmaikar.com/#business",
+          "name": "RentMaikar",
+          "alternateName": ["RentMaikar Global", "RentMaikar Rideshare & Fleet Rentals"],
+          "url": "https://rentmaikar.com/",
+          "logo": "https://rentmaikar.com/icon.svg",
+          "image": "https://rentmaikar.com/og-image.png",
+          "description": "Global rideshare vehicle rental and fleet telematics platform offering peer-to-peer and fleet vehicle leasing, verified driver onboarding, and real-time IoT tracking for local and international markets.",
+          "priceRange": "$$",
+          "currenciesAccepted": "USD, NGN, GBP, EUR, CAD, AUD, KES, ZAR, GHS",
+          "paymentAccepted": "Credit Card, Debit Card, PayPal, Paystack, Bank Transfer",
+          "areaServed": [
+            {
+              "@type": "Place",
+              "name": "Worldwide"
+            },
+            {
+              "@type": "Country",
+              "name": "United States"
+            },
+            {
+              "@type": "Country",
+              "name": "Nigeria"
+            },
+            {
+              "@type": "Country",
+              "name": "United Kingdom"
+            },
+            {
+              "@type": "Country",
+              "name": "Canada"
+            },
+            {
+              "@type": "Country",
+              "name": "Australia"
+            },
+            {
+              "@type": "Country",
+              "name": "South Africa"
+            },
+            {
+              "@type": "Country",
+              "name": "Ghana"
+            },
+            {
+              "@type": "Country",
+              "name": "Kenya"
+            },
+            {
+              "@type": "Continent",
+              "name": "North America"
+            },
+            {
+              "@type": "Continent",
+              "name": "Europe"
+            },
+            {
+              "@type": "Continent",
+              "name": "Africa"
+            },
+            {
+              "@type": "Continent",
+              "name": "Asia"
+            }
+          ],
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday"
+              ],
+              "opens": "00:00",
+              "closes": "23:59"
+            }
+          ],
+          "sameAs": [
+            "https://twitter.com/Rentmaikar"
+          ],
+          "potentialAction": {
+            "@type": "ReserveAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": "https://rentmaikar.com/vehicles",
+              "inLanguage": "en",
+              "actionPlatform": [
+                "http://schema.org/DesktopWebPlatform",
+                "http://schema.org/MobileWebPlatform"
+              ]
+            },
+            "result": {
+              "@type": "RentalCarReservation",
+              "name": "Rideshare & Fleet Vehicle Booking"
+            }
+          }
+        },
+        {
+          "@type": "Service",
+          "@id": "https://rentmaikar.com/#service",
+          "name": "Global Rideshare Vehicle Rental & Fleet Telematics Service",
+          "serviceType": "Rideshare Vehicle Rental & Fleet Management",
+          "provider": {
+            "@id": "https://rentmaikar.com/#business"
+          },
+          "description": "Worldwide peer-to-peer and fleet vehicle leasing for rideshare drivers and fleet operators, featuring automated onboarding, IoT telemetry tracking, and flexible rental terms worldwide without geographical restriction.",
+          "areaServed": {
+            "@type": "Place",
+            "name": "Worldwide"
+          },
+          "serviceAudience": {
+            "@type": "Audience",
+            "audienceType": "Rideshare Drivers, Fleet Owners, Vehicle Hosts, Transportation Businesses"
+          },
+          "hasOfferCatalog": {
+            "@type": "OfferCatalog",
+            "name": "Vehicle Rental & Fleet Services",
+            "itemListElement": [
+              {
+                "@type": "Offer",
+                "itemOffered": {
+                  "@type": "Service",
+                  "name": "Rideshare-Ready Vehicle Rental",
+                  "description": "Inspected, insured, rideshare-compliant vehicles for rideshare and delivery drivers across international and regional markets."
+                }
+              },
+              {
+                "@type": "Offer",
+                "itemOffered": {
+                  "@type": "Service",
+                  "name": "Fleet Management & IoT Telematics",
+                  "description": "Real-time vehicle tracking, geofencing, remote diagnostics, and automated maintenance workflows for global vehicle fleets."
+                }
+              },
+              {
+                "@type": "Offer",
+                "itemOffered": {
+                  "@type": "Service",
+                  "name": "Peer-to-Peer Vehicle Hosting",
+                  "description": "Vehicle host monetization with automated weekly payouts, driver vetting, and digital lease agreements."
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+    </script>
   </head>
 
   <body>

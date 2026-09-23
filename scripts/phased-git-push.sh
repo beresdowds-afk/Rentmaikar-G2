@@ -15,17 +15,18 @@ echo "=================================================================="
 echo "  RentMaikar Phased Git Repository Push"
 echo "=================================================================="
 
-# 1. Ensure repository is initialized
+# 1. Ensure repository is initialized and aligned on main branch
 if [ ! -d ".git" ]; then
   echo "==> Initializing git repository..."
-  git init
-  git branch -M main
+  git init -b main 2>/dev/null || (git init && git branch -M main)
 fi
 
-# Ensure branch is main
-CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'main')"
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  git branch -M main || true
+# Ensure branch is explicitly main (handles default 'master' or detached HEAD)
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" = "HEAD" ]; then
+  git checkout -B main 2>/dev/null || git branch -M main 2>/dev/null || true
+elif [ "$CURRENT_BRANCH" != "main" ]; then
+  git branch -M main 2>/dev/null || git checkout -B main 2>/dev/null || true
 fi
 
 # 2. Ensure Git author information is configured
@@ -35,6 +36,8 @@ fi
 if [ -z "$(git config user.email 2>/dev/null || true)" ]; then
   git config user.email "beresdowds@gmail.com"
 fi
+git config --global user.name "Olusola Adebayo" 2>/dev/null || true
+git config --global user.email "beresdowds@gmail.com" 2>/dev/null || true
 git config --global --add safe.directory "*" 2>/dev/null || true
 git config advice.ignoredHook false 2>/dev/null || true
 
@@ -42,6 +45,7 @@ git config advice.ignoredHook false 2>/dev/null || true
 git config http.postBuffer 524288000 || git config --global http.postBuffer 524288000 || true
 git config http.maxRequestBuffer 104857600 || git config --global http.maxRequestBuffer 104857600 || true
 git config core.compression 9 || git config --global core.compression 9 || true
+git config http.version HTTP/1.1 || git config --global http.version HTTP/1.1 || true
 
 # 4. Determine authenticated remote URL
 PUSH_REMOTE_URL="$REPO_URL"
@@ -71,7 +75,7 @@ echo "==> Remote target: $REPO_URL"
 echo "==> [Pre-Push] Checking remote origin status..."
 if git ls-remote --exit-code origin &>/dev/null; then
   echo "==> Fetching commits from origin/main..."
-  git fetch origin main --depth=50 || git fetch origin main || true
+  git fetch origin main --depth=100 || git fetch origin main || true
 
   if git rev-parse --verify origin/main >/dev/null 2>&1; then
     # If local branch has no commits yet (brand new git init), align HEAD to origin/main
@@ -84,26 +88,26 @@ if git ls-remote --exit-code origin &>/dev/null; then
       REMOTE_HEAD="$(git rev-parse origin/main 2>/dev/null || true)"
       if [ -n "$REMOTE_HEAD" ] && [ "$MERGE_BASE" != "$REMOTE_HEAD" ]; then
         echo "==> Aligning branch delta with origin/main..."
-        STASH_SAVED=0
-        if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-          git stash push -u -m "phased-push-autostash" || true
-          STASH_SAVED=1
-        fi
-        git rebase origin/main || {
-          echo "⚠ Rebase conflict, safely falling back to merge..."
+        git pull --rebase --autostash origin main 2>/dev/null || {
+          echo "⚠ Rebase conflict, safely falling back to merge with autostash..."
           git rebase --abort 2>/dev/null || true
-          git merge origin/main --no-edit -m "merge: sync remote origin/main" || true
+          STASH_SAVED=0
+          if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+            git stash push -u -m "phased-push-autostash" 2>/dev/null || true
+            STASH_SAVED=1
+          fi
+          git merge origin/main --no-edit -m "merge: sync remote origin/main" --allow-unrelated-histories 2>/dev/null || true
+          if [ "$STASH_SAVED" -eq 1 ]; then
+            git stash pop 2>/dev/null || true
+          fi
         }
-        if [ "$STASH_SAVED" -eq 1 ]; then
-          git stash pop 2>/dev/null || true
-        fi
       fi
     fi
     echo "✓ Remote history successfully reconciled."
   fi
 fi
 
-# Helper function to push with retry
+# Helper function to push with retry and dirty-working-tree protection
 push_with_retry() {
   local phase_name="$1"
   local max_attempts=3
@@ -117,9 +121,24 @@ push_with_retry() {
       success=1
       break
     else
-      echo "⚠ Push attempt $attempt failed. Fetching and retrying in 3 seconds..."
+      echo "⚠ Push attempt $attempt failed. Synchronizing with remote before retry..."
       git fetch origin main || true
-      git merge origin/main --no-edit -m "merge: sync remote before retry" 2>/dev/null || true
+
+      # Stash any dirty uncommitted changes in working tree before reconciling
+      # so git merge or pull --rebase does not abort due to dirty working tree
+      STASHED=0
+      if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        git stash push -u -m "retry-autostash" 2>/dev/null || true
+        STASHED=1
+      fi
+
+      git pull --rebase origin main 2>/dev/null || \
+        git merge origin/main --no-edit -m "merge: sync remote before retry" --allow-unrelated-histories 2>/dev/null || true
+
+      if [ "$STASHED" -eq 1 ]; then
+        git stash pop 2>/dev/null || true
+      fi
+
       sleep 3
       attempt=$((attempt + 1))
     fi
@@ -163,6 +182,13 @@ git add -A \
   docs/ \
   architecture/ \
   scripts/ \
+  .github/ \
+  tests/ \
+  cloudflare/ \
+  frontend/ \
+  handoff/ \
+  capacitor.config.ts \
+  RENTMAIKAR_UI_NAVIGATION_ARCHITECTURE.md \
   README.md || true
 
 if ! git diff --cached --quiet; then
