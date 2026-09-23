@@ -127,7 +127,7 @@ class BackendBridge {
         this.primaryBaseUrl = "http://localhost:5000/api";
       } else if (window.location.hostname.includes("rentmaikar.com")) {
         // Direct relative on production domain
-        this.primaryBaseUrl = "/api";
+        this.primaryBaseUrl = "https://staging.rentmaikar.com/api";
       } else {
         // Preview or staging default
         this.primaryBaseUrl = "https://staging.rentmaikar.com/api";
