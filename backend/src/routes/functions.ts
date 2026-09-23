@@ -22,11 +22,12 @@ const otpStore = new Map<string, { code: string; expiresAt: number }>();
  * Bridges all 164 available Edge Functions between frontend and Supabase
  */
 functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
-  const { functionName } = req.params;
+  const functionName = String(req.params.functionName || "");
   const body = req.body || {};
 
   // Extract authorization header from request if provided
-  const clientAuth = req.headers["authorization"] || "";
+  const rawAuth = req.headers["authorization"];
+  const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
     // 1. Generic Supabase-first dispatch for all functions EXCEPT send-outbound-email.
   // send-outbound-email has a dedicated Cloud Run-primary -> Supabase-fallback path below.
   if (functionName !== "send-outbound-email") {
@@ -318,6 +319,19 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             proxyHeaders["x-client-info"] = String(req.headers["x-client-info"]);
           }
 
+          const edgeRes = await fetch(edgeFunctionUrl, {
+            method: "POST",
+            headers: proxyHeaders,
+            body: JSON.stringify(body),
+          });
+          if (edgeRes.ok) {
+            const edgeData = await edgeRes.json().catch(() => ({}));
+            return res.status(200).json(edgeData);
+          }
+        } catch (edgeErr: any) {
+          console.warn("[Backend Functions] send-email-reply Supabase forward failed:", edgeErr?.message || edgeErr);
+        }
+
         // 2. Direct Provider Execution Fallback (Resend API)
         const resendApiKey = process.env.RESEND_API_KEY;
         const targetEmail = (body.recipientEmail || body.to || body.email || "").trim();
@@ -379,25 +393,25 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       case "send-outbound-email": {
-  // 1. PRIMARY: Direct Cloud Run server-side email service
-  try {
-    const { handleSendOutboundEmail } = await import("../../../src/server/emailService");
-    const result = await handleSendOutboundEmail(body);
+        // 1. PRIMARY: Direct Cloud Run server-side email service
+        try {
+          const { handleSendOutboundEmail } = await import("../services/emailService");
+          const result = await handleSendOutboundEmail(body);
 
-    if (result.ok) {
-      return res.status(200).json(result);
-    }
+          if (result.ok) {
+            return res.status(200).json(result);
+          }
 
-    console.warn(
-      "[Backend Functions] Primary Cloud Run email dispatch failed; falling back to Supabase:",
-      result
-    );
-  } catch (localErr: any) {
-    console.warn(
-      "[Backend Functions] Primary Cloud Run email dispatch threw; falling back to Supabase:",
-      localErr?.message || localErr
-    );
-  }
+          console.warn(
+            "[Backend Functions] Primary Cloud Run email dispatch failed; falling back to Supabase:",
+            result
+          );
+        } catch (localErr: any) {
+          console.warn(
+            "[Backend Functions] Primary Cloud Run email dispatch threw; falling back to Supabase:",
+            localErr?.message || localErr
+          );
+        }
 
   // 2. FALLBACK: Supabase Edge Function
   try {
@@ -476,7 +490,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
       case "resend-events": {
         try {
-          const { handleResendWebhookEvent } = await import("../../../src/server/emailService");
+          const { handleResendWebhookEvent } = await import("../services/emailService");
           const result = await handleResendWebhookEvent(body, req.headers as Record<string, string>);
           return res.status(200).json(result);
         } catch (e: any) {

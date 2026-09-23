@@ -25,7 +25,7 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 
 /** Canonical public backend base URL (API host). */
 const PUBLIC_BACKEND_URL = process.env.PUBLIC_BACKEND_URL || "https://staging.rentmaikar.com";
@@ -69,12 +69,16 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const referer = req.headers.referer as string | undefined;
   const path = req.path;
 
-  // Always allow portal management routes, bridge fallback routes, core health checks, and brand assets
+  // Always allow API routes, portal management routes, bridge fallback routes, core health checks, and brand assets
   const isManagementOrBridgeRoute =
     path.startsWith("/portal") ||
     path.startsWith("/admin") ||
     path.startsWith("/api/portal") ||
     path.startsWith("/api/bridge") ||
+    path.startsWith("/api/functions") ||
+    path.startsWith("/api/cpaas") ||
+    path.startsWith("/api/webhooks") ||
+    path.startsWith("/api/marketing") ||
     path === "/api/health" ||
     path === "/api/health/diagnostics" ||
     path === "/api/domains" ||
@@ -167,7 +171,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Correlation-ID, X-Client-Timestamp, X-Portal-Token, Accept"
+      "Content-Type, Authorization, apikey, x-client-info, X-Requested-With, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Correlation-ID, X-Client-Timestamp, X-Portal-Token, Accept"
     );
     res.setHeader("Access-Control-Max-Age", "86400");
   } else if (!origin) {

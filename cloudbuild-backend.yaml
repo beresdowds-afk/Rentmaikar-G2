@@ -1,0 +1,43 @@
+steps:
+  # 1. Build the self-contained backend container image using backend/Dockerfile
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-backend'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/rentmaikar-backend:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/rentmaikar-backend:latest'
+      - './backend'
+
+  # 2. Push the backend container image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-backend'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/rentmaikar-backend:$COMMIT_SHA'
+
+  # 3. Deploy the backend container image to Google Cloud Run (rentmaikar-backend)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-backend'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'rentmaikar-backend'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/rentmaikar-backend:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west1'
+      - '--port'
+      - '8080'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'NODE_ENV=production,PORT=8080,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
+
+images:
+  - 'gcr.io/$PROJECT_ID/rentmaikar-backend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/rentmaikar-backend:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

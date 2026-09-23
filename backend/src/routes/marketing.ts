@@ -45,7 +45,7 @@ marketingRouter.post("/events", async (req: Request, res: Response) => {
  * Safe webhook ingestion endpoint with platform validation
  */
 marketingRouter.post("/webhooks/:platform", async (req: Request, res: Response) => {
-  const { platform } = req.params;
+  const platform = String(req.params.platform || "");
   const allowedPlatforms = ["meta", "google", "tiktok", "linkedin", "manychat", "sentdm", "twilio", "resend"];
 
   if (!allowedPlatforms.includes(platform)) {

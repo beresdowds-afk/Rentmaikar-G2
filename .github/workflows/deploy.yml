@@ -26,14 +26,19 @@ jobs:
       - name: Run Linter
         run: npm run lint
 
-      - name: Build Test
+      - name: Frontend Build Test
         run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
 
-  deploy:
-    name: Build & Deploy to Google Cloud Run
+      - name: Backend Typecheck & Build Test
+        run: |
+          npm --prefix backend ci || npm --prefix backend install
+          npm --prefix backend run build
+
+  deploy-frontend:
+    name: Deploy Frontend (rentmaikar-g2)
     needs: validate
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -57,7 +62,7 @@ jobs:
         if: env.GCP_SA_KEY != ''
         run: gcloud auth configure-docker --quiet
 
-      - name: Build and Push Docker Image
+      - name: Build and Push Frontend Docker Image
         if: env.GCP_SA_KEY != ''
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}"
@@ -69,7 +74,7 @@ jobs:
           docker push gcr.io/${PROJECT_ID}/rentmaikar:${{ github.sha }}
           docker push gcr.io/${PROJECT_ID}/rentmaikar:latest
 
-      - name: Deploy to Cloud Run
+      - name: Deploy Frontend to Cloud Run
         if: env.GCP_SA_KEY != ''
         run: |
           gcloud run deploy rentmaikar-g2 \
@@ -77,3 +82,48 @@ jobs:
             --region europe-west1 \
             --port 80 \
             --allow-unauthenticated
+
+  deploy-backend:
+    name: Deploy Backend (rentmaikar-backend)
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        if: env.GCP_SA_KEY != ''
+        with:
+          credentials_json: ${{ env.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        if: env.GCP_SA_KEY != ''
+
+      - name: Authorize Docker with GCP
+        if: env.GCP_SA_KEY != ''
+        run: gcloud auth configure-docker --quiet
+
+      - name: Build and Push Backend Docker Image
+        if: env.GCP_SA_KEY != ''
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}"
+          docker build \
+            -t gcr.io/${PROJECT_ID}/rentmaikar-backend:${{ github.sha }} \
+            -t gcr.io/${PROJECT_ID}/rentmaikar-backend:latest ./backend
+          docker push gcr.io/${PROJECT_ID}/rentmaikar-backend:${{ github.sha }}
+          docker push gcr.io/${PROJECT_ID}/rentmaikar-backend:latest
+
+      - name: Deploy Backend to Cloud Run
+        if: env.GCP_SA_KEY != ''
+        run: |
+          gcloud run deploy rentmaikar-backend \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar-backend:${{ github.sha }} \
+            --region europe-west1 \
+            --port 8080 \
+            --allow-unauthenticated \
+            --set-env-vars NODE_ENV=production,PORT=8080,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
