@@ -106,7 +106,7 @@ export function EmailProviderHealthCard() {
 
     setSendingTest(true);
     try {
-      const res = await fetch("/api/functions/send-outbound-email", {
+      https://staging.rentmaikar.com/api/functions/send-outbound-email
   method: "POST",
   headers: {
     "Content-Type": "application/json",
