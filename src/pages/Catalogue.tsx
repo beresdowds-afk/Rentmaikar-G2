@@ -1,7 +1,8 @@
 import Seo from "@/components/seo/Seo";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import { Search, Filter, MapPin, Calendar, Info, Loader2, AlertTriangle, ShieldAlert, RefreshCw, User, Building } from "lucide-react";
+import { Search, Filter, MapPin, Calendar, Info, Loader2, AlertTriangle, ShieldAlert, RefreshCw, User, Building, ArrowLeftRight, Scale } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,6 +26,8 @@ import {
   USA_DEFAULT_RADIUS_MILES,
 } from "@/lib/geo-utils";
 import BookingRequestDialog from "@/components/catalogue/BookingRequestDialog";
+import { VehicleComparisonModal, type CompareVehicle } from "@/components/catalogue/VehicleComparisonModal";
+import { VehicleCompareFloatingDock } from "@/components/catalogue/VehicleCompareFloatingDock";
 import categoryBudget from "@/assets/category-budget.jpg";
 import categoryStandard from "@/assets/category-standard.jpg";
 import categoryPremium from "@/assets/category-premium.jpg";
@@ -98,6 +101,9 @@ const Catalogue = () => {
   const [makeFilter, setMakeFilter] = useState("all");
   const [modelFilter, setModelFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [compareVehicleA, setCompareVehicleA] = useState<CatalogueVehicle | null>(null);
+  const [compareVehicleB, setCompareVehicleB] = useState<CatalogueVehicle | null>(null);
+  const [comparisonModalOpen, setComparisonModalOpen] = useState(false);
 
   // Debounce the search box so each keystroke doesn't hit the database.
   useEffect(() => {
@@ -192,6 +198,70 @@ const Catalogue = () => {
   }, [rows, country, driverHome, radiusMiles, category, categoryPrice]);
 
   const nearbyCount = useMemo(() => vehicles.filter((v) => v.isNearby).length, [vehicles]);
+
+  const handleToggleCompare = (vehicle: CatalogueVehicle) => {
+    // If clicking on Vehicle A: remove A
+    if (compareVehicleA?.id === vehicle.id) {
+      if (compareVehicleB) {
+        setCompareVehicleA(compareVehicleB);
+        setCompareVehicleB(null);
+      } else {
+        setCompareVehicleA(null);
+      }
+      toast.info(`Removed ${vehicle.make} ${vehicle.model} from comparison.`);
+      return;
+    }
+
+    // If clicking on Vehicle B: remove B
+    if (compareVehicleB?.id === vehicle.id) {
+      setCompareVehicleB(null);
+      toast.info(`Removed ${vehicle.make} ${vehicle.model} from comparison.`);
+      return;
+    }
+
+    // If neither is selected, set A
+    if (!compareVehicleA) {
+      setCompareVehicleA(vehicle);
+      toast.success(
+        `Selected ${vehicle.make} ${vehicle.model}. Choose a 2nd vehicle to compare side-by-side.`,
+        {
+          action: {
+            label: "Compare Now",
+            onClick: () => {
+              const alt = vehicles.find((v) => v.id !== vehicle.id) || null;
+              if (alt) setCompareVehicleB(alt);
+              setComparisonModalOpen(true);
+            },
+          },
+        },
+      );
+      return;
+    }
+
+    // Vehicle A is already selected: set as Vehicle B and open modal immediately
+    setCompareVehicleB(vehicle);
+    setComparisonModalOpen(true);
+    toast.success(`Comparing ${compareVehicleA.make} ${compareVehicleA.model} with ${vehicle.make} ${vehicle.model}.`);
+  };
+
+  const handleOpenComparisonModal = () => {
+    if (!compareVehicleA && vehicles.length > 0) {
+      setCompareVehicleA(vehicles[0]);
+      if (vehicles.length > 1) {
+        setCompareVehicleB(vehicles[1]);
+      }
+    } else if (compareVehicleA && !compareVehicleB) {
+      const alt = vehicles.find((v) => v.id !== compareVehicleA.id) || null;
+      if (alt) setCompareVehicleB(alt);
+    }
+    setComparisonModalOpen(true);
+  };
+
+  const handleClearCompare = () => {
+    setCompareVehicleA(null);
+    setCompareVehicleB(null);
+    setComparisonModalOpen(false);
+  };
 
   const minPrice = minPriceInput ? Number(minPriceInput) : undefined;
   const maxPrice = maxPriceInput ? Number(maxPriceInput) : undefined;
@@ -461,7 +531,7 @@ const Catalogue = () => {
           </div>
 
           {/* Results count */}
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <span className="text-muted-foreground">
               {isLoading ? "Loading vehicles…" : `${filteredVehicles.length} of ${total} vehicles`}
               {!isLoading && country !== "Nigeria" && (
@@ -473,6 +543,20 @@ const Catalogue = () => {
                 <span className="ml-2 text-xs">({nearbyCount} in your city)</span>
               )}
             </span>
+
+            {(compareVehicleA || compareVehicleB) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenComparisonModal}
+                className="h-8 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <span>
+                  View Comparison ({((compareVehicleA ? 1 : 0) + (compareVehicleB ? 1 : 0))}/2)
+                </span>
+              </Button>
+            )}
           </div>
 
           {/* Error state */}
@@ -519,6 +603,9 @@ const Catalogue = () => {
                   const showSeparator =
                     locationFilter === "all" && !vehicle.isNearby && (index === 0 || filteredVehicles[index - 1]?.isNearby);
 
+                  const isCompared =
+                    compareVehicleA?.id === vehicle.id || compareVehicleB?.id === vehicle.id;
+
                   return (
                     <React.Fragment key={vehicle.id}>
                       {showSeparator && (
@@ -534,7 +621,11 @@ const Catalogue = () => {
                       )}
                       <div
                         className={`bg-card rounded-xl overflow-hidden shadow-card card-hover border ${
-                          vehicle.isNearby ? "border-border" : "border-muted"
+                          isCompared
+                            ? "border-primary ring-1 ring-primary/40"
+                            : vehicle.isNearby
+                              ? "border-border"
+                              : "border-muted"
                         }`}
                       >
                         <div className="relative h-48 overflow-hidden">
@@ -563,6 +654,24 @@ const Catalogue = () => {
                                   : "Distance unknown"}
                             </span>
                           </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleCompare(vehicle);
+                            }}
+                            className={`absolute bottom-3 right-3 px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 backdrop-blur-md transition-all shadow-sm ${
+                              isCompared
+                                ? "bg-primary text-primary-foreground ring-2 ring-primary/40 font-semibold"
+                                : "bg-card/90 text-foreground hover:bg-card hover:scale-105"
+                            }`}
+                            title={isCompared ? "Remove from comparison" : "Compare this vehicle"}
+                            aria-label={isCompared ? "Remove from comparison" : "Compare this vehicle"}
+                          >
+                            <ArrowLeftRight className="w-3 h-3" />
+                            <span>{isCompared ? "Selected" : "Compare"}</span>
+                          </button>
                         </div>
 
                         <div className="p-4">
@@ -591,12 +700,29 @@ const Catalogue = () => {
                               <span className="text-sm text-muted-foreground">/week</span>
                             </div>
 
-                            <div className="flex gap-2">
-                              <Link to={`/vehicle/${vehicle.id}`} className="flex-1">
-                                <Button size="sm" variant="outline" className="w-full">View details</Button>
-                              </Link>
-                              <Button size="sm" variant="hero" className="flex-1" onClick={() => setBookingVehicle(vehicle)}>
-                                Request to book
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                <Link to={`/vehicle/${vehicle.id}`} className="flex-1">
+                                  <Button size="sm" variant="outline" className="w-full">View details</Button>
+                                </Link>
+                                <Button size="sm" variant="hero" className="flex-1" onClick={() => setBookingVehicle(vehicle)}>
+                                  Request to book
+                                </Button>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={isCompared ? "secondary" : "outline"}
+                                className={`w-full text-xs h-8.5 gap-1.5 transition-all ${
+                                  isCompared
+                                    ? "bg-primary/15 text-primary border-primary/30 font-semibold hover:bg-primary/25"
+                                    : "text-muted-foreground hover:text-foreground border-border/80 hover:bg-muted/70"
+                                }`}
+                                onClick={() => handleToggleCompare(vehicle)}
+                                aria-pressed={isCompared}
+                              >
+                                <ArrowLeftRight className="w-3.5 h-3.5" />
+                                <span>{isCompared ? "In Comparison (Click to remove)" : "Compare Vehicle"}</span>
                               </Button>
                             </div>
                           </div>
@@ -668,6 +794,42 @@ const Catalogue = () => {
         </div>
       </main>
       <Footer />
+
+      {/* Floating comparison dock */}
+      <VehicleCompareFloatingDock
+        vehicleA={compareVehicleA}
+        vehicleB={compareVehicleB}
+        currencySymbol={currencySymbol}
+        onRemoveA={() => {
+          if (compareVehicleB) {
+            setCompareVehicleA(compareVehicleB);
+            setCompareVehicleB(null);
+          } else {
+            setCompareVehicleA(null);
+          }
+        }}
+        onRemoveB={() => setCompareVehicleB(null)}
+        onOpenModal={handleOpenComparisonModal}
+        onClear={handleClearCompare}
+      />
+
+      {/* Vehicle Comparison Modal */}
+      <VehicleComparisonModal
+        open={comparisonModalOpen}
+        onOpenChange={setComparisonModalOpen}
+        vehicleA={compareVehicleA}
+        vehicleB={compareVehicleB}
+        allVehicles={vehicles}
+        currencySymbol={currencySymbol}
+        country={country}
+        onSelectVehicleA={setCompareVehicleA}
+        onSelectVehicleB={setCompareVehicleB}
+        onRequestBook={(vehicle) => {
+          setComparisonModalOpen(false);
+          setBookingVehicle(vehicle);
+        }}
+        onClear={handleClearCompare}
+      />
 
       <BookingRequestDialog
         open={Boolean(bookingVehicle)}
