@@ -322,7 +322,7 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
         // Primary: Cloud Run application email gateway.
 // The backend gateway handles Supabase fallback.
 try {
-  const res = await fetch('/api/functions/send-outbound-email', {
+  const res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
