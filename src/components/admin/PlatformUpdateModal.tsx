@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw,
@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { FEATURE_PILLARS, type FeaturePillar } from "@/pages/PlatformReportPage";
 import { hardReload } from "@/lib/bundle-recovery";
+import { usePlatformFeaturesCount } from "@/hooks/usePlatformFeaturesCount";
 
 interface PlatformUpdateModalProps {
   trigger?: React.ReactNode;
@@ -60,7 +61,7 @@ const INITIAL_STEPS: UpdateStep[] = [
   {
     id: "features",
     title: "3. Platform Features Catalog Synchronization",
-    description: "Synchronizing and registering all 68 core platform features across 8 architecture pillars",
+    description: "Synchronizing and registering all platform features across architecture pillars",
     status: "pending",
   },
   {
@@ -81,11 +82,18 @@ export const PlatformUpdateModal: React.FC<PlatformUpdateModalProps> = ({
   trigger,
   onUpdateComplete,
 }) => {
+  const { count: dbFeatureCount } = usePlatformFeaturesCount(68);
   const [open, setOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [steps, setSteps] = useState<UpdateStep[]>(INITIAL_STEPS);
   const [syncedCount, setSyncedCount] = useState<number>(68);
+
+  useEffect(() => {
+    if (typeof dbFeatureCount === "number" && dbFeatureCount > 0) {
+      setSyncedCount(dbFeatureCount);
+    }
+  }, [dbFeatureCount]);
   const [showFeatureList, setShowFeatureList] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(() => {
     try {
@@ -217,7 +225,7 @@ export const PlatformUpdateModal: React.FC<PlatformUpdateModalProps> = ({
       setProgress(100);
 
       toast.success("Platform Features Successfully Updated!", {
-        description: `All ${totalFeaturesSynced || 68} features synchronized across 8 pillars. Caches flushed at ${readableTime}.`,
+        description: `All ${totalFeaturesSynced || syncedCount} features synchronized across 8 pillars. Caches flushed at ${readableTime}.`,
         icon: <Sparkles className="h-4 w-4 text-emerald-500" />,
       });
 
@@ -274,7 +282,7 @@ export const PlatformUpdateModal: React.FC<PlatformUpdateModalProps> = ({
                 </Badge>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Synchronize all 68 platform features, evict stale service worker caches, and reload live fleet parameters.
+                Synchronize all {syncedCount} platform features, evict stale service worker caches, and reload live fleet parameters.
               </DialogDescription>
             </div>
           </div>

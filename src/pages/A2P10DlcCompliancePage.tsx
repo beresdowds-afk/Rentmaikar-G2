@@ -514,9 +514,10 @@ export default function A2P10DlcCompliancePage() {
                     { label: "2. Driver Registration Form", url: "/driver-registration", desc: "Shows unbundled optional SMS checkboxes during driver signup." },
                     { label: "3. Owner Registration Form", url: "/owner-registration", desc: "Shows unbundled optional SMS checkboxes during owner signup." },
                     { label: "4. Privacy Policy (SMS Clause)", url: "/privacy", desc: "Includes explicit non-sharing clause for mobile number & consent data." },
-                    { label: "5. Terms & Conditions", url: "/terms", desc: "Contains SMS program terms, rate notices, and STOP/HELP instructions." },
-                    { label: "6. SMS Consent Audit Trail (Admin)", url: "/admin/sms-consent-audit", desc: "Database audit records showing timestamp, phone, page, and version." },
-                    { label: "7. Downloadable PDF Dossier", url: "/downloads/rentmaikar-10dlc-a2p-compliance-packet.pdf", desc: "Formatted 4-page official submission PDF document." },
+                    { label: "5. Terms & Conditions", url: "/terms", desc: "Contains SMS program terms, rate notices, carrier liability disclaimers, and STOP/HELP instructions." },
+                    { label: "6. Contact Us & HELP Destination", url: "/contact", desc: "Region-aware support directory, registered business identity, and SMS assistance." },
+                    { label: "7. SMS Consent Audit Trail (Admin)", url: "/admin/sms-consent-audit", desc: "Database audit records showing timestamp, phone, page, and version." },
+                    { label: "8. Downloadable PDF Dossier", url: "/downloads/rentmaikar-10dlc-a2p-compliance-packet.pdf", desc: "Formatted official submission PDF dossier ready for TCR reviewers." },
                   ].map((item, idx) => (
                     <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-muted/40 rounded-lg border gap-2">
                       <div>

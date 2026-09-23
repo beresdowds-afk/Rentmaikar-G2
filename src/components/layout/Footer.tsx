@@ -118,6 +118,12 @@ const Footer = () => {
                 </Link>
               </li>
               <li>
+                <Link to="/contact" className="text-primary-foreground/70 hover:text-accent transition-colors flex items-center gap-1">
+                  <Mail className="w-3 h-3" />
+                  Contact Us
+                </Link>
+              </li>
+              <li>
                 <Link to="/faq" className="text-primary-foreground/70 hover:text-accent transition-colors flex items-center gap-1">
                   <HelpCircle className="w-3 h-3" />
                   FAQ
@@ -173,6 +179,11 @@ const Footer = () => {
                   </a>
                 </li>
               )}
+              <li className="pt-1">
+                <Link to="/contact" className="text-xs text-accent hover:underline flex items-center gap-1 font-medium">
+                  Support Directory &amp; SMS Help &rarr;
+                </Link>
+              </li>
             </ul>
           </div>
         </div>

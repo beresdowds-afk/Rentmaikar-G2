@@ -1,6 +1,7 @@
 import Seo from "@/components/seo/Seo";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import { Link } from "react-router-dom";
 import { FileText } from "lucide-react";
 import { useRegion } from "@/contexts/RegionContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +20,7 @@ const Terms = () => {
         <h2 className="text-2xl font-semibold">1. Acceptance of Terms</h2>
         <p className="text-muted-foreground">
           By accessing or using the Rentmaikar platform ("Platform"), you agree to be bound by these Terms of Use ("Terms"). 
-          These Terms constitute a legally binding agreement between you and Rentmaikar LLC, a company registered in the United States.
+          These Terms constitute a legally binding agreement between you and Rentmaikar (wholly owned and operated by INTE-GRITTY LLC USA, a limited liability company registered in the United States).
           If you do not agree to these Terms, please do not use our services.
         </p>
       </section>
@@ -205,19 +206,23 @@ const Terms = () => {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">14. SMS / Text Message Program</h2>
+        <h2 className="text-2xl font-semibold">14. SMS / Text Message Program Terms</h2>
         <p className="text-muted-foreground">
-          By opting in to Rentmaikar SMS communications you agree to receive text messages from
-          Rentmaikar about your account, vehicle rentals, applications, reservations, payments,
-          customer support and service updates. Promotional text messages require a separate opt-in.
+          Rentmaikar (wholly owned and operated by INTE-GRITTY LLC USA) offers an optional SMS (text message) communications program. 
+          By opting in to Rentmaikar SMS communications during registration, on our standalone opt-in page, or in your profile preferences, 
+          you agree to receive text messages about your account, vehicle rentals, applications, reservations, inspections, payments, 
+          customer support, and service updates. Promotional text messages require a separate, independent opt-in.
         </p>
         <ul className="list-disc pl-6 text-muted-foreground space-y-2">
-          <li>SMS consent is optional and is not a condition of purchasing or using Rentmaikar services.</li>
-          <li>Message frequency varies. Message and data rates may apply.</li>
-          <li>Reply STOP to opt out of further messages. Reply HELP for help.</li>
-          <li>Messages may contain links to your Rentmaikar account, application or rental details.</li>
-          <li>You may review or withdraw your consent at any time in your account communication preferences.</li>
-          <li>Rentmaikar does not sell, rent or share mobile phone numbers or SMS consent information with third parties or affiliates for their own marketing or promotional purposes.</li>
+          <li><strong>Optional Consent:</strong> SMS consent is strictly optional and is not a condition of purchasing, creating an account, or using Rentmaikar services.</li>
+          <li><strong>Message Frequency:</strong> Message frequency varies based on your rental activity, reservations, and account notifications.</li>
+          <li><strong>Rates Disclosure:</strong> Message and data rates may apply depending on your mobile carrier plan.</li>
+          <li><strong>Opt-Out Instructions:</strong> Text or reply <strong>STOP</strong> to any text message at any time to opt out. You will receive a one-time confirmation text.</li>
+          <li><strong>Customer Care / HELP Instructions:</strong> Text or reply <strong>HELP</strong> for assistance, or contact our customer support team at {EMAIL_CONFIG.support}, call {COMPANY_INFO.USA.phone}, or visit <Link to="/contact" className="text-primary hover:underline">rentmaikar.com/contact</Link>.</li>
+          <li><strong>Direct Links:</strong> Messages may contain secure links to your Rentmaikar account, rental agreements, or payment invoices.</li>
+          <li><strong>Carrier Disclaimer:</strong> Wireless carriers (including but not limited to T-Mobile, AT&amp;T, Verizon, and regional carriers) are not liable for delayed or undelivered messages.</li>
+          <li><strong>Strict Non-Sharing Policy:</strong> No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.</li>
+          <li><strong>Privacy Policy:</strong> Review our full privacy practices at <Link to="/privacy" className="text-primary hover:underline">rentmaikar.com/privacy</Link>.</li>
         </ul>
       </section>
 
@@ -431,19 +436,23 @@ const Terms = () => {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold">14. SMS / Text Message Program</h2>
+        <h2 className="text-2xl font-semibold">14. SMS / Text Message Program Terms</h2>
         <p className="text-muted-foreground">
-          By opting in to Rentmaikar SMS communications you agree to receive text messages from
-          Rentmaikar about your account, vehicle rentals, applications, reservations, payments,
-          customer support and service updates. Promotional text messages require a separate opt-in.
+          Rentmaikar offers an optional SMS (text message) communications program. 
+          By opting in to Rentmaikar SMS communications during registration, on our standalone opt-in page, or in your profile preferences, 
+          you agree to receive text messages about your account, vehicle rentals, applications, reservations, inspections, payments, 
+          customer support, and service updates. Promotional text messages require a separate, independent opt-in.
         </p>
         <ul className="list-disc pl-6 text-muted-foreground space-y-2">
-          <li>SMS consent is optional and is not a condition of purchasing or using Rentmaikar services.</li>
-          <li>Message frequency varies. Message and data rates may apply.</li>
-          <li>Reply STOP to opt out of further messages. Reply HELP for help.</li>
-          <li>Messages may contain links to your Rentmaikar account, application or rental details.</li>
-          <li>You may review or withdraw your consent at any time in your account communication preferences.</li>
-          <li>Rentmaikar does not sell, rent or share mobile phone numbers or SMS consent information with third parties or affiliates for their own marketing or promotional purposes.</li>
+          <li><strong>Optional Consent:</strong> SMS consent is strictly optional and is not a condition of purchasing, creating an account, or using Rentmaikar services.</li>
+          <li><strong>Message Frequency:</strong> Message frequency varies based on your rental activity, reservations, and account notifications.</li>
+          <li><strong>Rates Disclosure:</strong> Message and data rates may apply depending on your mobile carrier network.</li>
+          <li><strong>Opt-Out Instructions:</strong> Text or reply <strong>STOP</strong> to any text message at any time to opt out. You will receive a one-time confirmation text.</li>
+          <li><strong>Customer Care / HELP Instructions:</strong> Text or reply <strong>HELP</strong> for assistance, or contact our customer support team at {EMAIL_CONFIG.support} or visit <Link to="/contact" className="text-primary hover:underline">rentmaikar.com/contact</Link>.</li>
+          <li><strong>Direct Links:</strong> Messages may contain secure links to your Rentmaikar account, rental agreements, or payment invoices.</li>
+          <li><strong>Carrier Disclaimer:</strong> Wireless carriers and telecommunications networks are not liable for delayed or undelivered messages.</li>
+          <li><strong>Strict Non-Sharing Policy:</strong> No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.</li>
+          <li><strong>Privacy Policy:</strong> Review our full privacy practices at <Link to="/privacy" className="text-primary hover:underline">rentmaikar.com/privacy</Link>.</li>
         </ul>
       </section>
 

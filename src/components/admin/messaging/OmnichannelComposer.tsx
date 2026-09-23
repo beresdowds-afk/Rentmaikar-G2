@@ -804,26 +804,7 @@ if (channel === 'email' && contact.email) {
 
     throw emailErr;
   }
-} {
-        const emailTarget = contact.email.trim();
-        const { data, error } = await supabase.functions.invoke('send-outbound-email', {
-          body: {
-            action: 'send',
-            to: emailTarget,
-            subject,
-            body,
-            recipientName: contact.full_name !== 'Customer' ? contact.full_name : undefined,
-            fromAlias: emailSenderAlias,
-            category: 'general',
-            attachments: uploadedAttachments,
-          },
-        });
-
-        if (error || data?.success === false || data?.ok === false) {
-          const emailErr = data?.error || error?.message || 'Email delivery failed';
-          throw new Error(emailErr);
-        }
-      } else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
+} else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
         let msgSent = false;
         let msgErr = '';
 

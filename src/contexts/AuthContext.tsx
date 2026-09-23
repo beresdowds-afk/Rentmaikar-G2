@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
+import { useAuthTabSync } from '@/hooks/useAuthTabSync';
 
 type AppRole = 'admin' | 'admin_assistant' | 'owner' | 'driver' | 'legal_support' | 'iot_support' | 'vehicle_support';
 
@@ -475,6 +476,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Cross-tab authentication synchronizer
+  const { broadcastSession, broadcastSignOut } = useAuthTabSync({
+    session,
+    onSessionSynced: (syncedSession) => {
+      setSession(syncedSession);
+      setUser(syncedSession.user);
+      if (syncedSession.user) {
+        setIsRoleLoading(true);
+        fetchUserRole(syncedSession.user.id, syncedSession.user.email)
+          .then((role) => setUserRole(role))
+          .catch(() => setUserRole(null))
+          .finally(() => setIsRoleLoading(false));
+
+        check2FAStatus(syncedSession.user.id)
+          .then((status) => {
+            if (!status || !status.requires_2fa) {
+              setTwoFactorVerified(true);
+            }
+          })
+          .catch(() => setTwoFactorVerified(true));
+      }
+    },
+    onSignedOut: () => {
+      setSession(null);
+      setUser(null);
+      setUserRole(null);
+      setUserRoles([]);
+      setTwoFactorStatus(null);
+      setTwoFactorVerified(false);
+      setIsRoleLoading(false);
+      setIsLoading(false);
+    },
+  });
+
   // Watchdog: Ensure isRoleLoading can never hang indefinitely
   useEffect(() => {
     if (isRoleLoading) {
@@ -524,6 +559,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
 
         setIsLoading(false);
+
+        // Broadcast auth updates across open tabs
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          broadcastSession(session, event as any);
+        } else if (event === 'SIGNED_OUT') {
+          broadcastSignOut();
+        }
 
         // Server-side auth event journal. Supabase rotates refresh tokens on
         // TOKEN_REFRESHED and mints new sessions on SIGNED_IN, which is our
@@ -576,38 +618,50 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     );
 
-      // THEN check for existing session.
-      // A stale/rotated refresh token left in localStorage makes every
-      // subsequent request fail with `refresh_token_not_found` and leaves the
-      // app stuck half-signed-in. Detect that and clear local storage so the
-      // user simply lands on a clean sign-in form.
-    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
+    // THEN check for existing session.
+    // Multi-tab resilience: When multiple tabs open concurrently, another tab might
+    // be actively rotating/refreshing the session token. Avoid wiping local storage
+    // prematurely during concurrent tab initialization.
+    supabase.auth.getSession().then(async ({ data: { session: initialSession }, error }) => {
+      let activeSession = initialSession;
       const staleToken =
         !!error &&
         /refresh[_ ]token|invalid|expired/i.test(error.message ?? '');
 
       if (staleToken) {
+        // Multi-tab grace period: Check if another tab recently refreshed or has a valid session
+        await new Promise((resolve) => setTimeout(resolve, 500));
         try {
-          await supabase.auth.signOut({ scope: 'local' });
+          const retryRes = await supabase.auth.getSession();
+          if (retryRes?.data?.session) {
+            activeSession = retryRes.data.session;
+          } else {
+            try {
+              await supabase.auth.signOut({ scope: 'local' });
+            } catch {
+              /* ignore */
+            }
+            setSession(null);
+            setUser(null);
+            setUserRole(null);
+            setUserRoles([]);
+            setIsRoleLoading(false);
+            setIsLoading(false);
+            return;
+          }
         } catch {
-          /* ignore */
+          // Proceed safely
         }
-        setSession(null);
-        setUser(null);
-        setUserRole(null);
-        setUserRoles([]);
-        setIsRoleLoading(false);
-        setIsLoading(false);
-        return;
       }
 
-      setSession(session);
-      setUser(session?.user ?? null);
+      setSession(activeSession);
+      setUser(activeSession?.user ?? null);
 
-      if (session?.user) {
+      if (activeSession?.user) {
+        broadcastSession(activeSession, 'SIGNED_IN');
         setIsRoleLoading(true);
-        const uid = session.user.id;
-        const uemail = session.user.email;
+        const uid = activeSession.user.id;
+        const uemail = activeSession.user.email;
         fetchUserRole(uid, uemail)
           .then((role) => {
             setUserRole(role);
@@ -635,7 +689,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [broadcastSession, broadcastSignOut]);
   const signUp = async (email: string, password: string, fullName: string, role: AppRole) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
@@ -786,6 +840,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
+    broadcastSignOut();
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);

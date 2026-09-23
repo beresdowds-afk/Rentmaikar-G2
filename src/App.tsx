@@ -76,6 +76,7 @@ const AdminAssistantDashboard = lazyWithRetry(() => import("./pages/AdminAssista
 const ApiDocs = lazy(() => import("./pages/ApiDocs"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Privacy = lazy(() => import("./pages/Privacy"));
+const Contact = lazy(() => import("./pages/Contact"));
 const SmsOptIn = lazy(() => import("./pages/SmsOptIn"));
 const A2P10DlcCompliancePage = lazy(() => import("./pages/A2P10DlcCompliancePage"));
 const FAQ = lazy(() => import("./pages/FAQ"));
@@ -252,23 +253,9 @@ const App = () => (
                   {/* Aliases cited in the A2P 10DLC submission packet */}
                   <Route path="/driver-registration" element={<Navigate to="/driver/register" replace />} />
                   <Route path="/owner-registration" element={<Navigate to="/owner/register" replace />} />
+                  <Route path="/driver/registration" element={<Navigate to="/driver/register" replace />} />
+                  <Route path="/owner/registration" element={<Navigate to="/owner/register" replace />} />
 
-                  <Route 
-                    path="/driver/registration" 
-                    element={
-                      <ProtectedRoute allowedRoles={['driver']}>
-                        <DriverRegistration />
-                      </ProtectedRoute>
-                    } 
-                  />
-                  <Route 
-                    path="/owner/registration" 
-                    element={
-                      <ProtectedRoute allowedRoles={['owner']}>
-                        <OwnerRegistration />
-                      </ProtectedRoute>
-                    } 
-                  />
                   <Route path="/driver/dashboard" element={<DriverDashboard />} />
                   <Route path="/driver-dashboard" element={<DeepLinkRedirect to="/driver/dashboard" />} />
                   <Route path="/driver/onboarding" element={<DriverOnboarding />} />
@@ -287,12 +274,35 @@ const App = () => (
                       </ProtectedRoute>
                     } 
                   />
+
+                  {/* 10DLC Compliance & Legal Routes + Canonical Aliases */}
+                  <Route path="/contact" element={<Contact />} />
+                  <Route path="/contact-us" element={<Navigate to="/contact" replace />} />
+                  <Route path="/support" element={<Navigate to="/contact" replace />} />
+
                   <Route path="/terms" element={<Terms />} />
+                  <Route path="/terms-of-service" element={<Navigate to="/terms" replace />} />
+                  <Route path="/terms-of-use" element={<Navigate to="/terms" replace />} />
+                  <Route path="/terms-and-conditions" element={<Navigate to="/terms" replace />} />
+                  <Route path="/tos" element={<Navigate to="/terms" replace />} />
+
                   <Route path="/privacy" element={<Privacy />} />
+                  <Route path="/privacy-policy" element={<Navigate to="/privacy" replace />} />
+
                   <Route path="/sms-opt-in" element={<SmsOptIn />} />
+                  <Route path="/sms" element={<Navigate to="/sms-opt-in" replace />} />
+                  <Route path="/sms-terms" element={<Navigate to="/sms-opt-in" replace />} />
+                  <Route path="/sms-policy" element={<Navigate to="/sms-opt-in" replace />} />
+                  <Route path="/text-messaging" element={<Navigate to="/sms-opt-in" replace />} />
+                  <Route path="/opt-in" element={<Navigate to="/sms-opt-in" replace />} />
+
+                  <Route path="/compliance" element={<A2P10DlcCompliancePage />} />
                   <Route path="/compliance/10dlc" element={<A2P10DlcCompliancePage />} />
+                  <Route path="/compliance/a2p" element={<Navigate to="/compliance/10dlc" replace />} />
                   <Route path="/10dlc" element={<A2P10DlcCompliancePage />} />
                   <Route path="/a2p-10dlc" element={<A2P10DlcCompliancePage />} />
+                  <Route path="/a2p" element={<Navigate to="/compliance/10dlc" replace />} />
+
                   <Route path="/faq" element={<FAQ />} />
                   <Route path="/how-it-works" element={<HowItWorksPage />} />
                   <Route 
@@ -928,6 +938,7 @@ const App = () => (
                   {/* Legacy / alternate URL aliases — keep deep links working
                       instead of dropping visitors on the 404 page. */}
                   <Route path="/profile/settings" element={<Navigate to="/settings/profile" replace />} />
+                  <Route path="/profile-settings" element={<Navigate to="/settings/profile" replace />} />
                   <Route path="/profile" element={<Navigate to="/settings/profile" replace />} />
                   <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
                   <Route path="/login" element={<Navigate to="/auth" replace />} />
@@ -936,6 +947,10 @@ const App = () => (
                   <Route path="/register" element={<Navigate to="/driver/register" replace />} />
                   <Route path="/dashboard" element={<OnboardingRedirect />} />
                   <Route path="/catalogue" element={<Navigate to="/catalogue/standard" replace />} />
+                  <Route path="/payments" element={<Navigate to="/billing" replace />} />
+                  <Route path="/payment" element={<Navigate to="/billing" replace />} />
+                  <Route path="/sms-optin" element={<Navigate to="/sms-opt-in" replace />} />
+                  <Route path="/optin" element={<Navigate to="/sms-opt-in" replace />} />
                   <Route path="/forgot-password" element={<Navigate to="/auth?forgot=1" replace />} />
                   <Route path="/~oauth/*" element={<Navigate to="/auth" replace />} />
                   <Route path="/~oauth" element={<Navigate to="/auth" replace />} />

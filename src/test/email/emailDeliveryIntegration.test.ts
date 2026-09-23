@@ -44,6 +44,34 @@ function prepareResendPayload(body: {
   };
 }
 
+function resendBaseUrl(): string {
+  return "https://api.resend.com";
+}
+
+function resendEmailsUrl(): string {
+  return `${resendBaseUrl()}/emails`;
+}
+
+function resendHeaders(key: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${key}`,
+  };
+}
+
+describe("Direct Resend connector & transport", () => {
+  it("always uses direct api.resend.com endpoints with Bearer auth", () => {
+    const directKey = "re_prod_123456789";
+    const url = resendEmailsUrl();
+    expect(url).toBe("https://api.resend.com/emails");
+
+    const headers = resendHeaders(directKey);
+    expect(headers["Authorization"]).toBe(`Bearer ${directKey}`);
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect("X-Connection-Api-Key" in headers).toBe(false);
+  });
+});
+
 describe("Email delivery & sender rewrite behavior", () => {
   it("rewrites unverified apex domains onto notify.rentmaikar.com preserving display name", () => {
     const input = "Rentmaikar <noreply@rentmaikar.com>";

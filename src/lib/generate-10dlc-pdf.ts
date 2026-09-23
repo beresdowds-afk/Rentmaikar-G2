@@ -308,8 +308,8 @@ export const build10DlcPdfDocument = () => {
   addSectionTitle('8. Mandatory Privacy Policy SMS Non-Sharing Clause', 'CARRIER APPROVED');
   addQuoteBox(
     'EXACT PRIVACY POLICY TEXT PUBLISHED ON RENTMAIKAR.COM/PRIVACY:',
-    '"Rentmaikar and its registered corporate owner INTE-GRITTY LLC USA do not sell, rent, or share mobile phone numbers or SMS consent information with third parties or affiliates for their own marketing or promotional purposes. Any sharing with service providers is strictly limited to telecommunication delivery partners for the sole purpose of transmitting your requested messages."',
-    'Mandatory TCR & Carrier Requirement: Carrier compliance teams will reject any campaign missing this exact statement.'
+    '"No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties. Mobile phone numbers are never sold, rented, or traded, and are shared only with our messaging gateway provider (Twilio) strictly for transmitting requested messages. Wireless carriers are not liable for delayed or undelivered messages."',
+    'Mandatory TCR & Carrier Requirement: Carrier compliance teams require this exact non-sharing exclusion language.'
   );
 
   // 9. TIMING, QUIET HOURS & AUDIT TRAIL

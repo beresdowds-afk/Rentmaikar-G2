@@ -18,10 +18,12 @@ import {
 } from "lucide-react";
 import { FEATURE_PILLARS } from "@/pages/PlatformReportPage";
 import { PlatformUpdateModal } from "@/components/admin/PlatformUpdateModal";
+import { usePlatformFeaturesCount } from "@/hooks/usePlatformFeaturesCount";
 
 export default function PlatformFeaturesReport() {
   const [searchQuery, setSearchQuery] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const { count: totalFeaturesCount, isLoading: isFeaturesLoading } = usePlatformFeaturesCount(68);
 
   const filteredPillars = useMemo(() => {
     if (!searchQuery.trim()) return FEATURE_PILLARS;
@@ -100,7 +102,7 @@ export default function PlatformFeaturesReport() {
       doc.roundedRect(margin, y, contentWidth, 22, 2, 2, "FD");
 
       const metrics = [
-        { label: "Total Core Features", value: "68 Modules" },
+        { label: "Total Core Features", value: `${totalFeaturesCount} Modules` },
         { label: "Active App Routes", value: "71 Routes" },
         { label: "Page Controllers", value: "96 Pages" },
         { label: "Modular Components", value: "436 Elements" },
@@ -237,7 +239,13 @@ export default function PlatformFeaturesReport() {
       {/* Metric Cards Banner */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Card className="p-4 text-center">
-          <div className="text-2xl font-bold text-foreground">68</div>
+          <div className="text-2xl font-bold text-foreground">
+            {isFeaturesLoading ? (
+              <span className="animate-pulse text-muted-foreground">...</span>
+            ) : (
+              totalFeaturesCount
+            )}
+          </div>
           <div className="text-xs text-muted-foreground font-medium mt-1">Core Modules</div>
         </Card>
         <Card className="p-4 text-center">

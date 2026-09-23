@@ -30,6 +30,8 @@ const Contact = () => {
   const { infoFor } = usePublishedCompanyInfo();
 
   const current: Country = country === "USA" || country === "Nigeria" ? country : "USA";
+  const currentInfo = infoFor(current);
+  const supportEmail = currentInfo?.supportEmail || EMAIL_CONFIG.support;
   const orderedRegions: Country[] = [
     current,
     ...REGIONS.filter((r) => r !== current),
@@ -56,6 +58,37 @@ const Contact = () => {
           right office for your country.
         </p>
 
+        {/* Corporate Identity & Verified Registry Info */}
+        <Card className="mb-8 border-primary/20 bg-primary/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="w-4 h-4 text-primary" />
+              Corporate Identity &amp; Registered Business Information
+            </CardTitle>
+            <CardDescription>
+              Rentmaikar is the official vehicle rental brand wholly owned and operated by INTE-GRITTY LLC USA.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div>
+              <span className="text-muted-foreground block font-medium">Legal Owner:</span>
+              <span className="font-semibold text-foreground">INTE-GRITTY LLC USA</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block font-medium">Brand / DBA:</span>
+              <span className="font-semibold text-foreground">Rentmaikar</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block font-medium">US Voice Hotline:</span>
+              <a href="tel:+16085489220" className="font-semibold text-primary hover:underline">+1 (608) 548-9220</a>
+            </div>
+            <div>
+              <span className="text-muted-foreground block font-medium">Twilio 10DLC Route:</span>
+              <span className="font-semibold text-foreground">+1 (608) 384-3932</span>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="mb-8">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -78,6 +111,12 @@ const Contact = () => {
               Privacy requests:{" "}
               <a href={`mailto:${EMAIL_CONFIG.privacy}`} className="text-primary hover:underline font-medium">
                 {EMAIL_CONFIG.privacy}
+              </a>
+            </p>
+            <p>
+              Compliance &amp; 10DLC:{" "}
+              <a href="mailto:compliance@rentmaikar.com" className="text-primary hover:underline font-medium">
+                compliance@rentmaikar.com
               </a>
             </p>
             <p>
@@ -167,10 +206,8 @@ const Contact = () => {
               <Link to="/terms" className="text-primary hover:underline">Terms of Use</Link> and{" "}
               <Link to="/privacy" className="text-primary hover:underline">Privacy Policy</Link>.
             </p>
-            <p>
-              Rentmaikar does not sell, rent, or share mobile phone numbers or SMS consent
-              information with third parties or affiliates for their own marketing or
-              promotional purposes.
+            <p className="font-medium text-foreground">
+              No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties. Wireless carriers (including T-Mobile, AT&amp;T, and Verizon) are not liable for delayed or undelivered messages.
             </p>
           </CardContent>
         </Card>

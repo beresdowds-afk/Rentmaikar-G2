@@ -352,21 +352,6 @@ try {
 } catch (e: any) {
   errMsg = e.message || 'Email gateway request failed';
 }
-            const contentType = res.headers.get('content-type') || '';
-            if (contentType.includes('application/json')) {
-              const json = await res.json().catch(() => null);
-              if (res.ok && (json?.ok !== false && json?.success !== false)) {
-                delivered = true;
-                messageId = json?.messageId || '';
-                errMsg = '';
-              } else if (json?.error) {
-                errMsg = json.error;
-              }
-            }
-          } catch (fbErr: any) {
-            // Retain original Edge Function error
-          }
-        }
 
         if (delivered) {
           return { success: true, messageId };

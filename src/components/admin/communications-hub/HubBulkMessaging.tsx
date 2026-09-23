@@ -474,20 +474,6 @@ export const HubBulkMessaging: React.FC = () => {
             },
           };
 
-                    const emailPayload = {
-            action: 'send',
-            to: emailTarget,
-            subject: renderedSubj,
-            body: renderedMsg,
-            recipientName: fullName !== 'Customer' ? fullName : undefined,
-            category: 'general',
-            templateData: {
-              subject: renderedSubj,
-              body: renderedMsg,
-              recipientName: fullName !== 'Customer' ? fullName : undefined,
-            },
-          };
-
           // PRIMARY: Cloud Run application email gateway.
           // The backend gateway handles Supabase as the secondary fallback.
           let emailDelivered = false;

@@ -17,7 +17,7 @@ const Privacy = () => {
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">1. Introduction</h2>
         <p className="text-muted-foreground">
-          Rentmaikar LLC ("Rentmaikar", "we", "our", or "us") is committed to protecting your privacy. This Privacy Policy 
+          Rentmaikar, wholly owned and operated by INTE-GRITTY LLC USA ("Rentmaikar", "we", "our", or "us"), is committed to protecting your privacy. This Privacy Policy 
           explains how we collect, use, disclose, and safeguard your information when you use our platform in the United States.
           This policy complies with applicable U.S. federal and state privacy laws, including the California Consumer Privacy Act (CCPA) 
           where applicable.
@@ -91,7 +91,18 @@ const Privacy = () => {
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">4. Information Sharing</h2>
-        <p className="text-muted-foreground">We may share your information with:</p>
+        
+        {/* A2P 10DLC & CTIA Mandatory Non-Sharing Exclusion */}
+        <div className="p-4 bg-primary/5 rounded-lg border border-primary/30 space-y-2">
+          <p className="font-semibold text-foreground text-sm">
+            Mobile Information Non-Sharing Policy (A2P 10DLC &amp; CTIA Compliance):
+          </p>
+          <p className="text-sm text-foreground leading-relaxed">
+            <strong>No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.</strong> Mobile phone numbers collected for account verification, service alerts, and text notifications are strictly excluded from all sharing and sales.
+          </p>
+        </div>
+
+        <p className="text-muted-foreground">We may share other non-SMS customer information strictly with:</p>
         
         <h3 className="text-xl font-medium">Other Platform Users</h3>
         <p className="text-muted-foreground">
@@ -103,7 +114,7 @@ const Privacy = () => {
         <ul className="list-disc pl-6 text-muted-foreground space-y-2">
           <li><strong>PayPal:</strong> Payment processing</li>
           <li><strong>Resend:</strong> Email notifications</li>
-          <li><strong>SMS Providers:</strong> Text message notifications</li>
+          <li><strong>SMS Providers (Twilio):</strong> Text message transmission strictly for requested alerts (excluded from marketing sharing)</li>
           <li><strong>Cloud Infrastructure:</strong> Secure data storage and processing</li>
         </ul>
         
@@ -220,15 +231,17 @@ const Privacy = () => {
           <li><strong>Message frequency:</strong> message frequency varies based on your account and rental activity.</li>
           <li><strong>Rates:</strong> message and data rates may apply.</li>
           <li><strong>Opt out:</strong> reply STOP to any message to stop receiving texts, or turn the setting off in your account preferences.</li>
-          <li><strong>Help:</strong> reply HELP for help, or contact Rentmaikar customer support.</li>
+          <li><strong>Help:</strong> reply HELP for help, or contact Rentmaikar customer support at {EMAIL_CONFIG.support} or {COMPANY_INFO.USA.phone}.</li>
           <li><strong>Records:</strong> we record each opt-in and opt-out with the mobile number, the exact disclosure shown, the page it was given on and the date and time.</li>
         </ul>
-        <p className="text-muted-foreground">
-          <strong>Rentmaikar does not sell, rent, or share mobile phone numbers or SMS consent information
-          with third parties or affiliates for their own marketing or promotional purposes.</strong> Mobile
-          numbers are shared only with our messaging service providers strictly for the purpose of
-          delivering the messages you requested.
-        </p>
+        <div className="p-4 bg-muted/60 rounded-lg border space-y-2 mt-4">
+          <p className="font-semibold text-foreground text-sm">
+            Strict Non-Sharing Policy &amp; Carrier Liability (A2P 10DLC):
+          </p>
+          <p className="text-sm text-foreground leading-relaxed">
+            <strong>No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.</strong> Mobile phone numbers are never sold, rented, or traded, and are shared only with our messaging gateway provider (Twilio) strictly for transmitting the messages you explicitly requested. Wireless carriers (including T-Mobile, AT&amp;T, and Verizon) are not liable for delayed or undelivered messages.
+          </p>
+        </div>
       </section>
 
       <section className="space-y-4">
@@ -339,7 +352,18 @@ const Privacy = () => {
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">5. Information Sharing</h2>
-        <p className="text-muted-foreground">We may share your information with:</p>
+
+        {/* A2P 10DLC & CTIA Mandatory Non-Sharing Exclusion */}
+        <div className="p-4 bg-primary/5 rounded-lg border border-primary/30 space-y-2">
+          <p className="font-semibold text-foreground text-sm">
+            Mobile Information Non-Sharing Policy (A2P 10DLC &amp; NDPR/CTIA Compliance):
+          </p>
+          <p className="text-sm text-foreground leading-relaxed">
+            <strong>No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.</strong> Mobile phone numbers collected for account verification, service alerts, and text notifications are strictly excluded from all sharing and sales.
+          </p>
+        </div>
+
+        <p className="text-muted-foreground">We may share other non-SMS information with:</p>
         
         <h3 className="text-xl font-medium">Other Platform Users</h3>
         <p className="text-muted-foreground">
@@ -351,7 +375,7 @@ const Privacy = () => {
         <ul className="list-disc pl-6 text-muted-foreground space-y-2">
           <li><strong>Paystack:</strong> Payment processing</li>
           <li><strong>Resend:</strong> Email notifications</li>
-          <li><strong>SMS Providers:</strong> Text message and WhatsApp notifications</li>
+          <li><strong>SMS Providers (Twilio):</strong> Text message and WhatsApp notifications strictly for requested alerts (excluded from marketing sharing)</li>
           <li><strong>Cloud Infrastructure:</strong> Secure data storage and processing</li>
         </ul>
         
@@ -490,15 +514,17 @@ const Privacy = () => {
           <li><strong>Message frequency:</strong> message frequency varies based on your account and rental activity.</li>
           <li><strong>Rates:</strong> message and data rates may apply.</li>
           <li><strong>Opt out:</strong> reply STOP to any message to stop receiving texts, or turn the setting off in your account preferences.</li>
-          <li><strong>Help:</strong> reply HELP for help, or contact Rentmaikar customer support.</li>
+          <li><strong>Help:</strong> reply HELP for help, or contact Rentmaikar customer support at {EMAIL_CONFIG.support}.</li>
           <li><strong>Records:</strong> we record each opt-in and opt-out with the mobile number, the exact disclosure shown, the page it was given on and the date and time.</li>
         </ul>
-        <p className="text-muted-foreground">
-          <strong>Rentmaikar does not sell, rent, or share mobile phone numbers or SMS consent information
-          with third parties or affiliates for their own marketing or promotional purposes.</strong> Mobile
-          numbers are shared only with our messaging service providers strictly for the purpose of
-          delivering the messages you requested.
-        </p>
+        <div className="p-4 bg-muted/60 rounded-lg border space-y-2 mt-4">
+          <p className="font-semibold text-foreground text-sm">
+            Strict Non-Sharing Policy &amp; Carrier Liability (A2P 10DLC):
+          </p>
+          <p className="text-sm text-foreground leading-relaxed">
+            <strong>No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All other categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.</strong> Mobile phone numbers are never sold, rented, or traded, and are shared only with our messaging gateway provider (Twilio) strictly for transmitting the messages you explicitly requested. Wireless carriers are not liable for delayed or undelivered messages.
+          </p>
+        </div>
       </section>
 
       <section className="space-y-4">

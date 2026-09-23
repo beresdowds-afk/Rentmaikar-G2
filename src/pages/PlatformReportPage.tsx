@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import { usePlatformFeaturesCount } from "@/hooks/usePlatformFeaturesCount";
 
 export interface FeaturePillar {
   title: string;
@@ -145,6 +146,7 @@ export const FEATURE_PILLARS: FeaturePillar[] = [
 
 export default function PlatformReportPage() {
   const [downloading, setDownloading] = useState(false);
+  const { count: totalFeaturesCount, isLoading: isFeaturesLoading } = usePlatformFeaturesCount(68);
 
   const generateAndDownloadPdf = () => {
     setDownloading(true);
@@ -205,7 +207,7 @@ export default function PlatformReportPage() {
       doc.roundedRect(margin, y, contentWidth, 22, 2, 2, "FD");
 
       const metrics = [
-        { label: "Total Features", value: "68 Modules" },
+        { label: "Total Features", value: `${totalFeaturesCount} Modules` },
         { label: "App Routes", value: "71 Routes" },
         { label: "Page Views", value: "96 Pages" },
         { label: "Components", value: "436 Elements" },
@@ -335,14 +337,20 @@ export default function PlatformReportPage() {
             RentMaikar Operations Platform
           </h1>
           <p className="text-slate-300 text-base max-w-3xl">
-            Internal architectural catalog detailing all 68 active core features, operational modules, and multi-role permission boundaries governing the RentMaikar vehicle rental and IoT fleet ecosystem.
+            Internal architectural catalog detailing all {totalFeaturesCount} active core features, operational modules, and multi-role permission boundaries governing the RentMaikar vehicle rental and IoT fleet ecosystem.
           </p>
         </div>
 
         {/* Metric Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-10">
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
-            <div className="text-2xl font-bold text-slate-900">68</div>
+            <div className="text-2xl font-bold text-slate-900">
+              {isFeaturesLoading ? (
+                <span className="animate-pulse text-slate-400">...</span>
+              ) : (
+                totalFeaturesCount
+              )}
+            </div>
             <div className="text-xs text-slate-500 font-medium mt-1">Core Modules</div>
           </div>
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
