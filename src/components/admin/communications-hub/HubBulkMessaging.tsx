@@ -481,13 +481,16 @@ export const HubBulkMessaging: React.FC = () => {
           let responseStatus = 200;
 
           try {
-            const res = await fetch('/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(emailPayload),
-            });
+            const res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    to: emailTarget,
+    subject: renderedSubj,
+    body: renderedMsg,
+    recipientName: fullName !== 'Customer' ? fullName : undefined,
+  }),
+});
 
             responseStatus = res.status;
 
