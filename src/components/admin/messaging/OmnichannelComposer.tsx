@@ -767,7 +767,7 @@ if (channel === 'email' && contact.email) {
   const emailTarget = contact.email.trim();
 
   try {
-    const res = await fetch('/api/functions/send-outbound-email', {
+    https://staging.rentmaikar.com/api/functions/send-outbound-email
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
