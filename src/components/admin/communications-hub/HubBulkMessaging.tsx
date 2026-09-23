@@ -502,7 +502,7 @@ export const HubBulkMessaging: React.FC = () => {
             console.group(
               `[HubBulkMessaging] 📥 Cloud Run Email Response: send-outbound-email -> ${emailTarget}`
             );
-            console.log('📌 Gateway URL:', '/api/functions/send-outbound-email');
+            console.log('📌 Gateway URL:', 'https://staging.rentmaikar.com/api/functions/send-outbound-email');
             console.log('📌 HTTP Status:', responseStatus);
             console.log('📌 Response:', result);
             console.groupEnd();
