@@ -90,7 +90,7 @@ interface UseVoiceDeviceResult {
   initialize: () => Promise<boolean>;
   /** `support`, a `+E.164` number, or `client:user_<uuid>`. */
   startCall: (to: string, params?: Record<string, string>) => Promise<boolean>;
-  hangUp: () => void;
+    hangUp: () => Promise<void>;
   toggleMute: () => void;
   setMuted: (muted: boolean) => void;
   toggleSpeakerphone: () => Promise<void>;
@@ -110,7 +110,7 @@ interface UseVoiceDeviceResult {
   /** Re-request permissions and re-apply audio routing after a failure. */
   reinitializeAudio: () => Promise<boolean>;
   acceptIncoming: () => void;
-  rejectIncoming: () => void;
+    rejectIncoming: () => Promise<void>;
 }
 
 export function useVoiceDevice(): UseVoiceDeviceResult {
@@ -359,51 +359,51 @@ if (answeredSid) {
     [applyAudio, attachCall, initialize],
   );
 
-  const hangUp = useCallback(async () => {
-  // Capture the SID BEFORE disconnecting or clearing the call reference.
-  const callSid = callSidRef.current;
-  const call = callRef.current;
+    const hangUp = useCallback(async () => {
+    // Capture the SID BEFORE disconnecting or clearing the call reference.
+    const callSid = callSidRef.current;
+    const call = callRef.current;
 
-  // Immediately terminate the browser media session.
-  try {
-    call?.disconnect();
-  } catch {
-    // The browser call was already disconnected.
-  }
-
-  // Authoritatively reconcile the provider-side call and Rentmaikar state.
-  if (callSid) {
+    // Immediately terminate the browser media session.
     try {
-      const { error } = await supabase.functions.invoke("end-voip-call", {
-        body: {
-          callSid,
-        },
-      });
-
-      if (error) {
-        console.error("[VoIP] Failed to reconcile ended call:", error);
-      }
-    } catch (error) {
-      console.error("[VoIP] Error reconciling ended call:", error);
-    }
-  }
-
-  callRef.current = null;
-  callSidRef.current = null;
-
-  if (incomingCall) {
-    try {
-      incomingCall.reject();
+      call?.disconnect();
     } catch {
-      // Incoming call was already gone.
+      // The browser call was already disconnected.
     }
-    setIncomingCall(null);
-  }
 
-  setStatus(deviceRef.current ? "ready" : "idle");
-  setDiagnosticsCallId(null);
-  logAudioEvent("call", "Call ended by agent");
-}, [incomingCall]);
+    // Authoritatively reconcile the provider-side call and Rentmaikar state.
+    if (callSid) {
+      try {
+        const { error } = await supabase.functions.invoke("end-voip-call", {
+          body: {
+            callSid,
+          },
+        });
+
+        if (error) {
+          console.error("[VoIP] Failed to reconcile ended call:", error);
+        }
+      } catch (error) {
+        console.error("[VoIP] Error reconciling ended call:", error);
+      }
+    }
+
+    callRef.current = null;
+    callSidRef.current = null;
+
+    if (incomingCall) {
+      try {
+        incomingCall.reject();
+      } catch {
+        // Incoming call was already gone.
+      }
+      setIncomingCall(null);
+    }
+
+    setStatus(deviceRef.current ? "ready" : "idle");
+    setDiagnosticsCallId(null);
+    logAudioEvent("call", "Call ended by agent");
+  }, [incomingCall]);
 
   const setMuted = useCallback((muted: boolean) => {
     const call = callRef.current;
@@ -453,42 +453,39 @@ if (answeredSid) {
     })();
   }, [incomingCall]);
 
-  const rejectIncoming = useCallback(async () => {
-  const callSid = callSidRef.current;
-  const call = callRef.current ?? incomingCall;
+    const rejectIncoming = useCallback(async () => {
+    const callSid = callSidRef.current;
+    const call = callRef.current ?? incomingCall;
 
-  try {
-    call?.reject();
-  } catch {
-    // Incoming call was already gone.
-  }
-
-  if (callSid) {
     try {
-      const { error } = await supabase.functions.invoke("end-voip-call", {
-        body: {
-          callSid,
-        },
-      });
-
-      if (error) {
-        console.error("[VoIP] Failed to reconcile rejected call:", error);
-      }
-    } catch (error) {
-      console.error("[VoIP] Error reconciling rejected call:", error);
+      call?.reject();
+    } catch {
+      // Incoming call was already gone.
     }
-  }
 
-  callRef.current = null;
-  callSidRef.current = null;
-  setIncomingCall(null);
-  setStatus(deviceRef.current ? "ready" : "idle");
-  setDiagnosticsCallId(null);
-  logAudioEvent("call", "Incoming call rejected by agent");
-}, [incomingCall]);
+    if (callSid) {
+      try {
+        const { error } = await supabase.functions.invoke("end-voip-call", {
+          body: {
+            callSid,
+          },
+        });
 
-  // KEEP EXISTING CLEANUP CODE
-};
+        if (error) {
+          console.error("[VoIP] Failed to reconcile rejected call:", error);
+        }
+      } catch (error) {
+        console.error("[VoIP] Error reconciling rejected call:", error);
+      }
+    }
+
+    callRef.current = null;
+    callSidRef.current = null;
+    setIncomingCall(null);
+    setStatus(deviceRef.current ? "ready" : "idle");
+    setDiagnosticsCallId(null);
+    logAudioEvent("call", "Incoming call rejected by agent");
+  }, [incomingCall]);
   const setAutoSwitchToHeadset = useCallback((enabled: boolean) => {
     prefsRef.current = { ...prefsRef.current, autoSwitchToHeadset: enabled };
     setPreferences(saveAudioPreferences({ autoSwitchToHeadset: enabled }));
