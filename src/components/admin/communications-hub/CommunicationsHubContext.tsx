@@ -75,11 +75,12 @@ export const CommunicationsHubProvider: React.FC<{ children: ReactNode }> = ({ c
   const syncActiveCall = useCallback(async () => {
     try {
       const { data: ongoingCalls } = await supabase
-        .from('voip_calls')
-        .select('*')
-        .in('status', ['ringing', 'in-progress'])
-        .order('created_at', { ascending: false })
-        .limit(1);
+  .from('voip_calls')
+  .select('*')
+  .in('status', ['ringing', 'in-progress'])
+  .not('call_sid', 'is', null)
+  .order('created_at', { ascending: false })
+  .limit(1);
 
       if (ongoingCalls && ongoingCalls.length > 0) {
         const call = ongoingCalls[0];
