@@ -1,6 +1,7 @@
 # =============================================================
 # RentMaikar Production Ingress & Reverse Proxy Router (Template)
 # Supports dynamic runtime substitution of BACKEND_URL & SUPABASE_URL
+# Confirmed Backend Cloud Run: https://rentmaikar-backend-672260445879.europe-west1.run.app
 # =============================================================
 
 map $http_upgrade $connection_upgrade {
@@ -72,6 +73,7 @@ server {
         proxy_pass $supabase_upstream$request_uri;
 
         proxy_ssl_server_name on;
+        proxy_ssl_name jrsydiofzceoeddjogov.supabase.co;
         proxy_ssl_protocols TLSv1.2 TLSv1.3;
         proxy_http_version 1.1;
 
@@ -83,6 +85,8 @@ server {
         proxy_set_header Authorization $http_authorization;
         proxy_set_header apikey $http_apikey;
         proxy_set_header x-client-info $http_x_client_info;
+        proxy_set_header Content-Type $http_content_type;
+        proxy_set_header Content-Length $http_content_length;
 
         proxy_pass_request_headers on;
         proxy_pass_request_body on;
@@ -97,10 +101,11 @@ server {
         proxy_pass $backend_upstream$request_uri;
 
         proxy_ssl_server_name on;
+        proxy_ssl_name rentmaikar-backend-672260445879.europe-west1.run.app;
         proxy_ssl_protocols TLSv1.2 TLSv1.3;
         proxy_http_version 1.1;
 
-        proxy_set_header Host $host;
+        proxy_set_header Host rentmaikar-backend-672260445879.europe-west1.run.app;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -113,6 +118,8 @@ server {
         proxy_set_header Authorization $http_authorization;
         proxy_set_header apikey $http_apikey;
         proxy_set_header x-client-info $http_x_client_info;
+        proxy_set_header Content-Type $http_content_type;
+        proxy_set_header Content-Length $http_content_length;
 
         proxy_pass_request_headers on;
         proxy_pass_request_body on;
@@ -130,13 +137,15 @@ server {
         proxy_pass $backend_upstream$request_uri;
 
         proxy_ssl_server_name on;
+        proxy_ssl_name rentmaikar-backend-672260445879.europe-west1.run.app;
         proxy_ssl_protocols TLSv1.2 TLSv1.3;
         proxy_http_version 1.1;
 
-        proxy_set_header Host $host;
+        proxy_set_header Host rentmaikar-backend-672260445879.europe-west1.run.app;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
 
@@ -147,11 +156,15 @@ server {
     location = /sitemap.xml {
         set $backend_upstream "${BACKEND_URL}";
         proxy_pass $backend_upstream/sitemap.xml;
+        proxy_ssl_server_name on;
+        proxy_ssl_name rentmaikar-backend-672260445879.europe-west1.run.app;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host rentmaikar-backend-672260445879.europe-west1.run.app;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
     }
 
     location ~* \.(?:js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)$ {

@@ -84,9 +84,41 @@ export const AdminCommunicationsHub: React.FC = () => {
 
   const isCallInProgress = Boolean(activeCall && activeCall.status !== 'completed' && activeCall.status !== 'failed');
 
+  // Dedicated standalone operational communication pages (suppress floating launcher unless an active call is running)
+  const isDedicatedCommsPage =
+    location.pathname === '/admin/call-center' ||
+    location.pathname === '/admin/messaging' ||
+    location.pathname.startsWith('/m/call-in');
+
+  // Auto-close floating hub window when navigating between routes or tabs so it never obstructs target pages
+  const lastLocationRef = React.useRef(location.pathname + location.search);
+  React.useEffect(() => {
+    const currentLoc = location.pathname + location.search;
+    if (lastLocationRef.current !== currentLoc) {
+      lastLocationRef.current = currentLoc;
+      // Close floating window if open and no phone call is currently in progress
+      if (!isCallInProgress && isOpen) {
+        setIsOpen(false);
+      }
+    }
+  }, [location.pathname, location.search, isCallInProgress, isOpen, setIsOpen]);
+
+  // Handle ESC key to dismiss open floating window
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !isCallInProgress) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isCallInProgress, setIsOpen]);
+
   // Ensure this Hub is active across operational pages or when explicitly opened or in active call
   const shouldRender = useMemo(() => {
     if (!isAuthorizedStaff) return false;
+    // Suppress on dedicated full-screen communications routes unless a call is running
+    if (isDedicatedCommsPage && !isCallInProgress) return false;
     // Always render if open, minimized, or when a telephony call is in progress
     if (isOpen || isMinimized || isCallInProgress) return true;
     // Render launcher across Admin, VoIP Call Center, Reports, and Operations pages
@@ -98,7 +130,7 @@ export const AdminCommunicationsHub: React.FC = () => {
       location.pathname === '/features-report' ||
       location.pathname.startsWith('/dashboard')
     );
-  }, [isAuthorizedStaff, isOpen, isMinimized, isCallInProgress, location.pathname]);
+  }, [isAuthorizedStaff, isDedicatedCommsPage, isOpen, isMinimized, isCallInProgress, location.pathname]);
 
   // If user is not authorized or not on an operational surface, do not render
   if (!shouldRender) {

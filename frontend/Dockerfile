@@ -40,7 +40,7 @@ FROM nginx:1.25-alpine AS runner
 RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
 
 # Default backend and Supabase URLs
-ENV BACKEND_URL=http://rentmaikar-backend:8080
+ENV BACKEND_URL=https://rentmaikar-backend-672260445879.europe-west1.run.app
 ENV SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
 
 # Copy custom Nginx configuration supporting SPA routing and Cloud Run ports

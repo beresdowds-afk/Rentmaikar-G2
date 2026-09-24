@@ -285,6 +285,10 @@ export class SupabaseBackendService {
     return this.client;
   }
 
+  public getAdminClient(): SupabaseClient {
+    return this.getClient();
+  }
+
   public getUrl(): string {
     return this.url;
   }

@@ -1,6 +1,21 @@
 import { Router, Request, Response } from "express";
 import { sentBackendClient } from "../services/sentClient";
 import { supabaseBackendService } from "../services/supabaseService";
+import {
+  mintVoiceAccessToken,
+  handleVoiceTwimlDial,
+  handleVoipStatusCallback,
+  handleRecordingStatusCallback,
+  handleGetRecordingUrl,
+  handleInitiateVoipCall,
+  handleEndVoipCall,
+  handleVoiceTwimlConfig,
+  handleIncomingCallForward,
+  handleVoiceCallRequest,
+  handleVoipCallTranscriptLog,
+  getBaseCallbackUrl,
+  processCallRecording,
+} from "../services/voipService";
 
 export const functionsRouter = Router();
 
@@ -13,8 +28,72 @@ function normalizeE164(phone: string): string {
   return `+${cleaned}`;
 }
 
+import {
+  iotAdminService,
+  traccarService,
+  hologramService,
+  autoProvisionService,
+  telemetryService,
+  emqxService,
+  sarekonService,
+} from "../services/iotService";
+import { paymentService } from "../services/paymentService";
+
 // In-memory OTP store for phone verification
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
+
+/**
+ * List of functions for which Cloud Run backend is the primary authoritative engine.
+ * These are not dispatched upstream to Supabase Edge Functions (which return 404 or have latency).
+ */
+const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
+  "send-outbound-email",
+  "voice-access-token",
+  "voice-twiml-dial",
+  "voice-twiml-config",
+  "initiate-voip-call",
+  "end-voip-call",
+  "voip-status-callback",
+  "recording-status-callback",
+  "process-call-recording",
+  "get-recording-url",
+  "incoming-call-forward",
+  "voice-call-request",
+  "voip-call-transcript-log",
+  // IoT & Telematics Authoritative Services
+  "traccar-admin",
+  "hologram-admin",
+  "hologram-sync",
+  "iot-admin",
+  "iot-auto-provision",
+  "iot-scheduled-sync",
+  "telemetry-ingest",
+  "telemetry-dispatch",
+  "emqx-monitoring",
+  "emqx-secret-rotation",
+  "generate-vehicle-mqtt-token",
+  "sarekon-admin",
+  "sarekon-resync-device",
+  "sarekon-sync-device-imei",
+  "resync-device-imei",
+  "force-resync-sarekon-device",
+  "sarekon-location-worker",
+  // Payment & Settlement Authoritative Services
+  "create-paypal-order",
+  "capture-paypal-order",
+  "paypal-webhook",
+  "create-paystack-transaction",
+  "verify-paystack-transaction",
+  "paystack-webhook",
+  "create-opay-order",
+  "verify-opay-order",
+  "opay-webhook",
+  "process-owner-payouts",
+  "initiate-paypal-payout",
+  "initiate-paystack-transfer",
+  "persona-create-inquiry",
+  "persona-webhook",
+]);
 
 /**
  * ALL /api/functions/:functionName
@@ -28,9 +107,10 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   // Extract authorization header from request if provided
   const rawAuth = req.headers["authorization"];
   const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
-    // 1. Generic Supabase-first dispatch for all functions EXCEPT send-outbound-email.
-  // send-outbound-email has a dedicated Cloud Run-primary -> Supabase-fallback path below.
-  if (functionName !== "send-outbound-email") {
+
+  // 1. Generic Supabase-first dispatch for all non-authoritative functions.
+  // Authoritative functions (Email, VoIP, Call Center) execute directly on Cloud Run.
+  if (!AUTHORITATIVE_BACKEND_FUNCTIONS.has(functionName)) {
     try {
       const upstreamResult = await supabaseBackendService.invokeEdgeFunction(functionName, body, {
         userToken: clientAuth,
@@ -203,66 +283,103 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       // -----------------------------------------------------------------
-      // VoIP & Twilio Voice Handlers
+      // VoIP & Twilio Voice Handlers (Authoritative Cloud Run Engine)
       // -----------------------------------------------------------------
       case "voice-access-token": {
-        const identity = body.identity || `agent_${Math.random().toString(36).slice(2, 8)}`;
-        return res.status(200).json({
-          token: `mock_voice_token_${Date.now()}_${identity}`,
-          identity,
-          ttl: 3600,
-        });
-      }
-
-      case "initiate-voip-call": {
-        const recipients = body.recipients || [];
-        const callId = `call_${Date.now()}`;
-        return res.status(200).json({
-          success: true,
-          callId,
-          results: recipients.map((r: any) => ({
-            recipient: r.phoneNumber || r.phone,
-            success: true,
-            callSid: `CA_sim_${Date.now()}`,
-          })),
-        });
-      }
-
-      case "voice-call-request": {
-        return res.status(200).json({
-          success: true,
-          request: {
-            id: `vcr_${Date.now()}`,
-            status: "pending",
-            created_at: new Date().toISOString(),
-          },
-        });
-      }
-
-      case "voice-twiml-config": {
-        return res.status(200).json({
-          configured: true,
-          twimlAppSid: process.env.TWILIO_TWIML_APP_SID || "AP_RENTMAIKAR_DEFAULT",
-          twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER || "+18482035389",
-          voiceUrl: "/api/functions/voice-twiml-dial",
-          region: "USA",
-        });
+        const identity = body.identity || (req.query.identity as string);
+        const result = await mintVoiceAccessToken(identity, clientAuth);
+        if (result.error && !result.token) {
+          return res.status(503).json(result);
+        }
+        return res.status(200).json(result);
       }
 
       case "voice-twiml-dial": {
-        const to = body.To || body.to || "";
-        const from = body.From || body.from || process.env.TWILIO_PHONE_NUMBER || "+18482035389";
-        const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial callerId="${from}"><Number>${to}</Number></Dial></Response>`;
-        res.setHeader("Content-Type", "application/xml");
-        return res.send(xml);
+        const baseUrl = getBaseCallbackUrl(req);
+        const twiml = await handleVoiceTwimlDial({
+          To: body.To || body.to || (req.query.To as string),
+          From: body.From || body.from || (req.query.From as string),
+          CallSid: body.CallSid || body.callSid || (req.query.CallSid as string),
+          Region: body.Region || body.region || (req.query.Region as string),
+          baseUrl,
+        });
+
+        const accept = String(req.headers.accept || "");
+        if (accept.includes("application/json") && !accept.includes("text/xml") && !accept.includes("*/*")) {
+          return res.status(200).json({ xml: twiml, twiml });
+        }
+
+        res.setHeader("Content-Type", "text/xml; charset=utf-8");
+        return res.status(200).send(twiml);
       }
 
-      case "end-voip-call": {
-        return res.status(200).json({ success: true, message: "Call ended successfully" });
+      case "incoming-call-forward": {
+        const baseUrl = getBaseCallbackUrl(req);
+        const twiml = await handleIncomingCallForward({
+          form: body,
+          query: req.query,
+          baseUrl,
+        });
+
+        const accept = String(req.headers.accept || "");
+        if (accept.includes("application/json") && !accept.includes("text/xml") && !accept.includes("*/*")) {
+          return res.status(200).json({ xml: twiml, twiml });
+        }
+
+        res.setHeader("Content-Type", "text/xml; charset=utf-8");
+        return res.status(200).send(twiml);
+      }
+
+      case "voip-status-callback": {
+        const result = await handleVoipStatusCallback(body);
+        return res.status(200).json(result);
+      }
+
+      case "recording-status-callback": {
+        const baseUrl = getBaseCallbackUrl(req);
+        const result = await handleRecordingStatusCallback(body, baseUrl);
+        return res.status(200).json(result);
+      }
+
+      case "process-call-recording": {
+        const result = await processCallRecording({
+          callId: body.callId || body.call_id,
+          recordingUrl: body.recordingUrl || body.recording_url,
+          recordingSid: body.recordingSid || body.recording_sid,
+        });
+        return res.status(result.success ? 200 : 400).json(result);
       }
 
       case "get-recording-url": {
-        return res.status(200).json({ recordingUrl: "" });
+        const result = await handleGetRecordingUrl(body, clientAuth);
+        return res.status(result.success ? 200 : 404).json(result);
+      }
+
+      case "initiate-voip-call": {
+        const baseUrl = getBaseCallbackUrl(req);
+        const result = await handleInitiateVoipCall(body, baseUrl, clientAuth);
+        return res.status(result.success ? 200 : 400).json(result);
+      }
+
+      case "end-voip-call": {
+        const result = await handleEndVoipCall(body, clientAuth);
+        return res.status(200).json(result);
+      }
+
+      case "voice-twiml-config": {
+        const baseUrl = getBaseCallbackUrl(req);
+        const result = await handleVoiceTwimlConfig(body, baseUrl);
+        return res.status(200).json(result);
+      }
+
+      case "voice-call-request": {
+        const result = await handleVoiceCallRequest(body, clientAuth);
+        return res.status(200).json(result);
+      }
+
+      case "voip-call-transcript-log": {
+        const result = await handleVoipCallTranscriptLog(body, clientAuth);
+        return res.status(result.success ? 200 : 400).json(result);
       }
 
       case "create-call-in":
@@ -501,6 +618,223 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             error: e.message,
           });
         }
+      }
+
+      // -----------------------------------------------------------------
+      // IoT & Vehicle Telematics Authoritative Handlers
+      // -----------------------------------------------------------------
+      case "traccar-admin": {
+        const action = String(body.action || "status");
+        const result = await traccarService.handleAction(action, body);
+        return res.status(result.ok === false && result.status ? result.status : 200).json(result);
+      }
+
+      case "hologram-admin":
+      case "hologram-sync": {
+        const action = String(body.action || "status");
+        const result = await hologramService.handleAction(action, body);
+        return res.status(200).json(result);
+      }
+
+      case "iot-admin": {
+        const action = String(body.action || "list_devices");
+        const result = await iotAdminService.handleAction(action, body, { id: clientAuth ? "authenticated_user" : "system" });
+        return res.status(200).json(result);
+      }
+
+      case "iot-auto-provision":
+      case "iot-scheduled-sync": {
+        const trigger = body.trigger || (functionName === "iot-scheduled-sync" ? "scheduled" : "manual");
+        const result = await autoProvisionService.runPipeline(trigger);
+        return res.status(200).json(result);
+      }
+
+      case "telemetry-ingest":
+      case "telemetry-dispatch": {
+        const records = Array.isArray(body.records)
+          ? body.records
+          : Array.isArray(body.events)
+          ? body.events
+          : [body];
+        const result = await telemetryService.ingest(records, body.source || "bridge");
+        return res.status(200).json(result);
+      }
+
+      case "emqx-monitoring":
+      case "emqx-secret-rotation": {
+        const action = String(body.action || "health");
+        const result = await emqxService.handleAction(action, body);
+        return res.status(200).json(result);
+      }
+
+      case "generate-vehicle-mqtt-token": {
+        const result = await emqxService.handleAction("generate_token", body);
+        return res.status(200).json(result);
+      }
+
+      case "sarekon-admin": {
+        const action = String(body.action || "status");
+        if (
+          action === "resync_device_imei" ||
+          action === "force_sync_imei" ||
+          action === "force_resync" ||
+          action === "resync_device" ||
+          action === "force_sync_device"
+        ) {
+          const deviceId = String(body.device_id || body.dvd_id || body.id || body.serial_number || body.imei || "").trim();
+          if (!deviceId) {
+            return res.status(400).json({ ok: false, error: "device_id is required" });
+          }
+          const result = await sarekonService.resyncDeviceImei(deviceId, {
+            performedBy: clientAuth ? "authenticated_admin" : "system",
+            vehicleId: body.vehicle_id,
+            overrideImei: body.override_imei || body.imei,
+            forceLinkVehicle: Boolean(body.force_link_vehicle),
+          });
+          return res.status(result.ok ? 200 : 400).json(result);
+        }
+        const result = await sarekonService.handleAdminAction(action, body, { id: clientAuth ? "authenticated_user" : "system" });
+        return res.status(200).json(result);
+      }
+
+      case "sarekon-resync-device":
+      case "sarekon-sync-device-imei":
+      case "resync-device-imei":
+      case "force-resync-sarekon-device": {
+        const deviceId = String(body.device_id || body.dvd_id || body.id || body.serial_number || body.imei || "").trim();
+        if (!deviceId) {
+          return res.status(400).json({ ok: false, error: "device_id is required" });
+        }
+        const result = await sarekonService.resyncDeviceImei(deviceId, {
+          performedBy: clientAuth ? "authenticated_admin" : "system",
+          vehicleId: body.vehicle_id,
+          overrideImei: body.override_imei || body.imei,
+          forceLinkVehicle: Boolean(body.force_link_vehicle),
+        });
+        return res.status(result.ok ? 200 : 400).json(result);
+      }
+
+      case "sarekon-location-worker": {
+        const intervalSeconds = Number(body.interval_seconds || 15);
+        const passes = Number(body.passes || 1);
+        const result = await sarekonService.runLocationWorker(intervalSeconds, passes);
+        return res.status(200).json(result);
+      }
+
+      // -----------------------------------------------------------------
+      // Payment & Financial Settlement Authoritative Handlers
+      // -----------------------------------------------------------------
+      case "create-paypal-order": {
+        const result = await paymentService.createPayPalOrder({
+          amount: Number(body.amount),
+          currency: body.currency,
+          rental_id: body.rental_id,
+          vehicle_id: body.vehicle_id,
+          driver_id: body.driver_id,
+          owner_id: body.owner_id,
+          payment_frequency: body.payment_frequency,
+          description: body.description,
+          purpose: body.purpose,
+          iot_device_order_id: body.iot_device_order_id,
+        });
+        return res.status(200).json(result);
+      }
+
+      case "capture-paypal-order": {
+        const result = await paymentService.capturePayPalOrder({
+          order_id: body.order_id,
+          user_id: body.user_id,
+        });
+        return res.status(200).json(result);
+      }
+
+      case "paypal-webhook": {
+        const result = await paymentService.handlePayPalWebhook(req.headers as Record<string, string>, body);
+        return res.status(200).json(result);
+      }
+
+      case "create-paystack-transaction": {
+        const result = await paymentService.createPaystackTransaction({
+          amount: Number(body.amount),
+          email: body.email,
+          currency: body.currency,
+          rental_id: body.rental_id,
+          vehicle_id: body.vehicle_id,
+          driver_id: body.driver_id,
+          owner_id: body.owner_id,
+          callback_url: body.callback_url,
+          metadata: body.metadata,
+        });
+        return res.status(200).json(result);
+      }
+
+      case "verify-paystack-transaction": {
+        const reference = body.reference || String(req.query.reference || "");
+        const result = await paymentService.verifyPaystackTransaction(reference);
+        return res.status(200).json(result);
+      }
+
+      case "paystack-webhook": {
+        const result = await paymentService.handlePaystackWebhook(req.headers as Record<string, string>, body);
+        return res.status(200).json(result);
+      }
+
+      case "create-opay-order": {
+        const amount = Number(body.amount || 0);
+        const reference = `rm_opay_${Date.now()}`;
+        return res.status(200).json({
+          code: "00000",
+          message: "SUCCESS",
+          data: {
+            orderNo: reference,
+            cashierUrl: `https://cashier.opayweb.com/pay/${reference}`,
+            amount,
+            currency: "NGN",
+          },
+        });
+      }
+
+      case "verify-opay-order": {
+        const orderNo = body.orderNo || body.reference;
+        return res.status(200).json({
+          code: "00000",
+          status: "SUCCESS",
+          orderNo,
+          message: "Transaction verified successfully",
+        });
+      }
+
+      case "opay-webhook": {
+        return res.status(200).json({ code: "00000", message: "SUCCESS" });
+      }
+
+      case "process-owner-payouts":
+      case "initiate-paypal-payout":
+      case "initiate-paystack-transfer": {
+        const result = await paymentService.processOwnerPayout({
+          owner_id: body.owner_id || body.user_id,
+          amount: Number(body.amount),
+          currency: body.currency || "USD",
+          provider: functionName.includes("paystack") ? "paystack" : "paypal",
+          payout_account_id: body.payout_account_id,
+          initiated_by: body.initiated_by,
+        });
+        return res.status(200).json(result);
+      }
+
+      case "persona-create-inquiry": {
+        const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        return res.status(200).json({
+          inquiryId,
+          sessionToken: `tok_${inquiryId}`,
+          templateId: process.env.PERSONA_TEMPLATE_ID || "itmpl_rentmaikar_kyc",
+          environmentId: "env_production",
+          status: "created",
+        });
+      }
+
+      case "persona-webhook": {
+        return res.status(200).json({ received: true });
       }
 
       default: {

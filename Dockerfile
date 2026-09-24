@@ -44,7 +44,7 @@ RUN touch /var/run/nginx.pid && \
 RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
 
 # Default backend and Supabase URLs (can be overridden dynamically via Cloud Run / container env)
-ENV BACKEND_URL=http://rentmaikar-backend:8080
+ENV BACKEND_URL=https://rentmaikar-backend-672260445879.europe-west1.run.app
 ENV SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
 
 # Copy production Nginx configuration and envsubst template

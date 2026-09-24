@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Wrench, UserCheck, ArrowRightLeft, FileSignature, PlugZap, Undo2, Search, ShieldCheck, History as HistoryIcon, Radar, Car, CheckCircle2, AlertCircle, Send, MapPin } from "lucide-react";
+import { Loader2, Wrench, UserCheck, ArrowRightLeft, FileSignature, PlugZap, Undo2, Search, ShieldCheck, History as HistoryIcon, Radar, Car, CheckCircle2, AlertCircle, Send, MapPin, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 interface Diagnosis {
@@ -172,6 +172,12 @@ export default function GPSANDTRACKFleetAdminPanel({ onChanged }: { onChanged?: 
   const [deals, setDeals] = useState<Record<string, unknown>[]>([]);
   const [dealId, setDealId] = useState("");
   const [dealDetail, setDealDetail] = useState<Record<string, unknown> | null>(null);
+
+  // forceful re-sync device IMEI
+  const [resyncDeviceId, setResyncDeviceId] = useState("");
+  const [resyncVehicleId, setResyncVehicleId] = useState("");
+  const [resyncOverrideImei, setResyncOverrideImei] = useState("");
+  const [forceLinkVehicle, setForceLinkVehicle] = useState(false);
 
   // permissions probe
   const [perms, setPerms] = useState<{
@@ -470,6 +476,90 @@ export default function GPSANDTRACKFleetAdminPanel({ onChanged }: { onChanged?: 
                 )}
               </div>
             )}
+          </AccordionContent>
+        </AccordionItem>
+
+        {/* ---------------- Force Re-Sync Device IMEI ---------------- */}
+        <AccordionItem value="resync-imei" className="rounded-lg border border-blue-500/20 bg-blue-500/[0.02] px-4">
+          <AccordionTrigger className="text-base font-semibold">
+            <span className="flex items-center gap-2 text-blue-600">
+              <RefreshCw className="h-4 w-4 text-blue-600" /> Force Re-Sync Device IMEI with Sarekon API
+            </span>
+          </AccordionTrigger>
+          <AccordionContent className="space-y-4 pb-4">
+            <p className="text-xs text-muted-foreground">
+              Directly queries the authoritative Sarekon API for the current active IMEI and hardware profile mapped to a device,
+              updates the Supabase <code>iot_devices</code> record, associates matching vehicles via VIN, and triggers the canonical{" "}
+              <code>public.sync_device_identity()</code> reconciliation.
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="resync-dev-id">Device Identifier <span className="text-red-500">*</span></Label>
+                <Input
+                  id="resync-dev-id"
+                  value={resyncDeviceId}
+                  onChange={(e) => setResyncDeviceId(e.target.value)}
+                  placeholder="Supabase UUID, Sarekon ID (e.g. 1998413), Serial (V24236052726550), or VIN"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="resync-veh-id">Vehicle ID / UUID (Optional)</Label>
+                <Input
+                  id="resync-veh-id"
+                  value={resyncVehicleId}
+                  onChange={(e) => setResyncVehicleId(e.target.value)}
+                  placeholder="Vehicle UUID to link (auto-detects from VIN if blank)"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="resync-override-imei">Override IMEI (Optional)</Label>
+                <Input
+                  id="resync-override-imei"
+                  value={resyncOverrideImei}
+                  onChange={(e) => setResyncOverrideImei(e.target.value)}
+                  placeholder="Leave empty to use active IMEI from Sarekon"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-6">
+                <Checkbox
+                  id="force-link-veh"
+                  checked={forceLinkVehicle}
+                  onCheckedChange={(c) => setForceLinkVehicle(c === true)}
+                />
+                <Label htmlFor="force-link-veh" className="text-xs font-normal">
+                  Force re-link vehicle and enable GPS tracking
+                </Label>
+              </div>
+            </div>
+
+            <Button
+              disabled={!resyncDeviceId.trim() || !!busy}
+              onClick={async () => {
+                const res = await run(
+                  "resync_device_imei",
+                  {
+                    action: "resync_device_imei",
+                    device_id: resyncDeviceId.trim(),
+                    vehicle_id: resyncVehicleId.trim() || undefined,
+                    override_imei: resyncOverrideImei.trim() || undefined,
+                    force_link_vehicle: forceLinkVehicle,
+                  },
+                  `Device IMEI forcefully re-synced successfully with Sarekon API`
+                );
+                if (res && res.ok) {
+                  toast.success(`Device ${res.sarekon_device_id || resyncDeviceId} re-synced with active IMEI: ${res.active_imei}`);
+                  onChanged?.();
+                }
+              }}
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {spinner("resync_device_imei") ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Force Re-Sync IMEI from Sarekon
+            </Button>
           </AccordionContent>
         </AccordionItem>
 

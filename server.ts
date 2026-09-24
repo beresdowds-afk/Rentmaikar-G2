@@ -240,6 +240,13 @@ async function startServer() {
 
       // If handled locally (status !== 404), return immediately
       if (localResponse && localResponse.status !== 404) {
+        if (
+          typeof localResponse.data === "string" &&
+          (localResponse.data.startsWith("<?xml") || (localResponse as any).isXml)
+        ) {
+          res.setHeader("Content-Type", "text/xml; charset=utf-8");
+          return res.status(localResponse.status).send(localResponse.data);
+        }
         return res.status(localResponse.status).json(localResponse.data);
       }
 

@@ -118,22 +118,12 @@ class BackendBridge {
   }> = [];
 
   constructor() {
-    // Determine primary URL from Vite env or default to origin/local
+    // Determine primary URL from Vite env or default to same-origin /api
     const envBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
     if (envBase) {
       this.primaryBaseUrl = envBase;
-    } else if (typeof window !== "undefined") {
-      if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-        this.primaryBaseUrl = "http://localhost:5000/api";
-      } else if (window.location.hostname.includes("rentmaikar.com")) {
-        // Direct relative on production domain
-        this.primaryBaseUrl = "/api";
-      } else {
-        // Preview or staging default
-        this.primaryBaseUrl = "https://staging.rentmaikar.com/api";
-      }
     } else {
-      this.primaryBaseUrl = "https://staging.rentmaikar.com/api";
+      this.primaryBaseUrl = "/api";
     }
 
     if (typeof window !== "undefined") {
