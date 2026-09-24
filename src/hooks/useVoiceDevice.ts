@@ -280,18 +280,10 @@ if (answeredSid) {
         setError(e?.message ?? "Calling error");
         logAudioEvent("call", e?.message ?? "Calling error", { level: "error" });
       });
-      device.on("incoming", (call: Call) 
-        const sid =
-  call.parameters?.CallSid ??
-  call.parameters?.CallSID ??
-  null;
-
-if (sid) {
-  callSidRef.current = sid;
-} => {
-        setIncomingCall(call);
-        attachCall(call);
-      });
+      device.on("incoming", (call: Call) => {
+  setIncomingCall(call);
+  attachCall(call);
+});
       device.on("tokenWillExpire", async () => {
         const { data: refreshed } = await supabase.functions.invoke("voice-access-token");
         if (refreshed?.token) device.updateToken(refreshed.token as string);
@@ -367,36 +359,51 @@ if (sid) {
     [applyAudio, attachCall, initialize],
   );
 
-  const hangUp = async () => {
-    // Live call: hang it up. Ringing inbound call: reject it.
-    // Neither: clear any stale call state and return the softphone to ready.
-    const callSid = callSidRef.current;
-    callRef.current?.disconnect();
-    if (callSid) {
-  try {
-    const { error } = await supabase.functions.invoke('end-voip-call', {
-      body: {
-        callSid,
-      },
-    });
+  const hangUp = useCallback(async () => {
+  // Capture the SID BEFORE disconnecting or clearing the call reference.
+  const callSid = callSidRef.current;
+  const call = callRef.current;
 
-    if (error) {
-      console.error('[VoIP] Failed to reconcile ended call:', error);
-    }
-  } catch (error) {
-    console.error('[VoIP] Error reconciling ended call:', error);
+  // Immediately terminate the browser media session.
+  try {
+    call?.disconnect();
+  } catch {
+    // The browser call was already disconnected.
   }
+
+  // Authoritatively reconcile the provider-side call and Rentmaikar state.
+  if (callSid) {
+    try {
+      const { error } = await supabase.functions.invoke("end-voip-call", {
+        body: {
+          callSid,
+        },
+      });
+
+      if (error) {
+        console.error("[VoIP] Failed to reconcile ended call:", error);
+      }
+    } catch (error) {
+      console.error("[VoIP] Error reconciling ended call:", error);
     }
-    callRef.current = null;
-    callSidRef.current = null;
-    if (incomingCall) {
+  }
+
+  callRef.current = null;
+  callSidRef.current = null;
+
+  if (incomingCall) {
+    try {
       incomingCall.reject();
-      setIncomingCall(null);
+    } catch {
+      // Incoming call was already gone.
     }
-    setStatus(deviceRef.current ? "ready" : "idle");
-    setDiagnosticsCallId(null);
-    logAudioEvent("call", "Call ended by agent");
-  }, [incomingCall]);
+    setIncomingCall(null);
+  }
+
+  setStatus(deviceRef.current ? "ready" : "idle");
+  setDiagnosticsCallId(null);
+  logAudioEvent("call", "Call ended by agent");
+}, [incomingCall]);
 
   const setMuted = useCallback((muted: boolean) => {
     const call = callRef.current;
@@ -446,26 +453,39 @@ if (sid) {
     })();
   }, [incomingCall]);
 
-  const rejectIncoming = async () => {
+  const rejectIncoming = useCallback(async () => {
   const callSid = callSidRef.current;
+  const call = callRef.current ?? incomingCall;
 
-  callRef.current?.reject();
+  try {
+    call?.reject();
+  } catch {
+    // Incoming call was already gone.
+  }
 
   if (callSid) {
     try {
-      const { error } = await supabase.functions.invoke('end-voip-call', {
+      const { error } = await supabase.functions.invoke("end-voip-call", {
         body: {
           callSid,
         },
       });
 
       if (error) {
-        console.error('[VoIP] Failed to reconcile rejected call:', error);
+        console.error("[VoIP] Failed to reconcile rejected call:", error);
       }
     } catch (error) {
-      console.error('[VoIP] Error reconciling rejected call:', error);
+      console.error("[VoIP] Error reconciling rejected call:", error);
     }
   }
+
+  callRef.current = null;
+  callSidRef.current = null;
+  setIncomingCall(null);
+  setStatus(deviceRef.current ? "ready" : "idle");
+  setDiagnosticsCallId(null);
+  logAudioEvent("call", "Incoming call rejected by agent");
+}, [incomingCall]);
 
   // KEEP EXISTING CLEANUP CODE
 };
