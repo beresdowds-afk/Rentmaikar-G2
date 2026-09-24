@@ -90,7 +90,7 @@ interface UseVoiceDeviceResult {
   initialize: () => Promise<boolean>;
   /** `support`, a `+E.164` number, or `client:user_<uuid>`. */
   startCall: (to: string, params?: Record<string, string>) => Promise<boolean>;
-  hangUp: () => Promise<void>;
+  hangUp: (reconcile?: boolean) => Promise<void>;
   toggleMute: () => void;
   setMuted: (muted: boolean) => void;
   toggleSpeakerphone: () => Promise<void>;
@@ -359,7 +359,7 @@ if (answeredSid) {
     [applyAudio, attachCall, initialize],
   );
 
-    const hangUp = useCallback(async () => {
+    const hangUp = useCallback(async (reconcile = true) => {
     // Capture the SID BEFORE disconnecting or clearing the call reference.
     const callSid = callSidRef.current;
     const call = callRef.current;
@@ -372,21 +372,16 @@ if (answeredSid) {
     }
 
     // Authoritatively reconcile the provider-side call and Rentmaikar state.
-    if (callSid) {
-      try {
-        const { error } = await supabase.functions.invoke("end-voip-call", {
-          body: {
-            callSid,
-          },
-        });
-
-        if (error) {
-          console.error("[VoIP] Failed to reconcile ended call:", error);
-        }
-      } catch (error) {
-        console.error("[VoIP] Error reconciling ended call:", error);
-      }
-    }
+    if (callSid && reconcile) {
+  try {
+    const { error } = await supabase.functions.invoke("end-voip-call", {
+      body: { callSid },
+    });
+    if (error) console.error("[VoIP] Failed to reconcile ended call:", error);
+  } catch (error) {
+    console.error("[VoIP] Error reconciling ended call:", error);
+  }
+}
 
     callRef.current = null;
     callSidRef.current = null;
