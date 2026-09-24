@@ -90,7 +90,7 @@ interface UseVoiceDeviceResult {
   initialize: () => Promise<boolean>;
   /** `support`, a `+E.164` number, or `client:user_<uuid>`. */
   startCall: (to: string, params?: Record<string, string>) => Promise<boolean>;
-    hangUp: () => Promise<void>;
+  hangUp: () => Promise<void>;
   toggleMute: () => void;
   setMuted: (muted: boolean) => void;
   toggleSpeakerphone: () => Promise<void>;
@@ -110,7 +110,7 @@ interface UseVoiceDeviceResult {
   /** Re-request permissions and re-apply audio routing after a failure. */
   reinitializeAudio: () => Promise<boolean>;
   acceptIncoming: () => void;
-    rejectIncoming: () => Promise<void>;
+  rejectIncoming: () => Promise<void>;
 }
 
 export function useVoiceDevice(): UseVoiceDeviceResult {
