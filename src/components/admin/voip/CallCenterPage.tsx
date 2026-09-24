@@ -156,28 +156,28 @@ export const CallCenterPage = () => {
 
   // Hangs up the browser audio session and asks the provider to terminate the call.
     const terminateCall = useCallback(async (callId: string) => {
-    const terminated = await endCall(callId);
+  const terminated = await endCall(callId);
 
-    if (terminated && activeCall?.id === callId) {
-      await voice.hangUp();
-    }
+  if (terminated && activeCall?.id === callId) {
+    await voice.hangUp(false);
+  }
 
-    return terminated;
-  }, [activeCall?.id, endCall, voice]);
+  return terminated;
+}, [activeCall?.id, endCall, voice]);
 
     const endAllCalls = useCallback(async () => {
-    const results = await Promise.allSettled(
-      activeCalls.map((call) => endCall(call.id))
-    );
+  const results = await Promise.allSettled(
+    activeCalls.map((call) => endCall(call.id))
+  );
 
-    const successfullyTerminated = results.some(
-      (result) => result.status === 'fulfilled' && result.value === true
-    );
+  const successfullyTerminated = results.some(
+    (result) => result.status === 'fulfilled' && result.value === true
+  );
 
-    if (successfullyTerminated) {
-      await voice.hangUp();
-    }
-  }, [activeCalls, endCall, voice]);
+  if (successfullyTerminated) {
+    await voice.hangUp(false);
+  }
+}, [activeCalls, endCall, voice]);
 
   // FIFO router: answering always connects the caller who has waited longest first.
   const answerQueuedCall = useCallback(async (call: QueuedCall) => {
