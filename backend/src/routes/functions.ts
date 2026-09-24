@@ -338,7 +338,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
         if (resendApiKey && targetEmail) {
           try {
-            const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "rentmaikar.com").trim();
+            const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
             const alias = (body.fromAlias || "support").toLowerCase().trim();
             const from = body.from || `Rentmaikar Support <${alias}@${defaultDomain}>`;
             const replyTo = `support@${defaultDomain}`;

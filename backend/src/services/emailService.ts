@@ -10,7 +10,7 @@ import crypto from "crypto";
 import pg from "pg";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
-export const VERIFIED_DOMAIN = (process.env.RESEND_SENDING_DOMAIN || "rentmaikar.com").trim();
+export const VERIFIED_DOMAIN = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
 export const INBOUND_DOMAIN = "backend.rentmaikar.com";
 
 export const SENDERS = {
@@ -59,7 +59,7 @@ export function parseEmailAddress(value: string): { name?: string; local: string
  * Respects both rentmaikar.com and notify.rentmaikar.com.
  */
 export function rewriteSenderAddress(from?: string): { from: string; preservedReplyTo?: string } {
-  const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "rentmaikar.com").trim();
+  const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
 
   if (!from || !from.trim()) {
     return { from: SENDERS.support, preservedReplyTo: `support@${defaultDomain}` };

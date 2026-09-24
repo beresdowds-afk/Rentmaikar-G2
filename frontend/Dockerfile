@@ -39,8 +39,13 @@ FROM nginx:1.25-alpine AS runner
 # Remove default nginx static pages
 RUN rm -rf /usr/share/nginx/html/* /etc/nginx/conf.d/default.conf
 
+# Default backend and Supabase URLs
+ENV BACKEND_URL=http://rentmaikar-backend:8080
+ENV SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
+
 # Copy custom Nginx configuration supporting SPA routing and Cloud Run ports
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # Copy compiled static distribution from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html

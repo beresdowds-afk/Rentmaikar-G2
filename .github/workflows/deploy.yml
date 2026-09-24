@@ -81,7 +81,8 @@ jobs:
             --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar:${{ github.sha }} \
             --region europe-west1 \
             --port 80 \
-            --allow-unauthenticated
+            --allow-unauthenticated \
+            --set-env-vars BACKEND_URL=http://rentmaikar-backend:8080,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
 
   deploy-backend:
     name: Deploy Backend (rentmaikar-backend)
@@ -126,4 +127,4 @@ jobs:
             --region europe-west1 \
             --port 8080 \
             --allow-unauthenticated \
-            --set-env-vars NODE_ENV=production,PORT=8080,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
+            --set-env-vars NODE_ENV=production,PORT=8080,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co

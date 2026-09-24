@@ -38,6 +38,8 @@ steps:
       - '--port'
       - '80'
       - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'BACKEND_URL=http://rentmaikar-backend:8080,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
 
   # 4. Build the self-contained backend container image using backend/Dockerfile
   - name: 'gcr.io/cloud-builders/docker'
@@ -73,7 +75,7 @@ steps:
       - '8080'
       - '--allow-unauthenticated'
       - '--set-env-vars'
-      - 'NODE_ENV=production,PORT=8080,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
+      - 'NODE_ENV=production,PORT=8080,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
 
 images:
   - 'gcr.io/$PROJECT_ID/rentmaikar:$COMMIT_SHA'
