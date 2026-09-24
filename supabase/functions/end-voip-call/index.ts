@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
+import { twilioCredentialsConfigured, twilioRequest } from '../_shared/twilio-auth.ts';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
@@ -62,57 +62,256 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // If call has a Twilio SID, end it via Twilio API
+    // Twilio is authoritative for call termination.
+    // Never mark the local call completed unless Twilio confirms a terminal state.
     if (callRecord.call_sid) {
-      const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-      const authToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+      if (!twilioCredentialsConfigured()) {
+        return new Response(
+          JSON.stringify({ error: 'Twilio voice credentials are not configured' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
 
-      if (accountSid && authToken) {
-        try {
-          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callRecord.call_sid}.json`;
-          
-          await fetch(twilioUrl, {
+      const terminalStatuses = new Set([
+        'completed',
+        'busy',
+        'failed',
+        'no-answer',
+        'canceled',
+      ]);
+
+      try {
+        // First verify the provider's current authoritative state.
+        const lookup = await twilioRequest(
+          `/Calls/${callRecord.call_sid}.json`,
+          { method: 'GET' }
+        );
+
+        if (lookup.status === 404) {
+          return new Response(
+            JSON.stringify({
+              error: 'Twilio call no longer exists',
+              callId,
+            }),
+            { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        if (!lookup.ok) {
+          return new Response(
+            JSON.stringify({
+              error: `Unable to verify Twilio call state (HTTP ${lookup.status})`,
+              callId,
+            }),
+            { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const providerStatus = String(
+          (lookup.payload as { status?: string })?.status || ''
+        ).toLowerCase();
+
+        if (!providerStatus) {
+          return new Response(
+            JSON.stringify({
+              error: 'Twilio returned no call status',
+              callId,
+            }),
+            { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // If Twilio already ended the call, reconcile local state without
+        // issuing another termination request.
+        if (terminalStatuses.has(providerStatus)) {
+          const endedAt = new Date();
+          const startedAt = callRecord.started_at
+            ? new Date(callRecord.started_at)
+            : new Date(callRecord.created_at);
+
+          const durationSeconds = Math.max(
+            0,
+            Math.floor(
+              (endedAt.getTime() - startedAt.getTime()) / 1000
+            )
+          );
+
+          const { error: reconcileError } = await supabase
+            .from('voip_calls')
+            .update({
+              status: providerStatus,
+              ended_at: callRecord.ended_at || endedAt.toISOString(),
+              duration_seconds: callRecord.duration_seconds ?? durationSeconds,
+            })
+            .eq('id', callId);
+
+          if (reconcileError) {
+            console.error(
+              'Error reconciling terminal call record:',
+              reconcileError
+            );
+
+            return new Response(
+              JSON.stringify({
+                error: 'Twilio call is terminal but local state synchronization failed',
+                callId,
+              }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          await supabase
+            .from('voip_call_participants')
+            .update({
+              status: 'disconnected',
+              left_at: callRecord.ended_at || endedAt.toISOString(),
+            })
+            .eq('call_id', callId);
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              callId,
+              status: providerStatus,
+              duration_seconds: callRecord.duration_seconds ?? durationSeconds,
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Provider confirms that the call is still active.
+        const formParams = new URLSearchParams();
+        formParams.append('Status', 'completed');
+
+        const termination = await twilioRequest(
+          `/Calls/${callRecord.call_sid}.json`,
+          {
             method: 'POST',
             headers: {
-              'Authorization': 'Basic ' + btoa(`${accountSid}:${authToken}`),
               'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: new URLSearchParams({ Status: 'completed' }),
-          });
-        } catch (twilioError) {
-          console.error('Error ending Twilio call:', twilioError);
+            body: formParams.toString(),
+          }
+        );
+
+        if (!termination.ok) {
+          console.error(
+            `Twilio termination rejected: HTTP ${termination.status}`
+          );
+
+          return new Response(
+            JSON.stringify({
+              error: `Twilio rejected call termination (HTTP ${termination.status})`,
+              callId,
+            }),
+            { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
         }
+
+        // Confirm the resulting provider state before touching local state.
+        const confirmation = await twilioRequest(
+          `/Calls/${callRecord.call_sid}.json`,
+          { method: 'GET' }
+        );
+
+        if (!confirmation.ok) {
+          return new Response(
+            JSON.stringify({
+              error: `Call termination was requested, but Twilio state could not be confirmed (HTTP ${confirmation.status})`,
+              callId,
+            }),
+            { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const confirmedStatus = String(
+          (confirmation.payload as { status?: string })?.status || ''
+        ).toLowerCase();
+
+        if (!terminalStatuses.has(confirmedStatus)) {
+          return new Response(
+            JSON.stringify({
+              error: `Twilio has not confirmed call termination; current status: ${confirmedStatus || 'unknown'}`,
+              callId,
+            }),
+            { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const endedAt = new Date();
+        const startedAt = callRecord.started_at
+          ? new Date(callRecord.started_at)
+          : new Date(callRecord.created_at);
+
+        const durationSeconds = Math.max(
+          0,
+          Math.floor(
+            (endedAt.getTime() - startedAt.getTime()) / 1000
+          )
+        );
+
+        const { error: updateError } = await supabase
+          .from('voip_calls')
+          .update({
+            status: confirmedStatus,
+            ended_at: endedAt.toISOString(),
+            duration_seconds: durationSeconds,
+          })
+          .eq('id', callId);
+
+        if (updateError) {
+          console.error('Error updating call record:', updateError);
+
+          return new Response(
+            JSON.stringify({
+              error: 'Twilio ended the call, but local state synchronization failed',
+              callId,
+            }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        await supabase
+          .from('voip_call_participants')
+          .update({
+            status: 'disconnected',
+            left_at: endedAt.toISOString(),
+          })
+          .eq('call_id', callId);
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            callId,
+            status: confirmedStatus,
+            duration_seconds: durationSeconds,
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (twilioError: any) {
+        console.error(
+          'Error terminating Twilio call:',
+          twilioError?.message || twilioError
+        );
+
+        return new Response(
+          JSON.stringify({
+            error: 'Unable to terminate the call with Twilio',
+            callId,
+          }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
     }
 
-    // Calculate duration
-    const startedAt = callRecord.started_at ? new Date(callRecord.started_at) : new Date(callRecord.created_at);
-    const endedAt = new Date();
-    const durationSeconds = Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000);
-
-    // Update call record
-    const { error: updateError } = await supabase
-      .from('voip_calls')
-      .update({
-        status: 'completed',
-        ended_at: endedAt.toISOString(),
-        duration_seconds: durationSeconds,
-      })
-      .eq('id', callId);
-
-    if (updateError) {
-      console.error('Error updating call record:', updateError);
-    }
-
-    // Update all participants
-    await supabase
-      .from('voip_call_participants')
-      .update({
-        status: 'disconnected',
-        left_at: endedAt.toISOString(),
-      })
-      .eq('call_id', callId);
-
+    // No provider SID means there is nothing authoritative to terminate.
+    return new Response(
+      JSON.stringify({
+        error: 'No Twilio Call SID is associated with this call',
+        callId,
+      }),
+      { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
     return new Response(
       JSON.stringify({
         success: true,
