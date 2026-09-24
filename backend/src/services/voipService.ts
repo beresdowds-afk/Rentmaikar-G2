@@ -803,44 +803,256 @@ export async function handleEndVoipCall(
   userToken?: string
 ): Promise<{ success: boolean; message: string; callId?: string }> {
   const callId = body.callId || body.call_id;
-  const callSid = body.callSid || body.call_sid;
+  const requestedCallSid = body.callSid || body.call_sid;
+  const reconcileOnly = body.reconcileOnly === true;
 
   const pool = getDbPool();
-  let targetSid = callSid;
+  let targetSid = requestedCallSid;
 
+  // Resolve the authoritative Twilio Call SID from the local record when
+  // the caller supplied only the Rentmaikar call ID.
   if (!targetSid && callId && pool) {
     try {
-      const res = await pool.query("SELECT call_sid FROM public.voip_calls WHERE id = $1 LIMIT 1", [callId]);
-      targetSid = res.rows?.[0]?.call_sid;
-    } catch {}
-  }
+      const res = await pool.query(
+        `SELECT call_sid
+         FROM public.voip_calls
+         WHERE id = $1
+         LIMIT 1`,
+        [callId]
+      );
 
-  if (targetSid) {
-    try {
-      const formParams = new URLSearchParams();
-      formParams.append("Status", "completed");
-      await twilioRequest(`/Calls/${targetSid}.json`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formParams.toString(),
-      });
+      targetSid = res.rows?.[0]?.call_sid || undefined;
     } catch (e: any) {
-      console.warn("[End Call] Twilio REST API termination error:", e.message);
+      console.warn("[End Call] Failed to resolve Call SID:", e.message);
     }
   }
 
-  if (pool && (callId || targetSid)) {
-    try {
-      await pool.query(
-        `UPDATE public.voip_calls
-         SET status = 'completed', ended_at = NOW(), updated_at = NOW()
-         WHERE id = $1 OR call_sid = $2`,
-        [callId || null, targetSid || null]
-      );
-    } catch {}
+  if (!targetSid) {
+    return {
+      success: false,
+      message: "No authoritative Twilio Call SID is available for this call",
+      callId,
+    };
   }
 
-  return { success: true, message: "Call ended successfully", callId };
+  const terminalStatuses = new Set([
+    "completed",
+    "busy",
+    "failed",
+    "no-answer",
+    "canceled",
+  ]);
+
+  const mapProviderStatus = (status: string): string => {
+    if (status === "queued" || status === "ringing") return "ringing";
+    if (status === "in-progress") return "in-progress";
+    if (status === "completed") return "completed";
+    if (status === "busy") return "busy";
+    if (status === "failed") return "failed";
+    if (status === "no-answer") return "no-answer";
+    if (status === "canceled") return "canceled";
+    return "in-progress";
+  };
+
+  // First ask Twilio for the authoritative provider state.
+  let providerStatus: string;
+
+  try {
+    const lookup = await twilioRequest(`/Calls/${targetSid}.json`, {
+      method: "GET",
+    });
+
+    // A missing provider call means the local record is stale. Reconcile it
+    // as failed rather than falsely claiming that an active call was ended.
+    if (lookup.status === 404) {
+      if (pool && callId) {
+        try {
+          await pool.query(
+            `UPDATE public.voip_calls
+             SET status = 'failed',
+                 ended_at = COALESCE(ended_at, NOW()),
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [callId]
+          );
+        } catch (e: any) {
+          console.warn(
+            "[End Call] Failed to reconcile missing Twilio call:",
+            e.message
+          );
+        }
+      }
+
+      return {
+        success: true,
+        message: "Twilio call no longer exists; local call record reconciled",
+        callId,
+      };
+    }
+
+    if (!lookup.ok) {
+      return {
+        success: false,
+        message: `Unable to verify Twilio call state (HTTP ${lookup.status})`,
+        callId,
+      };
+    }
+
+    providerStatus = String(lookup.data?.status || "").toLowerCase();
+
+    if (!providerStatus) {
+      return {
+        success: false,
+        message: "Twilio returned no call status",
+        callId,
+      };
+    }
+  } catch (e: any) {
+    console.warn("[End Call] Twilio state lookup error:", e.message);
+
+    return {
+      success: false,
+      message: "Unable to verify the call with Twilio",
+      callId,
+    };
+  }
+
+  // If Twilio already considers the call terminal, synchronize the local
+  // record and do not send another termination request.
+  if (terminalStatuses.has(providerStatus)) {
+    const localStatus = mapProviderStatus(providerStatus);
+
+    if (pool && (callId || targetSid)) {
+      try {
+        await pool.query(
+          `UPDATE public.voip_calls
+           SET status = $1,
+               ended_at = COALESCE(ended_at, NOW()),
+               updated_at = NOW()
+           WHERE ($2::uuid IS NOT NULL AND id = $2)
+              OR ($3::text IS NOT NULL AND call_sid = $3)`,
+          [localStatus, callId || null, targetSid || null]
+        );
+      } catch (e: any) {
+        console.warn(
+          "[End Call] Failed to synchronize terminal call state:",
+          e.message
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: `Call already ended at Twilio with status: ${providerStatus}`,
+      callId,
+    };
+  }
+
+  // Reconciliation mode must never terminate a live provider call.
+  if (reconcileOnly) {
+    return {
+      success: true,
+      message: `Call is still active at Twilio with status: ${providerStatus}`,
+      callId,
+    };
+  }
+
+  // The provider confirms that the call is still live. Request termination.
+  try {
+    const formParams = new URLSearchParams();
+    formParams.append("Status", "completed");
+
+    const termination = await twilioRequest(`/Calls/${targetSid}.json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formParams.toString(),
+    });
+
+    // Never mutate local state when Twilio rejects the termination request.
+    if (!termination.ok) {
+      console.warn(
+        `[End Call] Twilio termination rejected: HTTP ${termination.status}`
+      );
+
+      return {
+        success: false,
+        message: `Twilio rejected call termination (HTTP ${termination.status})`,
+        callId,
+      };
+    }
+
+    // Verify the provider's resulting state before declaring the local call
+    // completed. This prevents a successful HTTP request from creating a
+    // false "completed" state if Twilio has not actually transitioned yet.
+    const confirmation = await twilioRequest(`/Calls/${targetSid}.json`, {
+      method: "GET",
+    });
+
+    if (!confirmation.ok) {
+      return {
+        success: false,
+        message: `Call termination was requested, but Twilio state could not be confirmed (HTTP ${confirmation.status})`,
+        callId,
+      };
+    }
+
+    const confirmedStatus = String(
+      confirmation.data?.status || ""
+    ).toLowerCase();
+
+    if (!terminalStatuses.has(confirmedStatus)) {
+      return {
+        success: false,
+        message: `Twilio has not confirmed call termination; current status: ${confirmedStatus || "unknown"}`,
+        callId,
+      };
+    }
+
+    const localStatus = mapProviderStatus(confirmedStatus);
+
+    // Only now is it safe to synchronize the local database with the
+    // provider-confirmed terminal state.
+    if (pool && (callId || targetSid)) {
+      try {
+        await pool.query(
+          `UPDATE public.voip_calls
+           SET status = $1,
+               ended_at = COALESCE(ended_at, NOW()),
+               updated_at = NOW()
+           WHERE ($2::uuid IS NOT NULL AND id = $2)
+              OR ($3::text IS NOT NULL AND call_sid = $3)`,
+          [localStatus, callId || null, targetSid || null]
+        );
+      } catch (e: any) {
+        console.warn(
+          "[End Call] Failed to update local terminal state:",
+          e.message
+        );
+
+        return {
+          success: false,
+          message: "Twilio ended the call, but local state synchronization failed",
+          callId,
+        };
+      }
+    }
+
+    return {
+      success: true,
+      message: `Call ended successfully; Twilio confirmed status: ${confirmedStatus}`,
+      callId,
+    };
+  } catch (e: any) {
+    console.warn("[End Call] Twilio REST API termination error:", e.message);
+
+    // Critical: do NOT mark the local record completed when provider
+    // termination could not be confirmed.
+    return {
+      success: false,
+      message: "Unable to terminate the call with Twilio",
+      callId,
+    };
+  }
 }
 
 // -----------------------------------------------------------------
