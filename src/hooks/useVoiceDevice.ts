@@ -116,6 +116,7 @@ interface UseVoiceDeviceResult {
 export function useVoiceDevice(): UseVoiceDeviceResult {
   const deviceRef = useRef<Device | null>(null);
   const callRef = useRef<Call | null>(null);
+  const callSidRef = useRef<string | null>(null);
   const prefsRef = useRef<AudioPreferences>(DEFAULT_AUDIO_PREFERENCES);
   const routeRef = useRef<AudioOutputRoute>("default");
   const previousRouteRef = useRef<AudioOutputRoute | null>(null);
@@ -170,6 +171,20 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
 
   const attachCall = useCallback((call: Call) => {
     callRef.current = call;
+    const captureCallSid = () => {
+  const sid =
+    call.parameters?.CallSid ??
+    call.parameters?.CallSID ??
+    null;
+
+  if (sid) {
+    callSidRef.current = sid;
+  }
+};
+
+captureCallSid();
+
+ 
     // Restore the saved mute state for this device.
     const savedMuted = prefsRef.current.muted;
     if (savedMuted) {
@@ -186,14 +201,15 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     );
     logAudioEvent("call", "Call attached");
     call.on("accept", () => {
-      setStatus("on-call");
-      logAudioEvent("call", "Call accepted");
+  captureCallSid();
+
+  setStatus("on-call");
+  logAudioEvent("call", "Call accepted");
       // Record which staff member answered so the admin call log can show it.
-      const answeredSid = (call as unknown as { parameters?: { CallSid?: string } }).parameters
-        ?.CallSid;
-      if (answeredSid) {
-        void supabase
-          .rpc("mark_voip_call_answered", { _call_sid: answeredSid })
+      const answeredSid = callSidRef.current;
+if (answeredSid) {
+  void supabase
+    .rpc("mark_voip_call_answered", { _call_sid: answeredSid })
           .then(({ error }) => {
             if (error) console.error("mark_voip_call_answered failed:", error.message);
           });
@@ -264,7 +280,15 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
         setError(e?.message ?? "Calling error");
         logAudioEvent("call", e?.message ?? "Calling error", { level: "error" });
       });
-      device.on("incoming", (call: Call) => {
+      device.on("incoming", (call: Call) 
+        const sid =
+  call.parameters?.CallSid ??
+  call.parameters?.CallSID ??
+  null;
+
+if (sid) {
+  callSidRef.current = sid;
+} => {
         setIncomingCall(call);
         attachCall(call);
       });
@@ -343,11 +367,28 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     [applyAudio, attachCall, initialize],
   );
 
-  const hangUp = useCallback(() => {
+  const hangUp = async () => {
     // Live call: hang it up. Ringing inbound call: reject it.
     // Neither: clear any stale call state and return the softphone to ready.
+    const callSid = callSidRef.current;
     callRef.current?.disconnect();
+    if (callSid) {
+  try {
+    const { error } = await supabase.functions.invoke('end-voip-call', {
+      body: {
+        callSid,
+      },
+    });
+
+    if (error) {
+      console.error('[VoIP] Failed to reconcile ended call:', error);
+    }
+  } catch (error) {
+    console.error('[VoIP] Error reconciling ended call:', error);
+  }
+    }
     callRef.current = null;
+    callSidRef.current = null;
     if (incomingCall) {
       incomingCall.reject();
       setIncomingCall(null);
@@ -405,12 +446,29 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
     })();
   }, [incomingCall]);
 
-  const rejectIncoming = useCallback(() => {
-    incomingCall?.reject();
-    setIncomingCall(null);
-    callRef.current = null;
-  }, [incomingCall]);
+  const rejectIncoming = async () => {
+  const callSid = callSidRef.current;
 
+  callRef.current?.reject();
+
+  if (callSid) {
+    try {
+      const { error } = await supabase.functions.invoke('end-voip-call', {
+        body: {
+          callSid,
+        },
+      });
+
+      if (error) {
+        console.error('[VoIP] Failed to reconcile rejected call:', error);
+      }
+    } catch (error) {
+      console.error('[VoIP] Error reconciling rejected call:', error);
+    }
+  }
+
+  // KEEP EXISTING CLEANUP CODE
+};
   const setAutoSwitchToHeadset = useCallback((enabled: boolean) => {
     prefsRef.current = { ...prefsRef.current, autoSwitchToHeadset: enabled };
     setPreferences(saveAudioPreferences({ autoSwitchToHeadset: enabled }));
@@ -516,30 +574,38 @@ export function useVoiceDevice(): UseVoiceDeviceResult {
   }, [status]);
 
   useEffect(() => {
-    return () => {
-      // Teardown must never throw: an error here happens during React's commit
-      // phase and would tear down the whole dashboard, so the sibling feature
-      // the user just clicked (e.g. the Unified Inbox) would never render.
-      try {
-        callRef.current?.disconnect();
-      } catch {
-        /* the call was already gone */
-      }
-      try {
-        deviceRef.current?.destroy();
-      } catch {
-        /* the device was already destroyed or never registered */
-      }
-      deviceRef.current = null;
-      try {
-        void supabase.rpc("voip_set_presence", { _status: "offline", _region: "All" });
-      } catch {
-        /* presence is best-effort */
-      }
-    };
-  }, []);
+  return () => {
+    // Teardown must never throw: an error here happens during React's commit
+    // phase and would tear down the whole dashboard, so the sibling feature
+    // the user just clicked (e.g. the Unified Inbox) would never render.
+    try {
+      callRef.current?.disconnect();
+    } catch {
+      /* the call was already gone */
+    }
 
+    try {
+      deviceRef.current?.destroy();
+    } catch {
+      /* the device was already destroyed or never registered */
+    }
 
+    deviceRef.current = null;
+    callRef.current = null;
+    callSidRef.current = null;
+
+    try {
+      void supabase.rpc("voip_set_presence", {
+        _status: "offline",
+        _region: "All",
+      });
+    } catch {
+      /* presence is best-effort */
+    }
+  };
+}, []);
+
+ 
   return {
     status,
     error,
