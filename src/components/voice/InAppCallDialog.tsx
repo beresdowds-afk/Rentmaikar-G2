@@ -80,12 +80,12 @@ export function InAppCallDialog({
   }, [open, initialize]);
 
   useEffect(() => {
-    if (!open && started) {
-      hangUp();
+  if (!open && started) {
+    void hangUp().finally(() => {
       setStarted(false);
-    }
-  }, [open, started, hangUp]);
-
+    });
+  }
+}, [open, started, hangUp]);
   const active = status === "connecting" || status === "on-call";
 
   const handleCall = async () => {
@@ -231,7 +231,13 @@ export function InAppCallDialog({
                 <Volume2 className="h-4 w-4 mr-2" />
                 {isSpeakerphone ? "Speaker on" : "Speaker off"}
               </Button>
-              <Button variant="destructive" onClick={() => { hangUp(); setStarted(false); }}>
+              <Button
+  variant="destructive"
+  onClick={async () => {
+    await hangUp();
+    setStarted(false);
+  }}
+>
                 <PhoneOff className="h-4 w-4 mr-2" />
                 End call
               </Button>
