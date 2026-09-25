@@ -306,32 +306,42 @@ export const HubMessageComposer: React.FC = () => {
         let emailSent = false;
         let emailErr = '';
 
-        // Primary: Cloud Run application email gateway.
-// The backend gateway handles Cloud Run → Supabase fallback.
-try {
-  const res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      to: recipientContact.trim(),
-      subject: subject.trim() || 'Notice from Rentmaikar Admin',
-      body: trimmedBody,
-      recipientName: recipientName.trim() || undefined,
-    }),
-  });
+        // Primary: Cloud Run application email gateway via relative Nginx proxy, with direct staging fallback.
+        try {
+          const emailPayload = {
+            to: recipientContact.trim(),
+            subject: subject.trim() || 'Notice from Rentmaikar Admin',
+            body: trimmedBody,
+            recipientName: recipientName.trim() || undefined,
+          };
 
-  const json = await res.json().catch(() => null);
+          let res: Response;
+          try {
+            res = await fetch('/api/functions/send-outbound-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(emailPayload),
+            });
+          } catch {
+            res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(emailPayload),
+            });
+          }
 
-  if (res.ok && (json?.ok !== false && json?.success !== false)) {
-    emailSent = true;
-  } else {
-    emailErr =
-      json?.error ||
-      `Email dispatch failed (HTTP ${res.status})`;
-  }
-} catch (e: any) {
-  emailErr = e.message || 'Email gateway request failed';
-  }
+          const json = await res.json().catch(() => null);
+
+          if (res.ok && (json?.ok !== false && json?.success !== false)) {
+            emailSent = true;
+          } else {
+            emailErr =
+              json?.error ||
+              `Email dispatch failed (HTTP ${res.status})`;
+          }
+        } catch (e: any) {
+          emailErr = e.message || 'Email gateway request failed';
+        }
 
         if (!emailSent) throw new Error(emailErr || 'Email dispatch failed');
         toast.success(`Email dispatched to ${recipientContact.trim()}`);

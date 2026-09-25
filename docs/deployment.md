@@ -189,6 +189,17 @@ When running inside Google Cloud Run or Cloud Build containers:
 
 ---
 
+### 3.4 Dual Cloud Run Architecture: Frontend (`rentmaikar-g2`) vs Backend (`rentmaikar-backend`)
+
+RentMaikar operates two coordinated Google Cloud Run services in `europe-west1`:
+
+| Service Name | Container / Dockerfile | Port | Public Hostname | Role & Responsibilities |
+| :--- | :--- | :--- | :--- | :--- |
+| **`rentmaikar-g2`** | Root `Dockerfile` (`nginx:1.25-alpine`) | `80` | `rentmaikar.com` | **Frontend SPA & Ingress Proxy**: Serves static Vite React bundles and reverse-proxies `/api/*` to `rentmaikar-backend`. |
+| **`rentmaikar-backend`** | `backend/Dockerfile` (`node:20-alpine`) | `8080` | `staging.rentmaikar.com` | **Authoritative Backend API Gateway**: Executes `send-outbound-email` via Resend from `notify.rentmaikar.com`, telematics, and payments. |
+
+---
+
 ## 4. Troubleshooting Checklist
 
 | Symptom | Probable Cause | Corrective Action |

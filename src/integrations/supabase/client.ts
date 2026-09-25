@@ -351,7 +351,24 @@ async function callLocalGateway(functionName: string, options?: any) {
 
 const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
 supabase.functions.invoke = (async (functionName: string, options?: any) => {
-  // 1. Prioritize authoritative Supabase Edge Function
+  // 1. Authoritative Backend Functions: Route directly to Cloud Run backend gateway first.
+  if (AUTHORITATIVE_BACKEND_FUNCTIONS.has(functionName)) {
+    const localRes = await callLocalGateway(functionName, options);
+    if (!localRes.error) {
+      return localRes;
+    }
+
+    // If local gateway failed (e.g. 404 or network unreachable), attempt remote Supabase Edge Function fallback
+    try {
+      const edgeRes = await originalInvoke(functionName, options);
+      if (!edgeRes.error) return edgeRes;
+    } catch {
+      // Fall through to return local gateway response
+    }
+    return localRes;
+  }
+
+  // 2. Otherwise prioritize authoritative Supabase Edge Function
   let originalError: any = null;
   try {
     const res = await originalInvoke(functionName, options);

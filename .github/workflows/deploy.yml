@@ -74,7 +74,9 @@ jobs:
           docker push gcr.io/${PROJECT_ID}/rentmaikar:${{ github.sha }}
           docker push gcr.io/${PROJECT_ID}/rentmaikar:latest
 
-      - name: Deploy Frontend to Cloud Run
+      # Deploy Frontend SPA container (Nginx on Port 80) serving rentmaikar.com
+      # Proxies /api/* requests to the backend service rentmaikar-backend
+      - name: Deploy Frontend to Cloud Run (rentmaikar-g2)
         if: env.GCP_SA_KEY != ''
         run: |
           gcloud run deploy rentmaikar-g2 \
@@ -119,7 +121,9 @@ jobs:
           docker push gcr.io/${PROJECT_ID}/rentmaikar-backend:${{ github.sha }}
           docker push gcr.io/${PROJECT_ID}/rentmaikar-backend:latest
 
-      - name: Deploy Backend to Cloud Run
+      # Deploy Backend Gateway container (Express/Node.js on Port 8080) serving staging.rentmaikar.com
+      # Authoritative for send-outbound-email, Resend integration, telematics, and payments
+      - name: Deploy Backend to Cloud Run (rentmaikar-backend)
         if: env.GCP_SA_KEY != ''
         run: |
           gcloud run deploy rentmaikar-backend \

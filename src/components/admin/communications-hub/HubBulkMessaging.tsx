@@ -481,16 +481,29 @@ export const HubBulkMessaging: React.FC = () => {
           let responseStatus = 200;
 
           try {
-            const res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    to: emailTarget,
-    subject: renderedSubj,
-    body: renderedMsg,
-    recipientName: fullName !== 'Customer' ? fullName : undefined,
-  }),
-});
+            const gatewayUrl = '/api/functions/send-outbound-email';
+            const emailPayload = {
+              to: emailTarget,
+              subject: renderedSubj,
+              body: renderedMsg,
+              recipientName: fullName !== 'Customer' ? fullName : undefined,
+            };
+
+            let res: Response;
+            try {
+              res = await fetch(gatewayUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(emailPayload),
+              });
+            } catch {
+              // Direct fallback to staging backend if relative proxy is unreachable
+              res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(emailPayload),
+              });
+            }
 
             responseStatus = res.status;
 
@@ -502,7 +515,7 @@ export const HubBulkMessaging: React.FC = () => {
             console.group(
               `[HubBulkMessaging] 📥 Cloud Run Email Response: send-outbound-email -> ${emailTarget}`
             );
-            console.log('📌 Gateway URL:', 'https://staging.rentmaikar.com/api/functions/send-outbound-email');
+            console.log('📌 Gateway URL:', gatewayUrl);
             console.log('📌 HTTP Status:', responseStatus);
             console.log('📌 Response:', result);
             console.groupEnd();

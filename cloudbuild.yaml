@@ -24,6 +24,8 @@ steps:
       - 'gcr.io/$PROJECT_ID/rentmaikar:$COMMIT_SHA'
 
   # 3. Deploy the frontend container image to Google Cloud Run (rentmaikar-g2)
+  # NOTE: rentmaikar-g2 is the Frontend SPA container (Nginx on Port 80) serving rentmaikar.com
+  # It proxies /api/* requests to the backend service rentmaikar-backend.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy-frontend'
     entrypoint: 'gcloud'
@@ -60,6 +62,8 @@ steps:
       - 'gcr.io/$PROJECT_ID/rentmaikar-backend:$COMMIT_SHA'
 
   # 6. Deploy the backend container image to Google Cloud Run (rentmaikar-backend)
+  # NOTE: rentmaikar-backend is the Authoritative Backend API Gateway & Application Email Engine (Port 8080)
+  # Hostname: staging.rentmaikar.com. Dispatches transactional emails via Resend from notify.rentmaikar.com.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy-backend'
     entrypoint: 'gcloud'

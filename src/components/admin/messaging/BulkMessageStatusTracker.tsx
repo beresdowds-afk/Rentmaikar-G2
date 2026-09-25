@@ -319,39 +319,49 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
         let errMsg = '';
         let messageId = '';
 
-        // Primary: Cloud Run application email gateway.
-// The backend gateway handles Supabase fallback.
-try {
-  const res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'send',
-      to: emailTarget,
-      subject: subject || 'Notice from Rentmaikar Admin',
-      body,
-      recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
-      category: 'general',
-    }),
-  });
+        // Primary: Cloud Run application email gateway via relative Nginx proxy, with direct staging fallback.
+        try {
+          const emailPayload = {
+            action: 'send',
+            to: emailTarget,
+            subject: subject || 'Notice from Rentmaikar Admin',
+            body,
+            recipientName: recipientName !== 'Recipient' ? recipientName : undefined,
+            category: 'general',
+          };
 
-  const contentType = res.headers.get('content-type') || '';
-  const json = contentType.includes('application/json')
-    ? await res.json().catch(() => null)
-    : null;
+          let res: Response;
+          try {
+            res = await fetch('/api/functions/send-outbound-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(emailPayload),
+            });
+          } catch {
+            res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(emailPayload),
+            });
+          }
 
-  if (res.ok && (json?.ok !== false && json?.success !== false)) {
-    delivered = true;
-    messageId = json?.messageId || json?.id || '';
-    errMsg = '';
-  } else {
-    errMsg =
-      json?.error ||
-      `Email delivery failed with HTTP ${res.status}`;
-  }
-} catch (e: any) {
-  errMsg = e.message || 'Email gateway request failed';
-}
+          const contentType = res.headers.get('content-type') || '';
+          const json = contentType.includes('application/json')
+            ? await res.json().catch(() => null)
+            : null;
+
+          if (res.ok && (json?.ok !== false && json?.success !== false)) {
+            delivered = true;
+            messageId = json?.messageId || json?.id || '';
+            errMsg = '';
+          } else {
+            errMsg =
+              json?.error ||
+              `Email delivery failed with HTTP ${res.status}`;
+          }
+        } catch (e: any) {
+          errMsg = e.message || 'Email gateway request failed';
+        }
 
         if (delivered) {
           return { success: true, messageId };
