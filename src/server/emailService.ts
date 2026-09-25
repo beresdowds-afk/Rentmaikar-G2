@@ -8,6 +8,19 @@
 
 import crypto from "crypto";
 import pg from "pg";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
+
+let supaAdminClient: SupabaseClient | null = null;
+function getSupabaseAdmin(): SupabaseClient {
+  if (!supaAdminClient) {
+    const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co";
+    const rawKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
+    supaAdminClient = createClient(rawUrl, rawKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+  return supaAdminClient;
+}
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 export const VERIFIED_DOMAIN = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
@@ -443,8 +456,9 @@ function emailLayout(content: string, title: string): string {
 
 /**
  * 1. Handle Password Reset Request
- * Generates an OTP, stores SHA224 hash into auth.users.recovery_token,
- * and delivers the reset email via Resend from security@notify.rentmaikar.com.
+ * Uses Supabase GoTrue Auth as the sole authority for recovery credentials,
+ * and delivers the branded email via Resend from security@notify.rentmaikar.com.
+ * Never tampers directly with internal auth.users recovery_token.
  */
 export async function handleSendPasswordReset(body: {
   email: string;
@@ -456,57 +470,42 @@ export async function handleSendPasswordReset(body: {
   }
 
   try {
-    const pool = getDbPool();
+    const origin = body.redirectOrigin || "https://rentmaikar.com";
+    const admin = getSupabaseAdmin();
 
-    // Check if user exists in auth.users
-    const userRes = await pool.query(
-      `SELECT id, email, raw_user_meta_data FROM auth.users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
-      [email]
-    );
+    // Authoritative GoTrue recovery link generation
+    const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo: `${origin}/reset-password` },
+    });
 
-    if (userRes.rows.length === 0) {
-      console.log(`[PasswordReset] User not found for ${email}. Returning timing-safe ok.`);
+    if (linkErr || !linkData?.properties?.action_link) {
+      console.log(`[PasswordReset] GoTrue link generation not available for ${email}, attempting native resetPasswordForEmail`);
+      await admin.auth.resetPasswordForEmail(email, {
+        redirectTo: `${origin}/reset-password`,
+      }).catch(() => {});
       return { ok: true, success: true, message: "If an account exists, a reset email has been sent." };
     }
 
-    const user = userRes.rows[0];
-    const fullName = user.raw_user_meta_data?.full_name || "Valued User";
+    const resetUrl = linkData.properties.action_link;
+    const user = (linkData as { user?: { id?: string; user_metadata?: { full_name?: string } } })?.user;
+    const fullName = user?.user_metadata?.full_name || "Valued User";
     const firstName = fullName.split(" ")[0];
-
-    // Generate 6-digit OTP code
-    const rawOtp = String(Math.floor(100000 + Math.random() * 900000));
-    const tokenHash = crypto.createHash("sha224").update(email + rawOtp).digest("hex");
-
-    // Store in auth.users recovery_token
-    await pool.query(
-      `UPDATE auth.users 
-       SET recovery_token = $1, recovery_sent_at = NOW() 
-       WHERE id = $2`,
-      [tokenHash, user.id]
-    );
-
-    const origin = body.redirectOrigin || "https://rentmaikar.com";
-    const resetUrl = `${origin}/reset-password?email=${encodeURIComponent(email)}&token=${rawOtp}`;
 
     const htmlContent = `
       <h1>Reset Your RentMaikar Password</h1>
       <p>Hi ${firstName},</p>
       <p>We received a request to reset the password for your RentMaikar account (<strong>${email}</strong>).</p>
       
-      <p>Use your 6-digit reset code below, or click the button to reset your password directly:</p>
-      
-      <div class="code-box">
-        <div style="font-size: 13px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Reset Code</div>
-        <div class="code-value">${rawOtp}</div>
-        <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">Valid for 60 minutes</div>
-      </div>
+      <p>Click the button below to choose a new password for your account:</p>
 
       <div class="btn-container">
         <a href="${resetUrl}" class="btn">Reset Password &rarr;</a>
       </div>
 
       <div class="info-box">
-        <strong>Security Notice:</strong> If you did not request this password reset, you can safely ignore this email. Your password will remain unchanged.
+        <strong>Security Notice:</strong> This reset link is single-use and will expire in 60 minutes. If you did not request this password reset, you can safely ignore this email. Your password will remain unchanged.
       </div>
       
       <p style="font-size: 13px; color: #64748b; margin-top: 24px;">
@@ -523,7 +522,7 @@ export async function handleSendPasswordReset(body: {
       subject: "Reset your RentMaikar password",
       html: emailHtml,
       templateName: "password_reset",
-      metadata: { userId: user.id, origin },
+      metadata: { origin },
     });
 
     return { ok: true, success: true, message: "Password reset instructions sent." };
@@ -647,48 +646,42 @@ export async function handleSendVerificationEmail(body: {
   }
 
   try {
-    const pool = getDbPool();
-    const userRes = await pool.query(
-      `SELECT id, email, email_confirmed_at, raw_user_meta_data FROM auth.users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
-      [email]
-    );
-
-    if (userRes.rows.length > 0 && userRes.rows[0].email_confirmed_at) {
-      return { ok: true, success: true, already_verified: true, message: "Email is already verified" };
-    }
-
-    const rawOtp = String(Math.floor(100000 + Math.random() * 900000));
-    const tokenHash = crypto.createHash("sha224").update(email + rawOtp).digest("hex");
-
-    if (userRes.rows.length > 0) {
-      await pool.query(
-        `UPDATE auth.users 
-         SET confirmation_token = $1, confirmation_sent_at = NOW() 
-         WHERE id = $2`,
-        [tokenHash, userRes.rows[0].id]
-      );
-    }
-
     const origin = body.redirect_to || "https://rentmaikar.com/auth";
-    const verifyUrl = `${origin}?type=signup&email=${encodeURIComponent(email)}&token=${rawOtp}`;
+    const admin = getSupabaseAdmin();
+
+    // Authoritative GoTrue magiclink / signup verification link generation
+    const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+      options: { redirectTo: origin },
+    });
+
+    if (linkErr || !linkData?.properties?.action_link) {
+      console.warn("[VerificationEmail] generateLink error:", linkErr?.message);
+      return { ok: false, success: false, message: linkErr?.message || "Could not generate verification link" };
+    }
+
+    const verifyUrl = linkData.properties.action_link;
+    const user = (linkData as { user?: { user_metadata?: { full_name?: string } } })?.user;
+    const fullName = user?.user_metadata?.full_name || "there";
+    const firstName = fullName.split(" ")[0];
 
     const htmlContent = `
       <h1>Verify Your Email Address</h1>
       <p>Thank you for registering with RentMaikar!</p>
-      <p>Please use the 6-digit verification code below to verify your email address (<strong>${email}</strong>):</p>
-      
-      <div class="code-box">
-        <div style="font-size: 13px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Verification Code</div>
-        <div class="code-value">${rawOtp}</div>
-        <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">Valid for 24 hours</div>
-      </div>
+      <p>Please click the button below to verify your email address (<strong>${email}</strong>):</p>
 
       <div class="btn-container">
         <a href="${verifyUrl}" class="btn">Verify Email Address &rarr;</a>
       </div>
 
-      <p style="font-size: 13px; color: #64748b;">
-        If you did not sign up for a RentMaikar account, please disregard this email.
+      <div class="info-box">
+        <strong>Security Notice:</strong> This verification link is valid for 24 hours. If you did not sign up for a RentMaikar account, please disregard this email.
+      </div>
+      
+      <p style="font-size: 13px; color: #64748b; margin-top: 24px;">
+        Button not working? Copy and paste this link into your browser:<br/>
+        <a href="${verifyUrl}" style="color: #0284c7; word-break: break-all;">${verifyUrl}</a>
       </p>
     `;
 

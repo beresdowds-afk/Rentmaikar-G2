@@ -62,12 +62,18 @@ export function base32Decode(base32: string): Uint8Array {
  */
 export function generateTotpSecret(numBytes = 20): string {
   const randomBytes = new Uint8Array(numBytes);
-  if (typeof window !== 'undefined' && window.crypto) {
-    window.crypto.getRandomValues(randomBytes);
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(randomBytes);
   } else {
-    // Node environment fallback
-    for (let i = 0; i < numBytes; i++) {
-      randomBytes[i] = Math.floor(Math.random() * 256);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const nodeCrypto = require('crypto');
+      const buf = nodeCrypto.randomBytes(numBytes);
+      randomBytes.set(buf);
+    } catch {
+      if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+        window.crypto.getRandomValues(randomBytes);
+      }
     }
   }
   return base32Encode(randomBytes);

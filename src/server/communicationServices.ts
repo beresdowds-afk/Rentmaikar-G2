@@ -107,6 +107,8 @@ export function normalizeE164(phone: string): string {
   const cleaned = (phone || "").trim().replace(/[^\d+]/g, "");
   if (!cleaned) return "";
   if (cleaned.startsWith("+")) return cleaned;
+  if (cleaned.startsWith("234") && cleaned.length === 13) return `+${cleaned}`;
+  if (cleaned.startsWith("0") && cleaned.length === 11) return `+234${cleaned.slice(1)}`;
   if (cleaned.length === 10) return `+1${cleaned}`;
   return `+${cleaned}`;
 }
@@ -860,13 +862,6 @@ export async function handleSendEmailReply(body: any): Promise<{
 // -----------------------------------------------------------------
 // 7. Phone OTP Generation, Verification & Session Token Minting
 // -----------------------------------------------------------------
-interface StoredOtp {
-  code: string;
-  expiresAt: number;
-  attempts: number;
-}
-
-const inMemoryOtpStore = new Map<string, StoredOtp>();
 
 export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
   const action = body.action || "send";
@@ -882,24 +877,65 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
   // A. SEND / LINK_SEND OTP
   // ---------------------------------------------------------------
   if (action === "send" || action === "link_send") {
+    // Rate Limiting & Cooldown Protection via PostgreSQL
+    try {
+      // Cooldown: at least 60 seconds between consecutive requests for the same phone
+      const recentCheck = await pool.query(
+        `SELECT id FROM public.phone_otp_codes 
+         WHERE phone = $1 AND created_at >= NOW() - INTERVAL '60 seconds' 
+         LIMIT 1`,
+        [phone]
+      );
+      if (recentCheck.rows.length > 0) {
+        throw new Error("Please wait at least 60 seconds before requesting a new verification code.");
+      }
+
+      // Velocity check: max 3 in the last 10 minutes
+      const velocityCheck = await pool.query(
+        `SELECT COUNT(*)::int as count FROM public.phone_otp_codes 
+         WHERE phone = $1 AND created_at >= NOW() - INTERVAL '10 minutes'`,
+        [phone]
+      );
+      if (velocityCheck.rows[0]?.count >= 3) {
+        throw new Error("Too many verification requests. Please wait a few minutes before trying again.");
+      }
+    } catch (err: any) {
+      if (err.message?.includes("Please wait") || err.message?.includes("Too many")) {
+        throw err;
+      }
+      console.warn("[phone_otp_codes] Rate limit query warning:", err.message);
+    }
+
+    // Invalidate any previously unconsumed OTPs for this phone so only one code is active
+    try {
+      await pool.query(
+        `UPDATE public.phone_otp_codes 
+         SET consumed_at = NOW() 
+         WHERE phone = $1 AND consumed_at IS NULL`,
+        [phone]
+      );
+    } catch (e: any) {
+      console.warn("[phone_otp_codes] Invalidate prior codes warning:", e.message);
+    }
+
     // Generate cryptographically secure 6-digit code
     const code = crypto.randomInt(100000, 1000000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000;
     const expiresAtDate = new Date(expiresAt);
 
-    // Keep in-memory cache for ultra-low latency verification
-    inMemoryOtpStore.set(phone, { code, expiresAt, attempts: 0 });
-
     // Persist to Postgres phone_otp_codes table
     const codeHash = crypto.createHash("sha256").update(code).digest("hex");
     const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
 
+    let insertedId: string | null = null;
     try {
-      await pool.query(
+      const insertRes = await pool.query(
         `INSERT INTO public.phone_otp_codes (phone, code_hash, channel, attempts, expires_at, created_at)
-         VALUES ($1, $2, $3, 0, $4, NOW())`,
+         VALUES ($1, $2, $3, 0, $4, NOW())
+         RETURNING id`,
         [phone, codeHash, channel, expiresAtDate.toISOString()]
       );
+      insertedId = insertRes.rows[0]?.id;
     } catch (dbErr: any) {
       console.warn("[phone_otp_codes] Insert warning:", dbErr.message);
     }
@@ -920,7 +956,7 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
           id, correlation_id, stage, step, outcome, provider, message, context, created_at
         ) VALUES (gen_random_uuid(), $1, 'otp_dispatch', 'phone-otp-custom', $2, $3, $4, $5, NOW())`,
         [
-          `corr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          `corr_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
           smsRes.success ? "success" : "failure",
           smsRes.provider || "sent",
           smsRes.success ? `OTP sent to ${phone}` : "Failed to deliver OTP",
@@ -932,6 +968,10 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
     }
 
     if (!smsRes.success) {
+      // Invalidate the un-delivered code
+      if (insertedId) {
+        await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [insertedId]).catch(() => {});
+      }
       throw new Error(`Failed to dispatch verification code: ${smsRes.error || "SMS provider unavailable"}`);
     }
 
@@ -953,71 +993,45 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       throw new Error("A 6-digit verification code is required");
     }
 
-    let isCodeValid = false;
+    const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
+    const dbRes = await pool.query(
+      `SELECT id, code_hash, attempts, expires_at, consumed_at FROM public.phone_otp_codes
+       WHERE phone = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [phone]
+    );
 
-    // Check in-memory store
-    const mem = inMemoryOtpStore.get(phone);
-    if (mem) {
-      if (Date.now() > mem.expiresAt) {
-        inMemoryOtpStore.delete(phone);
-        throw new Error("Verification code has expired. Please request a new one.");
-      }
-      if (mem.attempts >= 5) {
-        inMemoryOtpStore.delete(phone);
-        throw new Error("Too many incorrect attempts. Please request a new code.");
-      }
-      if (mem.code === rawCode) {
-        isCodeValid = true;
-        inMemoryOtpStore.delete(phone);
-      } else {
-        mem.attempts += 1;
-        if (mem.attempts >= 5) {
-          inMemoryOtpStore.delete(phone);
-        }
-      }
+    if (dbRes.rows.length === 0) {
+      throw new Error("No active verification code found for this phone number. Please request a new code.");
     }
 
-    // Check PostgreSQL phone_otp_codes
-    if (!isCodeValid) {
-      const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
-      try {
-        const dbRes = await pool.query(
-          `SELECT id, code_hash, attempts, expires_at FROM public.phone_otp_codes
-           WHERE phone = $1 AND consumed_at IS NULL
-           ORDER BY created_at DESC LIMIT 1`,
-          [phone]
-        );
-        if (dbRes.rows.length > 0) {
-          const row = dbRes.rows[0];
-          if (new Date(row.expires_at).getTime() <= Date.now()) {
-            throw new Error("Verification code has expired. Please request a new one.");
-          }
-          if ((row.attempts || 0) >= 5) {
-            throw new Error("Too many incorrect attempts. Please request a new code.");
-          }
-          if (row.code_hash === codeHash) {
-            isCodeValid = true;
-            await pool.query(
-              `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`,
-              [row.id]
-            );
-          } else {
-            await pool.query(
-              `UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`,
-              [row.id]
-            );
-          }
-        }
-      } catch (dbErr: any) {
-        if (dbErr.message?.includes("expired") || dbErr.message?.includes("attempts")) {
-          throw dbErr;
-        }
-        console.warn("[phone_otp_codes] Verify query warning:", dbErr.message);
-      }
+    const row = dbRes.rows[0];
+    if (row.consumed_at) {
+      throw new Error("Verification code has already been used. Please request a new one.");
+    }
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      throw new Error("Verification code has expired. Please request a new one.");
+    }
+    if ((row.attempts || 0) >= 5) {
+      throw new Error("Too many incorrect attempts. This code is invalidated. Please request a new code.");
     }
 
-    if (!isCodeValid) {
-      throw new Error("Invalid or expired verification code. Please check your messages and try again.");
+    if (row.code_hash !== codeHash) {
+      await pool.query(
+        `UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1 AND consumed_at IS NULL`,
+        [row.id]
+      );
+      const remaining = 5 - (row.attempts + 1);
+      throw new Error(remaining > 0 ? `Invalid verification code (${remaining} attempts remaining)` : "Too many incorrect attempts. Please request a new code.");
+    }
+
+    // Atomic one-time consumption (prevent race condition / replay)
+    const consumeRes = await pool.query(
+      `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1 AND consumed_at IS NULL RETURNING id`,
+      [row.id]
+    );
+    if (consumeRes.rowCount === 0) {
+      throw new Error("Verification code already consumed or invalid");
     }
 
     // Resolve or provision user
@@ -1124,81 +1138,21 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       [userId, role]
     );
 
-    // Mint session directly via GoTrue recovery token
-    let session: { access_token: string; refresh_token: string; expires_in?: number; expires_at?: number } | null = null;
+    // Mint native GoTrue magiclink token_hash for client browser verification
+    // NEVER tamper with internal auth.users recovery_token
     let tokenHash = "";
     try {
-      const recoveryOtp = String(Math.floor(100000 + Math.random() * 900000));
-      const recoveryHash = crypto.createHash("sha224").update(signInEmail + recoveryOtp).digest("hex");
-      await pool.query(
-        `UPDATE auth.users SET recovery_token = $1, recovery_sent_at = NOW() WHERE id = $2`,
-        [recoveryHash, userId]
-      );
-
-      const DEFAULT_SUPABASE_URL = "https://jrsydiofzceoeddjogov.supabase.co";
-      const DEFAULT_SUPABASE_KEY = "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
-
-      const rawUrl = process.env.VITE_SUPABASE_URL;
-      const supabaseUrl = (rawUrl && !rawUrl.includes("bwvocmhcledbwqlpcswp")) ? rawUrl : DEFAULT_SUPABASE_URL;
-
-      const rawKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-      const isValidKey = (k?: string) => {
-        if (!k) return false;
-        if (k.startsWith("sb_secret_")) return false;
-        if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return false;
-        try {
-          const parts = k.split(".");
-          if (parts.length === 3) {
-            const payload = JSON.parse(atob(parts[1]));
-            if (payload.ref === "bwvocmhcledbwqlpcswp") return false;
-          }
-        } catch {
-          // ignore
-        }
-        return true;
-      };
-      const anonKey = (rawKey && isValidKey(rawKey)) ? rawKey : DEFAULT_SUPABASE_KEY;
-
-      const verifyRes = await fetch(`${supabaseUrl}/auth/v1/verify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": anonKey,
-        },
-        body: JSON.stringify({
-          email: signInEmail,
-          token: recoveryOtp,
-          type: "recovery",
-        }),
+      const admin = getSupabaseAdmin();
+      const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
+        type: "magiclink",
+        email: signInEmail,
       });
 
-      if (verifyRes.ok) {
-        const verifyData: any = await verifyRes.json();
-        if (verifyData.access_token && verifyData.refresh_token) {
-          session = {
-            access_token: verifyData.access_token,
-            refresh_token: verifyData.refresh_token,
-            expires_in: verifyData.expires_in,
-            expires_at: verifyData.expires_at,
-          };
-        }
+      if (link?.properties?.hashed_token) {
+        tokenHash = link.properties.hashed_token;
       }
     } catch (sessionErr: any) {
-      console.warn("[handlePhoneOtp] Session minting error:", sessionErr.message);
-    }
-
-    // Fallback: mint exchangeable token in auth.one_time_tokens
-    try {
-      const rawToken = crypto.randomBytes(20).toString("hex");
-      tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-      await pool.query(
-        `INSERT INTO auth.one_time_tokens (
-          id, user_id, token_type, token_hash, relates_to, created_at, updated_at
-        ) VALUES (gen_random_uuid(), $1, 'confirmation_token', $2, $3, NOW(), NOW())`,
-        [userId, tokenHash, signInEmail]
-      );
-    } catch (ottErr: any) {
-      console.warn("[handlePhoneOtp] one_time_tokens insertion warning:", ottErr.message);
+      console.warn("[handlePhoneOtp] GoTrue generateLink error:", sessionErr.message);
     }
 
     // Verification event audit
@@ -1208,7 +1162,7 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
         `INSERT INTO public.verification_event_log (
           id, user_id, correlation_id, stage, step, outcome, provider, message, context, created_at
         ) VALUES (gen_random_uuid(), $1, $2, 'otp_verify', 'phone-otp-custom', 'success', 'sent', 'Phone OTP verified successfully', $3, NOW())`,
-        [userId, correlationId, JSON.stringify({ phone, isNewUser, hasSession: !!session })]
+        [userId, correlationId, JSON.stringify({ phone, isNewUser, tokenMinted: !!tokenHash })]
       );
     } catch (logErr: any) {
       console.warn("[verification_event_log] Warning:", logErr.message);
@@ -1218,9 +1172,7 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       success: true,
       user_id: userId,
       is_new_user: isNewUser,
-      session,
       token_hash: tokenHash,
-      provider: "sent",
       message: "Phone verified successfully",
     };
   }
@@ -1247,61 +1199,45 @@ export async function handlePhoneOtp(body: any, token?: string): Promise<any> {
       throw new Error("A 6-digit verification code is required");
     }
 
-    let isCodeValid = false;
+    const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
+    const dbRes = await pool.query(
+      `SELECT id, code_hash, attempts, expires_at, consumed_at FROM public.phone_otp_codes
+       WHERE phone = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [phone]
+    );
 
-    const mem = inMemoryOtpStore.get(phone);
-    if (mem) {
-      if (Date.now() > mem.expiresAt) {
-        inMemoryOtpStore.delete(phone);
-        throw new Error("Verification code has expired. Please request a new one.");
-      }
-      if (mem.attempts >= 5) {
-        inMemoryOtpStore.delete(phone);
-        throw new Error("Too many incorrect attempts. Please request a new code.");
-      }
-      if (mem.code === rawCode) {
-        isCodeValid = true;
-        inMemoryOtpStore.delete(phone);
-      } else {
-        mem.attempts += 1;
-        if (mem.attempts >= 5) inMemoryOtpStore.delete(phone);
-      }
+    if (dbRes.rows.length === 0) {
+      throw new Error("No active verification code found for this phone number");
     }
 
-    if (!isCodeValid) {
-      const codeHash = crypto.createHash("sha256").update(rawCode).digest("hex");
-      try {
-        const dbRes = await pool.query(
-          `SELECT id, code_hash, attempts, expires_at FROM public.phone_otp_codes
-           WHERE phone = $1 AND consumed_at IS NULL
-           ORDER BY created_at DESC LIMIT 1`,
-          [phone]
-        );
-        if (dbRes.rows.length > 0) {
-          const row = dbRes.rows[0];
-          if (new Date(row.expires_at).getTime() <= Date.now()) {
-            throw new Error("Verification code has expired. Please request a new one.");
-          }
-          if ((row.attempts || 0) >= 5) {
-            throw new Error("Too many incorrect attempts. Please request a new code.");
-          }
-          if (row.code_hash === codeHash) {
-            isCodeValid = true;
-            await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
-          } else {
-            await pool.query(`UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
-          }
-        }
-      } catch (dbErr: any) {
-        if (dbErr.message?.includes("expired") || dbErr.message?.includes("attempts")) {
-          throw dbErr;
-        }
-        console.warn("[phone_otp_codes] Link verify warning:", dbErr.message);
-      }
+    const row = dbRes.rows[0];
+    if (row.consumed_at) {
+      throw new Error("Verification code has already been used. Please request a new one.");
+    }
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      throw new Error("Verification code has expired. Please request a new one.");
+    }
+    if ((row.attempts || 0) >= 5) {
+      throw new Error("Too many incorrect attempts. This code is invalidated. Please request a new code.");
     }
 
-    if (!isCodeValid) {
-      throw new Error("Invalid or expired verification code");
+    if (row.code_hash !== codeHash) {
+      await pool.query(
+        `UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1 AND consumed_at IS NULL`,
+        [row.id]
+      );
+      const remaining = 5 - (row.attempts + 1);
+      throw new Error(remaining > 0 ? `Invalid verification code (${remaining} attempts remaining)` : "Too many incorrect attempts. Please request a new code.");
+    }
+
+    // Atomic one-time consumption
+    const consumeRes = await pool.query(
+      `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1 AND consumed_at IS NULL RETURNING id`,
+      [row.id]
+    );
+    if (consumeRes.rowCount === 0) {
+      throw new Error("Verification code already consumed or invalid");
     }
 
     await pool.query(
@@ -1405,98 +1341,98 @@ export async function handleVerifyPhone(body: any, token?: string): Promise<{
     };
   }
 
-  let isCodeValid = false;
-  const mem = inMemoryOtpStore.get(phone);
-  if (mem) {
-    if (Date.now() > mem.expiresAt) {
-      inMemoryOtpStore.delete(phone);
+  const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+  try {
+    const rowRes = await pool.query(
+      `SELECT id, code_hash, attempts, expires_at, consumed_at FROM public.phone_otp_codes
+       WHERE phone = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [phone]
+    );
+
+    if (rowRes.rows.length === 0) {
+      return {
+        success: false,
+        valid: false,
+        message: "No verification code requested for this phone number.",
+      };
+    }
+
+    const otpRow = rowRes.rows[0];
+    if (otpRow.consumed_at) {
+      return {
+        success: false,
+        valid: false,
+        message: "Verification code has already been used. Please request a new one.",
+      };
+    }
+    if (new Date(otpRow.expires_at).getTime() <= Date.now()) {
       return {
         success: false,
         valid: false,
         message: "Verification code expired. Please request a new one.",
       };
     }
-    if (mem.attempts >= 5) {
-      inMemoryOtpStore.delete(phone);
+    if ((otpRow.attempts || 0) >= 5) {
       return {
         success: false,
         valid: false,
-        message: "Too many incorrect attempts. Please request a new code.",
+        message: "Too many incorrect attempts. This code is invalidated. Please request a new code.",
       };
     }
-    if (mem.code === code) {
-      isCodeValid = true;
-      inMemoryOtpStore.delete(phone);
-    } else {
-      mem.attempts += 1;
-      if (mem.attempts >= 5) inMemoryOtpStore.delete(phone);
-    }
-  }
 
-  if (!isCodeValid) {
-    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
-    try {
-      const row = await pool.query(
-        `SELECT id, code_hash, attempts, expires_at FROM public.phone_otp_codes
-         WHERE phone = $1 AND consumed_at IS NULL
-         ORDER BY created_at DESC LIMIT 1`,
-        [phone]
-      );
-      if (row.rows.length > 0) {
-        const otpRow = row.rows[0];
-        if (new Date(otpRow.expires_at).getTime() <= Date.now()) {
-          return {
-            success: false,
-            valid: false,
-            message: "Verification code expired. Please request a new one.",
-          };
-        }
-        if ((otpRow.attempts || 0) >= 5) {
-          return {
-            success: false,
-            valid: false,
-            message: "Too many incorrect attempts. Please request a new code.",
-          };
-        }
-        if (otpRow.code_hash === codeHash) {
-          isCodeValid = true;
-          await pool.query(`UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`, [otpRow.id]);
-        } else {
-          await pool.query(`UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [otpRow.id]);
-        }
-      }
-    } catch (err: any) {
-      console.warn("[verify-phone] DB check warning:", err.message);
-    }
-  }
-
-  if (isCodeValid) {
-    await pool.query(
-      `UPDATE public.profiles SET phone = $1, phone_verified = true, updated_at = NOW() WHERE user_id = $2`,
-      [phone, callerId]
-    );
-
-    try {
+    if (otpRow.code_hash !== codeHash) {
       await pool.query(
-        `UPDATE auth.users SET phone = $1, phone_confirmed_at = NOW() WHERE id = $2`,
-        [phone.replace(/^\+/, ""), callerId]
+        `UPDATE public.phone_otp_codes SET attempts = attempts + 1 WHERE id = $1 AND consumed_at IS NULL`,
+        [otpRow.id]
       );
-    } catch (authErr: any) {
-      console.warn("[verify-phone] auth.users sync warning:", authErr.message);
+      const remaining = 5 - (otpRow.attempts + 1);
+      return {
+        success: false,
+        valid: false,
+        message: remaining > 0 ? `Invalid verification code (${remaining} attempts remaining)` : "Too many incorrect attempts. Please request a new code.",
+      };
     }
 
+    // Atomic one-time consumption
+    const consumeRes = await pool.query(
+      `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1 AND consumed_at IS NULL RETURNING id`,
+      [otpRow.id]
+    );
+    if (consumeRes.rowCount === 0) {
+      return {
+        success: false,
+        valid: false,
+        message: "Verification code already consumed or invalid.",
+      };
+    }
+  } catch (err: any) {
+    console.warn("[verify-phone] DB check warning:", err.message);
     return {
-      success: true,
-      valid: true,
-      verified: true,
-      message: "Phone number verified successfully",
+      success: false,
+      valid: false,
+      message: "Database error during verification",
     };
   }
 
+  await pool.query(
+    `UPDATE public.profiles SET phone = $1, phone_verified = true, updated_at = NOW() WHERE user_id = $2`,
+    [phone, callerId]
+  );
+
+  try {
+    await pool.query(
+      `UPDATE auth.users SET phone = $1, phone_confirmed_at = NOW() WHERE id = $2`,
+      [phone.replace(/^\+/, ""), callerId]
+    );
+  } catch (authErr: any) {
+    console.warn("[verify-phone] auth.users sync warning:", authErr.message);
+  }
+
   return {
-    success: false,
-    valid: false,
-    verified: false,
-    message: "Invalid or expired verification code",
+    success: true,
+    valid: true,
+    verified: true,
+    message: "Phone number verified successfully",
   };
 }

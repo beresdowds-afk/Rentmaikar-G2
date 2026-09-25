@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { sentBackendClient } from "../services/sentClient";
 import { sendApplicationMessage } from "../services/smsService";
+import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
 import { supabaseBackendService } from "../services/supabaseService";
 import {
   mintVoiceAccessToken,
@@ -40,15 +41,14 @@ import {
 } from "../services/iotService";
 import { paymentService } from "../services/paymentService";
 
-// In-memory OTP store for phone verification
-const otpStore = new Map<string, { code: string; expiresAt: number }>();
-
 /**
  * List of functions for which Cloud Run backend is the primary authoritative engine.
  * These are not dispatched upstream to Supabase Edge Functions (which return 404 or have latency).
  */
 const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "send-outbound-email",
+  "phone-otp-custom",
+  "verify-phone",
   "voice-access-token",
   "voice-twiml-dial",
   "voice-twiml-config",
@@ -255,48 +255,99 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           return res.status(400).json({ success: false, error: "Valid phone number required" });
         }
         const action = body.action || "send";
+
+        // Resolve authenticated caller ID if present
+        let callerId: string | undefined = undefined;
+        if (clientAuth) {
+          try {
+            const admin = supabaseBackendService.getAdminClient();
+            const token = clientAuth.replace(/^Bearer\s+/i, "").trim();
+            const { data: u } = await admin.auth.getUser(token);
+            if (u?.user?.id) callerId = u.user.id;
+          } catch {}
+        }
+
         if (action === "send" || action === "link_send") {
-          const code = (Math.floor(100000 + Math.random() * 900000)).toString();
-          otpStore.set(phone, { code, expiresAt: Date.now() + 300000 });
-          return res.status(200).json({
-            success: true,
-            message: `Verification code sent to ${phone}`,
+          const sendRes = await sendPhoneOtp({
             phone,
+            channel: body.channel,
+            action,
+            callerId,
+            sandbox: Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true"),
           });
-        }
-        if (action === "verify" || action === "link_verify") {
-          const code = (body.code || "").trim();
-          const record = otpStore.get(phone);
-          if (record && record.code === code && Date.now() <= record.expiresAt) {
-            otpStore.delete(phone);
-            return res.status(200).json({ success: true, valid: true, message: "Phone verified successfully" });
+          if (sendRes.success) {
+            return res.status(200).json(sendRes);
+          } else {
+            return res.status(400).json(sendRes);
           }
-          return res.status(400).json({ success: false, valid: false, error: "Invalid or expired verification code" });
         }
-        return res.status(400).json({ error: "Unsupported action" });
+
+        if (action === "verify" || action === "link_verify") {
+          const verifyRes = await verifyPhoneOtp({
+            phone,
+            code: body.code,
+            action,
+            callerId,
+            full_name: body.full_name,
+            role: body.role,
+          });
+          if (verifyRes.success) {
+            return res.status(200).json(verifyRes);
+          } else {
+            return res.status(400).json(verifyRes);
+          }
+        }
+
+        return res.status(400).json({ success: false, error: "Unsupported OTP action" });
       }
 
       case "verify-phone": {
         const phone = normalizeE164(body.phone || "");
-        const code = (body.code || "").trim();
         const action = body.action || "verify_code";
 
         if (!clientAuth) {
           return res.status(401).json({ success: false, valid: false, error: "Authentication required for phone verification" });
         }
 
-        if (action === "send_code") {
-          const newCode = (Math.floor(100000 + Math.random() * 900000)).toString();
-          otpStore.set(phone, { code: newCode, expiresAt: Date.now() + 300000 });
-          return res.status(200).json({ success: true, valid: true, message: "Verification code sent", expiresIn: 300 });
+        let callerId: string | undefined = undefined;
+        try {
+          const admin = supabaseBackendService.getAdminClient();
+          const token = clientAuth.replace(/^Bearer\s+/i, "").trim();
+          const { data: u } = await admin.auth.getUser(token);
+          if (u?.user?.id) callerId = u.user.id;
+        } catch {}
+
+        if (!callerId) {
+          return res.status(401).json({ success: false, valid: false, error: "Invalid authentication session" });
         }
 
-        const record = otpStore.get(phone);
-        if (record && record.code === code && Date.now() <= record.expiresAt) {
-          otpStore.delete(phone);
-          return res.status(200).json({ success: true, valid: true, verified: true, message: "Phone number verified successfully" });
+        if (action === "send_code") {
+          const sendRes = await sendPhoneOtp({
+            phone,
+            channel: body.channel,
+            action: "send_code",
+            callerId,
+            sandbox: Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true"),
+          });
+          if (sendRes.success) {
+            return res.status(200).json({ success: true, valid: true, message: sendRes.message, expiresIn: 600 });
+          } else {
+            return res.status(400).json({ success: false, valid: false, error: sendRes.message });
+          }
         }
-        return res.status(400).json({ success: false, valid: false, verified: false, message: "Invalid or expired verification code" });
+
+        const verifyRes = await verifyPhoneOtp({
+          phone,
+          code: body.code,
+          action: "verify_code",
+          callerId,
+        });
+
+        if (verifyRes.success) {
+          return res.status(200).json({ success: true, valid: true, verified: true, message: verifyRes.message || "Phone number verified successfully" });
+        } else {
+          return res.status(400).json({ success: false, valid: false, verified: false, message: verifyRes.error || "Invalid or expired verification code" });
+        }
       }
 
       // -----------------------------------------------------------------
