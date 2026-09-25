@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { sentBackendClient } from "../services/sentClient";
+import { sendApplicationMessage } from "../services/smsService";
 import { supabaseBackendService } from "../services/supabaseService";
 import {
   mintVoiceAccessToken,
@@ -132,7 +133,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   try {
     switch (functionName) {
       // -----------------------------------------------------------------
-      // SMS & CPaaS Notification Handlers
+      // SMS & CPaaS Notification Handlers (SENT.dm primary, Twilio/Termii fallback)
       // -----------------------------------------------------------------
       case "send-sms-notification":
       case "case-send-sms": {
@@ -146,36 +147,21 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         const messageText = body.customMessage || body.message || "You have an update from RentMaikar.";
         const isSandbox = Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true");
 
-        // Attempt dispatch via Sent.dm OpenAPI v3 gateway
-        try {
-          const sentRes = await sentBackendClient.sendMessage({
-            to: [to],
-            channel,
-            text: messageText,
-            sandbox: isSandbox,
-            template: body.whatsappTemplateId
-              ? { id: body.whatsappTemplateId, parameters: body.whatsappTemplateParams }
-              : undefined,
-            metadata: { source: "backend_functions_gateway", function: functionName },
-          });
+        const result = await sendApplicationMessage({
+          to,
+          message: messageText,
+          channel,
+          sandbox: isSandbox,
+          whatsappTemplateId: body.whatsappTemplateId,
+          whatsappTemplateParams: body.whatsappTemplateParams,
+          notificationType: functionName,
+          metadata: { source: "backend_functions_gateway", function: functionName },
+        });
 
-          return res.status(200).json({
-            success: true,
-            messageId: sentRes?.data?.id || `sent_${Date.now()}`,
-            channel,
-            provider: "sent",
-            region: to.startsWith("+234") ? "Nigeria" : "USA",
-            deliveryStatus: isSandbox ? "sandbox_delivered" : "queued",
-          });
-        } catch (sentErr: any) {
-          console.error("[Backend Functions] Sent.dm failed:", sentErr.message);
-          return res.status(502).json({
-            success: false,
-            error: "SMS delivery failed: upstream provider unavailable",
-            channel,
-            provider: "sent",
-            deliveryStatus: "failed",
-          });
+        if (result.success) {
+          return res.status(200).json(result);
+        } else {
+          return res.status(502).json(result);
         }
       }
 
@@ -187,6 +173,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         });
       }
 
+      // Diagnostic probe only — strictly separate from production communications
       case "twilio-test-send": {
         const to = normalizeE164(body.to || "");
         const channel = body.channel || "sms";
@@ -194,7 +181,11 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         const authToken = process.env.TWILIO_AUTH_TOKEN;
         const fromNumber = process.env.TWILIO_PHONE_NUMBER || "+18482035389";
 
-        if (accountSid && authToken && to) {
+        if (!to) {
+          return res.status(400).json({ success: false, error: "Recipient phone number required for Twilio diagnostic probe" });
+        }
+
+        if (accountSid && authToken) {
           try {
             const isWa = channel === "whatsapp";
             const toFormatted = isWa && !to.startsWith("whatsapp:") ? `whatsapp:${to}` : to;
@@ -203,7 +194,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             const params = new URLSearchParams();
             params.append("To", toFormatted);
             params.append("From", fromFormatted);
-            params.append("Body", body.message || "RentMaikar Twilio backend probe");
+            params.append("Body", body.message || "RentMaikar Twilio diagnostic probe");
 
             const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
               method: "POST",
@@ -216,19 +207,45 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
             if (twilioRes.ok) {
               const data = await twilioRes.json();
-              return res.status(200).json({ success: true, sid: data.sid, channel, to });
+              return res.status(200).json({
+                success: true,
+                sid: data.sid,
+                channel,
+                to,
+                provider: "twilio",
+                deliveryStatus: "queued",
+                diagnostic: true,
+              });
+            } else {
+              const errData = await twilioRes.json().catch(() => ({}));
+              return res.status(502).json({
+                success: false,
+                error: errData?.message || "Twilio diagnostic probe rejected",
+                channel,
+                provider: "twilio",
+                deliveryStatus: "failed",
+                diagnostic: true,
+              });
             }
           } catch (e: any) {
-            console.warn("[Backend Twilio Test Error]", e.message);
+            return res.status(500).json({
+              success: false,
+              error: e.message,
+              channel,
+              provider: "twilio",
+              deliveryStatus: "failed",
+              diagnostic: true,
+            });
           }
         }
 
-        return res.status(200).json({
-          success: true,
-          sid: `SM_sim_${Date.now()}`,
+        return res.status(503).json({
+          success: false,
+          error: "Twilio credentials not configured for diagnostic probe",
           channel,
-          to,
-          note: "Dispatched via resilient simulation",
+          provider: "twilio",
+          deliveryStatus: "failed",
+          diagnostic: true,
         });
       }
 
