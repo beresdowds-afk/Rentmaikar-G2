@@ -933,6 +933,16 @@ export async function handleEndVoipCall(
               OR ($3::text IS NOT NULL AND call_sid = $3)`,
           [localStatus, callId || null, targetSid || null]
         );
+
+        if (callId) {
+          await pool.query(
+            `UPDATE public.voip_call_participants
+             SET status = 'disconnected',
+                 left_at = COALESCE(left_at, NOW())
+             WHERE call_id = $1`,
+            [callId]
+          ).catch(() => {});
+        }
       } catch (e: any) {
         console.warn(
           "[End Call] Failed to synchronize terminal call state:",
@@ -981,6 +991,28 @@ export async function handleEndVoipCall(
       };
     }
 
+    // Terminate any active conference if this is a group call
+    if (callId) {
+      try {
+        const confRes = await twilioRequest(
+          `/Conferences.json?FriendlyName=RentMaikar_${callId}&Status=in-progress`,
+          { method: "GET" }
+        );
+        const conferences = confRes.data?.conferences || [];
+        for (const conf of conferences) {
+          const confParams = new URLSearchParams();
+          confParams.append("Status", "completed");
+          await twilioRequest(`/Conferences/${conf.sid}.json`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: confParams.toString(),
+          });
+        }
+      } catch (e: any) {
+        console.warn("[End Call] Conference termination warning:", e.message);
+      }
+    }
+
     // Verify the provider's resulting state before declaring the local call
     // completed. This prevents a successful HTTP request from creating a
     // false "completed" state if Twilio has not actually transitioned yet.
@@ -1023,6 +1055,16 @@ export async function handleEndVoipCall(
               OR ($3::text IS NOT NULL AND call_sid = $3)`,
           [localStatus, callId || null, targetSid || null]
         );
+
+        if (callId) {
+          await pool.query(
+            `UPDATE public.voip_call_participants
+             SET status = 'disconnected',
+                 left_at = COALESCE(left_at, NOW())
+             WHERE call_id = $1`,
+            [callId]
+          ).catch(() => {});
+        }
       } catch (e: any) {
         console.warn(
           "[End Call] Failed to update local terminal state:",

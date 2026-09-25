@@ -7,7 +7,9 @@ const corsHeaders = {
 };
 
 interface EndCallRequest {
-  callId: string;
+  callId?: string;
+  callSid?: string;
+  call_sid?: string;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -39,21 +41,24 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     const body: EndCallRequest = await req.json();
-    const { callId } = body;
+    const callId = body.callId;
+    const requestedCallSid = body.callSid || body.call_sid;
 
-    if (!callId) {
+    if (!callId && !requestedCallSid) {
       return new Response(
-        JSON.stringify({ error: 'Call ID is required' }),
+        JSON.stringify({ error: 'Call ID or Call SID is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     // Get call record
-    const { data: callRecord, error: callError } = await supabase
-      .from('voip_calls')
-      .select('*')
-      .eq('id', callId)
-      .single();
+    let query = supabase.from('voip_calls').select('*');
+    if (callId) {
+      query = query.eq('id', callId);
+    } else {
+      query = query.eq('call_sid', requestedCallSid!);
+    }
+    const { data: callRecord, error: callError } = await query.maybeSingle();
 
     if (callError || !callRecord) {
       return new Response(
@@ -62,9 +67,12 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
+    const resolvedCallId = callRecord.id;
+    const targetSid = callRecord.call_sid || requestedCallSid;
+
     // Twilio is authoritative for call termination.
     // Never mark the local call completed unless Twilio confirms a terminal state.
-    if (callRecord.call_sid) {
+    if (targetSid) {
       if (!twilioCredentialsConfigured()) {
         return new Response(
           JSON.stringify({ error: 'Twilio voice credentials are not configured' }),
@@ -83,15 +91,24 @@ const handler = async (req: Request): Promise<Response> => {
       try {
         // First verify the provider's current authoritative state.
         const lookup = await twilioRequest(
-          `/Calls/${callRecord.call_sid}.json`,
+          `/Calls/${targetSid}.json`,
           { method: 'GET' }
         );
 
         if (lookup.status === 404) {
+          const endedAt = new Date();
+          await supabase
+            .from('voip_calls')
+            .update({
+              status: 'failed',
+              ended_at: callRecord.ended_at || endedAt.toISOString(),
+            })
+            .eq('id', resolvedCallId);
+
           return new Response(
             JSON.stringify({
               error: 'Twilio call no longer exists',
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
@@ -101,7 +118,7 @@ const handler = async (req: Request): Promise<Response> => {
           return new Response(
             JSON.stringify({
               error: `Unable to verify Twilio call state (HTTP ${lookup.status})`,
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
@@ -115,7 +132,7 @@ const handler = async (req: Request): Promise<Response> => {
           return new Response(
             JSON.stringify({
               error: 'Twilio returned no call status',
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
@@ -140,10 +157,11 @@ const handler = async (req: Request): Promise<Response> => {
             .from('voip_calls')
             .update({
               status: providerStatus,
+              call_sid: callRecord.call_sid || targetSid,
               ended_at: callRecord.ended_at || endedAt.toISOString(),
               duration_seconds: callRecord.duration_seconds ?? durationSeconds,
             })
-            .eq('id', callId);
+            .eq('id', resolvedCallId);
 
           if (reconcileError) {
             console.error(
@@ -154,7 +172,7 @@ const handler = async (req: Request): Promise<Response> => {
             return new Response(
               JSON.stringify({
                 error: 'Twilio call is terminal but local state synchronization failed',
-                callId,
+                callId: resolvedCallId,
               }),
               { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
             );
@@ -166,12 +184,12 @@ const handler = async (req: Request): Promise<Response> => {
               status: 'disconnected',
               left_at: callRecord.ended_at || endedAt.toISOString(),
             })
-            .eq('call_id', callId);
+            .eq('call_id', resolvedCallId);
 
           return new Response(
             JSON.stringify({
               success: true,
-              callId,
+              callId: resolvedCallId,
               status: providerStatus,
               duration_seconds: callRecord.duration_seconds ?? durationSeconds,
             }),
@@ -184,7 +202,7 @@ const handler = async (req: Request): Promise<Response> => {
         formParams.append('Status', 'completed');
 
         const termination = await twilioRequest(
-          `/Calls/${callRecord.call_sid}.json`,
+          `/Calls/${targetSid}.json`,
           {
             method: 'POST',
             headers: {
@@ -202,15 +220,37 @@ const handler = async (req: Request): Promise<Response> => {
           return new Response(
             JSON.stringify({
               error: `Twilio rejected call termination (HTTP ${termination.status})`,
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
 
+        // Terminate any active conference if this is a group call
+        if (callRecord.call_type === 'group') {
+          try {
+            const confLookup = await twilioRequest(
+              `/Conferences.json?FriendlyName=RentMaikar_${resolvedCallId}&Status=in-progress`,
+              { method: 'GET' }
+            );
+            const confList = (confLookup.payload as { conferences?: Array<{ sid: string }> })?.conferences || [];
+            for (const conf of confList) {
+              const confForm = new URLSearchParams();
+              confForm.append('Status', 'completed');
+              await twilioRequest(`/Conferences/${conf.sid}.json`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: confForm.toString(),
+              });
+            }
+          } catch (confErr) {
+            console.warn('Conference termination warning:', confErr);
+          }
+        }
+
         // Confirm the resulting provider state before touching local state.
         const confirmation = await twilioRequest(
-          `/Calls/${callRecord.call_sid}.json`,
+          `/Calls/${targetSid}.json`,
           { method: 'GET' }
         );
 
@@ -218,7 +258,7 @@ const handler = async (req: Request): Promise<Response> => {
           return new Response(
             JSON.stringify({
               error: `Call termination was requested, but Twilio state could not be confirmed (HTTP ${confirmation.status})`,
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
@@ -232,7 +272,7 @@ const handler = async (req: Request): Promise<Response> => {
           return new Response(
             JSON.stringify({
               error: `Twilio has not confirmed call termination; current status: ${confirmedStatus || 'unknown'}`,
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
@@ -254,10 +294,11 @@ const handler = async (req: Request): Promise<Response> => {
           .from('voip_calls')
           .update({
             status: confirmedStatus,
+            call_sid: callRecord.call_sid || targetSid,
             ended_at: endedAt.toISOString(),
             duration_seconds: durationSeconds,
           })
-          .eq('id', callId);
+          .eq('id', resolvedCallId);
 
         if (updateError) {
           console.error('Error updating call record:', updateError);
@@ -265,7 +306,7 @@ const handler = async (req: Request): Promise<Response> => {
           return new Response(
             JSON.stringify({
               error: 'Twilio ended the call, but local state synchronization failed',
-              callId,
+              callId: resolvedCallId,
             }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
@@ -277,12 +318,12 @@ const handler = async (req: Request): Promise<Response> => {
             status: 'disconnected',
             left_at: endedAt.toISOString(),
           })
-          .eq('call_id', callId);
+          .eq('call_id', resolvedCallId);
 
         return new Response(
           JSON.stringify({
             success: true,
-            callId,
+            callId: resolvedCallId,
             status: confirmedStatus,
             duration_seconds: durationSeconds,
           }),
@@ -297,7 +338,7 @@ const handler = async (req: Request): Promise<Response> => {
         return new Response(
           JSON.stringify({
             error: 'Unable to terminate the call with Twilio',
-            callId,
+            callId: resolvedCallId,
           }),
           { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
@@ -308,17 +349,9 @@ const handler = async (req: Request): Promise<Response> => {
     return new Response(
       JSON.stringify({
         error: 'No Twilio Call SID is associated with this call',
-        callId,
+        callId: resolvedCallId,
       }),
       { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-    return new Response(
-      JSON.stringify({
-        success: true,
-        callId,
-        duration_seconds: durationSeconds,
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error: any) {
