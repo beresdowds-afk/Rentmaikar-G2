@@ -155,11 +155,14 @@ export const CallCenterPage = () => {
   const activeCalls = calls.filter(c => ['ringing', 'in-progress'].includes(c.status));
 
   // Hangs up the browser audio session and asks the provider to terminate the call.
-    const terminateCall = useCallback(async (callId: string) => {
+    // Authoritative termination first.
+// Local Twilio SDK cleanup happens only after useVoIPCalls.endCall()
+// confirms provider-side termination.
+const terminateCall = useCallback(async (callId: string) => {
   const terminated = await endCall(callId);
 
   if (terminated && activeCall?.id === callId) {
-    await voice.hangUp(false);
+    await voice.hangUp();
   }
 
   return terminated;
@@ -170,14 +173,16 @@ export const CallCenterPage = () => {
     activeCalls.map((call) => endCall(call.id))
   );
 
-  const successfullyTerminated = results.some(
-    (result) => result.status === 'fulfilled' && result.value === true
+  const allSuccessfullyTerminated =
+  results.length > 0 &&
+  results.every(
+    (result) =>
+      result.status === 'fulfilled' && result.value === true
   );
 
-  if (successfullyTerminated) {
-    await voice.hangUp(false);
-  }
-}, [activeCalls, endCall, voice]);
+if (allSuccessfullyTerminated) {
+  await voice.hangUp();
+}
 
   // FIFO router: answering always connects the caller who has waited longest first.
   const answerQueuedCall = useCallback(async (call: QueuedCall) => {
