@@ -84,9 +84,37 @@ export const ActiveCallPanel = ({
     segmentSeconds: 15,
   });
 
-  useEffect(() => {
-    const startTime = call.started_at ? new Date(call.started_at).getTime() : Date.now();
+    useEffect(() => {
+    /*
+     * Ringing is not an active conversation.
+     * Never calculate elapsed conversation time from an old
+     * started_at value while the call is still ringing.
+     */
+    if (call.status !== 'in-progress' || !call.started_at) {
+      setDuration(0);
+      return;
+    }
 
+    const startTime = new Date(call.started_at).getTime();
+
+    const updateDuration = () => {
+      const elapsed = Math.max(
+        0,
+        Math.floor((Date.now() - startTime) / 1000)
+      );
+
+      setDuration(elapsed);
+    };
+
+    updateDuration();
+
+    const interval = setInterval(
+      updateDuration,
+      1000
+    );
+
+    return () => clearInterval(interval);
+  }, [call.status, call.started_at]);
     const interval = setInterval(() => {
       setDuration(Math.floor((Date.now() - startTime) / 1000));
     }, 1000);
@@ -159,9 +187,21 @@ export const ActiveCallPanel = ({
                 <span className="font-semibold text-lg">
                   {call.call_type === 'group' ? 'Conference Call' : 'Voice Call'}
                 </span>
-                <Badge className={`${isHeld ? 'bg-amber-500' : statusColors[call.status]} text-white`}>
-                  {isHeld ? 'On Hold' : call.status === 'ringing' ? 'Ringing...' : 'In Progress'}
-                </Badge>
+                <Badge
+  className={`${
+    isHeld
+      ? 'bg-amber-500'
+      : statusColors[call.status] || 'bg-gray-500'
+  } text-white`}
+>
+  {isHeld
+    ? 'On Hold'
+    : call.status === 'ringing'
+    ? 'Ringing...'
+    : call.status === 'in-progress'
+    ? 'In Progress'
+    : call.status}
+</Badge>
                 <Badge variant="outline">
                   {call.region === 'USA' ? '🇺🇸' : '🇳🇬'} {call.region}
                 </Badge>
@@ -180,7 +220,9 @@ export const ActiveCallPanel = ({
           {/* Duration & In-Call Softphone Controls */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="text-2xl font-mono font-bold text-green-600 mr-2">
-              {formatDuration(duration)}
+              {call.status === 'ringing'
+                ? '00:00'
+                : formatDuration(duration)}
             </div>
 
             {/* In-Call Speaker Volume Slider */}
