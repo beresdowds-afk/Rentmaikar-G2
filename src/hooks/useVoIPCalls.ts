@@ -124,52 +124,57 @@ if (!data?.success) {
   };
 
     const endCall = async (callId: string): Promise<boolean> => {
-    try {
-      const call = calls.find((item) => item.id === callId);
+  try {
+    const call = calls.find((item) => item.id === callId);
 
-      const { data, error } = await supabase.functions.invoke('end-voip-call', {
-        body: {
-          callId,
-          callSid: call?.call_sid ?? undefined,
-        },
-      });
+    const { data, error } = await supabase.functions.invoke('end-voip-call', {
+      body: {
+        callId,
+        callSid: call?.call_sid ?? undefined,
+      },
+    });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      // The function may return HTTP 200 with success:false.
-      if (data && data.success === false) {
-        throw new Error(data.error || 'The call provider rejected the termination request');
-      }
-
-      toast({
-        title: 'Call Ended',
-        description: 'The call has been terminated.',
-      });
-
-      try {
-        window.dispatchEvent(
-          new CustomEvent('comms_activity_update', {
-            detail: { type: 'voip_call', action: 'ended', callId },
-          })
-        );
-      } catch {
-        /* ignore */
-      }
-
-      setActiveCall(null);
-      await fetchCalls();
-
-      return true;
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to end call',
-        variant: 'destructive',
-      });
-
-      return false;
+    // Termination is successful ONLY when the authoritative server
+    // explicitly confirms success:true.
+    if (!data?.success) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          'The provider did not confirm call termination'
+      );
     }
-  };
+
+    toast({
+      title: 'Call Ended',
+      description: 'The call has been terminated.',
+    });
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent('comms_activity_update', {
+          detail: { type: 'voip_call', action: 'ended', callId },
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+
+    setActiveCall(null);
+    await fetchCalls();
+
+    return true;
+  } catch (error: any) {
+    toast({
+      title: 'Error',
+      description: error.message || 'Failed to end call',
+      variant: 'destructive',
+    });
+
+    return false;
+  }
+};
   const createGroup = async (
     name: string,
     description: string,
