@@ -5,7 +5,33 @@ import { useToast } from '@/hooks/use-toast';
 import type { VoIPCall, VoIPCallParticipant, VoIPCallGroup, VoIPGroupMember, CallRegion, CallType } from '@/types/voip';
 
 export const useVoIPCalls = () => {
-  const [calls, setCalls] = useState<VoIPCall[]>([]);
+  const ACTIVE_CALL_STATUSES = new Set([
+  'pending',
+  'ringing',
+  'in-progress',
+]);
+
+const TERMINAL_CALL_STATUSES = new Set([
+  'completed',
+  'failed',
+  'busy',
+  'no-answer',
+  'canceled',
+]);
+
+const isActiveCallRecord = (call: VoIPCall): boolean => {
+  if (!call.call_sid) return false;
+  if (call.ended_at) return false;
+
+  return ACTIVE_CALL_STATUSES.has(call.status);
+};
+
+const isTerminalCallRecord = (call: VoIPCall): boolean => {
+  if (call.ended_at) return true;
+
+  return TERMINAL_CALL_STATUSES.has(call.status);
+};
+ const [calls, setCalls] = useState<VoIPCall[]>([]);
   const [groups, setGroups] = useState<VoIPCallGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeCall, setActiveCall] = useState<VoIPCall | null>(null);
@@ -66,14 +92,89 @@ export const useVoIPCalls = () => {
     }
   }, []);
 
-  const initiateCall = async (
+    const initiateCall = async (
     callType: CallType,
     region: CallRegion,
-    recipients: { phoneNumber: string; displayName?: string; userId?: string }[]
+    recipients: {
+      phoneNumber: string;
+      displayName?: string;
+      userId?: string;
+    }[]
   ) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      if (!recipients.length) {
+        throw new Error('At least one recipient is required');
+      }
+
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+        'initiate-voip-call',
+        {
+          callType,
+          region,
+          recipients,
+        },
+        {
+          method: 'POST',
+          timeoutMs: 20000,
+          skipRetry: true,
+        }
+      );
+
+      if (bridgeRes.error) {
+        throw bridgeRes.error;
+      }
+
+      const data = bridgeRes.data;
+
+      if (!data?.success) {
+        throw new Error(
+          data?.message ||
+            data?.error ||
+            'The backend did not confirm call initiation'
+        );
+      }
+
+      toast({
+        title: 'Call Initiated',
+        description: `Calling ${recipients.length} recipient(s)...`,
+      });
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent('comms_activity_update', {
+            detail: {
+              type: 'voip_call',
+              action: 'initiated',
+              callId: data.callId,
+            },
+          })
+        );
+      } catch {
+        /* ignore browser event failures */
+      }
+
+      await fetchCalls();
+
+      return data;
+    } catch (error: any) {
+      toast({
+        title: 'Call Failed',
+        description: error.message || 'Failed to initiate call',
+        variant: 'destructive',
+      });
+
+      throw error;
+    }
+  };
+      
 
       // Call the edge function to initiate the call
       const bridgeRes = await backendBridge.invokeEdgeFunction(
@@ -139,14 +240,24 @@ if (!data?.success) {
   try {
     const call = calls.find((item) => item.id === callId);
 
-    const { data, error } = await supabase.functions.invoke('end-voip-call', {
-      body: {
+        const bridgeRes = await backendBridge.invokeEdgeFunction(
+      'end-voip-call',
+      {
         callId,
         callSid: call?.call_sid ?? undefined,
       },
-    });
+      {
+        method: 'POST',
+        timeoutMs: 15000,
+        skipRetry: true,
+      }
+    );
 
-    if (error) throw error;
+    if (bridgeRes.error) {
+      throw bridgeRes.error;
+    }
+
+    const data = bridgeRes.data;
 
     // Termination is successful ONLY when the authoritative server
     // explicitly confirms success:true.
