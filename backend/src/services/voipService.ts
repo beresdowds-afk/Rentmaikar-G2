@@ -960,12 +960,12 @@ export async function handleEndVoipCall(
 
   // Reconciliation mode must never terminate a live provider call.
   if (reconcileOnly) {
-    return {
-      success: true,
-      message: `Call is still active at Twilio with status: ${providerStatus}`,
-      callId,
-    };
-  }
+  return {
+    success: false,
+    message: `Call remains active at Twilio with status: ${providerStatus}`,
+    callId,
+  };
+}
 
   // The provider confirms that the call is still live. Request termination.
   try {
