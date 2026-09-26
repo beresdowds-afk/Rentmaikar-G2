@@ -183,9 +183,10 @@ const terminateCall = useCallback(async (callId: string) => {
 if (allSuccessfullyTerminated) {
   await voice.hangUp();
 }
+}, [activeCalls, endCall, voice]);
 
-  // FIFO router: answering always connects the caller who has waited longest first.
-  const answerQueuedCall = useCallback(async (call: QueuedCall) => {
+// FIFO router: answering always connects the caller who has waited longest first.
+const answerQueuedCall = useCallback(async (call: QueuedCall) => {
     if (call.isSimulated) {
       queueState.removeSimulated(call.id);
       return;
