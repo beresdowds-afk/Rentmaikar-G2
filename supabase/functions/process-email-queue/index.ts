@@ -101,24 +101,49 @@ async function moveToDlq(
   supabase: ReturnType<typeof createClient>,
   queue: string,
   msg: { msg_id: number; message: Record<string, unknown> },
-  reason: string
-): Promise<void> {
+  reason: string,
+  correlationId?: string
+): Promise<boolean> {
   const payload = msg.message
-  await supabase.from('email_send_log').insert({
-    message_id: payload.message_id,
-    template_name: (payload.label || queue) as string,
-    recipient_email: payload.to,
-    status: 'dlq',
-    error_message: reason,
-  })
-  const { error } = await supabase.rpc('move_to_dlq', {
-    source_queue: queue,
-    dlq_name: `${queue}_dlq`,
-    message_id: msg.msg_id,
-    payload,
-  })
-  if (error) {
-    console.error('Failed to move message to DLQ', { queue, msg_id: msg.msg_id, reason, code: error.code, message: error.message })
+  try {
+    await supabase.from('email_send_log').insert({
+      message_id: payload.message_id,
+      template_name: (payload.label || queue) as string,
+      recipient_email: payload.to,
+      status: 'dlq',
+      error_message: reason,
+      metadata: {
+        correlation_id: correlationId,
+        source_queue: queue,
+        moved_at: new Date().toISOString(),
+      },
+    })
+    const { error } = await supabase.rpc('move_to_dlq', {
+      source_queue: queue,
+      dlq_name: `${queue}_dlq`,
+      message_id: msg.msg_id,
+      payload,
+    })
+    if (error) {
+      console.error('Failed to move message to DLQ', {
+        queue,
+        msg_id: msg.msg_id,
+        correlation_id: correlationId,
+        reason,
+        code: error.code,
+        message: error.message,
+      })
+      return false
+    }
+    return true
+  } catch (err: any) {
+    console.error('moveToDlq unhandled exception', {
+      queue,
+      msg_id: msg.msg_id,
+      correlation_id: correlationId,
+      error: err?.message || err,
+    })
+    return false
   }
 }
 
@@ -182,7 +207,10 @@ async function handleRequest(req: Request): Promise<Response> {
     transactional_emails: state?.transactional_email_ttl_minutes ?? DEFAULT_TRANSACTIONAL_TTL_MINUTES,
   }
 
+  const correlationId = req.headers.get('x-correlation-id') || crypto.randomUUID()
   let totalProcessed = 0
+  let totalFailed = 0
+  let totalDlq = 0
 
   // 2. Process auth_emails first (priority), then transactional_emails
   for (const queue of ['auth_emails', 'transactional_emails']) {
@@ -193,7 +221,13 @@ async function handleRequest(req: Request): Promise<Response> {
     })
 
     if (readError) {
-      console.error('Failed to read email batch', { queue, code: readError.code, message: readError.message })
+      console.error('Failed to read email batch', {
+        queue,
+        correlation_id: correlationId,
+        code: readError.code,
+        message: readError.message,
+      })
+      totalFailed++
       continue
     }
 
@@ -224,6 +258,7 @@ async function handleRequest(req: Request): Promise<Response> {
       if (failedRowsError) {
         console.error('Failed to load failed-attempt counters', {
           queue,
+          correlation_id: correlationId,
           code: failedRowsError.code,
           message: failedRowsError.message,
         })
@@ -258,17 +293,34 @@ async function handleRequest(req: Request): Promise<Response> {
           console.warn('Email expired (TTL exceeded)', {
             queue,
             msg_id: msg.msg_id,
+            correlation_id: correlationId,
             queued_at: queuedAt,
             ttl_minutes: ttlMinutes[queue],
           })
-          await moveToDlq(supabase, queue, msg, `TTL exceeded (${ttlMinutes[queue]} minutes)`)
+          const moved = await moveToDlq(
+            supabase,
+            queue,
+            msg,
+            `TTL exceeded (${ttlMinutes[queue]} minutes)`,
+            correlationId
+          )
+          if (moved) totalDlq++
+          else totalFailed++
           continue
         }
       }
 
       // Move to DLQ if max failed send attempts reached.
       if (failedAttempts >= MAX_RETRIES) {
-        await moveToDlq(supabase, queue, msg, `Max retries (${MAX_RETRIES}) exceeded (attempted ${failedAttempts} times)`)
+        const moved = await moveToDlq(
+          supabase,
+          queue,
+          msg,
+          `Max retries (${MAX_RETRIES}) exceeded (attempted ${failedAttempts} times)`,
+          correlationId
+        )
+        if (moved) totalDlq++
+        else totalFailed++
         continue
       }
 
@@ -286,13 +338,21 @@ async function handleRequest(req: Request): Promise<Response> {
             queue,
             msg_id: msg.msg_id,
             message_id: payload.message_id,
+            correlation_id: correlationId,
           })
           const { error: dupDelError } = await supabase.rpc('delete_email', {
             queue_name: queue,
             message_id: msg.msg_id,
           })
           if (dupDelError) {
-            console.error('Failed to delete duplicate message from queue', { queue, msg_id: msg.msg_id, code: dupDelError.code, message: dupDelError.message })
+            console.error('Failed to delete duplicate message from queue', {
+              queue,
+              msg_id: msg.msg_id,
+              correlation_id: correlationId,
+              code: dupDelError.code,
+              message: dupDelError.message,
+            })
+            totalFailed++
           }
           continue
         }
@@ -307,7 +367,7 @@ async function handleRequest(req: Request): Promise<Response> {
           template_name: payload.label || queue,
           recipient_email: payload.to,
           status: 'sent',
-          metadata: { provider: 'resend-direct' },
+          metadata: { provider: 'resend-direct', correlation_id: correlationId },
         })
 
         // Delete from queue
@@ -316,7 +376,14 @@ async function handleRequest(req: Request): Promise<Response> {
           message_id: msg.msg_id,
         })
         if (delError) {
-          console.error('Failed to delete sent message from queue', { queue, msg_id: msg.msg_id, code: delError.code, message: delError.message })
+          console.error('Failed to delete sent message from queue', {
+            queue,
+            msg_id: msg.msg_id,
+            correlation_id: correlationId,
+            code: delError.code,
+            message: delError.message,
+          })
+          totalFailed++
         }
         totalProcessed++
       } catch (error) {
@@ -326,6 +393,7 @@ async function handleRequest(req: Request): Promise<Response> {
           msg_id: msg.msg_id,
           read_ct: msg.read_ct,
           failed_attempts: failedAttempts,
+          correlation_id: correlationId,
           error: errorMsg,
         })
 
@@ -336,6 +404,7 @@ async function handleRequest(req: Request): Promise<Response> {
             recipient_email: payload.to,
             status: 'rate_limited',
             error_message: errorMsg.slice(0, 1000),
+            metadata: { correlation_id: correlationId },
           })
 
           const retryAfterSecs = getRetryAfterSeconds(error)
@@ -351,18 +420,34 @@ async function handleRequest(req: Request): Promise<Response> {
 
           // Stop processing — remaining messages stay in queue (VT expires, retried next cycle)
           return new Response(
-            JSON.stringify({ processed: totalProcessed, stopped: 'rate_limited' }),
-            { headers: { 'Content-Type': 'application/json' } }
+            JSON.stringify({
+              status: 'rate_limited',
+              processed: totalProcessed,
+              failed: totalFailed,
+              dlq_transfers: totalDlq,
+              stopped: 'rate_limited',
+              correlation_id: correlationId,
+            }),
+            { headers: { 'Content-Type': 'application/json', 'X-Correlation-ID': correlationId } }
           )
         }
 
         // 403 indicates authentication or domain-verification failure in Resend.
         // If repeated (failed attempts >= 3), route to DLQ to avoid loop.
         if (isForbidden(error) && failedAttempts >= 3) {
-          await moveToDlq(supabase, queue, msg, errorMsg.slice(0, 1000))
+          const moved = await moveToDlq(supabase, queue, msg, errorMsg.slice(0, 1000), correlationId)
+          if (moved) totalDlq++
+          else totalFailed++
           return new Response(
-            JSON.stringify({ processed: totalProcessed, stopped: 'forbidden' }),
-            { headers: { 'Content-Type': 'application/json' } }
+            JSON.stringify({
+              status: 'forbidden',
+              processed: totalProcessed,
+              failed: totalFailed,
+              dlq_transfers: totalDlq,
+              stopped: 'forbidden',
+              correlation_id: correlationId,
+            }),
+            { headers: { 'Content-Type': 'application/json', 'X-Correlation-ID': correlationId } }
           )
         }
 
@@ -373,12 +458,13 @@ async function handleRequest(req: Request): Promise<Response> {
           recipient_email: payload.to,
           status: 'failed',
           error_message: errorMsg.slice(0, 1000),
+          metadata: { correlation_id: correlationId },
         })
         if (payload?.message_id && typeof payload.message_id === 'string') {
           failedAttemptsByMessageId.set(payload.message_id, failedAttempts + 1)
         }
 
-        // Non-429 errors: message stays invisible until VT expires, then retried
+        totalFailed++
       }
 
       // Small delay between sends to smooth bursts
@@ -388,11 +474,19 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
+  const isDegraded = totalFailed > 0
   return new Response(
     JSON.stringify({
+      status: isDegraded ? 'degraded' : 'ok',
       processed: totalProcessed,
+      failed: totalFailed,
+      dlq_transfers: totalDlq,
       provider: 'resend-direct',
+      correlation_id: correlationId,
     }),
-    { headers: { 'Content-Type': 'application/json' } }
+    {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Correlation-ID': correlationId },
+    }
   )
 }

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { EventEmitter } from "events";
 
 export type BridgeMode = "active" | "disabled" | "maintenance" | "restricted";
@@ -172,7 +173,7 @@ class BridgeManager extends EventEmitter {
   ): BridgeConfig {
     const previousState = this.config.enabled;
     const event: BridgeToggleEvent = {
-      id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: `evt-${Date.now().toString(36)}-${crypto.randomUUID()}`,
       timestamp: new Date().toISOString(),
       previousState,
       newState: enabled,
@@ -368,7 +369,7 @@ class BridgeManager extends EventEmitter {
   public logFrontendResponse(telemetry: Omit<FrontendResponseTelemetry, "id" | "serverTimestamp">): FrontendResponseTelemetry {
     const record: FrontendResponseTelemetry = {
       ...telemetry,
-      id: `resp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `resp-${Date.now().toString(36)}-${crypto.randomUUID()}`,
       serverTimestamp: new Date().toISOString(),
     };
 

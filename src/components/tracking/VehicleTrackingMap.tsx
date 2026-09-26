@@ -233,8 +233,8 @@ const VehicleTrackingMap = () => {
     toast.info('Disconnected from tracking system');
   }, []);
 
-  const handleDisableVehicle = async (vehicleId: string) => {
-    const vehicle = vehicles.find(v => v.vehicleId === vehicleId);
+  const handleDisableVehicle = useCallback(async (vehicleId: string) => {
+    const vehicle = vehiclesRef.current.find(v => v.vehicleId === vehicleId);
     if (!vehicle) return;
 
     // Check if this is after 3rd notification (3+ days overdue)
@@ -270,11 +270,11 @@ const VehicleTrackingMap = () => {
         icon: <ShieldAlert className="w-5 h-5" />,
       });
     }
-  };
+  }, []);
 
-  const handleConfirmedDisable = async () => {
+  const handleConfirmedDisable = useCallback(async () => {
     const { vehicleId } = confirmationDialog;
-    const vehicle = vehicles.find(v => v.vehicleId === vehicleId);
+    const vehicle = vehiclesRef.current.find(v => v.vehicleId === vehicleId);
     
     if (!vehicle) {
       setConfirmationDialog(prev => ({ ...prev, isOpen: false }));
@@ -299,9 +299,9 @@ const VehicleTrackingMap = () => {
     }
 
     setConfirmationDialog(prev => ({ ...prev, isOpen: false }));
-  };
+  }, [confirmationDialog]);
 
-  const handleEnableVehicle = async (vehicleId: string) => {
+  const handleEnableVehicle = useCallback(async (vehicleId: string) => {
     const result = await mqttTracker.sendCommand(vehicleId, 'enable');
     
     if (result.success) {
@@ -312,7 +312,7 @@ const VehicleTrackingMap = () => {
     } else {
       toast.error(result.message);
     }
-  };
+  }, []);
 
   // Runs a live provider sync (Traccar → EMQX fallback), then replots every
   // device at its newest fix.

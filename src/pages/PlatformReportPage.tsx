@@ -142,11 +142,32 @@ export const FEATURE_PILLARS: FeaturePillar[] = [
       { name: "Comprehensive System Audit Log", desc: "Immutable record of all administrative actions, logins, and status overrides." },
     ],
   },
+  {
+    title: "9. Control & Evidence Plane (Governance & Forensic Authority)",
+    count: "8 Features",
+    color: "bg-emerald-600",
+    features: [
+      { name: "Immutable Event Ledger", desc: "Double-entry debits, credits, and financial state transitions with cryptographic balance verification." },
+      { name: "Decision Chronicle & Log", desc: "Chronological audit of algorithmic policy rulings, human underwriting approvals, and override justifications." },
+      { name: "Multi-Vector Audit Trail", desc: "Consolidated forensic security access denials, Traccar hardware commands, document exports, and SMS consent." },
+      { name: "Cryptographic Evidence Store", desc: "Inspection photo bundles, digitally executed legal agreements, referee affidavits, and SHA-256 seal verification." },
+      { name: "Disputes & Claims Arbitration", desc: "Tribunal for adjudicating payment chargebacks, rental damage claims, and binding settlement determinations." },
+      { name: "Appellate Reconsideration Bench", desc: "Formal appellate workbench for reconsidering rejected applications, referee disputes, and disciplinary sanctions." },
+      { name: "A2P 10DLC & Regulatory Vault", desc: "Official TCR brand and campaign registry, carrier vetting, opt-in consent records, and NDPR compliance." },
+      { name: "Evidence Dossier Compiler", desc: "One-click export and generation of printable, tamper-evident legal audit packets for regulators and courts." },
+    ],
+  },
 ];
+
+/** The exact, verified number of platform features cataloged across all pillars */
+export const TOTAL_ACTUAL_FEATURES_COUNT = FEATURE_PILLARS.reduce(
+  (sum, pillar) => sum + pillar.features.length,
+  0
+);
 
 export default function PlatformReportPage() {
   const [downloading, setDownloading] = useState(false);
-  const { count: totalFeaturesCount, isLoading: isFeaturesLoading } = usePlatformFeaturesCount(68);
+  const { count: totalFeaturesCount, isLoading: isFeaturesLoading } = usePlatformFeaturesCount(TOTAL_ACTUAL_FEATURES_COUNT);
 
   const generateAndDownloadPdf = () => {
     setDownloading(true);

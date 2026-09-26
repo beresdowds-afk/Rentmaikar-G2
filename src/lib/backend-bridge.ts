@@ -25,7 +25,62 @@ export interface BackendCallOptions extends RequestInit {
   maxRetries?: number;
   skipRetry?: boolean;
   correlationId?: string;
+  idempotent?: boolean;
+  idempotencyKey?: string;
+  allowOfflineQueue?: boolean;
+  allowDiagnosticSimulation?: boolean;
 }
+
+/**
+ * Authoritative cryptographically-random correlation ID generator.
+ * Bounded length (< 48 chars), URL/header safe, never relies on Math.random().
+ */
+export function generateBridgeCorrelationId(prefix: string = "call"): string {
+  try {
+    if (typeof crypto !== "undefined") {
+      if ("randomUUID" in crypto && typeof crypto.randomUUID === "function") {
+        return `${prefix}-${crypto.randomUUID()}`;
+      }
+      if ("getRandomValues" in crypto && typeof crypto.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+        return `${prefix}-${hex}`;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  const now = Date.now().toString(36);
+  const perf = (typeof performance !== "undefined" ? performance.now() : 0).toString(36).replace(".", "");
+  return `${prefix}-${now}-${perf}`.slice(0, 48);
+}
+
+// Edge functions that may safely use non-authoritative simulation in explicit test/diagnostic mode
+const SAFE_DIAGNOSTIC_EDGE_FUNCTIONS = new Set([
+  "ping",
+  "health",
+  "diagnostics",
+  "ui-status",
+]);
+
+// Authoritative operations that MUST NEVER simulate success
+export const MUST_NEVER_SIMULATE_EDGE_FUNCTIONS = new Set([
+  "send-outbound-email",
+  "verify-phone-otp",
+  "send-phone-otp",
+  "process-daily-debits",
+  "process-owner-payouts",
+  "persona-reconcile",
+  "process-payment-defaults",
+  "process-email-queue",
+  "dispatch-event-notifications",
+  "sarekon-location-worker",
+  "auto_enable_sims",
+  "run_iot_liveness_test",
+  "admin-auth",
+  "payment-webhook",
+]);
 
 export interface FrontendCallTriggerInfo {
   timestamp: string;
@@ -528,12 +583,26 @@ class BackendBridge {
   public async call<T = any>(endpoint: string, options: BackendCallOptions = {}): Promise<T> {
     const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
     const correlationId =
-      options.correlationId || `call-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      options.correlationId || generateBridgeCorrelationId("call");
     const timeoutMs = options.timeoutMs || 8000;
     const maxRetries = options.maxRetries ?? 2;
 
-    // If completely offline and request is safe to queue, queue it
+    const method = (options.method || "GET").toUpperCase();
+    const isSafeRead = method === "GET" || method === "HEAD";
+    const hasIdempotency =
+      Boolean(options.idempotent) ||
+      Boolean(options.idempotencyKey) ||
+      Boolean(options.headers && ("x-idempotency-key" in (options.headers as any) || "X-Idempotency-Key" in (options.headers as any)));
+    const isQueueable = isSafeRead || (hasIdempotency && Boolean(options.allowOfflineQueue));
+
+    // If completely offline and request is safe to queue, queue it with expiration TTL.
+    // Unsafe non-idempotent business mutations fail visibly rather than accumulating silently!
     if (typeof navigator !== "undefined" && !navigator.onLine && !options.skipRetry) {
+      if (!isQueueable) {
+        throw new Error(
+          `Cannot queue non-idempotent business mutation (${method} ${cleanEndpoint}) while offline. Please verify connectivity and submit fresh authoritative request.`
+        );
+      }
       return new Promise((resolve, reject) => {
         this.offlineQueue.push({
           id: correlationId,
@@ -567,6 +636,11 @@ class BackendBridge {
       const primaryUrl = `${this.primaryBaseUrl}${cleanEndpoint}`;
       return await this.executeSingleCall<T>(primaryUrl, options, correlationId, false, timeoutMs);
     } catch (primaryErr: any) {
+      // If error is a permanent 4xx (unauthorized, validation, forbidden), fail immediately
+      if (primaryErr?.isPermanentError || (primaryErr?.status >= 400 && primaryErr?.status < 500 && primaryErr?.status !== 429)) {
+        throw primaryErr;
+      }
+
       // LOSS OF DIRECT CONTACT DETECTED!
       this.setConnectionState(
         "STAGING_FALLBACK",
@@ -594,13 +668,39 @@ class BackendBridge {
     try {
       return await this.executeSingleCall<T>(url, options, correlationId, isFallback, timeoutMs);
     } catch (err: any) {
+      // 1. NEVER automatically retry permanent 4xx errors (e.g. 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404, 422)
+      if (err.isPermanentError || (err.status >= 400 && err.status < 500 && err.status !== 429)) {
+        throw err;
+      }
+
+      // 2. Classify operation retryability: GET/HEAD or explicitly idempotent mutations are safe
+      const method = (options.method || "GET").toUpperCase();
+      const isSafeMethod = method === "GET" || method === "HEAD";
+      const hasIdempotency =
+        Boolean(options.idempotent) ||
+        Boolean(options.idempotencyKey) ||
+        Boolean(options.headers && ("x-idempotency-key" in (options.headers as any) || "X-Idempotency-Key" in (options.headers as any)));
+
+      if (!isSafeMethod && !hasIdempotency) {
+        // Non-idempotent mutation without idempotency protection: DO NOT AUTOMATICALLY RETRY!
+        throw err;
+      }
+
+      // 3. Bounded retries with exponential backoff and jitter; respects Retry-After if provided
       if (retriesLeft > 0 && !options.skipRetry) {
-        const delay = 400 * Math.pow(2, 2 - retriesLeft) + Math.random() * 200;
+        const retryAfterMs = err.retryAfterSeconds ? err.retryAfterSeconds * 1000 : null;
+        const maxRetriesTotal = options.maxRetries ?? 2;
+        const baseDelay = 400 * Math.pow(2, maxRetriesTotal - retriesLeft);
+        const jitter = (typeof crypto !== "undefined" && crypto.getRandomValues)
+          ? (crypto.getRandomValues(new Uint32Array(1))[0] / 0xffffffff) * 200
+          : 100;
+        const delay = Math.min(retryAfterMs || (baseDelay + jitter), 10000);
+
         await new Promise((res) => setTimeout(res, delay));
         return this.executeCallWithRetry<T>(
           url,
           options,
-          correlationId,
+          correlationId, // Preserve exact same correlation ID across retries
           isFallback,
           retriesLeft - 1
         );
@@ -621,6 +721,9 @@ class BackendBridge {
 
     const headers = await this.getHeaders(options.headers, isFallback);
     headers["X-Correlation-ID"] = correlationId;
+    if (options.idempotencyKey) {
+      headers["X-Idempotency-Key"] = options.idempotencyKey;
+    }
 
     try {
       const res = await fetch(url, {
@@ -634,16 +737,25 @@ class BackendBridge {
       // Detect direct bridge rejection (e.g. 503 or 502)
       if (res.status === 503 || res.status === 502 || res.status === 504) {
         const errorBody = await res.json().catch(() => ({}));
-        throw new Error(
+        const err = new Error(
           errorBody.message || `Server returned ${res.status} (${res.statusText})`
-        );
+        ) as any;
+        err.status = res.status;
+        err.isPermanentError = false;
+        throw err;
       }
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        throw new Error(
+        const retryAfterHeader = res.headers.get("retry-after");
+        const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : null;
+        const err = new Error(
           errJson.error || errJson.message || `HTTP ${res.status}: ${res.statusText}`
-        );
+        ) as any;
+        err.status = res.status;
+        err.isPermanentError = res.status >= 400 && res.status < 500 && res.status !== 429;
+        err.retryAfterSeconds = Number.isFinite(retryAfterSec) ? retryAfterSec : null;
+        throw err;
       }
 
       // Check if response is JSON
@@ -655,7 +767,10 @@ class BackendBridge {
     } catch (err: any) {
       clearTimeout(timer);
       if (err.name === "AbortError") {
-        throw new Error(`Request timed out after ${timeoutMs}ms`);
+        const timeoutErr = new Error(`Request timed out after ${timeoutMs}ms`) as any;
+        timeoutErr.status = 504;
+        timeoutErr.isPermanentError = false;
+        throw timeoutErr;
       }
       throw err;
     }
@@ -665,9 +780,15 @@ class BackendBridge {
     if (this.offlineQueue.length === 0) return;
     const queue = [...this.offlineQueue];
     this.offlineQueue = [];
+    const now = Date.now();
+    const OFFLINE_TTL_MS = 5 * 60 * 1000; // 5 minute TTL
 
     console.info(`[BackendBridge] Processing ${queue.length} queued offline calls...`);
-    queue.forEach(({ endpoint, options, resolve, reject }) => {
+    queue.forEach(({ endpoint, options, resolve, reject, enqueuedAt }) => {
+      if (now - enqueuedAt > OFFLINE_TTL_MS) {
+        reject(new Error(`Queued request for '${endpoint}' expired (TTL exceeded while offline)`));
+        return;
+      }
       this.call(endpoint, options).then(resolve).catch(reject);
     });
   }
@@ -909,7 +1030,7 @@ class BackendBridge {
     options: BackendCallOptions = {}
   ): Promise<{ data: T | null; error: Error | null; status: number; handledBy: string }> {
     const correlationId =
-      options.correlationId || `edge-${functionName}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      options.correlationId || generateBridgeCorrelationId(`edge-${functionName}`);
 
     // If direct link is active and not severed, attempt invocation through direct gateway
     if (this.connectionState === "DIRECT" && !this.isSimulatedLossOfContact && !options.forceFallback) {
@@ -983,19 +1104,75 @@ class BackendBridge {
         status: bridgeRes?.status || 500,
         handledBy: "link_bridge_rpc",
       };
-    } catch {
-      // Resilient simulation fallback so UI never crashes
+    } catch (bridgeErr: any) {
+      // PHASE 2 RESILIENCE HARDENING:
+      // Authoritative business operations (payments, OTP, rentals, KYC, accounts, webhooks)
+      // MUST NEVER manufacture false success payloads ({ok: true, simulated: true}).
+      // Isolated behind explicit diagnostic flags for safe non-authoritative presentation testing only.
+      const isTestEnv =
+        typeof process !== "undefined" &&
+        process.env.NODE_ENV !== "production" &&
+        Boolean(options.allowDiagnosticSimulation);
+
+      if (isTestEnv && SAFE_DIAGNOSTIC_EDGE_FUNCTIONS.has(functionName)) {
+        return {
+          data: {
+            ok: true,
+            simulated: true,
+            handledBy: "link_bridge_client_diagnostic_simulation",
+            functionName,
+            timestamp: new Date().toISOString(),
+          } as unknown as T,
+          error: null,
+          status: 200,
+          handledBy: "link_bridge_client_diagnostic_simulation",
+        };
+      }
+
+      // Propagate real failure to the caller with correlation ID and status
+      const message = bridgeErr?.message || `Bridge execution for '${functionName}' failed`;
       return {
-        data: {
-          ok: true,
-          simulated: true,
-          handledBy: "link_bridge_client_resilience",
-          functionName,
-          timestamp: new Date().toISOString(),
-        } as unknown as T,
-        error: null,
-        status: 200,
-        handledBy: "link_bridge_client_resilience",
+        data: null,
+        error: new Error(message),
+        status: bridgeErr?.status || 503,
+        handledBy: "link_bridge_failure",
+      };
+    }
+  }
+
+  /**
+   * Authoritative reconciliation lookup for operations where client lost contact.
+   * Enables discovery of "already completed" operations by correlation ID,
+   * idempotency key, or record ID without blindly repeating mutations.
+   */
+  public async reconcileOperation<T = any>(params: {
+    correlationId?: string;
+    idempotencyKey?: string;
+    recordType?: string;
+    recordId?: string;
+  }): Promise<{
+    reconciled: boolean;
+    status: "completed" | "in_progress" | "not_found" | "failed";
+    data?: T | null;
+    error?: string;
+  }> {
+    try {
+      const res = await this.call<{
+        reconciled: boolean;
+        status: "completed" | "in_progress" | "not_found" | "failed";
+        data?: T;
+        error?: string;
+      }>("/bridge/reconcile", {
+        method: "POST",
+        body: JSON.stringify(params),
+        skipRetry: true,
+      });
+      return res;
+    } catch (err: any) {
+      return {
+        reconciled: false,
+        status: "not_found",
+        error: err.message || "Failed to contact reconciliation service",
       };
     }
   }
@@ -1033,7 +1210,7 @@ class BackendBridge {
    * Run full bidirectional verification test: Call, Listen, and Respond
    */
   public async testBidirectionalLink(): Promise<BidirectionalLinkTestResult> {
-    const correlationId = `diag-${Date.now()}`;
+    const correlationId = generateBridgeCorrelationId("diag");
     let callSuccess = false;
     let callLatencyMs = 0;
     let callProcessedBy = "unknown";

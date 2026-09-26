@@ -12,9 +12,21 @@ const STORAGE_KEY = 'rentmaikar_correlation_id';
 
 function randomId(): string {
   try {
-    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+    if (typeof crypto !== 'undefined') {
+      if ('randomUUID' in crypto && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      if ('getRandomValues' in crypto && typeof crypto.getRandomValues === 'function') {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        return `cid-${hex}`;
+      }
+    }
   } catch { /* ignore */ }
-  return `cid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const now = Date.now().toString(36);
+  const perf = (typeof performance !== 'undefined' ? performance.now() : 0).toString(36).replace('.', '');
+  return `cid-${now}-${perf}`.slice(0, 40);
 }
 
 /** Stable per-browser-session correlation id (survives reloads within a tab). */

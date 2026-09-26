@@ -16,14 +16,14 @@ import {
   FileText, 
   Lock 
 } from "lucide-react";
-import { FEATURE_PILLARS } from "@/pages/PlatformReportPage";
+import { FEATURE_PILLARS, TOTAL_ACTUAL_FEATURES_COUNT } from "@/pages/PlatformReportPage";
 import { PlatformUpdateModal } from "@/components/admin/PlatformUpdateModal";
 import { usePlatformFeaturesCount } from "@/hooks/usePlatformFeaturesCount";
 
 export default function PlatformFeaturesReport() {
   const [searchQuery, setSearchQuery] = useState("");
   const [downloading, setDownloading] = useState(false);
-  const { count: totalFeaturesCount, isLoading: isFeaturesLoading } = usePlatformFeaturesCount(68);
+  const { count: totalFeaturesCount, isLoading: isFeaturesLoading } = usePlatformFeaturesCount(TOTAL_ACTUAL_FEATURES_COUNT);
 
   const filteredPillars = useMemo(() => {
     if (!searchQuery.trim()) return FEATURE_PILLARS;

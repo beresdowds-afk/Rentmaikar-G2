@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { exec } from "child_process";
+import crypto from "crypto";
 import path from "path";
 import fs from "fs";
 import { bridgeManager, BridgeEventPacket } from "../services/bridgeManager";
@@ -15,10 +16,15 @@ export const bridgeRouter = Router();
  */
 bridgeRouter.post("/call", async (req: Request, res: Response) => {
   const startTime = Date.now();
+  const incomingCorrelationId =
+    (req.headers["x-correlation-id"] as string) ||
+    req.body?.correlationId ||
+    `call-${Date.now().toString(36)}-${crypto.randomUUID()}`;
+
   const {
     action,
     payload = {},
-    correlationId = `call-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    correlationId = incomingCorrelationId,
     clientTimestamp,
   } = req.body || {};
 
@@ -40,6 +46,7 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
     "diagnostics",
     "cpaas_simulate",
     "custom",
+    "reconcile",
   ]);
 
   // Check if direct connection has been disconnected by administrator switch
@@ -370,6 +377,71 @@ bridgeRouter.post("/respond", (req: Request, res: Response) => {
     channel,
     note: "Frontend response successfully logged and acknowledged by staging.rentmaikar.com",
   });
+});
+
+/**
+ * 4. RECONCILIATION:
+ * Authoritative state recovery endpoint when frontend client loses contact
+ * after submitting a mutation (payment, rental, KYC, or email dispatch).
+ * Queries authoritative backend database by idempotencyKey, correlationId, or recordId.
+ */
+bridgeRouter.post("/reconcile", async (req: Request, res: Response) => {
+  const { correlationId, idempotencyKey, recordType, recordId } = req.body || {};
+  const queryId =
+    (req.headers["x-correlation-id"] as string) ||
+    correlationId ||
+    `recon-${Date.now().toString(36)}-${crypto.randomUUID()}`;
+
+  try {
+    const supabase = supabaseBackendService.getClient();
+    let recordFound: any = null;
+
+    if (idempotencyKey && recordType === "payment") {
+      const { data } = await supabase
+        .from("payment_transactions")
+        .select("id, status, amount, currency, created_at, reference")
+        .eq("idempotency_key", idempotencyKey)
+        .maybeSingle();
+      recordFound = data;
+    } else if (recordId && recordType === "payment") {
+      const { data } = await supabase
+        .from("payment_transactions")
+        .select("id, status, amount, currency, created_at, reference")
+        .eq("id", recordId)
+        .maybeSingle();
+      recordFound = data;
+    } else if (idempotencyKey) {
+      const { data } = await supabase
+        .from("marketing_webhooks")
+        .select("id, processing_status, created_at")
+        .eq("provider_event_id", idempotencyKey)
+        .maybeSingle();
+      recordFound = data;
+    }
+
+    if (recordFound) {
+      return res.status(200).json({
+        reconciled: true,
+        status: "completed",
+        correlationId: queryId,
+        data: recordFound,
+      });
+    }
+
+    return res.status(200).json({
+      reconciled: false,
+      status: "not_found",
+      correlationId: queryId,
+      message: "No authoritative completed operation found for given identifier",
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      reconciled: false,
+      status: "failed",
+      correlationId: queryId,
+      error: err.message || "Failed to reconcile state with backend",
+    });
+  }
 });
 
 /**

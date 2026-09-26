@@ -9,7 +9,8 @@ function normalizePortal(raw: string | null): PortalType {
   if (!raw) return 'support';
   if (raw === 'content') return 'content-editor';
   if (raw === 'comms') return 'support';
-  if (['crm', 'erp', 'support', 'content-editor', 'marketing', 'docs'].includes(raw)) {
+  if (raw === 'control' || raw === 'evidence' || raw === 'control-evidence') return 'control-plane';
+  if (['crm', 'erp', 'support', 'content-editor', 'marketing', 'docs', 'control-plane'].includes(raw)) {
     return raw as PortalType;
   }
   return 'support';
@@ -24,6 +25,7 @@ function getInitialTabs(scope: string): Record<string, string> {
     content: 'faq',
     marketing: 'campaigns',
     docs: 'platform-features',
+    'control-plane': 'event-ledger',
   };
 
   try {

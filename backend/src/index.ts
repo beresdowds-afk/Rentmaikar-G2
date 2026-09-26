@@ -348,9 +348,50 @@ app.use((req: Request, res: Response) => {
 // on Google Cloud Run and Envoy Load Balancer
 // -----------------------------------------------------------------
 
+const FORBIDDEN_H2_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "transfer-encoding",
+  "upgrade",
+  "http2-settings",
+]);
+
 const h1Server = http.createServer(app);
 const h2Server = http2.createServer((req, res) => {
-  app(req as any, res as any);
+  // Wrap res.setHeader to filter out HTTP/1 connection-specific headers that crash HTTP/2 streams
+  const origSetHeader = res.setHeader.bind(res);
+  res.setHeader = function (name: string, value: any) {
+    if (FORBIDDEN_H2_HEADERS.has(name.toLowerCase())) {
+      return this;
+    }
+    return origSetHeader(name, value);
+  };
+
+  const origWriteHead = res.writeHead.bind(res);
+  (res as any).writeHead = function (statusCode: number, ...args: any[]) {
+    if (args.length > 0) {
+      const headers = typeof args[0] === "object" ? args[0] : args[1];
+      if (headers && typeof headers === "object") {
+        for (const key of Object.keys(headers)) {
+          if (FORBIDDEN_H2_HEADERS.has(key.toLowerCase())) {
+            delete headers[key];
+          }
+        }
+      }
+    }
+    return origWriteHead(statusCode, ...args);
+  };
+
+  try {
+    app(req as any, res as any);
+  } catch (err: any) {
+    console.error("[H2 Gateway Handler Error]", err);
+    if (!res.headersSent) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Internal Server Error" }));
+    }
+  }
 });
 
 // Align keep-alive timeouts with Google Cloud Run & Cloud Load Balancer (Envoy timeout is 600s)
@@ -368,13 +409,31 @@ const H2_PREFACE = Buffer.from("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
 // Dual Protocol Listener: multiplexes TCP connections to HTTP/1.1 or HTTP/2
 const gatewayServer = net.createServer((socket) => {
+  // Prevent socket streaming prematurely before routing
+  socket.pause();
+
+  let handled = false;
+  // If no data received within 600ms (e.g. TCP health check or idle pooled socket), delegate to HTTP/1.1
+  const timeoutId = setTimeout(() => {
+    if (!handled && !socket.destroyed) {
+      handled = true;
+      h1Server.emit("connection", socket);
+      socket.resume();
+    }
+  }, 600);
+
   socket.once("data", (chunk) => {
+    if (handled) return;
+    handled = true;
+    clearTimeout(timeoutId);
+
     socket.unshift(chunk);
     if (chunk.length >= 24 && chunk.subarray(0, 24).equals(H2_PREFACE)) {
       h2Server.emit("connection", socket);
     } else {
       h1Server.emit("connection", socket);
     }
+    socket.resume();
   });
 
   socket.on("error", (err: any) => {

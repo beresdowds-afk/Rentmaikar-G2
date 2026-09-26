@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Building2, UsersRound, Users, Headphones, LayoutGrid, Phone, MessageSquare, UserCircle, HandshakeIcon, ClipboardList, Home, Car, MapPin, Cpu, Package, BarChart3, Tag, Wrench, WifiOff, Ban, Camera, Wallet, KeyRound, Settings, HelpCircle, FileText, UserPlus, Shield, ShieldCheck, ShieldAlert, Share2, Facebook, Instagram, Linkedin, Chrome, CreditCard, TrendingUp, Webhook, Code, Bell, Flag, GraduationCap, Truck, BookOpen, Mail, Wifi, Activity, Clock, Radio, Globe, Star, Calendar, Satellite, Signal, UserX, Inbox, AlertTriangle } from "lucide-react";
+import { ChevronDown, Building2, UsersRound, Users, Headphones, LayoutGrid, Phone, MessageSquare, UserCircle, HandshakeIcon, ClipboardList, Home, Car, MapPin, Cpu, Package, BarChart3, Tag, Wrench, WifiOff, Ban, Camera, Wallet, KeyRound, Settings, HelpCircle, FileText, UserPlus, Shield, ShieldCheck, ShieldAlert, Share2, Facebook, Instagram, Linkedin, Chrome, CreditCard, TrendingUp, Webhook, Code, Bell, Flag, GraduationCap, Truck, BookOpen, Mail, Wifi, Activity, Clock, Radio, Globe, Star, Calendar, Satellite, Signal, UserX, Inbox, AlertTriangle, Lock, FileSpreadsheet, Gavel, History, Archive, Scale, FileCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 
 
-export type PortalType = 'crm' | 'erp' | 'support' | 'content-editor' | 'marketing' | 'docs' | 'content';
+export type PortalType = 'crm' | 'erp' | 'support' | 'content-editor' | 'marketing' | 'docs' | 'content' | 'control-plane';
 
 export interface PortalTab {
   value: string;
@@ -131,6 +131,17 @@ export const docsTabs: PortalTab[] = [
   { value: "voip-docs", label: "VoIP & IVR", icon: <Phone className="h-4 w-4" /> },
 ];
 
+export const controlPlaneTabs: PortalTab[] = [
+  { value: "event-ledger", label: "Event Ledger", icon: <FileSpreadsheet className="h-4 w-4" /> },
+  { value: "decision-log", label: "Decision Log", icon: <Gavel className="h-4 w-4" /> },
+  { value: "audit-log", label: "Audit Log", icon: <History className="h-4 w-4" /> },
+  { value: "evidence-store", label: "Evidence Store", icon: <Archive className="h-4 w-4" /> },
+  { value: "disputes", label: "Disputes", icon: <Scale className="h-4 w-4" /> },
+  { value: "appeals", label: "Appeals", icon: <ShieldAlert className="h-4 w-4" /> },
+  { value: "compliance", label: "Compliance", icon: <FileCheck2 className="h-4 w-4" /> },
+  { value: "reporting", label: "Reporting", icon: <FileText className="h-4 w-4" /> },
+];
+
 interface PortalNavigationProps {
   activePortal: PortalType;
   activeTab: string;
@@ -208,6 +219,7 @@ export const PortalNavigation = ({
         case 'content': return contentEditorTabs;
         case 'marketing': return marketingTabs;
         case 'docs': return docsTabs;
+        case 'control-plane': return controlPlaneTabs;
       }
     })();
     return base.filter(t => !excludedTabSet.has(t.value));
@@ -222,6 +234,7 @@ export const PortalNavigation = ({
       case 'content': return <HelpCircle className="h-4 w-4" />;
       case 'marketing': return <Share2 className="h-4 w-4" />;
       case 'docs': return <BookOpen className="h-4 w-4" />;
+      case 'control-plane': return <Lock className="h-4 w-4 text-emerald-500" />;
     }
   };
 
@@ -234,6 +247,7 @@ export const PortalNavigation = ({
       case 'content': return 'Content Editor';
       case 'marketing': return 'Marketing';
       case 'docs': return 'Docs';
+      case 'control-plane': return 'Control & Evidence Plane';
     }
   };
 
@@ -246,6 +260,7 @@ export const PortalNavigation = ({
       case 'content': return 'FAQs, legal templates, policies & guides';
       case 'marketing': return 'Social media & campaign management';
       case 'docs': return 'Communication system documentation';
+      case 'control-plane': return 'Immutable event ledger, decision chronicle, audit trail, evidence store, disputes & compliance';
     }
   };
 
@@ -253,6 +268,10 @@ export const PortalNavigation = ({
   const currentTabLabel = currentTabs.find(t => t.value === activeTab)?.label || 'Select...';
   const visiblePortals = (['crm', 'erp', 'support', 'content-editor', 'marketing', 'docs'] as PortalType[])
     .filter(p => !excludedPortalSet.has(p));
+
+  const isControlPlaneActive = activePortal === 'control-plane';
+  const controlPlaneLastTab = last['control-plane'];
+  const controlPlaneTabsList = getTabsForPortal('control-plane');
 
   return (
     <div className="flex flex-col gap-4 mb-6">
@@ -353,6 +372,88 @@ export const PortalNavigation = ({
             </DropdownMenu>
           );
         })}
+
+        {/* Visual Boundary Divider */}
+        <div className="h-7 w-px bg-border/80 mx-1 hidden sm:block" />
+
+        {/* Separate Control & Evidence Plane Portal */}
+        {!excludedPortalSet.has('control-plane') && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={isControlPlaneActive ? 'default' : 'outline'}
+                onClick={() => {
+                  const targetTab = controlPlaneLastTab || controlPlaneTabsList[0]?.value || 'event-ledger';
+                  onPortalChange('control-plane');
+                  onTabChange(targetTab);
+                  remember('control-plane', targetTab);
+                }}
+                className={cn(
+                  "gap-2 min-h-11 border-primary/40 bg-gradient-to-r from-card via-card to-primary/5",
+                  isControlPlaneActive
+                    ? "bg-primary text-primary-foreground shadow-sm ring-2 ring-primary/30"
+                    : "hover:border-primary/60 hover:bg-primary/5 text-foreground"
+                )}
+                aria-label="Open Control & Evidence Plane menu"
+              >
+                <Lock className={cn("h-4 w-4", isControlPlaneActive ? "text-primary-foreground" : "text-emerald-500")} />
+                <span className="font-semibold tracking-wide">Control &amp; Evidence Plane</span>
+                <ChevronDown className="h-3 w-3 ml-1 opacity-70" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              sideOffset={6}
+              collisionPadding={12}
+              avoidCollisions
+              className="w-72 max-w-[calc(100vw-1.5rem)] bg-popover z-50 border-primary/30"
+              aria-label="Control & Evidence Plane portal navigation"
+            >
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Immutable event ledger, decision chronicle, audit trail &amp; evidence store
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <div
+                className="max-h-[min(360px,60dvh)] overflow-y-auto overscroll-contain pr-1"
+                style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+                role="presentation"
+              >
+                {controlPlaneTabsList.map((tab) => {
+                  const isActive = isControlPlaneActive && activeTab === tab.value;
+                  const isLast = !isActive && controlPlaneLastTab === tab.value;
+                  return (
+                    <DropdownMenuItem
+                      key={tab.value}
+                      className={cn(
+                        "cursor-pointer gap-2 min-h-11",
+                        isActive && "bg-accent font-medium",
+                        isLast && "ring-1 ring-primary/40 bg-primary/5"
+                      )}
+                      aria-current={isActive ? "page" : undefined}
+                      onSelect={() => {
+                        onPortalChange('control-plane');
+                        onTabChange(tab.value);
+                        remember('control-plane', tab.value);
+                      }}
+                    >
+                      {tab.icon}
+                      <span className="flex-1">{tab.label}</span>
+                      {isLast && (
+                        <span
+                          className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+                          aria-label="Last used"
+                        >
+                          <Star className="h-3 w-3" aria-hidden="true" />
+                          Last
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </nav>
 
       {/* Current Selection Indicator */}

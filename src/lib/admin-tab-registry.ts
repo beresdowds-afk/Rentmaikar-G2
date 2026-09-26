@@ -13,6 +13,7 @@ import {
   contentEditorTabs,
   marketingTabs,
   docsTabs,
+  controlPlaneTabs,
   type PortalTab,
   type PortalType,
 } from '@/components/admin/PortalNavigation';
@@ -26,6 +27,7 @@ export const PORTAL_TABS: Record<PortalType, PortalTab[]> = {
   marketing: marketingTabs,
   docs: docsTabs,
   content: contentEditorTabs,
+  'control-plane': controlPlaneTabs,
 };
 
 /** Every tab value rendered anywhere in the admin portal navigation. */
@@ -85,6 +87,7 @@ export function getDefaultTabForPortal(portal: PortalType): string {
     case 'content': return 'faq';
     case 'marketing': return 'campaigns';
     case 'docs': return 'platform-features';
+    case 'control-plane': return 'event-ledger';
   }
 }
 

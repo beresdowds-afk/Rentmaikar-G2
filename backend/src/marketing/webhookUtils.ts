@@ -369,3 +369,34 @@ export function validateWebhookSignature(
       return { valid: true, provider: norm };
   }
 }
+
+/**
+ * Universal Provider Webhook Signature Validator Helper Function
+ * Supports calling with an Express Request object directly:
+ *   validateProviderWebhookSignature(req, 'resend', secretOverride?)
+ * Or with raw request body and headers:
+ *   validateProviderWebhookSignature('resend', rawBody, headers, secretOverride?)
+ */
+export function validateProviderWebhookSignature(
+  reqOrPlatform: Request | string,
+  platformOrRawBody?: string | Buffer,
+  headersOrSecret?: Record<string, string | string[] | undefined> | string,
+  secretOverride?: string
+): WebhookValidationResult {
+  if (typeof reqOrPlatform === 'object' && reqOrPlatform !== null && 'headers' in reqOrPlatform) {
+    const req = reqOrPlatform as Request;
+    const platform = (typeof platformOrRawBody === 'string' ? platformOrRawBody : (req.params as any)?.platform) || '';
+    const secret = typeof headersOrSecret === 'string' ? headersOrSecret : secretOverride;
+    const rawBody = getRawBodyFromRequest(req);
+    const headers = req.headers as Record<string, string | string[] | undefined>;
+    return validateWebhookSignature(platform, rawBody, headers, secret);
+  }
+
+  const platform = String(reqOrPlatform || '');
+  const rawBody = (platformOrRawBody as Buffer | string) || '';
+  const headers = (typeof headersOrSecret === 'object' ? headersOrSecret : {}) as Record<string, string | string[] | undefined>;
+  return validateWebhookSignature(platform, rawBody, headers, secretOverride);
+}
+
+export const verifyProviderWebhookSignature = validateProviderWebhookSignature;
+

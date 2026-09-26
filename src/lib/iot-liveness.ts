@@ -1,5 +1,108 @@
 import { supabase } from "@/integrations/supabase/client";
 
+/**
+ * Explicit device telemetry and liveness states.
+ * Prohibits treating stale "last known GPS position" as active proof of liveness.
+ */
+export type DeviceLivenessState =
+  | "ACTIVE"
+  | "STALE"
+  | "DORMANT"
+  | "UNPROVISIONED"
+  | "UNREACHABLE"
+  | "ERROR";
+
+export interface DeviceLivenessEvaluation {
+  state: DeviceLivenessState;
+  ageMinutes: number | null;
+  isLive: boolean;
+  reason: string;
+}
+
+/**
+ * Rigorously evaluates device liveness based on timestamp age and hardware telemetry evidence.
+ */
+export function evaluateDeviceLiveness(device: {
+  last_ping?: string | Date | null;
+  status?: string | null;
+  is_linked?: boolean | null;
+  vehicle_id?: string | null;
+  has_error?: boolean | null;
+}): DeviceLivenessEvaluation {
+  if (device.has_error || device.status === "error") {
+    return {
+      state: "ERROR",
+      ageMinutes: null,
+      isLive: false,
+      reason: "Device reported hardware or communication error",
+    };
+  }
+
+  if (!device.is_linked || !device.vehicle_id) {
+    return {
+      state: "UNPROVISIONED",
+      ageMinutes: null,
+      isLive: false,
+      reason: "Device is unprovisioned or unassigned to an active vehicle",
+    };
+  }
+
+  if (!device.last_ping) {
+    return {
+      state: "UNREACHABLE",
+      ageMinutes: null,
+      isLive: false,
+      reason: "Device has never recorded a valid ping timestamp",
+    };
+  }
+
+  const pingTime = new Date(device.last_ping).getTime();
+  if (isNaN(pingTime)) {
+    return {
+      state: "ERROR",
+      ageMinutes: null,
+      isLive: false,
+      reason: "Device ping timestamp is malformed",
+    };
+  }
+
+  const ageMinutes = Math.floor((Date.now() - pingTime) / 60000);
+
+  if (ageMinutes <= 30) {
+    return {
+      state: "ACTIVE",
+      ageMinutes: Math.max(0, ageMinutes),
+      isLive: true,
+      reason: `Active telemetry confirmed ${Math.max(0, ageMinutes)}m ago`,
+    };
+  }
+
+  if (ageMinutes <= 180) {
+    return {
+      state: "STALE",
+      ageMinutes,
+      isLive: false,
+      reason: `Telemetry delayed/stale: silent for ${ageMinutes}m`,
+    };
+  }
+
+  if (ageMinutes <= 1440 * 7) {
+    return {
+      state: "DORMANT",
+      ageMinutes,
+      isLive: false,
+      reason: `Device dormant: no telemetry for ${Math.floor(ageMinutes / 60)} hours`,
+    };
+  }
+
+  return {
+    state: "UNREACHABLE",
+    ageMinutes,
+    isLive: false,
+    reason: `Device unreachable: silent for over 7 days`,
+  };
+}
+
 export interface LivenessCategoryStats {
   total: number;
   active: number;
@@ -142,8 +245,9 @@ export async function fetchIoTAuditLogs(limit = 30): Promise<IoTAuditLogRecord[]
  * Subscribes to real-time additions to iot_audit_log.
  */
 export function subscribeToIoTAuditLog(onInsert: (record: IoTAuditLogRecord) => void) {
+  const channelId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Date.now().toString(36);
   const channel = supabase
-    .channel("iot_audit_log_realtime_" + Math.random().toString(36).substring(2, 9))
+    .channel("iot_audit_log_realtime_" + channelId)
     .on(
       "postgres_changes" as any,
       {

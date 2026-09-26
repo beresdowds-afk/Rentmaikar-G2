@@ -1,10 +1,11 @@
+import React, { memo, useCallback } from 'react';
 import { Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { VehicleLocation } from '@/lib/mqtt-client';
 import { Button } from '@/components/ui/button';
 import { Power, Battery, Gauge, Navigation } from 'lucide-react';
 
-interface VehicleMarkerProps {
+export interface VehicleMarkerProps {
   vehicle: VehicleLocation & { 
     make?: string; 
     model?: string; 
@@ -18,12 +19,19 @@ interface VehicleMarkerProps {
   onEnable?: (vehicleId: string) => void;
 }
 
-// Create custom vehicle icon based on status
-const createVehicleIcon = (isParked: boolean, ignitionStatus: boolean): L.DivIcon => {
+// Global cached DivIcon instances to eliminate repetitive DOM construction and icon reallocations
+const iconCache: Record<string, L.DivIcon> = {};
+
+export const getVehicleIcon = (isParked: boolean, ignitionStatus: boolean): L.DivIcon => {
+  const statusKey = !ignitionStatus ? 'disabled' : isParked ? 'parked' : 'active';
+  if (iconCache[statusKey]) {
+    return iconCache[statusKey];
+  }
+
   const color = !ignitionStatus ? '#ef4444' : isParked ? '#f59e0b' : '#22c55e';
   
-  return L.divIcon({
-    className: 'vehicle-marker',
+  const icon = L.divIcon({
+    className: `vehicle-marker vehicle-marker-${statusKey}`,
     html: `
       <div style="
         width: 36px;
@@ -47,9 +55,53 @@ const createVehicleIcon = (isParked: boolean, ignitionStatus: boolean): L.DivIco
     iconAnchor: [18, 18],
     popupAnchor: [0, -20],
   });
+
+  iconCache[statusKey] = icon;
+  return icon;
 };
 
-const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => {
+/**
+ * Deep memoization equality comparison for VehicleMarkerProps.
+ * Prevents unnecessary re-renders across large fleets when unrelated telemetry streams update.
+ */
+export const areVehicleMarkerPropsEqual = (
+  prevProps: Readonly<VehicleMarkerProps>,
+  nextProps: Readonly<VehicleMarkerProps>
+): boolean => {
+  if (prevProps.onDisable !== nextProps.onDisable || prevProps.onEnable !== nextProps.onEnable) {
+    return false;
+  }
+
+  const p = prevProps.vehicle;
+  const n = nextProps.vehicle;
+
+  if (p === n) return true;
+  if (!p || !n) return false;
+
+  const prevTime = p.timestamp instanceof Date ? p.timestamp.getTime() : p.timestamp;
+  const nextTime = n.timestamp instanceof Date ? n.timestamp.getTime() : n.timestamp;
+
+  return (
+    p.vehicleId === n.vehicleId &&
+    p.latitude === n.latitude &&
+    p.longitude === n.longitude &&
+    p.speed === n.speed &&
+    p.heading === n.heading &&
+    p.batteryLevel === n.batteryLevel &&
+    p.ignitionStatus === n.ignitionStatus &&
+    p.isParked === n.isParked &&
+    prevTime === nextTime &&
+    p.make === n.make &&
+    p.model === n.model &&
+    p.licensePlate === n.licensePlate &&
+    p.driverName === n.driverName &&
+    p.agreementStatus === n.agreementStatus &&
+    p.isTrackingGated === n.isTrackingGated &&
+    p.address === n.address
+  );
+};
+
+const VehicleMarkerBase = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => {
   if (
     !vehicle ||
     typeof vehicle.latitude !== 'number' ||
@@ -63,15 +115,23 @@ const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => 
     return null;
   }
 
-  const icon = createVehicleIcon(vehicle.isParked, vehicle.ignitionStatus);
+  const icon = getVehicleIcon(vehicle.isParked, vehicle.ignitionStatus);
   
   const formatSpeed = (speed: number) => {
     return `${Math.round(speed)} mph`;
   };
 
-  const formatTime = (date: Date) => {
+  const formatTime = (date: Date | string | number) => {
     return new Date(date).toLocaleTimeString();
   };
+
+  const handleDisableClick = useCallback(() => {
+    onDisable?.(vehicle.vehicleId);
+  }, [onDisable, vehicle.vehicleId]);
+
+  const handleEnableClick = useCallback(() => {
+    onEnable?.(vehicle.vehicleId);
+  }, [onEnable, vehicle.vehicleId]);
 
   return (
     <Marker 
@@ -150,7 +210,7 @@ const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => 
                 size="sm" 
                 variant="destructive" 
                 className="w-full text-xs"
-                onClick={() => onDisable?.(vehicle.vehicleId)}
+                onClick={handleDisableClick}
               >
                 <Power className="w-3 h-3 mr-1" />
                 Disable Vehicle
@@ -160,7 +220,7 @@ const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => 
                 size="sm" 
                 variant="hero" 
                 className="w-full text-xs"
-                onClick={() => onEnable?.(vehicle.vehicleId)}
+                onClick={handleEnableClick}
               >
                 <Power className="w-3 h-3 mr-1" />
                 Enable Vehicle
@@ -173,4 +233,9 @@ const VehicleMarker = ({ vehicle, onDisable, onEnable }: VehicleMarkerProps) => 
   );
 };
 
+/**
+ * High-Performance Memoized Vehicle Marker for Real-Time Telemetry Streaming
+ * Ensures active vehicle fleet markers only re-render when their individual telemetry or status updates.
+ */
+export const VehicleMarker = memo(VehicleMarkerBase, areVehicleMarkerPropsEqual);
 export default VehicleMarker;

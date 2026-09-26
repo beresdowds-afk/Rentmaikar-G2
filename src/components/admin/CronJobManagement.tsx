@@ -224,6 +224,8 @@ export const CronJobManagement = () => {
   const [runHistory, setRunHistory] = useState<Record<string, { time: string; status: "success" | "error" }[]>>({});
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
 
+  const [isTriggeringAll, setIsTriggeringAll] = useState(false);
+
   const initStatuses = useCallback(() => {
     const initial: Record<string, JobStatus> = {};
     CRON_JOBS.forEach((j) => {
@@ -237,16 +239,23 @@ export const CronJobManagement = () => {
   }, [initStatuses]);
 
   const triggerJob = async (job: CronJob) => {
+    // Prevent duplicate concurrent execution
+    if (jobStatuses[job.functionName]?.isRunning) {
+      toast.warning(`${job.name} is already executing. Concurrency blocked.`);
+      return;
+    }
+
     setJobStatuses((prev) => ({
       ...prev,
       [job.functionName]: { ...prev[job.functionName], isRunning: true, lastStatus: "running" },
     }));
 
     const startTime = new Date().toISOString();
+    const triggerCorrelationId = `cron-manual-${job.functionName}-${Date.now()}`;
 
     try {
       const { error } = await supabase.functions.invoke(job.functionName, {
-        body: { time: "now", manual_trigger: true },
+        body: { time: "now", manual_trigger: true, correlation_id: triggerCorrelationId },
       });
 
       const status = error ? "error" : "success";
@@ -296,9 +305,18 @@ export const CronJobManagement = () => {
   };
 
   const triggerAll = async () => {
-    toast.info("Triggering all cron jobs…");
-    for (const job of CRON_JOBS) {
-      await triggerJob(job);
+    if (isTriggeringAll) return;
+    setIsTriggeringAll(true);
+    toast.info("Triggering all idle cron jobs sequentially…");
+
+    try {
+      for (const job of CRON_JOBS) {
+        if (!jobStatuses[job.functionName]?.isRunning) {
+          await triggerJob(job);
+        }
+      }
+    } finally {
+      setIsTriggeringAll(false);
     }
   };
 
@@ -329,9 +347,18 @@ export const CronJobManagement = () => {
             Monitor and manually trigger all scheduled background jobs
           </p>
         </div>
-        <Button variant="outline" className="gap-2 self-start" onClick={triggerAll}>
-          <Zap className="h-4 w-4" />
-          Trigger All Now
+        <Button
+          variant="outline"
+          className="gap-2 self-start"
+          onClick={triggerAll}
+          disabled={isTriggeringAll}
+        >
+          {isTriggeringAll ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Zap className="h-4 w-4" />
+          )}
+          {isTriggeringAll ? "Triggering..." : "Trigger All Now"}
         </Button>
       </div>
 

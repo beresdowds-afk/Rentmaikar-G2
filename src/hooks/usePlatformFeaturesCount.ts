@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { TOTAL_ACTUAL_FEATURES_COUNT } from "@/pages/PlatformReportPage";
 
 export interface PlatformFeatureItem {
   id: string;
@@ -10,7 +11,7 @@ export interface PlatformFeatureItem {
   is_global_default: boolean;
 }
 
-export function usePlatformFeaturesCount(fallbackCount: number = 68) {
+export function usePlatformFeaturesCount(fallbackCount: number = TOTAL_ACTUAL_FEATURES_COUNT) {
   const [count, setCount] = useState<number>(fallbackCount);
   const [features, setFeatures] = useState<PlatformFeatureItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);

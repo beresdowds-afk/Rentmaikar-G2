@@ -75,11 +75,17 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   'message-templates': 'can_view_communications',
 
   // Marketing – requires reports
+  overview: 'can_view_reports',
   campaigns: 'can_view_reports',
+  leads: 'can_view_reports',
+  communications: 'can_view_communications',
+  platforms: 'can_view_reports',
+  attribution: 'can_view_reports',
   facebook: 'can_view_reports',
   instagram: 'can_view_reports',
   linkedin: 'can_view_reports',
   google: 'can_view_reports',
+  tiktok: 'can_view_reports',
 
   // Docs – reference material, always available to assistants and support staff.
   'service-disruption-docs': null,
@@ -88,6 +94,16 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   'messaging-docs': null,
   'email-docs': null,
   'voip-docs': null,
+
+  // Control & Evidence Plane – governance and audit tabs
+  'event-ledger': 'can_view_payments',
+  'decision-log': 'can_view_reports',
+  'audit-log': 'can_view_reports',
+  'evidence-store': 'can_view_vehicles',
+  disputes: 'can_view_support_tasks',
+  appeals: 'can_view_users',
+  compliance: 'can_view_reports',
+  reporting: 'can_view_reports',
 };
 
 /**

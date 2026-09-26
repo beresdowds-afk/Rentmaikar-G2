@@ -98,6 +98,7 @@ import { VoIPDocs } from "@/components/admin/docs/VoIPDocs";
 import PlatformGlossary from "@/components/admin/docs/PlatformGlossary";
 import { ServiceDisruptionDocs } from "@/components/admin/docs/ServiceDisruptionDocs";
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
+import ControlEvidencePlane from "@/components/admin/control-plane/ControlEvidencePlane";
 import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
 import RegionalOperationsManagement from "@/components/admin/RegionalOperationsManagement";
 import { RegionAutoBuildWorker } from "@/components/admin/RegionAutoBuildWorker";
@@ -885,6 +886,17 @@ const AdminAssistantDashboard = () => {
                 {activeTab === 'voip-docs' && <VoIPDocs />}
                 {activeTab === 'glossary' && <PlatformGlossary />}
               </div>
+            </SectionErrorBoundary>
+          )}
+
+          {/* Control & Evidence Plane Portal */}
+          {activeTabAllowed && portalView === 'control-plane' && (
+            <SectionErrorBoundary section="CONTROL_PLANE" onSwitchPortal={setPortalView}>
+              <ControlEvidencePlane
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                scope="assistant"
+              />
             </SectionErrorBoundary>
           )}
         </div>

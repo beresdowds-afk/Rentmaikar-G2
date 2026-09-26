@@ -15,6 +15,7 @@ import {
   validateMetaWebhook,
   validateSentDmWebhook,
   validateWebhookSignature,
+  validateProviderWebhookSignature,
 } from '../webhookUtils';
 
 describe('Webhook Cryptographic Signature Verification Utilities', () => {
@@ -182,6 +183,38 @@ describe('Webhook Cryptographic Signature Verification Utilities', () => {
       );
 
       expect(res.valid).toBe(true);
+    });
+
+    it('validates provider webhook using validateProviderWebhookSignature with Express Request or raw args', () => {
+      const secret = 'whsec_mfYJuJTruKdK7YGh0rwuisPdjOZkrFull=';
+      const key = Buffer.from(secret.substring(6), 'base64');
+      const body = '{"hello":"resend"}';
+      const id = 'evt_uni_2';
+      const ts = String(Math.floor(Date.now() / 1000));
+      const sig = crypto.createHmac('sha256', key).update(`${id}.${ts}.${body}`).digest('base64');
+
+      const mockReq: any = {
+        headers: {
+          'svix-id': id,
+          'svix-timestamp': ts,
+          'svix-signature': `v1,${sig}`,
+        },
+        rawBody: Buffer.from(body, 'utf8'),
+        params: { platform: 'resend' },
+      };
+
+      const resFromReq = validateProviderWebhookSignature(mockReq, 'resend', secret);
+      expect(resFromReq.valid).toBe(true);
+      expect(resFromReq.provider).toBe('resend');
+
+      // Test ManyChat via validateProviderWebhookSignature with raw params
+      const mcSecret = 'mc_secret_123';
+      const mcBody = JSON.stringify({ subscriber_id: 1234 });
+      const mcSig = crypto.createHmac('sha256', mcSecret).update(mcBody).digest('hex');
+
+      const resFromRaw = validateProviderWebhookSignature('manychat', mcBody, { 'x-manychat-signature': mcSig }, mcSecret);
+      expect(resFromRaw.valid).toBe(true);
+      expect(resFromRaw.provider).toBe('manychat');
     });
   });
 });

@@ -109,6 +109,7 @@ const AdminTreasuryPage = lazy(() => import("./pages/admin/AdminTreasuryPage"));
 const AdminDocumentExportAuditPage = lazy(() => import("./pages/admin/AdminDocumentExportAuditPage"));
 const AdminDocumentFailuresPage = lazy(() => import("./pages/admin/AdminDocumentFailuresPage"));
 const AuditLogPage = lazy(() => import("./pages/admin/AuditLogPage"));
+const ControlEvidencePlanePage = lazy(() => import("./pages/admin/ControlEvidencePlanePage"));
 const PaymentsViewerPage = lazy(() => import("./pages/admin/PaymentsViewerPage"));
 const TourStepConfigPage = lazy(() => import("./pages/admin/TourStepConfigPage"));
 const AdminLegalTemplatePreviewPage = lazy(() => import("./pages/admin/AdminLegalTemplatePreviewPage"));
@@ -531,6 +532,26 @@ const App = () => (
                       <ProtectedRoute allowedRoles={['admin']}>
                         <AdminProfiler id="AuditLogPage">
                           <AuditLogPage />
+                        </AdminProfiler>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/control-plane"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin', 'assistant', 'super_admin']}>
+                        <AdminProfiler id="ControlEvidencePlanePage">
+                          <ControlEvidencePlanePage />
+                        </AdminProfiler>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/control-evidence-plane"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin', 'assistant', 'super_admin']}>
+                        <AdminProfiler id="ControlEvidencePlanePage">
+                          <ControlEvidencePlanePage />
                         </AdminProfiler>
                       </ProtectedRoute>
                     }
