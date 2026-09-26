@@ -433,6 +433,11 @@ if (allSuccessfullyTerminated) {
                 userRole={userRole || 'admin'}
                 isAssistant={isAssistant}
                 onInitiateCall={initiateCall}
+              onEndCall={
+  activeCall
+    ? () => terminateCall(activeCall.id)
+    : undefined
+              }
                 onOpenWhatsAppConsole={() => handleTabChange('whatsapp-voice')}
                 onOpenIVRBuilder={() => handleTabChange('ivr')}
               />
