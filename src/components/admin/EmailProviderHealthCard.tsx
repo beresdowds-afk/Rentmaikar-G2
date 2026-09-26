@@ -17,6 +17,7 @@ import {
   Server,
   ExternalLink
 } from "lucide-react";
+import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface EmailHealthData {
@@ -106,7 +107,52 @@ export function EmailProviderHealthCard() {
 
     setSendingTest(true);
     try {
-      const res = await fetch("/api/functions/send-outbound-email", {
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+  "send-outbound-email",
+  {
+    action: "send",
+    to: testEmail.trim(),
+    subject: "RentMaikar Email Provider Diagnostic Test",
+    templateName: "diagnostic-test",
+    body: `This is a live diagnostic verification email sent from the RentMaikar Credential Health dashboard.
+
+Provider: ${health?.provider?.toUpperCase() || "RESEND"}
+Domain: ${health?.domain || "notify.rentmaikar.com"}
+Timestamp: ${new Date().toISOString()}
+
+If you received this message, outbound transactional email delivery is functioning normally.`,
+    content: `This is a live diagnostic verification email sent from the RentMaikar Credential Health dashboard.
+
+Provider: ${health?.provider?.toUpperCase() || "RESEND"}
+Domain: ${health?.domain || "notify.rentmaikar.com"}
+Timestamp: ${new Date().toISOString()}`,
+    category: "diagnostic",
+  },
+  {
+    method: "POST",
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
+
+if (bridgeRes.error) {
+  throw bridgeRes.error;
+}
+
+const result = bridgeRes.data;
+
+if (
+  bridgeRes.status < 200 ||
+  bridgeRes.status >= 300 ||
+  result?.ok === false ||
+  result?.success === false
+) {
+  throw new Error(
+    result?.error ||
+      result?.message ||
+      `Email delivery failed with HTTP ${bridgeRes.status}`,
+  );
+}
   method: "POST",
   headers: {
     "Content-Type": "application/json",
