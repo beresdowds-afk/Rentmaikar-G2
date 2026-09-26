@@ -42,6 +42,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { backendBridge } from '@/lib/backend-bridge';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -330,26 +331,37 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
             category: 'general',
           };
 
-          let res: Response;
-          try {
-            res = await fetch('/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(emailPayload),
-            });
-          } catch {
-            res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(emailPayload),
-            });
-          }
+          const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'send-outbound-email',
+  emailPayload,
+  {
+    method: 'POST',
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
 
-          const contentType = res.headers.get('content-type') || '';
-          const json = contentType.includes('application/json')
-            ? await res.json().catch(() => null)
-            : null;
+if (bridgeRes.error) {
+  throw bridgeRes.error;
+}
 
+const json = bridgeRes.data;
+
+if (
+  bridgeRes.status >= 200 &&
+  bridgeRes.status < 300 &&
+  json?.ok !== false &&
+  json?.success !== false
+) {
+  delivered = true;
+  messageId = json?.messageId || json?.id || '';
+  errMsg = '';
+} else {
+  errMsg =
+    json?.error ||
+    json?.message ||
+    `Email delivery failed with HTTP ${bridgeRes.status}`;
+}
           if (res.ok && (json?.ok !== false && json?.success !== false)) {
             delivered = true;
             messageId = json?.messageId || json?.id || '';
