@@ -37,7 +37,7 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
   const [activeCall, setActiveCall] = useState<VoIPCall | null>(null);
   const { toast } = useToast();
 
-  const fetchCalls = useCallback(async () => {
+    const fetchCalls = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('voip_calls')
@@ -46,49 +46,153 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
         .limit(100);
 
       if (error) throw error;
-      
-      // Fetch participants for each call
+
       const callsWithParticipants = await Promise.all(
         (data || []).map(async (call) => {
           const { data: participants } = await supabase
             .from('voip_call_participants')
             .select('*')
             .eq('call_id', call.id);
-          return { ...call, participants: participants || [] } as VoIPCall;
+
+          return {
+            ...call,
+            participants: participants || [],
+          } as VoIPCall;
         })
       );
-      
-      setCalls(callsWithParticipants);
-    } catch (error) {
-      console.error('Error fetching calls:', error);
-    }
-  }, []);
 
-  const fetchGroups = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('voip_call_groups')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
+      let reconciledCalls = callsWithParticipants;
 
-      if (error) throw error;
-      
-      // Fetch members for each group
-      const groupsWithMembers = await Promise.all(
-        (data || []).map(async (group) => {
-          const { data: members } = await supabase
-            .from('voip_group_members')
-            .select('*')
-            .eq('group_id', group.id)
-            .eq('is_active', true);
-          return { ...group, members: members || [] } as VoIPCallGroup;
-        })
+      /*
+       * IMPORTANT:
+       * The database is the local record, not the final authority for
+       * whether a call is currently active.
+       *
+       * Any call which looks active locally must be verified against
+       * Twilio through the Cloud Run backend before it is allowed to
+       * become frontend active-call state.
+       */
+      const locallyActiveCalls = callsWithParticipants.filter(
+        isActiveCallRecord
       );
-      
-      setGroups(groupsWithMembers);
-    } catch (error) {
-      console.error('Error fetching groups:', error);
+
+      if (locallyActiveCalls.length > 0) {
+        const verificationResults = await Promise.all(
+          locallyActiveCalls.map(async (call) => {
+            try {
+              const result =
+                await backendBridge.invokeEdgeFunction(
+                  'get-voip-call-status',
+                  {
+                    callId: call.id,
+                    callSid: call.call_sid,
+                  },
+                  {
+                    method: 'POST',
+                    timeoutMs: 10000,
+                    skipRetry: true,
+                  }
+                );
+
+              if (result.error || !result.data?.success) {
+                return {
+                  callId: call.id,
+                  verified: false,
+                  active: false,
+                };
+              }
+
+              return {
+                callId: call.id,
+                verified: true,
+                active: Boolean(result.data.active),
+                providerStatus: result.data.providerStatus,
+              };
+            } catch (error) {
+              console.warn(
+                `[VoIP] Failed to verify provider state for call ${call.id}:`,
+                error
+              );
+
+              return {
+                callId: call.id,
+                verified: false,
+                active: false,
+              };
+            }
+          })
+        );
+
+        const verificationMap = new Map(
+          verificationResults.map((result) => [
+            result.callId,
+            result,
+          ])
+        );
+
+        reconciledCalls = callsWithParticipants.map((call) => {
+          const verification = verificationMap.get(call.id);
+
+          if (!verification?.verified) {
+            return call;
+          }
+
+          if (!verification.active) {
+            return {
+              ...call,
+              status:
+                verification.providerStatus &&
+                TERMINAL_CALL_STATUSES.has(
+                  verification.providerStatus
+                )
+                  ? verification.providerStatus
+                  : 'completed',
+              ended_at: call.ended_at || new Date().toISOString(),
+            } as VoIPCall;
+          }
+
+          if (verification.providerStatus === 'in-progress') {
+            return {
+              ...call,
+              status: 'in-progress',
+            } as VoIPCall;
+          }
+
+          return {
+            ...call,
+            status: 'ringing',
+          } as VoIPCall;
+        });
+      }
+
+      setCalls(reconciledCalls);
+
+      /*
+            const verifiedActiveCalls = reconciledCalls.filter((call) => {
+        const wasLocallyActive = locallyActiveCalls.some(
+          (candidate) => candidate.id === call.id
+        );
+
+        return wasLocallyActive && isActiveCallRecord(call);
+      });
+
+      setActiveCall(
+        verifiedActiveCalls.length > 0
+      setCalls(reconciledCalls);
+
+      const verifiedActiveCalls = reconciledCalls.filter((call) => {
+        const wasLocallyActive = locallyActiveCalls.some(
+          (candidate) => candidate.id === call.id
+        );
+
+        return wasLocallyActive && isActiveCallRecord(call);
+      });
+
+      setActiveCall(
+        verifiedActiveCalls.length > 0
+          ? verifiedActiveCalls[0]
+          : null
+      );
     }
   }, []);
 
