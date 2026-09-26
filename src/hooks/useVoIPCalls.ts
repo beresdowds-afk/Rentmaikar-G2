@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { backendBridge } from '@/lib/backend-bridge';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import type { VoIPCall, VoIPCallParticipant, VoIPCallGroup, VoIPGroupMember, CallRegion, CallType } from '@/types/voip';
@@ -75,13 +76,24 @@ export const useVoIPCalls = () => {
       if (!user) throw new Error('Not authenticated');
 
       // Call the edge function to initiate the call
-      const { data, error } = await supabase.functions.invoke('initiate-voip-call', {
-        body: {
-          callType,
-          region,
-          recipients,
-        },
-      });
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'end-voip-call',
+  {
+    callId,
+    callSid: call?.call_sid ?? undefined,
+  },
+  {
+    method: 'POST',
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
+
+if (bridgeRes.error) {
+  throw bridgeRes.error;
+}
+
+const data = bridgeRes.data;
 
       if (error) throw error;
 
