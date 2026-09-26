@@ -51,7 +51,7 @@ import { renderPlaceholders } from '@/lib/reply-placeholders';
 import { format } from 'date-fns';
 import { calculateSmsSegments } from '@/lib/sms-templates';
 import { cn } from '@/lib/utils';
-
+import { backendBridge } from '@/lib/backend-bridge';
 type BulkChannel = 'sms' | 'whatsapp' | 'email' | 'in_app';
 
 export interface BulkContact {
@@ -474,78 +474,54 @@ export const HubBulkMessaging: React.FC = () => {
             },
           };
 
-          // PRIMARY: Cloud Run application email gateway.
-          // The backend gateway handles Supabase as the secondary fallback.
-          let emailDelivered = false;
-          let emailErrorMsg = '';
-          let responseStatus = 200;
+          // AUTHORITATIVE: frontend -> backend bridge -> Cloud Run.
+// The bridge preserves the authenticated user's JWT and handles
+// same-origin -> staging.rentmaikar.com failover.
+let emailDelivered = false;
+let emailErrorMsg = '';
+let responseStatus = 502;
 
-          try {
-            const gatewayUrl = '/api/functions/send-outbound-email';
-            const emailPayload = {
-              to: emailTarget,
-              subject: renderedSubj,
-              body: renderedMsg,
-              recipientName: fullName !== 'Customer' ? fullName : undefined,
-            };
+try {
+  const bridgeRes = await backendBridge.invokeEdgeFunction(
+    'send-outbound-email',
+    emailPayload,
+    {
+      method: 'POST',
+      timeoutMs: 15000,
+      skipRetry: true,
+    },
+  );
 
-            let res: Response;
-            try {
-              res = await fetch(gatewayUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(emailPayload),
-              });
-            } catch {
-              // Direct fallback to staging backend if relative proxy is unreachable
-              res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(emailPayload),
-              });
-            }
+  responseStatus = bridgeRes.status;
 
-            responseStatus = res.status;
+  console.group(
+    `[HubBulkMessaging] Backend Email Response: send-outbound-email -> ${emailTarget}`
+  );
+  console.log('Handled by:', bridgeRes.handledBy);
+  console.log('HTTP Status:', responseStatus);
+  console.log('Response:', bridgeRes.data);
+  console.groupEnd();
 
-            const contentType = res.headers.get('content-type') || '';
-            const result = contentType.includes('application/json')
-              ? await res.json().catch(() => null)
-              : null;
-
-            console.group(
-              `[HubBulkMessaging] 📥 Cloud Run Email Response: send-outbound-email -> ${emailTarget}`
-            );
-            console.log('📌 Gateway URL:', gatewayUrl);
-            console.log('📌 HTTP Status:', responseStatus);
-            console.log('📌 Response:', result);
-            console.groupEnd();
-
-            if (
-              res.ok &&
-              result?.ok !== false &&
-              result?.success !== false
-            ) {
-              emailDelivered = true;
-              emailErrorMsg = '';
-            } else {
-              emailDelivered = false;
-              emailErrorMsg =
-                result?.error ||
-                result?.message ||
-                `Email delivery failed with HTTP ${responseStatus}`;
-            }
-          } catch (invokeErr: any) {
-            responseStatus =
-              invokeErr?.context?.status ||
-              invokeErr?.status ||
-              502;
-
-            emailDelivered = false;
-            emailErrorMsg =
-              invokeErr?.message ||
-              `Cloud Run email gateway request failed (HTTP ${responseStatus})`;
-          }
-
+  if (
+    !bridgeRes.error &&
+    bridgeRes.data?.ok !== false &&
+    bridgeRes.data?.success !== false
+  ) {
+    emailDelivered = true;
+    emailErrorMsg = '';
+  } else {
+    emailErrorMsg =
+      bridgeRes.data?.error ||
+      bridgeRes.data?.message ||
+      bridgeRes.error?.message ||
+      `Email delivery failed with HTTP ${responseStatus}`;
+  }
+} catch (invokeErr: any) {
+  responseStatus = invokeErr?.status || 502;
+  emailErrorMsg =
+    invokeErr?.message ||
+    `Cloud Run email gateway request failed (HTTP ${responseStatus})`;
+}
           // Strict verification: delivery must be confirmed by a successful
           // Cloud Run gateway response. The backend itself owns the
           // Supabase fallback.
