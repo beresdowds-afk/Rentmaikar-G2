@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { useCommunicationsHub } from './CommunicationsHubContext';
@@ -315,22 +316,35 @@ export const HubMessageComposer: React.FC = () => {
             recipientName: recipientName.trim() || undefined,
           };
 
-          let res: Response;
-          try {
-            res = await fetch('/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(emailPayload),
-            });
-          } catch {
-            res = await fetch('https://staging.rentmaikar.com/api/functions/send-outbound-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(emailPayload),
-            });
-          }
+          const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'send-outbound-email',
+  emailPayload,
+  {
+    method: 'POST',
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
 
-          const json = await res.json().catch(() => null);
+if (bridgeRes.error) {
+  throw bridgeRes.error;
+}
+
+const json = bridgeRes.data;
+
+if (
+  bridgeRes.status >= 200 &&
+  bridgeRes.status < 300 &&
+  json?.ok !== false &&
+  json?.success !== false
+) {
+  emailSent = true;
+} else {
+  emailErr =
+    json?.error ||
+    json?.message ||
+    `Email dispatch failed (HTTP ${bridgeRes.status})`;
+}
 
           if (res.ok && (json?.ok !== false && json?.success !== false)) {
             emailSent = true;
