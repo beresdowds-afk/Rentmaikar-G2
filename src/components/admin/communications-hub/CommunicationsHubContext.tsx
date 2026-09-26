@@ -71,40 +71,7 @@ export const CommunicationsHubProvider: React.FC<{ children: ReactNode }> = ({ c
   const [bulkAudienceRole, setBulkAudienceRole] = useState<string | null>(null);
   const [bulkRecipients, setBulkRecipients] = useState<any[]>([]);
 
-  // Active VoIP Call Realtime Sync across Call Center & Hub
-  const syncActiveCall = useCallback(async () => {
-    try {
-      const { data: ongoingCalls } = await supabase
-  .from('voip_calls')
-  .select('*')
-  .in('status', ['ringing', 'in-progress'])
-  .not('call_sid', 'is', null)
-  .order('created_at', { ascending: false })
-  .limit(1);
-
-      if (ongoingCalls && ongoingCalls.length > 0) {
-        const call = ongoingCalls[0];
-        const { data: participants } = await supabase
-          .from('voip_call_participants')
-          .select('*')
-          .eq('call_id', call.id);
-
-        setActiveCall({
-          ...call,
-          participants: participants || [],
-        } as VoIPCall);
-      } else {
-        setActiveCall((prev) => {
-          if (prev && (prev.status === 'in-progress' || prev.status === 'ringing')) {
-            return null;
-          }
-          return prev;
-        });
-      }
-    } catch (e) {
-      console.warn('Error syncing active call in HubContext:', e);
-    }
-  }, []);
+   
 
   // Unread Count Sync across Messages and Inboxes
   const syncUnreadCount = useCallback(async () => {
@@ -123,37 +90,53 @@ export const CommunicationsHubProvider: React.FC<{ children: ReactNode }> = ({ c
     }
   }, []);
 
-  useEffect(() => {
-    syncActiveCall();
+    useEffect(() => {
     syncUnreadCount();
 
-    // Listen to Supabase realtime events
     const channel = supabase
       .channel('comms_hub_global_sync')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'voip_calls' },
-        () => syncActiveCall()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'inbox_conversations' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'inbox_conversations',
+        },
         () => syncUnreadCount()
       )
       .subscribe();
 
-    const handleCustomEvent = () => {
-      syncActiveCall();
+    const handleCustomEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+
+      if (customEvent.detail?.type === 'voip_call') {
+        /*
+         * Do not query voip_calls here.
+         *
+         * useVoIPCalls is the frontend authority for active-call state.
+         * This context must never promote a stale database row to active.
+         */
+        if (customEvent.detail.action === 'ended') {
+          setActiveCall(null);
+        }
+      }
+
       syncUnreadCount();
     };
 
-    window.addEventListener('comms_activity_update', handleCustomEvent);
+    window.addEventListener(
+      'comms_activity_update',
+      handleCustomEvent
+    );
 
     return () => {
       supabase.removeChannel(channel);
-      window.removeEventListener('comms_activity_update', handleCustomEvent);
+      window.removeEventListener(
+        'comms_activity_update',
+        handleCustomEvent
+      );
     };
-  }, [syncActiveCall, syncUnreadCount]);
+  }, [syncUnreadCount]);
 
   const toggleOpen = useCallback(() => {
     setIsOpen((prev) => !prev);
