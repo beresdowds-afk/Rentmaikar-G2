@@ -38,6 +38,7 @@ interface UnifiedTelephoneCardProps {
   userRole?: string;
   isAssistant?: boolean;
   onInitiateCall: (type: 'individual' | 'group', region: 'USA' | 'Nigeria', participants: Array<{ phoneNumber: string; displayName?: string }>) => Promise<any>;
+  onEndCall?: () => Promise<boolean>;
   onOpenWhatsAppConsole?: () => void;
   onOpenIVRBuilder?: () => void;
 }
@@ -47,8 +48,10 @@ export const UnifiedTelephoneCard = ({
   userRole = 'admin',
   isAssistant = false,
   onInitiateCall,
+  onEndCall,
   onOpenWhatsAppConsole,
   onOpenIVRBuilder,
+}: UnifiedTelephoneCardProps) => {
 }: UnifiedTelephoneCardProps) => {
   const { toast } = useToast();
   const [activeChannel, setActiveChannel] = useState<'voip' | 'whatsapp'>('voip');
@@ -338,12 +341,7 @@ export const UnifiedTelephoneCard = ({
                   </>
                 )}
               </Button>
-
-              {voice.deviceState === 'connected' && (
-                <Button variant="destructive" onClick={() => voice.hangUp()}>
-                  <PhoneOff className="h-4 w-4 mr-1.5" /> Hang Up
-                </Button>
-              )}
+              
             </div>
 
             {/* Quick Extension Buttons */}
