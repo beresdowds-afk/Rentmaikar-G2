@@ -11,6 +11,7 @@ import {
   handleGetRecordingUrl,
   handleInitiateVoipCall,
   handleEndVoipCall,
+  handleGetVoipCallStatus,
   handleVoiceTwimlConfig,
   handleIncomingCallForward,
   handleVoiceCallRequest,
@@ -54,6 +55,7 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "voice-twiml-config",
   "initiate-voip-call",
   "end-voip-call",
+  "get-voip-call-status",
   "voip-status-callback",
   "recording-status-callback",
   "process-call-recording",
@@ -434,6 +436,11 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         return res.status(200).json(result);
       }
 
+      case "get-voip-call-status": {
+        const result = await handleGetVoipCallStatus(body);
+        return res.status(result.success ? 200 : 503).json(result);
+      }
+      
       case "voice-twiml-config": {
         const baseUrl = getBaseCallbackUrl(req);
         const result = await handleVoiceTwimlConfig(body, baseUrl);
