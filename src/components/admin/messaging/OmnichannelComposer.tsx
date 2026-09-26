@@ -44,6 +44,7 @@ import {
   Headphones
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { backendBridge } from '@/lib/backend-bridge';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCannedReplies } from '@/hooks/useCannedReplies';
@@ -764,10 +765,43 @@ export const OmnichannelComposer = ({
       // 3. Trigger external delivery via the Cloud Run application email gateway.
 // The backend gateway handles Supabase as the secondary fallback.
 if (channel === 'email' && contact.email) {
-  const emailTarget = contact.email.trim();
+  const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'send-outbound-email',
+  {
+    action: 'send',
+    to: emailTarget,
+    subject: subject || 'Message from Rentmaikar',
+    body,
+    recipientName: recipientName || undefined,
+    category: 'general',
+  },
+  {
+    method: 'POST',
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
 
-  try {
-    const res = await fetch('/api/functions/send-outbound-email', {
+if (bridgeRes.error) {
+  throw bridgeRes.error;
+}
+
+const json = bridgeRes.data;
+
+if (
+  bridgeRes.status >= 200 &&
+  bridgeRes.status < 300 &&
+  json?.ok !== false &&
+  json?.success !== false
+) {
+  // continue existing success handling
+} else {
+  throw new Error(
+    json?.error ||
+      json?.message ||
+      `Email delivery failed with HTTP ${bridgeRes.status}`,
+  );
+  }
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
