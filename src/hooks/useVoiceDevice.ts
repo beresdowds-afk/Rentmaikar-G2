@@ -359,46 +359,36 @@ if (answeredSid) {
     [applyAudio, attachCall, initialize],
   );
 
-    const hangUp = useCallback(async (reconcile = true) => {
-    // Capture the SID BEFORE disconnecting or clearing the call reference.
-    const callSid = callSidRef.current;
-    const call = callRef.current;
+    const hangUp = useCallback(async (_reconcile = false) => {
+  // IMPORTANT:
+  // This function is LOCAL SDK cleanup only.
+  // Authoritative Twilio termination MUST happen through useVoIPCalls.endCall()
+  // before this function is called by an End Call UI.
 
-    // Immediately terminate the browser media session.
-    try {
-      call?.disconnect();
-    } catch {
-      // The browser call was already disconnected.
-    }
+  const call = callRef.current;
 
-    // Authoritatively reconcile the provider-side call and Rentmaikar state.
-    if (callSid && reconcile) {
   try {
-    const { error } = await supabase.functions.invoke("end-voip-call", {
-      body: { callSid },
-    });
-    if (error) console.error("[VoIP] Failed to reconcile ended call:", error);
-  } catch (error) {
-    console.error("[VoIP] Error reconciling ended call:", error);
+    call?.disconnect();
+  } catch {
+    // The browser call was already disconnected.
   }
-}
 
-    callRef.current = null;
-    callSidRef.current = null;
+  callRef.current = null;
+  callSidRef.current = null;
 
-    if (incomingCall) {
-      try {
-        incomingCall.reject();
-      } catch {
-        // Incoming call was already gone.
-      }
-      setIncomingCall(null);
+  if (incomingCall) {
+    try {
+      incomingCall.reject();
+    } catch {
+      // Incoming call was already gone.
     }
+    setIncomingCall(null);
+  }
 
-    setStatus(deviceRef.current ? "ready" : "idle");
-    setDiagnosticsCallId(null);
-    logAudioEvent("call", "Call ended by agent");
-  }, [incomingCall]);
+  setStatus(deviceRef.current ? "ready" : "idle");
+  setDiagnosticsCallId(null);
+  logAudioEvent("call", "Local Twilio SDK call cleanup completed");
+}, [incomingCall]);
 
   const setMuted = useCallback((muted: boolean) => {
     const call = callRef.current;
