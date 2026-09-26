@@ -1287,9 +1287,239 @@ export async function handleEndVoipCall(
     };
   }
 }
-
 // -----------------------------------------------------------------
-// 9. TwiML App Config Verification & Sync (/api/functions/voice-twiml-config)
+// 9. Authoritative VoIP provider-state verification
+// -----------------------------------------------------------------
+
+export async function handleGetVoipCallStatus(
+  body: any
+): Promise<{
+  success: boolean;
+  callId?: string;
+  callSid?: string;
+  providerStatus?: string;
+  databaseStatus?: string;
+  active: boolean;
+  authoritative: boolean;
+  message?: string;
+}> {
+  const callId = body.callId || body.call_id;
+  const requestedCallSid = body.callSid || body.call_sid;
+
+  const pool = getDbPool();
+
+  let callSid = requestedCallSid;
+  let databaseStatus: string | undefined;
+
+  // Resolve the authoritative Twilio SID and current DB state.
+  if (pool && (callId || !callSid)) {
+    try {
+      const result = await pool.query(
+        `SELECT id, call_sid, status
+         FROM public.voip_calls
+         WHERE ($1::uuid IS NOT NULL AND id = $1)
+            OR ($2::text IS NOT NULL AND call_sid = $2)
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [callId || null, callSid || null]
+      );
+
+      const row = result.rows?.[0];
+
+      if (row) {
+        callSid = callSid || row.call_sid || undefined;
+        databaseStatus = row.status || undefined;
+      }
+    } catch (e: any) {
+      console.warn(
+        '[VoIP Status] Failed to resolve local call record:',
+        e.message
+      );
+    }
+  }
+
+  if (!callSid) {
+    return {
+      success: false,
+      callId,
+      active: false,
+      authoritative: false,
+      message: 'No authoritative Twilio Call SID is available',
+    };
+  }
+
+  let providerStatus = '';
+
+  try {
+    const lookup = await twilioRequest(`/Calls/${callSid}.json`, {
+      method: 'GET',
+    });
+
+    // The provider no longer knows this call.
+    if (lookup.status === 404) {
+      if (pool && (callId || callSid)) {
+        try {
+          await pool.query(
+            `UPDATE public.voip_calls
+             SET status = 'failed',
+                 ended_at = COALESCE(ended_at, NOW()),
+                 updated_at = NOW()
+             WHERE ($1::uuid IS NOT NULL AND id = $1)
+                OR ($2::text IS NOT NULL AND call_sid = $2)`,
+            [callId || null, callSid]
+          );
+        } catch (e: any) {
+          console.warn(
+            '[VoIP Status] Failed to reconcile missing provider call:',
+            e.message
+          );
+        }
+      }
+
+      return {
+        success: true,
+        callId,
+        callSid,
+        providerStatus: 'not-found',
+        databaseStatus,
+        active: false,
+        authoritative: true,
+        message: 'Twilio no longer has this call; local record reconciled',
+      };
+    }
+
+    if (!lookup.ok) {
+      return {
+        success: false,
+        callId,
+        callSid,
+        databaseStatus,
+        active: false,
+        authoritative: false,
+        message: `Unable to verify Twilio call state (HTTP ${lookup.status})`,
+      };
+    }
+
+    providerStatus = String(
+      lookup.data?.status || ''
+    ).toLowerCase();
+
+    if (!providerStatus) {
+      return {
+        success: false,
+        callId,
+        callSid,
+        databaseStatus,
+        active: false,
+        authoritative: false,
+        message: 'Twilio returned no call status',
+      };
+    }
+  } catch (e: any) {
+    console.warn(
+      '[VoIP Status] Twilio state lookup failed:',
+      e.message
+    );
+
+    return {
+      success: false,
+      callId,
+      callSid,
+      databaseStatus,
+      active: false,
+      authoritative: false,
+      message: 'Unable to verify the call with Twilio',
+    };
+  }
+
+  const terminalStatuses = new Set([
+    'completed',
+    'busy',
+    'failed',
+    'no-answer',
+    'canceled',
+  ]);
+
+  const activeStatuses = new Set([
+    'queued',
+    'ringing',
+    'in-progress',
+  ]);
+
+  const active = activeStatuses.has(providerStatus);
+
+  let reconciledStatus = databaseStatus;
+
+  if (providerStatus === 'queued' || providerStatus === 'ringing') {
+    reconciledStatus = 'ringing';
+  } else if (providerStatus === 'in-progress') {
+    reconciledStatus = 'in-progress';
+  } else if (terminalStatuses.has(providerStatus)) {
+    reconciledStatus = providerStatus;
+  }
+
+  // Reconcile the local record to the provider state.
+  if (pool && (callId || callSid)) {
+    try {
+      if (terminalStatuses.has(providerStatus)) {
+        await pool.query(
+          `UPDATE public.voip_calls
+           SET status = $1,
+               ended_at = COALESCE(ended_at, NOW()),
+               updated_at = NOW()
+           WHERE ($2::uuid IS NOT NULL AND id = $2)
+              OR ($3::text IS NOT NULL AND call_sid = $3)`,
+          [
+            reconciledStatus,
+            callId || null,
+            callSid || null,
+          ]
+        );
+
+        if (callId) {
+          await pool.query(
+            `UPDATE public.voip_call_participants
+             SET status = 'disconnected',
+                 left_at = COALESCE(left_at, NOW())
+             WHERE call_id = $1`,
+            [callId]
+          ).catch(() => {});
+        }
+      } else {
+        await pool.query(
+          `UPDATE public.voip_calls
+           SET status = $1,
+               ended_at = NULL,
+               updated_at = NOW()
+           WHERE ($2::uuid IS NOT NULL AND id = $2)
+              OR ($3::text IS NOT NULL AND call_sid = $3)`,
+          [
+            reconciledStatus,
+            callId || null,
+            callSid || null,
+          ]
+        );
+      }
+    } catch (e: any) {
+      console.warn(
+        '[VoIP Status] Local reconciliation failed:',
+        e.message
+      );
+    }
+  }
+
+  return {
+    success: true,
+    callId,
+    callSid,
+    providerStatus,
+    databaseStatus,
+    active,
+    authoritative: true,
+  };
+}
+// -----------------------------------------------------------------
+// 10. TwiML App Config Verification & Sync (/api/functions/voice-twiml-config)
 // -----------------------------------------------------------------
 
 export async function handleVoiceTwimlConfig(
@@ -1403,7 +1633,7 @@ export async function handleVoiceTwimlConfig(
 }
 
 // -----------------------------------------------------------------
-// 10. Incoming Call Forwarding (/api/functions/incoming-call-forward)
+// 11. Incoming Call Forwarding (/api/functions/incoming-call-forward)
 // -----------------------------------------------------------------
 
 export async function handleIncomingCallForward(params: {
@@ -1485,7 +1715,7 @@ export async function handleIncomingCallForward(params: {
 }
 
 // -----------------------------------------------------------------
-// 11. Voice Call Requests (/api/functions/voice-call-request)
+// 12. Voice Call Requests (/api/functions/voice-call-request)
 // -----------------------------------------------------------------
 
 export async function handleVoiceCallRequest(
@@ -1550,7 +1780,7 @@ export async function handleVoiceCallRequest(
 }
 
 // -----------------------------------------------------------------
-// 12. VoIP Call Transcript Log (/api/functions/voip-call-transcript-log)
+// 13. VoIP Call Transcript Log (/api/functions/voip-call-transcript-log)
 // -----------------------------------------------------------------
 
 export async function handleVoipCallTranscriptLog(
