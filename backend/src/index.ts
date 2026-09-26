@@ -1,4 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
+import http from "http";
+import http2 from "http2";
+import net from "net";
 import path from "path";
 import fs from "fs";
 import helmet from "helmet";
@@ -195,12 +198,26 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.use(express.urlencoded({ extended: true }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(morgan("combined"));
 
-// Webhooks need the raw body to verify signatures, so mount before express.json()
+// Webhooks raw body capture (for /api/webhooks and all provider endpoints)
 app.use("/api/webhooks", express.raw({ type: "application/json" }), webhooksRouter);
-app.use(express.json());
+app.use(
+  express.json({
+    limit: "25mb",
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // -----------------------------------------------------------------
 // 2.5 Brand Assets & Favicons (for browsers on staging.rentmaikar.com)
@@ -281,8 +298,8 @@ app.get("/", (req: Request, res: Response) => {
 // 3. Dedicated Backend Admin & Platform Portal (Domiciled in Backend)
 // -----------------------------------------------------------------
 
-// Visual Portal UI
-app.get(["/portal", "/portal/*", "/admin"], (req: Request, res: Response) => {
+// Visual Portal UI (Accessible via /portal or /admin on staging.rentmaikar.com)
+app.get(["/portal", "/portal/*", "/admin", "/admin/*"], (req: Request, res: Response) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(renderPortalHtml());
 });
@@ -325,11 +342,52 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// Server boot
-app.listen(PORT, () => {
-  console.log(`🚀 Rentmaikar Backend API Gateway running on port ${PORT}`);
+// -----------------------------------------------------------------
+// 5. Hardened Dual Protocol Server Boot (HTTP/1.1 + HTTP/2 h2c)
+// Resolves "upstream connect error or disconnect/reset before headers. reset reason: protocol error"
+// on Google Cloud Run and Envoy Load Balancer
+// -----------------------------------------------------------------
+
+const h1Server = http.createServer(app);
+const h2Server = http2.createServer((req, res) => {
+  app(req as any, res as any);
+});
+
+// Align keep-alive timeouts with Google Cloud Run & Cloud Load Balancer (Envoy timeout is 600s)
+h1Server.keepAliveTimeout = 650000;
+h1Server.headersTimeout = 660000;
+h2Server.setTimeout(650000);
+
+// Graceful client error handling avoids abrupt socket teardown before headers
+h1Server.on("clientError", (err: any, socket: any) => {
+  if (err.code === "ECONNRESET" || !socket.writable) return;
+  socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+});
+
+const H2_PREFACE = Buffer.from("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+
+// Dual Protocol Listener: multiplexes TCP connections to HTTP/1.1 or HTTP/2
+const gatewayServer = net.createServer((socket) => {
+  socket.once("data", (chunk) => {
+    socket.unshift(chunk);
+    if (chunk.length >= 24 && chunk.subarray(0, 24).equals(H2_PREFACE)) {
+      h2Server.emit("connection", socket);
+    } else {
+      h1Server.emit("connection", socket);
+    }
+  });
+
+  socket.on("error", (err: any) => {
+    if (err.code === "ECONNRESET" || err.code === "EPIPE") return;
+    console.warn("[Gateway Socket Error]", err.message);
+  });
+});
+
+const serverPort = Number(PORT) || 8080;
+gatewayServer.listen(serverPort, "0.0.0.0", () => {
+  console.log(`🚀 Rentmaikar Backend API Gateway running on port ${serverPort} (0.0.0.0 dual HTTP/1.1 + HTTP/2 h2c enabled)`);
   console.log(`🌐 Public backend URL: ${PUBLIC_BACKEND_URL}`);
-  console.log(`🛡️ Dedicated Backend Admin Portal: ${PUBLIC_BACKEND_URL}/portal`);
+  console.log(`🛡️ Dedicated Backend Admin Portal: ${PUBLIC_BACKEND_URL}/portal & ${PUBLIC_BACKEND_URL}/admin`);
   console.log(
     `⚡ Direct Connection Switch: ${
       bridgeManager.isDirectConnectionEnabled() ? "ENABLED (Listening to rentmaikar.com)" : "DISABLED"

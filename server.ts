@@ -11,21 +11,73 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Middleware for CORS and pre-flight handling
+  // Hardened Middleware for CORS and pre-flight handling
+  const ALLOWED_ORIGINS = [
+    "https://rentmaikar.com",
+    "https://www.rentmaikar.com",
+    "https://staging.rentmaikar.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+  ];
+
+  function isAuthorizedOrigin(origin?: string): boolean {
+    if (!origin) return false;
+    const norm = origin.trim().toLowerCase();
+    if (ALLOWED_ORIGINS.some((allowed) => norm === allowed || norm.endsWith(".rentmaikar.com") || norm.endsWith(".run.app"))) {
+      return true;
+    }
+    const publicApp = process.env.PUBLIC_APP_URL?.toLowerCase();
+    if (publicApp && norm === publicApp) return true;
+    const publicBackend = process.env.PUBLIC_BACKEND_URL?.toLowerCase();
+    if (publicBackend && norm === publicBackend) return true;
+    return false;
+  }
+
   app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    const origin = req.headers.origin;
+    if (origin && isAuthorizedOrigin(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-Requested-With, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Test-Role, X-Test-User-Id"
+      );
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Max-Age", "86400");
+    }
+
     if (req.method === "OPTIONS") {
+      if (origin && !isAuthorizedOrigin(origin)) {
+        res.status(403).json({ error: "CORS origin denied" });
+        return;
+      }
       res.status(204).end();
       return;
     }
     next();
   });
 
-  // Body parsers
-  app.use(express.json({ limit: "25mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+  // Body parsers with rawBody retention for webhook signature validation
+  app.use(
+    express.json({
+      limit: "25mb",
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
+  app.use(
+    express.urlencoded({
+      extended: true,
+      limit: "25mb",
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    })
+  );
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {

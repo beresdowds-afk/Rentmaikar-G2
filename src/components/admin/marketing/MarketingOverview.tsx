@@ -18,7 +18,10 @@ import {
   Layers,
   ChevronRight,
   MessageSquare,
-  Share2
+  Share2,
+  AlertCircle,
+  Info,
+  Database
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +33,69 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import { supabase } from '@/integrations/supabase/client';
+
+export type DataAuthorityStatus = 'live' | 'partial' | 'unavailable' | 'demo';
+
+const DEMO_METRICS = {
+  spend: 3450,
+  impressions: 124800,
+  clicks: 4920,
+  leads: 384,
+  qualifiedLeads: 215,
+  registrations: 168,
+  verifiedUsers: 142,
+  kycCompletions: 118,
+  vehiclesListed: 84,
+  vehiclesApproved: 62,
+  rentals: 54,
+  revenue: 45900,
+  costPerLead: 8.98,
+  costPerQualifiedLead: 16.05,
+  costPerVehicle: 55.65,
+  costPerRental: 63.89,
+  roas: 13.3,
+  conversionFunnel: [
+    { stage: 'Impressions', count: 124800, rate: '100%' },
+    { stage: 'Clicks', count: 4920, rate: '3.9%' },
+    { stage: 'Leads Captured', count: 384, rate: '7.8%' },
+    { stage: 'Qualified Leads', count: 215, rate: '56.0%' },
+    { stage: 'Registered Users', count: 168, rate: '78.1%' },
+    { stage: 'KYC Verified', count: 118, rate: '70.2%' },
+    { stage: 'Vehicles Approved', count: 62, rate: '52.5%' },
+    { stage: 'Rentals Converted', count: 54, rate: '87.1%' },
+  ],
+};
+
+const EMPTY_METRICS = {
+  spend: 0,
+  impressions: 0,
+  clicks: 0,
+  leads: 0,
+  qualifiedLeads: 0,
+  registrations: 0,
+  verifiedUsers: 0,
+  kycCompletions: 0,
+  vehiclesListed: 0,
+  vehiclesApproved: 0,
+  rentals: 0,
+  revenue: 0,
+  costPerLead: 0,
+  costPerQualifiedLead: 0,
+  costPerVehicle: 0,
+  costPerRental: 0,
+  roas: 0,
+  conversionFunnel: [
+    { stage: 'Impressions', count: 0, rate: '0%' },
+    { stage: 'Clicks', count: 0, rate: '0%' },
+    { stage: 'Leads Captured', count: 0, rate: '0%' },
+    { stage: 'Qualified Leads', count: 0, rate: '0%' },
+    { stage: 'Registered Users', count: 0, rate: '0%' },
+    { stage: 'KYC Verified', count: 0, rate: '0%' },
+    { stage: 'Vehicles Approved', count: 0, rate: '0%' },
+    { stage: 'Rentals Converted', count: 0, rate: '0%' },
+  ],
+};
 
 interface MarketingOverviewProps {
   onNavigateTab?: (tab: string) => void;
@@ -37,6 +103,9 @@ interface MarketingOverviewProps {
 
 export const MarketingOverview: React.FC<MarketingOverviewProps> = ({ onNavigateTab }) => {
   const [loading, setLoading] = useState(false);
+  const [dataAuthority, setDataAuthority] = useState<DataAuthorityStatus>('live');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const [dateRange, setDateRange] = useState('30d');
   const [country, setCountry] = useState('all');
   const [city, setCity] = useState('all');
@@ -45,39 +114,21 @@ export const MarketingOverview: React.FC<MarketingOverviewProps> = ({ onNavigate
   const [channel, setChannel] = useState('all');
   const [role, setRole] = useState('all');
 
-  const [metrics, setMetrics] = useState({
-    spend: 3450,
-    impressions: 124800,
-    clicks: 4920,
-    leads: 384,
-    qualifiedLeads: 215,
-    registrations: 168,
-    verifiedUsers: 142,
-    kycCompletions: 118,
-    vehiclesListed: 84,
-    vehiclesApproved: 62,
-    rentals: 54,
-    revenue: 45900,
-    costPerLead: 8.98,
-    costPerQualifiedLead: 16.05,
-    costPerVehicle: 55.65,
-    costPerRental: 63.89,
-    roas: 13.3,
-    conversionFunnel: [
-      { stage: 'Impressions', count: 124800, rate: '100%' },
-      { stage: 'Clicks', count: 4920, rate: '3.9%' },
-      { stage: 'Leads Captured', count: 384, rate: '7.8%' },
-      { stage: 'Qualified Leads', count: 215, rate: '56.0%' },
-      { stage: 'Registered Users', count: 168, rate: '78.1%' },
-      { stage: 'KYC Verified', count: 118, rate: '70.2%' },
-      { stage: 'Vehicles Approved', count: 62, rate: '52.5%' },
-      { stage: 'Rentals Converted', count: 54, rate: '87.1%' },
-    ],
-  });
+  const [metrics, setMetrics] = useState(EMPTY_METRICS);
 
   const fetchOverview = async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
+      const sessionRes = await supabase.auth.getSession();
+      const session = sessionRes?.data?.session;
+      const headers: Record<string, string> = {
+        'x-test-role': 'admin', // For dev/test environments
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const queryParams = new URLSearchParams({
         dateRange,
         country,
@@ -88,23 +139,44 @@ export const MarketingOverview: React.FC<MarketingOverviewProps> = ({ onNavigate
         role,
       });
 
-      const res = await fetch(`/api/marketing/overview?${queryParams.toString()}`);
+      const res = await fetch(`/api/marketing/overview?${queryParams.toString()}`, { headers });
       if (res.ok) {
         const json = await res.json();
         if (json.overview) {
           setMetrics(json.overview);
+          // If all counts are zero, it is live authoritative data with no conversions yet
+          setDataAuthority('live');
+          return;
         }
       }
-    } catch {
-      // Fall back to default state
+
+      // If backend returned error or non-200
+      setDataAuthority('unavailable');
+      setErrorMessage('Marketing API reporting service returned an error. Showing live authority state as unavailable.');
+    } catch (err: any) {
+      setDataAuthority('unavailable');
+      setErrorMessage(err.message || 'Network error communicating with Marketing API Gateway');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchOverview();
+    if (dataAuthority !== 'demo') {
+      fetchOverview();
+    }
   }, [dateRange, country, city, platform, campaign, channel, role]);
+
+  const handleEnableDemoMode = () => {
+    setMetrics(DEMO_METRICS);
+    setDataAuthority('demo');
+    setErrorMessage(null);
+  };
+
+  const handleReturnToLive = () => {
+    setDataAuthority('live');
+    fetchOverview();
+  };
 
   return (
     <div className="space-y-6">
@@ -113,25 +185,71 @@ export const MarketingOverview: React.FC<MarketingOverviewProps> = ({ onNavigate
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
             Marketing Engine Overview
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-xs py-0.5">
-              Live Attribution
-            </Badge>
+            {dataAuthority === 'live' && (
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-xs py-0.5 flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                REAL DATA
+              </Badge>
+            )}
+            {dataAuthority === 'partial' && (
+              <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-xs py-0.5 flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                PARTIAL DATA
+              </Badge>
+            )}
+            {dataAuthority === 'unavailable' && (
+              <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20 text-xs py-0.5 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                DATA UNAVAILABLE
+              </Badge>
+            )}
+            {dataAuthority === 'demo' && (
+              <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/20 text-xs py-0.5 flex items-center gap-1">
+                <Database className="h-3 w-3" />
+                DEMO DATA (SIMULATED)
+              </Badge>
+            )}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Real-time performance across ad networks, social conversations, and lifecycle conversions.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchOverview}
-            disabled={loading}
-            className="h-9"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          {dataAuthority === 'demo' ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleReturnToLive}
+              className="h-9 border-purple-300 text-purple-700 hover:bg-purple-50"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Return to Live Data
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchOverview}
+              disabled={loading}
+              className="h-9"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          )}
+
+          {dataAuthority === 'unavailable' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleEnableDemoMode}
+              className="h-9 bg-purple-100 text-purple-700 hover:bg-purple-200"
+            >
+              <Database className="h-4 w-4 mr-2" />
+              Preview Demo Data
+            </Button>
+          )}
+
           {onNavigateTab && (
             <>
               <Button
@@ -155,6 +273,57 @@ export const MarketingOverview: React.FC<MarketingOverviewProps> = ({ onNavigate
           )}
         </div>
       </div>
+
+      {/* Explicit Data Authority Status Banners */}
+      {dataAuthority === 'demo' && (
+        <div className="p-4 rounded-lg bg-purple-50 border border-purple-200 text-purple-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 font-medium">
+            <Info className="h-5 w-5 text-purple-600 shrink-0" />
+            <span>
+              <strong>EXPLICIT DEMO DATA:</strong> You are currently viewing sample simulated metrics for layout demonstration. These are not real production figures.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleReturnToLive}
+            className="shrink-0 bg-white border-purple-300 text-purple-700 hover:bg-purple-100"
+          >
+            Connect to Live Data
+          </Button>
+        </div>
+      )}
+
+      {dataAuthority === 'unavailable' && (
+        <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+            <div>
+              <strong>LIVE DATA UNAVAILABLE:</strong> {errorMessage || 'Live marketing reporting could not be loaded.'} Fabricated figures are strictly prohibited from being silently substituted.
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={fetchOverview}
+              disabled={loading}
+              className="bg-white border-destructive/30 hover:bg-destructive/5 text-destructive"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Retry Connection
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleEnableDemoMode}
+              className="bg-purple-100 text-purple-800 hover:bg-purple-200"
+            >
+              Preview Demo Mode
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Comprehensive Filter Bar */}
       <Card className="shadow-sm border-border bg-card">
