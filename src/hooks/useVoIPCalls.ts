@@ -84,10 +84,17 @@ export const useVoIPCalls = () => {
       });
 
       if (error) throw error;
-            // The function returns 200 with success:false when the provider rejects.
-      if (data && data.success === false) {
-        throw new Error(data.error || 'The call provider rejected this call');
-      }
+
+// End Call is successful ONLY when the authoritative server explicitly
+// confirms success. Never treat an empty, malformed, or simulated response
+// as a successful termination.
+if (!data?.success) {
+  throw new Error(
+    data?.message ||
+      data?.error ||
+      'The provider did not confirm call termination'
+  );
+}
 
       toast({
         title: 'Call Initiated',
