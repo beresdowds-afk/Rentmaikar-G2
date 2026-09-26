@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Call, Device } from "@twilio/voice-sdk";
+import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
 import {
   AudioOutputRoute,
@@ -260,7 +261,18 @@ if (answeredSid) {
       return false;
     }
 
-    const { data, error: fnError } = await supabase.functions.invoke("voice-access-token");
+    const bridgeRes = await backendBridge.invokeEdgeFunction(
+  "voice-access-token",
+  {},
+  {
+    method: "POST",
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
+
+const data = bridgeRes?.data;
+const fnError = bridgeRes?.error;
     if (fnError || !data?.token) {
       setError(
         (data && typeof data.error === "string" ? data.error : fnError?.message) ??
@@ -285,8 +297,21 @@ if (answeredSid) {
   attachCall(call);
 });
       device.on("tokenWillExpire", async () => {
-        const { data: refreshed } = await supabase.functions.invoke("voice-access-token");
-        if (refreshed?.token) device.updateToken(refreshed.token as string);
+        const bridgeRes = await backendBridge.invokeEdgeFunction(
+  "voice-access-token",
+  {},
+  {
+    method: "POST",
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
+
+const refreshed = bridgeRes?.data;
+
+if (refreshed?.token) {
+  device.updateToken(refreshed.token as string);
+}
       });
 
       await device.register();
@@ -450,11 +475,19 @@ if (answeredSid) {
 
     if (callSid) {
       try {
-        const { error } = await supabase.functions.invoke("end-voip-call", {
-          body: {
-            callSid,
-          },
-        });
+        const bridgeRes = await backendBridge.invokeEdgeFunction(
+  "end-voip-call",
+  {
+    callSid,
+  },
+  {
+    method: "POST",
+    timeoutMs: 15000,
+    skipRetry: true,
+  },
+);
+
+const error = bridgeRes?.error;
 
         if (error) {
           console.error("[VoIP] Failed to reconcile rejected call:", error);
