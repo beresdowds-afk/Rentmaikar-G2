@@ -483,8 +483,22 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         });
       }
      case "send-inbox-reply": {
-       const result = await sendInboxReply(body, token);
-        return res.status(result.success ? 200 : 500).json(result);
+  const result = await sendInboxReply({
+    conversationId: body.conversationId,
+    messageContent: body.messageContent,
+    channel: body.channel,
+    recipientId: body.recipientId,
+    recipientPhone: body.recipientPhone,
+    attachments: body.attachments,
+    metadata: body.metadata,
+    whatsappTemplateId: body.whatsappTemplateId,
+    whatsappTemplateLanguage: body.whatsappTemplateLanguage,
+    whatsappTemplateParams: body.whatsappTemplateParams,
+  });
+
+  return res
+    .status(result.success ? 200 : 502)
+    .json(result);
     }
       
       case "send-email-reply": {
@@ -633,24 +647,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           });
         }
       }
-    case "send-inbox-reply": {
-  const result = await sendInboxReply({
-    conversationId: body.conversationId,
-    messageContent: body.messageContent,
-    channel: body.channel,
-    recipientId: body.recipientId,
-    recipientPhone: body.recipientPhone,
-    attachments: body.attachments,
-    metadata: body.metadata,
-    whatsappTemplateId: body.whatsappTemplateId,
-    whatsappTemplateLanguage: body.whatsappTemplateLanguage,
-    whatsappTemplateParams: body.whatsappTemplateParams,
-  });
-
-  return res
-    .status(result.success ? 200 : 502)
-    .json(result);
-    }
+    
       // -----------------------------------------------------------------
       // IoT & Vehicle Telematics Authoritative Handlers
       // -----------------------------------------------------------------
