@@ -173,12 +173,22 @@ class BackendBridge {
   }> = [];
 
   constructor() {
-    // Determine primary URL from Vite env or default to same-origin /api
-    const envBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-    if (envBase) {
-      this.primaryBaseUrl = envBase;
+    // Canonical production operational backend.
+    // Browser operational requests must never depend on the static
+    // rentmaikar.com origin or an accidental same-origin proxy.
+    const configuredBase = String(
+      import.meta.env.VITE_API_BASE_URL || ""
+    ).trim().replace(/\/+$/, "");
+
+    const isProduction =
+      typeof import.meta !== "undefined" &&
+      import.meta.env?.MODE === "production";
+
+    if (isProduction) {
+      this.primaryBaseUrl = this.stagingBackendUrl;
     } else {
-      this.primaryBaseUrl = "/api";
+      this.primaryBaseUrl =
+        configuredBase || this.stagingBackendUrl;
     }
 
     if (typeof window !== "undefined") {
@@ -1020,122 +1030,189 @@ class BackendBridge {
   // -------------------------------------------------------------
 
   /**
-   * Invoke any Supabase Edge Function through the resilient Link Bridge.
-   * Handles all 164 available edge functions with automatic fallback,
-   * JWT session preservation, and staging gateway routing when direct link is severed.
+   * Invoke an operational backend function while preserving the raw HTTP
+   * response. This is required for binary, streaming and multipart operations.
+   *
+   * The request still uses the SAME canonical transport:
+   *
+   * Browser
+   *   -> backendBridge
+   *   -> /api/functions/:functionName
+   *   -> staging.rentmaikar.com
+   *
+   * It never contacts Supabase Edge Functions directly.
    */
+  public async invokeRawEdgeFunction(
+    functionName: string,
+    options: BackendCallOptions = {}
+  ): Promise<Response> {
+    const correlationId =
+      options.correlationId ||
+      generateBridgeCorrelationId(`raw-${functionName}`);
+
+    const cleanFunctionName = encodeURIComponent(functionName);
+    const endpoint = `/functions/${cleanFunctionName}`;
+
+    const method = (options.method || "POST").toUpperCase();
+    const timeoutMs = options.timeoutMs || 30000;
+
+    const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const customHeaders = new Headers(options.headers || {});
+
+      /*
+       * Do not force application/json onto FormData.
+       * The browser must generate the multipart boundary automatically.
+       */
+      const isFormData =
+        typeof FormData !== "undefined" &&
+        options.body instanceof FormData;
+
+      if (isFormData) {
+        customHeaders.delete("Content-Type");
+      }
+
+      const headers = await this.getHeaders(
+        customHeaders,
+        this.connectionState === "STAGING_FALLBACK"
+      );
+
+      if (isFormData) {
+        delete headers["Content-Type"];
+        delete headers["content-type"];
+      }
+
+      headers["X-Correlation-ID"] = correlationId;
+
+      if (options.idempotencyKey) {
+        headers["X-Idempotency-Key"] = options.idempotencyKey;
+      }
+
+      const response = await fetch(
+        `${this.getActiveBaseUrl()}${endpoint}`,
+        {
+          ...options,
+          method,
+          headers,
+          signal: options.signal || controller.signal,
+          body: options.body,
+        }
+      );
+
+      /*
+       * Raw operations must expose the real HTTP status.
+       * Never convert a provider/backend failure into success.
+       */
+      if (!response.ok) {
+        const contentType =
+          response.headers.get("content-type") || "";
+
+        let message = `HTTP ${response.status}: ${response.statusText}`;
+
+        try {
+          if (contentType.includes("application/json")) {
+            const body = await response.clone().json();
+            message =
+              body?.error ||
+              body?.message ||
+              message;
+          } else {
+            const body = await response.clone().text();
+            if (body) {
+              message = body.slice(0, 1000);
+            }
+          }
+        } catch {
+          // Preserve original HTTP failure.
+        }
+
+        const error = new Error(message) as Error & {
+          status?: number;
+          correlationId?: string;
+        };
+
+        error.status = response.status;
+        error.correlationId = correlationId;
+
+        throw error;
+      }
+
+      return response;
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        const timeoutError = new Error(
+          `Request timed out after ${timeoutMs}ms`
+        ) as Error & {
+          status?: number;
+          correlationId?: string;
+        };
+
+        timeoutError.status = 504;
+        timeoutError.correlationId = correlationId;
+
+        throw timeoutError;
+      }
+
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   public async invokeEdgeFunction<T = any>(
     functionName: string,
     payload: any = {},
     options: BackendCallOptions = {}
-  ): Promise<{ data: T | null; error: Error | null; status: number; handledBy: string }> {
+  ): Promise<{
+    data: T | null;
+    error: Error | null;
+    status: number;
+    handledBy: string;
+  }> {
     const correlationId =
-      options.correlationId || generateBridgeCorrelationId(`edge-${functionName}`);
+      options.correlationId ||
+      generateBridgeCorrelationId(`edge-${functionName}`);
 
-    // If direct link is active and not severed, attempt invocation through direct gateway
-    if (this.connectionState === "DIRECT" && !this.isSimulatedLossOfContact && !options.forceFallback) {
-      try {
-        const headers = await this.getHeaders(options.headers || {}, false);
-        const res = await fetch(`/api/functions/${functionName}`, {
-          method: options.method || "POST",
-          headers,
-          body: options.method !== "GET" && options.method !== "HEAD"
-            ? (typeof payload === "string" ? payload : JSON.stringify(payload))
-            : undefined,
-        });
+    const method = (options.method || "POST").toUpperCase();
 
-        const contentType = res.headers.get("content-type") || "";
-        const json = contentType.includes("application/json") ? await res.json().catch(() => null) : null;
-
-        if (res.ok) {
-          return { data: json, error: null, status: res.status, handledBy: "direct_gateway" };
-        }
-
-        // If not a client-side rejection, fall through to link bridge fallback
-        if (res.status === 404 || res.status >= 500) {
-          // Continue to bridge RPC
-        } else {
-          return {
-            data: json,
-            error: new Error(json?.error || json?.message || `Edge function failed (${res.status})`),
-            status: res.status,
-            handledBy: "direct_gateway",
-          };
-        }
-      } catch (err: any) {
-        this.handleLossOfContact(err.message || "Failed to contact direct edge gateway");
-      }
-    }
-
-    // Dispatched via Link Bridge (/api/bridge/call or staging backend)
     try {
-      const bridgeRes = await this.call<{
-        success: boolean;
-        status?: number;
-        data?: any;
-        error?: string;
-        provider?: string;
-      }>("/bridge/call", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "invoke_edge_function",
-          correlationId,
-          payload: {
-            functionName,
-            body: payload,
-          },
-        }),
-        timeoutMs: options.timeoutMs || 15000,
-        headers: options.headers,
+      const endpoint = `/functions/${encodeURIComponent(functionName)}`;
+
+      const result = await this.call<T>(endpoint, {
+        ...options,
+        method,
+        correlationId,
+        body:
+          method === "GET" || method === "HEAD"
+            ? undefined
+            : typeof payload === "string"
+              ? payload
+              : JSON.stringify(payload),
       });
 
-      if (bridgeRes && (bridgeRes.success || (bridgeRes.status && bridgeRes.status < 400))) {
-        return {
-          data: bridgeRes.data ?? (bridgeRes as any),
-          error: null,
-          status: bridgeRes.status || 200,
-          handledBy: "link_bridge_rpc",
-        };
-      }
-
       return {
-        data: bridgeRes?.data ?? null,
-        error: new Error(bridgeRes?.error || `Bridge execution for '${functionName}' reported failure`),
-        status: bridgeRes?.status || 500,
-        handledBy: "link_bridge_rpc",
+        data: result,
+        error: null,
+        status: 200,
+        handledBy: "backendBridge",
       };
-    } catch (bridgeErr: any) {
-      // PHASE 2 RESILIENCE HARDENING:
-      // Authoritative business operations (payments, OTP, rentals, KYC, accounts, webhooks)
-      // MUST NEVER manufacture false success payloads ({ok: true, simulated: true}).
-      // Isolated behind explicit diagnostic flags for safe non-authoritative presentation testing only.
-      const isTestEnv =
-        typeof process !== "undefined" &&
-        process.env.NODE_ENV !== "production" &&
-        Boolean(options.allowDiagnosticSimulation);
-
-      if (isTestEnv && SAFE_DIAGNOSTIC_EDGE_FUNCTIONS.has(functionName)) {
-        return {
-          data: {
-            ok: true,
-            simulated: true,
-            handledBy: "link_bridge_client_diagnostic_simulation",
-            functionName,
-            timestamp: new Date().toISOString(),
-          } as unknown as T,
-          error: null,
-          status: 200,
-          handledBy: "link_bridge_client_diagnostic_simulation",
-        };
-      }
-
-      // Propagate real failure to the caller with correlation ID and status
-      const message = bridgeErr?.message || `Bridge execution for '${functionName}' failed`;
+    } catch (err: any) {
       return {
         data: null,
-        error: new Error(message),
-        status: bridgeErr?.status || 503,
-        handledBy: "link_bridge_failure",
+        error:
+          err instanceof Error
+            ? err
+            : new Error(
+                err?.message ||
+                  `Backend function '${functionName}' failed`
+              ),
+        status: Number(err?.status) || 503,
+        handledBy: "backendBridge_failure",
       };
     }
   }

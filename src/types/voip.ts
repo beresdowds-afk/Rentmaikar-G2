@@ -1,3 +1,43 @@
+export { CallingMethod, type RentmaikarCallSession } from './telephony';
+export type TelephonyEngine = 'SOFTPHONE' | 'SERVER_REST' | 'TWIML';
+
+export interface AdminTelephonyPreferences {
+  id?: string;
+  admin_id: string;
+  preferred_engine: TelephonyEngine;
+  caller_id?: string;
+  auto_record: boolean;
+  webrtc_audio_input_device_id?: string;
+  webrtc_audio_output_device_id?: string;
+  region: CallRegion;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const TELEPHONY_ENGINE_METADATA: Record<
+  TelephonyEngine,
+  { label: string; description: string; badge: string; icon: string }
+> = {
+  SOFTPHONE: {
+    label: 'Softphone (WebRTC)',
+    description: 'Browser audio via Twilio Voice SDK. Directly connects your headset/microphone.',
+    badge: 'WebRTC Direct',
+    icon: 'Headphones',
+  },
+  SERVER_REST: {
+    label: 'Server REST Call',
+    description: 'Twilio Cloud REST API server-initiated calling with conference bridge routing.',
+    badge: 'Server REST',
+    icon: 'Server',
+  },
+  TWIML: {
+    label: 'TwiML App Dial',
+    description: 'Twilio TwiML dynamic application dialing instructions with status callbacks.',
+    badge: 'TwiML App',
+    icon: 'Radio',
+  },
+};
+
 export type CallType = 'individual' | 'group';
 export type CallStatus = 'pending' | 'ringing' | 'in-progress' | 'completed' | 'failed' | 'busy' | 'no-answer' | 'canceled';
 export type CallDirection = 'inbound' | 'outbound';

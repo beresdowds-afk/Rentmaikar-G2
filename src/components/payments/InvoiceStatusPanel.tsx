@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -159,27 +160,21 @@ export function InvoiceStatusPanel({ scope, userId }: Props) {
   }, [invoices, q, filter]);
 
   const downloadReceipt = async (receiptId: string) => {
-    const { data: { session } } = await supabase.auth.getSession();
     try {
       const html = await backendBridge.call<string>(
-  "/functions/billing-portal",
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      action: "render_html",
-      kind: "receipt",
-      id: receiptId,
-    }),
-  }
-);
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ action: "render_html", kind: "receipt", id: receiptId }),
-      });
-      const html = await res.text();
+        "/functions/billing-portal",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "render_html",
+            kind: "receipt",
+            id: receiptId,
+          }),
+        }
+      );
       const w = window.open("", "_blank");
       if (w) { w.document.write(html); w.document.close(); }
     } catch { toast.error("Unable to open receipt"); }

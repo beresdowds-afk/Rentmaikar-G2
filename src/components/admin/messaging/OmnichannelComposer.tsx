@@ -765,7 +765,8 @@ export const OmnichannelComposer = ({
       // 3. Trigger external delivery via the Cloud Run application email gateway.
 // The backend gateway handles Supabase as the secondary fallback.
 if (channel === 'email' && contact.email) {
-  const bridgeRes = await backendBridge.invokeEdgeFunction(
+  try {
+    const bridgeRes = await backendBridge.invokeEdgeFunction(
   'send-outbound-email',
   {
     action: 'send',
@@ -801,31 +802,7 @@ if (
       json?.message ||
       `Email delivery failed with HTTP ${bridgeRes.status}`,
   );
-  }
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'send',
-        to: emailTarget,
-        subject,
-        body,
-        recipientName: contact.full_name !== 'Customer' ? contact.full_name : undefined,
-        fromAlias: emailSenderAlias,
-        category: 'general',
-        attachments: uploadedAttachments,
-      }),
-    });
-
-    const contentType = res.headers.get('content-type') || '';
-    const result = contentType.includes('application/json')
-      ? await res.json().catch(() => null)
-      : null;
-
-    if (!res.ok || result?.ok === false || result?.success === false) {
-      throw new Error(
-        result?.error || `Email delivery failed with HTTP ${res.status}`
-      );
-    }
+}
 
     console.log(
       `[OmnichannelComposer] Email dispatched through Cloud Run gateway to ${emailTarget}`

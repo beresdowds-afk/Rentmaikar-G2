@@ -115,12 +115,6 @@ export const ActiveCallPanel = ({
 
     return () => clearInterval(interval);
   }, [call.status, call.started_at]);
-    const interval = setInterval(() => {
-      setDuration(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [call.started_at]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Copy, Check, RefreshCw, Loader2, AlertTriangle, CheckCircle2, Wrench } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { useToast } from '@/hooks/use-toast';
 
 interface TwilioNumber {
@@ -75,10 +75,10 @@ export const TwiMLAppConfigPanel = () => {
   const load = useCallback(async (action: 'verify' | 'apply' | 'apply-number' = 'verify') => {
     action === 'verify' ? setIsLoading(true) : setIsApplying(true);
     try {
-      const { data: res, error } = await supabase.functions.invoke('voice-twiml-config', {
-        body: { action },
-      });
-      if (error) throw error;
+      const bridgeRes = await backendBridge.invokeEdgeFunction('voice-twiml-config', { action });
+      if (bridgeRes.error) throw bridgeRes.error;
+      const res = bridgeRes.data;
+      if (!res) throw new Error('No data received from voice-twiml-config');
       setData(res as TwiMLConfigResponse);
       if (action === 'apply') {
         toast({ title: 'TwiML App updated', description: 'Voice Request URL now points at voice-twiml-dial.' });

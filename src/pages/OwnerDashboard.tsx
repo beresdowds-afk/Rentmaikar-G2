@@ -42,7 +42,7 @@ import { UnifiedBillingPanel } from '@/components/payments/UnifiedBillingPanel';
 import { InvoiceStatusPanel } from '@/components/payments/InvoiceStatusPanel';
 
 import { OwnerOverviewTab } from '@/components/dashboard/OwnerOverviewTab';
-import SupportChatWidget from '@/components/supporit/SupportChatWidget';
+import SupportChatWidget from '@/components/support/SupportChatWidget';
 import { InstallAppBanner } from '@/components/pwa/InstallAppBanner';
 import { UserIdentityCard } from '@/components/profile/UserIdentityCard';
 import { CallSupportButton } from '@/components/support/CallSupportButton';
@@ -55,7 +55,6 @@ import { AdminNotificationsBell as NotificationsBell } from "@/components/admin/
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/contexts/ImpersonationContext';
 import { supabase } from '@/integrations/supabase/client';
-import { backendBridge } from '@/lib/backend-bridge';
 import { useOwnerDashboard } from '@/hooks/useOwnerDashboard';
 import { RecallApprovalPanel } from '@/components/recall/RecallApprovalPanel';
 import { OwnerWithdrawalPanel } from "@/components/owner/OwnerWithdrawalPanel";
@@ -227,19 +226,16 @@ export default function OwnerDashboard() {
         ? 'initiate-paypal-payout'
         : 'initiate-paystack-transfer';
 
-      const { data, error } = await backendBridge.invokeEdgeFunction(
-  fnName,
-  {
-    amount,
-    payoutAccountId: account.id,
-    authorizationId,
-    note: 'RentMaikar owner withdrawal',
-    reason: 'RentMaikar owner withdrawal',
-  },
-  {
-    method: 'POST',
-  }
-);
+      const { data, error } = await supabase.functions.invoke(fnName, {
+        body: {
+          amount,
+          payoutAccountId: account.id,
+          authorizationId,
+          note: 'RentMaikar owner withdrawal',
+          reason: 'RentMaikar owner withdrawal',
+        },
+      });
+
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
 

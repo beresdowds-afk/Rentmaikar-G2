@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,33 +126,15 @@ function STTTest({ onLogged }: { onLogged: () => void }) {
       form.append("audio", file);
       form.append("diarize", "true");
       form.append("tag_audio_events", "true");
-      const { data: json, error } =
-  await backendBridge.invokeEdgeFunction<{
-    token?: string;
-    error?: string;
-    details?: string;
-  }>(
-    "elevenlabs-agent-token",
-    {
-      agentId: agentId.trim() || undefined,
-    },
-    {
-      method: "POST",
-    }
-  );
-
-if (error) {
-  throw error;
-}
-
-if (!json?.token) {
-  throw new Error(
-    json?.details ||
-    json?.error ||
-    "ElevenLabs agent token was not returned"
-  );
-}
-      if (!res.ok) throw new Error(json?.details || json?.error || `HTTP ${res.status}`);
+      const res = await backendBridge.invokeRawEdgeFunction("elevenlabs-stt", {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(body || `ElevenLabs STT failed (${res.status})`);
+      }
+      const json = await res.json();
       setResult(json);
       toast.success("Transcription complete");
       onLogged();
@@ -348,16 +331,32 @@ function VoiceAgentTest({ onLogged }: { onLogged: () => void }) {
     try {
       const gotMic = await requestMic();
       if (!gotMic) return;
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) throw new Error("Not signed in");
-      const res = await fetch(`${FUNCTIONS_BASE}/elevenlabs-agent-token`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId: agentId.trim() || undefined }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.details || json?.error || `HTTP ${res.status}`);
+      const { data: json, error } =
+        await backendBridge.invokeEdgeFunction<{
+          token?: string;
+          error?: string;
+          details?: string;
+        }>(
+          "elevenlabs-agent-token",
+          {
+            agentId: agentId.trim() || undefined,
+          },
+          {
+            method: "POST",
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      if (!json?.token) {
+        throw new Error(
+          json?.details ||
+            json?.error ||
+            "ElevenLabs agent token was not returned"
+        );
+      }
       await conversation.startSession({ conversationToken: json.token, connectionType: "webrtc" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect agent");
@@ -745,16 +744,32 @@ function RecentRuns({ refreshToken, onChanged }: { refreshToken: number; onChang
 
   const getSignedUrl = async (row: RunRow): Promise<string | null> => {
     if (!row.audio_storage_path) return null;
-    const { data: sess } = await supabase.auth.getSession();
-    const token = sess.session?.access_token;
-    const res = await fetch(`${FUNCTIONS_BASE}/elevenlabs-test-audio-url`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ logId: row.id }),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json?.error || "Failed to sign audio URL");
-    return json.url as string;
+    const { data: json, error } =
+      await backendBridge.invokeEdgeFunction<{
+        url?: string;
+        error?: string;
+      }>(
+        "elevenlabs-test-audio-url",
+        {
+          logId: row.id,
+        },
+        {
+          method: "POST",
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    if (!json?.url) {
+      throw new Error(
+        json?.error ||
+          "Failed to sign audio URL"
+      );
+    }
+
+    return json.url;
   };
 
   const playAudio = async (row: RunRow) => {

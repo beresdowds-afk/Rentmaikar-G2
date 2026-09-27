@@ -29,9 +29,12 @@ import {
   Play,
   RotateCcw,
   Zap,
+  Server,
 } from 'lucide-react';
 import type { UseVoiceDeviceResult } from '@/hooks/useVoiceDevice';
 import { useToast } from '@/hooks/use-toast';
+import { TelephonyEngineSelector } from './TelephonyEngineSelector';
+import { TelephonyEngine, TELEPHONY_ENGINE_METADATA } from '@/types/voip';
 
 interface UnifiedTelephoneCardProps {
   voice: UseVoiceDeviceResult;
@@ -41,6 +44,9 @@ interface UnifiedTelephoneCardProps {
   onEndCall?: () => Promise<boolean>;
   onOpenWhatsAppConsole?: () => void;
   onOpenIVRBuilder?: () => void;
+  preferredEngine?: TelephonyEngine;
+  onEngineChange?: (engine: TelephonyEngine) => void;
+  onControlledDial?: (params: { phoneNumber: string; region: 'USA' | 'Nigeria'; displayName?: string }) => Promise<boolean>;
 }
 
 export const UnifiedTelephoneCard = ({
@@ -51,7 +57,9 @@ export const UnifiedTelephoneCard = ({
   onEndCall,
   onOpenWhatsAppConsole,
   onOpenIVRBuilder,
-}: UnifiedTelephoneCardProps) => {
+  preferredEngine = 'SOFTPHONE',
+  onEngineChange,
+  onControlledDial,
 }: UnifiedTelephoneCardProps) => {
   const { toast } = useToast();
   const [activeChannel, setActiveChannel] = useState<'voip' | 'whatsapp'>('voip');
@@ -92,14 +100,22 @@ export const UnifiedTelephoneCard = ({
         if (voice.makeCall) {
           voice.makeCall(dialNumber);
         }
+      } else if (onControlledDial) {
+        // Use the authoritative Telephony Control Layer
+        await onControlledDial({
+          phoneNumber: dialNumber,
+          region: selectedRegion,
+          displayName: callerDisplayName || `Caller ${dialNumber}`,
+        });
       } else {
-        // Standard VoIP Call
-        if (voice.makeCall) {
+        // Fallback to direct engine calling
+        if (preferredEngine === 'SOFTPHONE' && voice.makeCall) {
           voice.makeCall(dialNumber);
+        } else {
+          await onInitiateCall('individual', selectedRegion, [
+            { phoneNumber: dialNumber, displayName: callerDisplayName || `Caller ${dialNumber}` },
+          ]);
         }
-        await onInitiateCall('individual', selectedRegion, [
-          { phoneNumber: dialNumber, displayName: callerDisplayName || `Caller ${dialNumber}` },
-        ]);
       }
     } catch (err: any) {
       toast({
@@ -137,6 +153,15 @@ export const UnifiedTelephoneCard = ({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Calling Engine Selector */}
+            {onEngineChange && (
+              <TelephonyEngineSelector
+                currentEngine={preferredEngine}
+                onChange={onEngineChange}
+                compact
+              />
+            )}
+
             {/* DND Toggle */}
             <div className="flex items-center gap-2 bg-muted/40 px-3 py-1.5 rounded-lg border text-xs">
               <Switch id="dnd-switch" checked={isDND} onCheckedChange={setIsDND} />
@@ -337,7 +362,7 @@ export const UnifiedTelephoneCard = ({
                   </>
                 ) : (
                   <>
-                    <Phone className="h-4 w-4" /> Place VoIP Call
+                    <Phone className="h-4 w-4" /> Place Call ({TELEPHONY_ENGINE_METADATA[preferredEngine]?.badge || 'VoIP'})
                   </>
                 )}
               </Button>

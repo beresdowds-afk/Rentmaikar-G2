@@ -1,6 +1,6 @@
-import { backendBridge } from "@/lib/backend-bridge";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,74 +45,58 @@ export const TwilioTestSendPanel = () => {
   const [diag, setDiag] = useState<Record<string, unknown> | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
 
-
   const invoke = async (
-  method: "POST" | "GET",
-  body?: unknown,
-  sid?: string
-) => {
-  const query = sid ? `?sid=${encodeURIComponent(sid)}` : "";
+    method: "POST" | "GET",
+    body?: unknown,
+    sid?: string
+  ) => {
+    const query = sid
+      ? `?sid=${encodeURIComponent(sid)}`
+      : "";
 
-  const result = await backendBridge.call<Record<string, unknown>>(
-    `/functions/twilio-test-send${query}`,
-    {
-      method,
-      body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
-      headers: {
-        "Content-Type": "application/json",
-      },
+    const result =
+      await backendBridge.call<Record<string, unknown>>(
+        `/functions/twilio-test-send${query}`,
+        {
+          method,
+          body:
+            method === "POST"
+              ? JSON.stringify(body ?? {})
+              : undefined,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+    if ((result as any)?.error) {
+      throw new Error(
+        (result as any)?.error ||
+          (result as any)?.twilio?.message ||
+          "Twilio request failed"
+      );
     }
-  );
 
-  if ((result as any)?.error) {
-    throw new Error(
-      (result as any)?.error ||
-      (result as any)?.twilio?.message ||
-      "Twilio request failed"
-    );
-  }
-
-  return result;
-};
-    const { data: sess } = await supabase.auth.getSession();
-    const token = sess.session?.access_token;
-    if (!token) throw new Error("Not signed in");
-    const base = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-test-send`;
-    const url = sid ? `${base}?sid=${encodeURIComponent(sid)}` : base;
-    const res = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(json?.error || json?.twilio?.message || `HTTP ${res.status}`);
-    }
-    return json;
+    return result as any;
   };
 
   const runDiagnostics = async () => {
     setDiagLoading(true);
     setDiag(null);
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) throw new Error("Not signed in");
-      const json = await backendBridge.call<Record<string, unknown>>(
-  "/functions/twilio-test-send?diagnostics=1",
-  {
-    method: "GET",
-  }
-);
+      const json =
+        await backendBridge.call<Record<string, unknown>>(
+          "/functions/twilio-test-send?diagnostics=1",
+          {
+            method: "GET",
+          }
+        );
 
-if ((json as any)?.error) {
-  throw new Error((json as any).error);
-}
+      if ((json as any)?.error) {
+        throw new Error((json as any).error);
+      }
 
-setDiag(json);
+      setDiag(json);
       toast.success("Twilio diagnostics complete");
     } catch (e) {
       toast.error((e as Error).message);
@@ -354,26 +338,25 @@ const NumberWebhookAudit = ({
   const repair = async () => {
     setFixing(true);
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) throw new Error("Not signed in");
-      const json = await backendBridge.call<Record<string, unknown>>(
-  "/functions/twilio-test-send",
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      action: "fix-number-webhooks",
-    }),
-  }
-);
+      const json =
+        await backendBridge.call<Record<string, unknown>>(
+          "/functions/twilio-test-send",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "fix-number-webhooks",
+            }),
+          }
+        );
 
-if ((json as any)?.error) {
-  throw new Error((json as any).error);
-}
-      if (json.success) toast.success("Number webhooks repointed to the live backend");
+      if ((json as any)?.error) {
+        throw new Error((json as any).error);
+      }
+
+      if ((json as any)?.success) toast.success("Number webhooks repointed to the live backend");
       else toast.error("Some numbers failed to update — check diagnostics");
       onRepaired();
     } catch (e) {

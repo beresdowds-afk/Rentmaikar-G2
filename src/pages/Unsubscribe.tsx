@@ -1,7 +1,7 @@
-import { backendBridge } from "@/lib/backend-bridge";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Loader2, MailX, ShieldAlert } from "lucide-react";
@@ -15,9 +15,6 @@ type PageState =
   | "submitting"
   | "success"
   | "error";
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 export default function Unsubscribe() {
   const [searchParams] = useSearchParams();
@@ -33,32 +30,25 @@ export default function Unsubscribe() {
       }
       try {
         const result = await backendBridge.call<{
-  valid?: boolean;
-  reason?: string;
-  error?: string;
-}>(
-  `/functions/handle-email-unsubscribe?token=${encodeURIComponent(token)}`,
-  {
-    method: "GET",
-  }
-);
-
-if (cancelled) return;
-
-if (result?.valid) {
-  setState("confirm");
-} else if (result?.reason === "already_unsubscribed") {
-  setState("already_unsubscribed");
-} else {
-  setState("invalid");
-}
-          { headers: { apikey: SUPABASE_ANON_KEY } },
+          valid?: boolean;
+          reason?: string;
+          error?: string;
+        }>(
+          `/functions/handle-email-unsubscribe?token=${encodeURIComponent(token)}`,
+          {
+            method: "GET",
+          }
         );
-        const data = await res.json().catch(() => ({}));
+
         if (cancelled) return;
-        if (res.ok && data.valid) setState("confirm");
-        else if (data.reason === "already_unsubscribed") setState("already_unsubscribed");
-        else setState("invalid");
+
+        if (result?.valid) {
+          setState("confirm");
+        } else if (result?.reason === "already_unsubscribed") {
+          setState("already_unsubscribed");
+        } else {
+          setState("invalid");
+        }
       } catch {
         if (!cancelled) setState("error");
       }

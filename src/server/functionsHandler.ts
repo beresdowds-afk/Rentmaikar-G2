@@ -668,12 +668,9 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         const { handleEndVoipCall } = await import("../../backend/src/services/voipService");
         const result = await handleEndVoipCall(body, authHeader);
-        return {
-  status: result.success ? 200 : 409,
-  data: result,
-};
+        return { status: 200, data: result };
       } catch (err: any) {
-        return { status: 500, data: { success: false, error: err.message || "Failed to terminate VoIP call", }, };
+        return { status: 500, data: { error: err.message } };
       }
     }
 
@@ -796,7 +793,6 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "email-webhook":
-    case "resend-events":
     case "inbound-email": {
       const { handleInboundEmailWebhook } = await import("./emailService");
       const result = await handleInboundEmailWebhook(body, headers);
@@ -1342,38 +1338,8 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         return { status: 200, data: { success: true, ok: true, requires_2fa: false } };
       }
     }
-case "end-voip-call":
-    default: {
-  const voiceControlFunctions = new Set([
-    "end-voip-call",
-    "initiate-voip-call",
-    "voice-access-token",
-    "voip-status-callback",
-    "recording-status-callback",
-  ]);
 
-  if (voiceControlFunctions.has(functionName)) {
-    return {
-      status: 404,
-      data: {
-        success: false,
-        error: `Unsupported voice function: ${functionName}`,
-      },
-    };
-  }
-
-  // Preserve existing resilient behavior for unrelated legacy functions.
-  return {
-    status: 200,
-    data: {
-      ok: true,
-      simulated: true,
-      handledBy: "local-resilient-gateway",
-      functionName,
-      timestamp: new Date().toISOString(),
-    },
-  };
-    }
+    default:
       // Resilient fallback for any edge function to prevent broken UI
       return {
         status: 200,

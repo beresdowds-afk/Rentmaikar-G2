@@ -9,13 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Phone, Users, Plus, X, Loader2, PhoneOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { CallRegion, CallType, VoIPCallGroup } from '@/types/voip';
-import { COUNTRY_CODES, validatePhoneNumber, formatPhoneForDisplay } from '@/types/voip';
+import type { CallRegion, CallType, VoIPCallGroup, TelephonyEngine } from '@/types/voip';
+import { COUNTRY_CODES, validatePhoneNumber, formatPhoneForDisplay, TELEPHONY_ENGINE_METADATA } from '@/types/voip';
 import { useRegion } from '@/contexts/RegionContext';
 import { regionToDefaultCountry } from '@/hooks/useDefaultPhoneCountry';
 import { UserCallSearch } from './UserCallSearch';
 import { Separator } from '@/components/ui/separator';
-
+import { TelephonyEngineSelector } from './TelephonyEngineSelector';
 
 interface CallDialerProps {
   onInitiateCall: (
@@ -29,9 +29,27 @@ interface CallDialerProps {
   activeCall?: { id: string; status: string } | null;
   /** Terminates the live call from the dialer surface. */
   onEndCall?: () => void | Promise<void>;
+  preferredEngine?: TelephonyEngine;
+  onEngineChange?: (engine: TelephonyEngine) => void;
+  onControlledDial?: (params: {
+    phoneNumber: string;
+    region: CallRegion;
+    displayName?: string;
+    callType: CallType;
+    recipients?: { phoneNumber: string; displayName?: string; userId?: string }[];
+  }) => Promise<boolean>;
 }
 
-export const CallDialer = ({ onInitiateCall, groups, isLoading, activeCall, onEndCall }: CallDialerProps) => {
+export const CallDialer = ({
+  onInitiateCall,
+  groups,
+  isLoading,
+  activeCall,
+  onEndCall,
+  preferredEngine = 'SOFTPHONE',
+  onEngineChange,
+  onControlledDial,
+}: CallDialerProps) => {
   // Seed the dial region from RegionContext so admins start on their active
   // region instead of a hard-coded USA default.
   const { country: activeCountry } = useRegion();
@@ -94,21 +112,49 @@ export const CallDialer = ({ onInitiateCall, groups, isLoading, activeCall, onEn
           return;
         }
 
-        await onInitiateCall('individual', region, [
-          { phoneNumber: fullNumber, displayName: displayName || undefined },
-        ]);
+        if (onControlledDial) {
+          await onControlledDial({
+            phoneNumber: fullNumber,
+            region,
+            displayName: displayName || undefined,
+            callType: 'individual',
+          });
+        } else {
+          await onInitiateCall('individual', region, [
+            { phoneNumber: fullNumber, displayName: displayName || undefined },
+          ]);
+        }
       } else if (callMode === 'group') {
         if (selectedGroupId) {
           const group = groups.find(g => g.id === selectedGroupId);
           if (group?.members) {
-            await onInitiateCall('group', region, group.members.map(m => ({
+            const groupRecipients = group.members.map(m => ({
               phoneNumber: m.phone_number,
               displayName: m.display_name,
               userId: m.user_id,
-            })));
+            }));
+            if (onControlledDial) {
+              await onControlledDial({
+                phoneNumber: groupRecipients[0]?.phoneNumber || '',
+                region,
+                callType: 'group',
+                recipients: groupRecipients,
+              });
+            } else {
+              await onInitiateCall('group', region, groupRecipients);
+            }
           }
         } else if (recipients.length > 0) {
-          await onInitiateCall('group', region, recipients);
+          if (onControlledDial) {
+            await onControlledDial({
+              phoneNumber: recipients[0]?.phoneNumber || '',
+              region,
+              callType: 'group',
+              recipients,
+            });
+          } else {
+            await onInitiateCall('group', region, recipients);
+          }
         } else {
           toast({
             title: 'No Recipients',
@@ -128,13 +174,24 @@ export const CallDialer = ({ onInitiateCall, groups, isLoading, activeCall, onEn
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Phone className="h-5 w-5" />
-          Make a Call
-        </CardTitle>
-        <CardDescription>
-          Call individual users or groups across USA and Nigeria
-        </CardDescription>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Phone className="h-5 w-5" />
+              Make a Call
+            </CardTitle>
+            <CardDescription>
+              Call individual users or groups across USA and Nigeria
+            </CardDescription>
+          </div>
+          {onEngineChange && (
+            <TelephonyEngineSelector
+              currentEngine={preferredEngine}
+              onChange={onEngineChange}
+              compact
+            />
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {activeCall && onEndCall && (
@@ -329,7 +386,9 @@ export const CallDialer = ({ onInitiateCall, groups, isLoading, activeCall, onEn
           ) : (
             <>
               <Phone className="h-4 w-4 mr-2" />
-              {callMode === 'individual' ? 'Call Now' : 'Start Conference Call'}
+              {callMode === 'individual'
+                ? `Call Now (${TELEPHONY_ENGINE_METADATA[preferredEngine]?.badge || 'VoIP'})`
+                : `Start Conference Call (${TELEPHONY_ENGINE_METADATA[preferredEngine]?.badge || 'VoIP'})`}
             </>
           )}
         </Button>

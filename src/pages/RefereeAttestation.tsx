@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, ShieldCheck, CheckCircle2, XCircle } from "lucide-react";
-import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 
 interface Context {
   referee_name: string;
@@ -33,23 +33,26 @@ export default function RefereeAttestation() {
     (async () => {
       try {
         const body = await backendBridge.call<{
-  ok?: boolean;
-  referee_name?: string;
-  driver_name?: string;
-  already_submitted?: boolean;
-  error?: string;
-}>(
-  `/functions/referee-attestation?token=${encodeURIComponent(token)}`,
-  {
-    method: "GET",
-  }
-);
+          ok?: boolean;
+          referee_name?: string;
+          driver_name?: string;
+          already_submitted?: boolean;
+          error?: string;
+        }>(
+          `/functions/referee-attestation?token=${encodeURIComponent(token)}`,
+          {
+            method: "GET",
+          }
+        );
 
-if (!body?.ok) {
-  throw new Error(body?.error ?? "This attestation link is invalid or has expired.");
-}
+        if (!body?.ok) {
+          throw new Error(
+            body?.error ||
+              "This attestation link is invalid or has expired."
+          );
+        }
 
-setCtx(body);
+        setCtx(body as Context);
       } catch (e: any) {
         setError(e?.message ?? "Could not load attestation");
       } finally {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,20 +30,20 @@ export function DriverBillingPanel({ userId }: Props) {
 
   const viewDoc = async (kind: "invoice" | "receipt", id: string) => {
     try {
-  const html = await backendBridge.call<string>(
-    "/functions/billing-portal",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "render_html",
-        kind,
-        id,
-      }),
-    }
-  );
+      const html = await backendBridge.call<string>(
+        "/functions/billing-portal",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "render_html",
+            kind,
+            id,
+          }),
+        }
+      );
       const w = window.open("", "_blank");
       if (w) { w.document.write(html); w.document.close(); }
     } catch (e) { toast.error("Unable to open document"); }

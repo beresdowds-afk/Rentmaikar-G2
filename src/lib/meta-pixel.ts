@@ -5,6 +5,8 @@
 //   (`rentmaikar_message_consent` / `rentmaikar_cookie_consent`).
 // - PII (email, phone, name) is hashed server-side before hitting Meta.
 
+import { backendBridge } from "@/lib/backend-bridge";
+
 const PIXEL_ID = (import.meta as any).env?.VITE_META_PIXEL_ID as string | undefined;
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co";
 const SUPABASE_ANON = (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
@@ -96,24 +98,20 @@ async function sendCapi(
     }],
   };
 
-  try {
-    // Fire-and-forget; keepalive lets it survive page unload for navigation events.
-import { backendBridge } from "@/lib/backend-bridge";
-    const { error } = await backendBridge.invokeEdgeFunction(
-  "send-meta-capi",
-  payload,
-  {
-    method: "POST",
-    idempotent: true,
-  }
-);
+  const { error } = await backendBridge.invokeEdgeFunction(
+    "send-meta-capi",
+    payload,
+    {
+      method: "POST",
+      idempotent: true,
+    }
+  );
 
-if (error) {
-  console.warn("[Meta CAPI] Backend bridge dispatch failed:", error.message);
-}
-  } catch (e) {
-    // Never let analytics break the app.
-    console.warn("Meta CAPI dispatch failed:", e);
+  if (error) {
+    console.warn(
+      "[Meta CAPI] Backend bridge dispatch failed:",
+      error.message
+    );
   }
 }
 

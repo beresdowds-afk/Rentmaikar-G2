@@ -31,9 +31,12 @@ import { ConferenceRoomPanel } from './ConferenceRoomPanel';
 import { CallRecordingsPanel } from './CallRecordingsPanel';
 import { TwiMLAppConfigPanel } from './TwiMLAppConfigPanel';
 import { OutboundNumberRouting } from './OutboundNumberRouting';
+import { AdminTelephonySettingsCard } from './AdminTelephonySettingsCard';
 
 import { IncomingCallAlerts } from '@/components/voice/IncomingCallAlerts';
 import { useVoiceDevice } from '@/hooks/useVoiceDevice';
+import { useTelephonyControl } from '@/hooks/useTelephonyControl';
+import { TelephonyEngineSelector } from './TelephonyEngineSelector';
 import { Badge } from '@/components/ui/badge';
 import { AccentConversionAgentPanel } from './AccentConversionAgentPanel';
 import { AudioHardwareTester } from './AudioHardwareTester';
@@ -84,9 +87,10 @@ const CALL_CENTER_STORAGE_KEY = 'rentmaikar:callcenter:last_subtab';
 
 export const CallCenterPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const telephonyControl = useTelephonyControl();
   const { calls, groups, isLoading, activeCall, initiateCall, endCall, refreshCalls } = useVoIPCalls();
   const { incomingRequests, acceptCallRequest, rejectCallRequest, escalateCallRequest } = useVoiceCall('admin');
-  const voice = useVoiceDevice();
+  const voice = telephonyControl.engines.softphone;
   const queueState = useCallQueue();
   const { userRole } = useAuth();
   const hub = useCommunicationsHubSafe();
@@ -434,13 +438,22 @@ const answerQueuedCall = useCallback(async (call: QueuedCall) => {
                 userRole={userRole || 'admin'}
                 isAssistant={isAssistant}
                 onInitiateCall={initiateCall}
-              onEndCall={
-  activeCall
-    ? () => terminateCall(activeCall.id)
-    : undefined
-              }
+                onEndCall={
+                  activeCall
+                    ? () => terminateCall(activeCall.id)
+                    : undefined
+                }
                 onOpenWhatsAppConsole={() => handleTabChange('whatsapp-voice')}
                 onOpenIVRBuilder={() => handleTabChange('ivr')}
+                preferredEngine={telephonyControl.preferredEngine}
+                onEngineChange={(eng) => void telephonyControl.setPreferredEngine(eng)}
+                onControlledDial={async ({ phoneNumber, region, displayName }) => {
+                  return await telephonyControl.initiateCall({
+                    phoneNumber,
+                    region,
+                    recipientName: displayName,
+                  });
+                }}
               />
 
               <div className="grid gap-6 md:grid-cols-2">
@@ -450,6 +463,17 @@ const answerQueuedCall = useCallback(async (call: QueuedCall) => {
                   isLoading={isLoading}
                   activeCall={activeCall ? { id: activeCall.id, status: activeCall.status } : null}
                   onEndCall={activeCall ? () => terminateCall(activeCall.id) : undefined}
+                  preferredEngine={telephonyControl.preferredEngine}
+                  onEngineChange={(eng) => void telephonyControl.setPreferredEngine(eng)}
+                  onControlledDial={async ({ phoneNumber, region, displayName, callType, recipients }) => {
+                    return await telephonyControl.initiateCall({
+                      phoneNumber,
+                      region,
+                      recipientName: displayName,
+                      callType,
+                      recipients,
+                    });
+                  }}
                 />
 
                 <div className="space-y-4">
@@ -560,6 +584,7 @@ const answerQueuedCall = useCallback(async (call: QueuedCall) => {
         {selectedTab === 'settings' && (
           <CallCenterSubPageErrorBoundary subPage="Telephony Settings" onResetToDialer={() => handleTabChange('dialer')}>
             <TabsContent value="settings" className="space-y-4 mt-0">
+              <AdminTelephonySettingsCard />
               <OutboundNumberRouting />
               <VoIPFeatureSettings />
               <TwiMLAppConfigPanel />

@@ -167,19 +167,6 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
 
       setCalls(reconciledCalls);
 
-      /*
-            const verifiedActiveCalls = reconciledCalls.filter((call) => {
-        const wasLocallyActive = locallyActiveCalls.some(
-          (candidate) => candidate.id === call.id
-        );
-
-        return wasLocallyActive && isActiveCallRecord(call);
-      });
-
-      setActiveCall(
-        verifiedActiveCalls.length > 0
-      setCalls(reconciledCalls);
-
       const verifiedActiveCalls = reconciledCalls.filter((call) => {
         const wasLocallyActive = locallyActiveCalls.some(
           (candidate) => candidate.id === call.id
@@ -193,10 +180,12 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
           ? verifiedActiveCalls[0]
           : null
       );
+    } catch (error: any) {
+      console.error('Error fetching VoIP calls:', error);
     }
   }, []);
 
-    const initiateCall = async (
+  const initiateCall = async (
     callType: CallType,
     region: CallRegion,
     recipients: {
@@ -278,69 +267,8 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
       throw error;
     }
   };
-      
 
-      // Call the edge function to initiate the call
-      const bridgeRes = await backendBridge.invokeEdgeFunction(
-  'end-voip-call',
-  {
-    callId,
-    callSid: call?.call_sid ?? undefined,
-  },
-  {
-    method: 'POST',
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
-);
-
-if (bridgeRes.error) {
-  throw bridgeRes.error;
-}
-
-const data = bridgeRes.data;
-
-      if (error) throw error;
-
-// End Call is successful ONLY when the authoritative server explicitly
-// confirms success. Never treat an empty, malformed, or simulated response
-// as a successful termination.
-if (!data?.success) {
-  throw new Error(
-    data?.message ||
-      data?.error ||
-      'The provider did not confirm call termination'
-  );
-}
-
-      toast({
-        title: 'Call Initiated',
-        description: `Calling ${recipients.length} recipient(s)...`,
-      });
-
-      try {
-        window.dispatchEvent(
-          new CustomEvent('comms_activity_update', {
-            detail: { type: 'voip_call', action: 'initiated' },
-          })
-        );
-      } catch {
-        /* ignore */
-      }
-
-      await fetchCalls();
-      return data;
-    } catch (error: any) {
-      toast({
-        title: 'Call Failed',
-        description: error.message || 'Failed to initiate call',
-        variant: 'destructive',
-      });
-      throw error;
-    }
-  };
-
-    const endCall = async (callId: string): Promise<boolean> => {
+  const endCall = async (callId: string): Promise<boolean> => {
   try {
     const call = calls.find((item) => item.id === callId);
 

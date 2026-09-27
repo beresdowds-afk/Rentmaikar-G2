@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Call, Device } from "@twilio/voice-sdk";
-import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import {
   AudioOutputRoute,
   ensureMediaPermissions,
@@ -261,18 +261,9 @@ if (answeredSid) {
       return false;
     }
 
-    const bridgeRes = await backendBridge.invokeEdgeFunction(
-  "voice-access-token",
-  {},
-  {
-    method: "POST",
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
-);
-
-const data = bridgeRes?.data;
-const fnError = bridgeRes?.error;
+    const bridgeRes = await backendBridge.invokeEdgeFunction("voice-access-token");
+    const data = bridgeRes.data;
+    const fnError = bridgeRes.error;
     if (fnError || !data?.token) {
       setError(
         (data && typeof data.error === "string" ? data.error : fnError?.message) ??
@@ -297,21 +288,8 @@ const fnError = bridgeRes?.error;
   attachCall(call);
 });
       device.on("tokenWillExpire", async () => {
-        const bridgeRes = await backendBridge.invokeEdgeFunction(
-  "voice-access-token",
-  {},
-  {
-    method: "POST",
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
-);
-
-const refreshed = bridgeRes?.data;
-
-if (refreshed?.token) {
-  device.updateToken(refreshed.token as string);
-}
+        const refreshRes = await backendBridge.invokeEdgeFunction("voice-access-token");
+        if (refreshRes.data?.token) device.updateToken(refreshRes.data.token as string);
       });
 
       await device.register();
@@ -475,22 +453,12 @@ if (refreshed?.token) {
 
     if (callSid) {
       try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction(
-  "end-voip-call",
-  {
-    callSid,
-  },
-  {
-    method: "POST",
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
-);
+        const bridgeRes = await backendBridge.invokeEdgeFunction("end-voip-call", {
+          callSid,
+        });
 
-const error = bridgeRes?.error;
-
-        if (error) {
-          console.error("[VoIP] Failed to reconcile rejected call:", error);
+        if (bridgeRes.error) {
+          console.error("[VoIP] Failed to reconcile rejected call:", bridgeRes.error);
         }
       } catch (error) {
         console.error("[VoIP] Error reconciling rejected call:", error);

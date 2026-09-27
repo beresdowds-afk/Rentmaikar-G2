@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRegion } from '@/contexts/RegionContext';
@@ -106,17 +107,16 @@ export const useVoiceCall = (userRole?: string) => {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke('voice-call-request', {
-        body: {
-          action: 'create',
-          targetRole,
-          targetId,
-          reason,
-          region: country,
-        },
+      const bridgeRes = await backendBridge.invokeEdgeFunction('voice-call-request', {
+        action: 'create',
+        targetRole,
+        targetId,
+        reason,
+        region: country,
       });
 
-      if (error) throw error;
+      if (bridgeRes.error) throw bridgeRes.error;
+      const data = bridgeRes.data;
 
       toast({
         title: 'Call Request Sent',
@@ -137,10 +137,11 @@ export const useVoiceCall = (userRole?: string) => {
 
   const acceptCallRequest = async (requestId: string) => {
     try {
-      const { error } = await supabase.functions.invoke('voice-call-request', {
-        body: { action: 'accept', requestId },
+      const bridgeRes = await backendBridge.invokeEdgeFunction('voice-call-request', {
+        action: 'accept',
+        requestId,
       });
-      if (error) throw error;
+      if (bridgeRes.error) throw bridgeRes.error;
 
       toast({ title: 'Call Request Accepted', description: 'You can now call the user.' });
       await fetchIncomingRequests();
@@ -151,10 +152,11 @@ export const useVoiceCall = (userRole?: string) => {
 
   const rejectCallRequest = async (requestId: string) => {
     try {
-      const { error } = await supabase.functions.invoke('voice-call-request', {
-        body: { action: 'reject', requestId },
+      const bridgeRes = await backendBridge.invokeEdgeFunction('voice-call-request', {
+        action: 'reject',
+        requestId,
       });
-      if (error) throw error;
+      if (bridgeRes.error) throw bridgeRes.error;
 
       toast({ title: 'Call Request Rejected' });
       await fetchIncomingRequests();
@@ -165,10 +167,11 @@ export const useVoiceCall = (userRole?: string) => {
 
   const escalateCallRequest = async (requestId: string) => {
     try {
-      const { error } = await supabase.functions.invoke('voice-call-request', {
-        body: { action: 'escalate', requestId },
+      const bridgeRes = await backendBridge.invokeEdgeFunction('voice-call-request', {
+        action: 'escalate',
+        requestId,
       });
-      if (error) throw error;
+      if (bridgeRes.error) throw bridgeRes.error;
 
       toast({ title: 'Call Escalated', description: 'Request has been escalated to Admin.' });
       await fetchIncomingRequests();
