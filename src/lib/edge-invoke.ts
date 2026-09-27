@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 
 /**
  * Extracts a descriptive, human-readable error message from an edge function invocation failure.
