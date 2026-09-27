@@ -584,71 +584,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         });
       }
 
-      case "send-outbound-email": {
-        // 1. PRIMARY: Direct Cloud Run server-side email service
-        try {
-          const { handleSendOutboundEmail } = await import("../services/emailService");
-          const result = await handleSendOutboundEmail(body);
-
-          if (result.ok) {
-            return res.status(200).json(result);
-          }
-
-          console.warn(
-            "[Backend Functions] Primary Cloud Run email dispatch failed; falling back to Supabase:",
-            result
-          );
-        } catch (localErr: any) {
-          console.warn(
-            "[Backend Functions] Primary Cloud Run email dispatch threw; falling back to Supabase:",
-            localErr?.message || localErr
-          );
-        }
-
-  // 2. FALLBACK: Supabase Edge Function
-  try {
-    const supabaseUrl = (
-      process.env.SUPABASE_URL ||
-      process.env.SUPABASE_PROJECT_URL ||
-      "https://jrsydiofzceoeddjogov.supabase.co"
-    ).replace(/\/+$/, "");
-
-    const supabaseAnonKey =
-      process.env.SUPABASE_ANON_KEY ||
-      process.env.VITE_SUPABASE_ANON_KEY ||
-      process.env.SUPABASE_PUBLISHABLE_KEY ||
-      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      "";
-
-    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-outbound-email`;
-
-    const authHeader =
-      req.headers["authorization"] ||
-      (supabaseAnonKey ? `Bearer ${supabaseAnonKey}` : "");
-
-    const proxyHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    if (authHeader) {
-      proxyHeaders["Authorization"] = authHeader;
-    }
-
-    if (supabaseAnonKey) {
-      proxyHeaders["apikey"] = supabaseAnonKey;
-    }
-
-    if (req.headers["x-client-info"]) {
-      proxyHeaders["x-client-info"] = String(req.headers["x-client-info"]);
-    }
-
-    const edgeRes = await fetch(edgeFunctionUrl, {
-      method: "POST",
-      headers: proxyHeaders,
-      body: JSON.stringify(body),
-    });
-
-    const edgeData = await edgeRes.json().catch(() => null);
+      
 
             case "send-outbound-email": {
         // AUTHORITATIVE OPERATIONAL EMAIL PATH:
