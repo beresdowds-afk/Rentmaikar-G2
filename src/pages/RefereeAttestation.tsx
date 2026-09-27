@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, ShieldCheck, CheckCircle2, XCircle } from "lucide-react";
+import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Context {
@@ -31,13 +32,24 @@ export default function RefereeAttestation() {
     if (!tokenLooksValid) return;
     (async () => {
       try {
-        const base = import.meta.env.VITE_SUPABASE_URL as string;
-        const res = await fetch(`${base}/functions/v1/referee-attestation?token=${encodeURIComponent(token)}`, {
-          headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string },
-        });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body?.error ?? "This attestation link is invalid or has expired.");
-        setCtx(body);
+        const body = await backendBridge.call<{
+  ok?: boolean;
+  referee_name?: string;
+  driver_name?: string;
+  already_submitted?: boolean;
+  error?: string;
+}>(
+  `/functions/referee-attestation?token=${encodeURIComponent(token)}`,
+  {
+    method: "GET",
+  }
+);
+
+if (!body?.ok) {
+  throw new Error(body?.error ?? "This attestation link is invalid or has expired.");
+}
+
+setCtx(body);
       } catch (e: any) {
         setError(e?.message ?? "Could not load attestation");
       } finally {
