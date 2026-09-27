@@ -480,16 +480,11 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           message: "In-app message dispatched successfully",
         });
       }
-
-      case "send-inbox-reply": {
-        return res.status(200).json({
-          success: true,
-          messageId: `reply_${Date.now()}`,
-          channel: body.channel || "sms",
-          provider: "backend_gateway",
-        });
-      }
-
+     case "send-inbox-reply": {
+       const result = await sendInboxReply(body, token);
+        return res.status(result.success ? 200 : 500).json(result);
+    }
+      
       case "send-email-reply": {
         const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
         const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
