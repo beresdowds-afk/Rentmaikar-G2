@@ -344,15 +344,7 @@ if (
     json?.error ||
     json?.message ||
     `Email dispatch failed (HTTP ${bridgeRes.status})`;
-}
-
-          if (res.ok && (json?.ok !== false && json?.success !== false)) {
-            emailSent = true;
-          } else {
-            emailErr =
-              json?.error ||
-              `Email dispatch failed (HTTP ${res.status})`;
-          }
+         }
         } catch (e: any) {
           emailErr = e.message || 'Email gateway request failed';
         }
