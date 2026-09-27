@@ -23,7 +23,6 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
-import { backendBridge } from '@/lib/backend-bridge';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { useCommunicationsHub } from './CommunicationsHubContext';
@@ -316,15 +315,29 @@ export const HubMessageComposer: React.FC = () => {
             recipientName: recipientName.trim() || undefined,
           };
 
-          const bridgeRes = await backendBridge.invokeEdgeFunction(
+          const { data: json, error } = await supabase.functions.invoke(
   'send-outbound-email',
-  emailPayload,
   {
-    method: 'POST',
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
+    body: emailPayload,
+  }
 );
+
+if (error) {
+  throw error;
+}
+
+if (
+  json?.ok === false ||
+  json?.success === false
+) {
+  throw new Error(
+    json?.error ||
+    json?.message ||
+    'Email dispatch failed'
+  );
+}
+
+emailSent = true;
 
 if (bridgeRes.error) {
   throw bridgeRes.error;
