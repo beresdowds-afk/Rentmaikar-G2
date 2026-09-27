@@ -43,10 +43,14 @@ export async function invokeEdge<T = unknown>(
   }
 ): Promise<{ data: T | null; error: Error | null }> {
   try {
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      body,
-      headers: options?.headers,
-    });
+    const { data, error } = await backendBridge.invokeEdgeFunction(
+  functionName,
+  body,
+  {
+    method: "POST",
+    headers: options?.headers,
+  }
+);
 
     if (error) {
       const message = await readEdgeError(error, error.message || `Failed to invoke ${functionName}`);
