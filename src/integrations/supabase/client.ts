@@ -355,7 +355,7 @@ supabase.functions.invoke = (async (functionName: string, options?: any) => {
 // Authoritative Backend Functions:
 // Cloud Run/backend gateway is the ONLY frontend execution path.
 // Do not fall back to direct Supabase Edge Function invocation here.
-if if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
+if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
   return await callLocalGateway(functionName, options);
 }
 
