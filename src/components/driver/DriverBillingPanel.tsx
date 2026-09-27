@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { backendBridge } from "@/lib/backend-bridge";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,15 +29,21 @@ export function DriverBillingPanel({ userId }: Props) {
   useEffect(() => { load(); }, [userId]);
 
   const viewDoc = async (kind: "invoice" | "receipt", id: string) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/billing-portal`;
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ action: "render_html", kind, id }),
-      });
-      const html = await res.text();
+  const html = await backendBridge.call<string>(
+    "/functions/billing-portal",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "render_html",
+        kind,
+        id,
+      }),
+    }
+  );
       const w = window.open("", "_blank");
       if (w) { w.document.write(html); w.document.close(); }
     } catch (e) { toast.error("Unable to open document"); }
