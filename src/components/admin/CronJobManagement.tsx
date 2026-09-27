@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { toast } from "sonner";
 import {
   Clock,
@@ -254,9 +255,17 @@ export const CronJobManagement = () => {
     const triggerCorrelationId = `cron-manual-${job.functionName}-${Date.now()}`;
 
     try {
-      const { error } = await supabase.functions.invoke(job.functionName, {
-        body: { time: "now", manual_trigger: true, correlation_id: triggerCorrelationId },
-      });
+      const { error } = await backendBridge.invokeEdgeFunction(
+  job.functionName,
+  {
+    time: "now",
+    manual_trigger: true,
+    correlation_id: triggerCorrelationId,
+  },
+  {
+    method: "POST",
+  }
+);
 
       const status = error ? "error" : "success";
 
