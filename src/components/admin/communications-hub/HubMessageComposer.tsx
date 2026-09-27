@@ -306,7 +306,8 @@ export const HubMessageComposer: React.FC = () => {
         let emailSent = false;
         let emailErr = '';
 
-        // Primary: Cloud Run application email gateway via relative Nginx proxy, with direct staging fallback.
+        // Application email: route through the Supabase client adapter,
+// which dispatches operational email through the authoritative backend gateway.
         try {
           const emailPayload = {
             to: recipientContact.trim(),
@@ -370,29 +371,7 @@ emailSent = true;
           msgErr = e.message || 'Edge function invoke error';
         }
 
-        // Tier 2: Resilient local API fallback
-        if (!msgSent) {
-          try {
-            const res = await fetch('/api/functions/send-sms-notification', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                phone: recipientContact.trim(),
-                message: trimmedBody,
-                channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
-                recipientName: recipientName.trim() || undefined,
-              }),
-            });
-            const json = await res.json().catch(() => null);
-            if (res.ok && (json?.success !== false && json?.ok !== false)) {
-              msgSent = true;
-            } else {
-              msgErr = json?.error || msgErr || `${channel.toUpperCase()} dispatch failed (HTTP ${res.status})`;
-            }
-          } catch (fbErr: any) {
-            msgErr = fbErr.message || msgErr;
-          }
-        }
+        
 
         if (!msgSent) throw new Error(msgErr || `${channel.toUpperCase()} message failed`);
         toast.success(`${channel.toUpperCase()} message sent to ${recipientContact.trim()}`);
