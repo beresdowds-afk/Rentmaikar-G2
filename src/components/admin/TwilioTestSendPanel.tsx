@@ -1,3 +1,4 @@
+import { backendBridge } from "@/lib/backend-bridge";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
@@ -45,7 +46,34 @@ export const TwilioTestSendPanel = () => {
   const [diagLoading, setDiagLoading] = useState(false);
 
 
-  const invoke = async (method: "POST" | "GET", body?: unknown, sid?: string) => {
+  const invoke = async (
+  method: "POST" | "GET",
+  body?: unknown,
+  sid?: string
+) => {
+  const query = sid ? `?sid=${encodeURIComponent(sid)}` : "";
+
+  const result = await backendBridge.call<Record<string, unknown>>(
+    `/functions/twilio-test-send${query}`,
+    {
+      method,
+      body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if ((result as any)?.error) {
+    throw new Error(
+      (result as any)?.error ||
+      (result as any)?.twilio?.message ||
+      "Twilio request failed"
+    );
+  }
+
+  return result;
+};
     const { data: sess } = await supabase.auth.getSession();
     const token = sess.session?.access_token;
     if (!token) throw new Error("Not signed in");
@@ -73,13 +101,18 @@ export const TwilioTestSendPanel = () => {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) throw new Error("Not signed in");
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-test-send?diagnostics=1`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-      setDiag(json);
+      const json = await backendBridge.call<Record<string, unknown>>(
+  "/functions/twilio-test-send?diagnostics=1",
+  {
+    method: "GET",
+  }
+);
+
+if ((json as any)?.error) {
+  throw new Error((json as any).error);
+}
+
+setDiag(json);
       toast.success("Twilio diagnostics complete");
     } catch (e) {
       toast.error((e as Error).message);
@@ -324,16 +357,22 @@ const NumberWebhookAudit = ({
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) throw new Error("Not signed in");
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/twilio-test-send`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "fix-number-webhooks" }),
-        },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      const json = await backendBridge.call<Record<string, unknown>>(
+  "/functions/twilio-test-send",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      action: "fix-number-webhooks",
+    }),
+  }
+);
+
+if ((json as any)?.error) {
+  throw new Error((json as any).error);
+}
       if (json.success) toast.success("Number webhooks repointed to the live backend");
       else toast.error("Some numbers failed to update — check diagnostics");
       onRepaired();
