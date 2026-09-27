@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { sendInboxReply } from "../services/inboxReplyService";
 import { sentBackendClient } from "../services/sentClient";
 import { sendApplicationMessage } from "../services/smsService";
 import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
@@ -96,6 +97,7 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "initiate-paystack-transfer",
   "persona-create-inquiry",
   "persona-webhook",
+  "send-inbox-reply",
 ]);
 
 /**
@@ -631,7 +633,24 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           });
         }
       }
-    
+    case "send-inbox-reply": {
+  const result = await sendInboxReply({
+    conversationId: body.conversationId,
+    messageContent: body.messageContent,
+    channel: body.channel,
+    recipientId: body.recipientId,
+    recipientPhone: body.recipientPhone,
+    attachments: body.attachments,
+    metadata: body.metadata,
+    whatsappTemplateId: body.whatsappTemplateId,
+    whatsappTemplateLanguage: body.whatsappTemplateLanguage,
+    whatsappTemplateParams: body.whatsappTemplateParams,
+  });
+
+  return res
+    .status(result.success ? 200 : 502)
+    .json(result);
+    }
       // -----------------------------------------------------------------
       // IoT & Vehicle Telematics Authoritative Handlers
       // -----------------------------------------------------------------
