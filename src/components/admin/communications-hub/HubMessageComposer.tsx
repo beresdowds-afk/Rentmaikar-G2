@@ -339,25 +339,7 @@ if (
 
 emailSent = true;
 
-if (bridgeRes.error) {
-  throw bridgeRes.error;
-}
 
-const json = bridgeRes.data;
-
-if (
-  bridgeRes.status >= 200 &&
-  bridgeRes.status < 300 &&
-  json?.ok !== false &&
-  json?.success !== false
-) {
-  emailSent = true;
-} else {
-  emailErr =
-    json?.error ||
-    json?.message ||
-    `Email dispatch failed (HTTP ${bridgeRes.status})`;
-         }
         } catch (e: any) {
           emailErr = e.message || 'Email gateway request failed';
         }
