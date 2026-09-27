@@ -583,9 +583,6 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           error: "Email reply dispatch failed: Edge function and Resend provider both unavailable",
         });
       }
-
-      
-
             case "send-outbound-email": {
         // AUTHORITATIVE OPERATIONAL EMAIL PATH:
         // Browser -> backendBridge -> Cloud Run -> Resend.
