@@ -125,12 +125,32 @@ function STTTest({ onLogged }: { onLogged: () => void }) {
       form.append("audio", file);
       form.append("diarize", "true");
       form.append("tag_audio_events", "true");
-      const res = await fetch(`${FUNCTIONS_BASE}/elevenlabs-stt`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const json = await res.json();
+      const { data: json, error } =
+  await backendBridge.invokeEdgeFunction<{
+    token?: string;
+    error?: string;
+    details?: string;
+  }>(
+    "elevenlabs-agent-token",
+    {
+      agentId: agentId.trim() || undefined,
+    },
+    {
+      method: "POST",
+    }
+  );
+
+if (error) {
+  throw error;
+}
+
+if (!json?.token) {
+  throw new Error(
+    json?.details ||
+    json?.error ||
+    "ElevenLabs agent token was not returned"
+  );
+}
       if (!res.ok) throw new Error(json?.details || json?.error || `HTTP ${res.status}`);
       setResult(json);
       toast.success("Transcription complete");
