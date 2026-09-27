@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,13 @@ export function IngestionMonitor({
     try {
       const body: Record<string, unknown> = { action: syncAction };
       if (enableVehicleScope && scope.size > 0) body.vehicle_ids = Array.from(scope);
-      const { data, error } = await supabase.functions.invoke(functionName, { body });
+      const { data, error } = await backendBridge.invokeEdgeFunction(
+  functionName,
+  body,
+  {
+    method: "POST",
+  }
+);
       if (error) throw new Error(error.message);
       const res = data as { ok?: boolean; devices_synced?: number; positions_imported?: number };
       if (res?.ok === false) throw new Error(JSON.stringify(res));
