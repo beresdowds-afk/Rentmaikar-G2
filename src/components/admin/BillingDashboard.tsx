@@ -67,8 +67,20 @@ export function BillingDashboard() {
   };
   const viewDoc = async (kind: "invoice" | "receipt", id: string) => {
     const { data: { session } } = await supabase.auth.getSession();
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/billing-portal`;
-    const res = await fetch(url, {
+    const url = const html = await backendBridge.call<string>(
+  "/functions/billing-portal",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      action: "render_html",
+      kind,
+      id,
+    }),
+  }
+);
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
       body: JSON.stringify({ action: "render_html", kind, id }),
