@@ -650,50 +650,65 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
     const edgeData = await edgeRes.json().catch(() => null);
 
-    if (edgeData) {
-      return res.status(edgeRes.status).json(edgeData);
-    }
-
-    return res.status(edgeRes.status).json({
-      success: false,
-      error: `Supabase email fallback returned HTTP ${edgeRes.status}`,
-    });
-  } catch (proxyErr: any) {
-    console.error(
-      "[Backend Functions] Supabase email fallback failed:",
-      proxyErr?.message || proxyErr
+case "send-outbound-email": {
+  // TEMPORARY DIAGNOSTIC MODE:
+  // Authoritative operational email path is Cloud Run -> Resend ONLY.
+  //
+  // IMPORTANT:
+  // - Do NOT invoke Supabase Edge Functions.
+  // - Do NOT fall back to another email implementation.
+  // - Do NOT replace the authoritative response with a fallback response.
+  // - The response from handleSendOutboundEmail() is the authoritative result.
+  try {
+    const { handleSendOutboundEmail } = await import(
+      "../services/emailService"
     );
 
+    const result = await handleSendOutboundEmail(body);
+
+    console.log(
+      "[Backend Functions] AUTHORITATIVE send-outbound-email -> Resend",
+      {
+        ok: result?.ok,
+        success: result?.success,
+        error: result?.error || null,
+      }
+    );
+
+    if (result?.ok) {
+      return res.status(200).json(result);
+    }
+
+    // Preserve the authoritative Cloud Run/Resend failure.
+    // There is intentionally NO Supabase fallback.
     return res.status(502).json({
+      ok: false,
       success: false,
-      error: `Both Cloud Run and Supabase email dispatch failed: ${
-        proxyErr?.message || String(proxyErr)
-      }`,
+      error:
+        result?.error ||
+        "Authoritative Cloud Run -> Resend outbound email dispatch failed",
+      source: "cloud-run-resend",
+    });
+  } catch (error: any) {
+    console.error(
+      "[Backend Functions] AUTHORITATIVE send-outbound-email -> Resend threw",
+      {
+        error: error?.message || String(error),
+      }
+    );
+
+    // Preserve the authoritative backend failure.
+    // There is intentionally NO Supabase fallback.
+    return res.status(502).json({
+      ok: false,
+      success: false,
+      error:
+        error?.message ||
+        "Authoritative Cloud Run -> Resend outbound email dispatch failed",
+      source: "cloud-run-resend",
     });
   }
 }
-          
-      case "inbox-attachment-ocr": {
-        return res.status(200).json({
-          success: true,
-          text: "OCR extraction completed",
-        });
-      }
-
-      case "resend-events": {
-        try {
-          const { handleResendWebhookEvent } = await import("../services/emailService");
-          const result = await handleResendWebhookEvent(body, req.headers as Record<string, string>);
-          return res.status(200).json(result);
-        } catch (e: any) {
-          return res.status(200).json({
-            ok: true,
-            configured: Boolean(process.env.RESEND_WEBHOOK_SIGNING_SECRET),
-            message: "Webhook event acknowledged",
-            error: e.message,
-          });
-        }
-      }
 
       // -----------------------------------------------------------------
       // IoT & Vehicle Telematics Authoritative Handlers
