@@ -1,3 +1,4 @@
+import { backendBridge } from "@/lib/backend-bridge";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -31,8 +32,26 @@ export default function Unsubscribe() {
         return;
       }
       try {
-        const res = await fetch(
-          `${SUPABASE_URL}/functions/v1/handle-email-unsubscribe?token=${encodeURIComponent(token)}`,
+        const result = await backendBridge.call<{
+  valid?: boolean;
+  reason?: string;
+  error?: string;
+}>(
+  `/functions/handle-email-unsubscribe?token=${encodeURIComponent(token)}`,
+  {
+    method: "GET",
+  }
+);
+
+if (cancelled) return;
+
+if (result?.valid) {
+  setState("confirm");
+} else if (result?.reason === "already_unsubscribed") {
+  setState("already_unsubscribed");
+} else {
+  setState("invalid");
+}
           { headers: { apikey: SUPABASE_ANON_KEY } },
         );
         const data = await res.json().catch(() => ({}));
