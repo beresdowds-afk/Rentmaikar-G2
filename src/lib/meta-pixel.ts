@@ -98,16 +98,19 @@ async function sendCapi(
 
   try {
     // Fire-and-forget; keepalive lets it survive page unload for navigation events.
-    await fetch(`${SUPABASE_URL}/functions/v1/send-meta-capi`, {
-      method: "POST",
-      keepalive: true,
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_ANON,
-        Authorization: `Bearer ${SUPABASE_ANON}`,
-      },
-      body: JSON.stringify(payload),
-    });
+import { backendBridge } from "@/lib/backend-bridge";
+    const { error } = await backendBridge.invokeEdgeFunction(
+  "send-meta-capi",
+  payload,
+  {
+    method: "POST",
+    idempotent: true,
+  }
+);
+
+if (error) {
+  console.warn("[Meta CAPI] Backend bridge dispatch failed:", error.message);
+}
   } catch (e) {
     // Never let analytics break the app.
     console.warn("Meta CAPI dispatch failed:", e);
