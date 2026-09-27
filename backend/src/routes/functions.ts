@@ -650,7 +650,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
     const edgeData = await edgeRes.json().catch(() => null);
 
-      case "send-outbound-email": {
+            case "send-outbound-email": {
         // AUTHORITATIVE OPERATIONAL EMAIL PATH:
         // Browser -> backendBridge -> Cloud Run -> Resend.
         //
