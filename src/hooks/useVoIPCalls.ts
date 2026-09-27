@@ -184,7 +184,38 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
       console.error('Error fetching VoIP calls:', error);
     }
   }, []);
+  
+  const fetchGroups = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('voip_call_groups')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
 
+      if (error) throw error;
+
+      const groupsWithMembers = await Promise.all(
+        (data || []).map(async (group) => {
+          const { data: members } = await supabase
+            .from('voip_group_members')
+            .select('*')
+            .eq('group_id', group.id)
+            .eq('is_active', true);
+
+          return {
+            ...group,
+            members: members || [],
+          } as VoIPCallGroup;
+        })
+      );
+
+      setGroups(groupsWithMembers);
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+    }
+  }, []);
+  
   const initiateCall = async (
     callType: CallType,
     region: CallRegion,
