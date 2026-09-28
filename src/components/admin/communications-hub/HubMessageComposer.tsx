@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { useCommunicationsHub } from './CommunicationsHubContext';
@@ -310,9 +311,11 @@ export const HubMessageComposer: React.FC = () => {
 // which dispatches operational email through the authoritative backend gateway.
         try {
           const uniqueEmailId = crypto.randomUUID();
+
           const emailPayload = {
             id: uniqueEmailId,
             messageId: uniqueEmailId,
+            action: 'send',
             to: recipientContact.trim(),
             subject: subject.trim() || 'Notice from Rentmaikar Admin',
             body: trimmedBody,
@@ -328,29 +331,43 @@ export const HubMessageComposer: React.FC = () => {
             ],
           };
 
-          const { data: json, error } = await supabase.functions.invoke(
-  'send-outbound-email',
-  {
-    body: emailPayload,
-  }
-);
+          // AUTHORITATIVE OPERATIONAL EMAIL PATH:
+          // HubMessageComposer
+          //   -> backendBridge
+          //   -> staging.rentmaikar.com
+          //   -> /api/functions/send-outbound-email
+          //   -> Cloud Run emailService
+          //   -> Resend
+          const bridgeRes = await backendBridge.invokeEdgeFunction(
+            'send-outbound-email',
+            emailPayload,
+            {
+              method: 'POST',
+              timeoutMs: 15000,
+              skipRetry: true,
+            },
+          );
 
-if (error) {
-  throw error;
-}
+          if (
+            bridgeRes.error ||
+            bridgeRes.status < 200 ||
+            bridgeRes.status >= 300 ||
+            bridgeRes.data?.ok !== true ||
+            bridgeRes.data?.success !== true ||
+            !bridgeRes.data?.messageId
+          ) {
+            throw new Error(
+              bridgeRes.data?.error ||
+              bridgeRes.data?.message ||
+              bridgeRes.error?.message ||
+              `Authoritative email dispatch failed (HTTP ${bridgeRes.status})`
+            );
+          }
 
-if (
-  json?.ok === false ||
-  json?.success === false
-) {
-  throw new Error(
-    json?.error ||
-    json?.message ||
-    'Email dispatch failed'
-  );
-}
-
-emailSent = true;
+          emailSent = true;
+        } catch (e: any) {
+          emailErr = e.message || 'Email gateway request failed';
+        }
 
 
         } catch (e: any) {
