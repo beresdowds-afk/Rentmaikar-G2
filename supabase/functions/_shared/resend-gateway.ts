@@ -9,9 +9,7 @@
  * has been removed in favor of direct API connectivity to api.resend.com.
  */
 
-import { reportResendAuthFailure } from "./email-alerts.ts";
-import { sentApiKey, sentEnabled } from "./sent-client.ts";
-
+import { sendPlatformEmail } from "./backend-email-bridge.ts";
 export const RESEND_DIRECT_URL = "https://api.resend.com";
 
 /** True when the configured key is a valid Resend key. */
@@ -121,58 +119,7 @@ export function resendFrom(from: string): string {
 
 type ResendBody = Record<string, unknown> & { from?: string; reply_to?: string | string[] };
 
-/** Best-effort caller name (`supabase/functions/<name>/index.ts`) for alerts. */
-function callerFunctionName(): string {
-  const stack = new Error().stack ?? "";
-  const match = stack.match(/functions\/([A-Za-z0-9_-]+)\/[^/]+\.ts/);
-  return match?.[1] ?? Deno.env.get("SB_FUNCTION_NAME") ?? "unknown-function";
-}
 
-/**
- * Fallback: send email via SENT.DM when Resend dispatch fails or is unavailable.
- */
-export async function sendEmailViaSent(payload: Record<string, unknown>): Promise<Response | null> {
-  if (!sentEnabled()) return null;
-  const baseUrl = Deno.env.get("SENT_API_BASE_URL") || "https://api.sent.dm";
-  const apiKey = sentApiKey();
-  const toRaw = payload.to;
-  const toList: string[] = Array.isArray(toRaw)
-    ? toRaw.map(String)
-    : typeof toRaw === "string"
-      ? [toRaw]
-      : [];
-
-  if (!toList.length) return null;
-
-  try {
-    const res = await fetch(`${baseUrl}/v3/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        to: toList,
-        channel: ["email"],
-        subject: payload.subject,
-        text: payload.text || payload.subject,
-        html: payload.html,
-        from: payload.from,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (res.ok) {
-      console.log("[resend-gateway] Email fallback via SENT.DM succeeded for", toList.join(", "));
-    } else {
-      console.warn(`[resend-gateway] Email fallback via SENT.DM returned HTTP ${res.status}`);
-    }
-    return res;
-  } catch (e) {
-    console.error("[resend-gateway] Email fallback via SENT.DM error:", e);
-    return null;
-  }
-}
 
 /**
  * Ensures the sender address contains a valid display Name attribute.
@@ -211,14 +158,184 @@ export function ensureSenderName(addressWithOrWithoutName: string): string {
  * payload excerpt before attempting the SENT.DM fallback.
  * Ensures all outbound emails have valid unique Id and Name attributes.
  */
-export async function resendSendEmail(body: ResendBody, key?: string | null): Promise<Response> {
-  const apiKey = key ?? Deno.env.get("RESEND_API_KEY") ?? "";
-  const originalFrom = typeof body.from === "string" ? body.from : "";
-  const rawFrom = originalFrom ? resendFrom(originalFrom) : originalFrom;
-  const from = rawFrom ? ensureSenderName(rawFrom) : rawFrom;
-  const replyTo = body.reply_to ??
-    (originalFrom && from !== originalFrom ? originalFrom : undefined);
-  const caller = callerFunctionName();
+/**
+ * Compatibility transport for ordinary outbound platform email.
+ *
+ * This function intentionally does NOT call Resend or SENT.DM.
+ *
+ * It preserves the existing resendSendEmail() contract used by the
+ * Supabase Edge Functions while handing actual delivery to the
+ * server-side Backend Email Bridge.
+ *
+ * Delivery path:
+ *
+ *   Existing producer
+ *        ↓
+ *   resendSendEmail()
+ *        ↓
+ *   Backend Email Bridge
+ *        ↓
+ *   staging.rentmaikar.com/api/functions/send-outbound-email
+ *        ↓
+ *   Cloud Run emailService
+ *        ↓
+ *   Resend
+ */
+export async function resendSendEmail(
+  body: ResendBody,
+  _legacyResendApiKey?: string | null,
+): Promise<Response> {
+  const originalFrom =
+    typeof body.from === "string" ? body.from : "";
+
+  const rawFrom =
+    originalFrom ? resendFrom(originalFrom) : originalFrom;
+
+  const from =
+    rawFrom ? ensureSenderName(rawFrom) : rawFrom;
+
+  const replyTo =
+    body.reply_to ??
+    (
+      originalFrom && from !== originalFrom
+        ? originalFrom
+        : undefined
+    );
+
+  // Preserve an existing message ID where possible.
+  // Otherwise generate one for tracking and idempotency.
+  const uniqueMessageId =
+    (typeof body.id === "string" && body.id)
+      ? body.id
+      : (typeof body.messageId === "string" && body.messageId)
+        ? body.messageId
+        : (typeof body.message_id === "string" && body.message_id)
+          ? body.message_id
+          : crypto.randomUUID();
+
+  const domain = resendSendingDomain();
+
+  const existingHeaders =
+    body.headers &&
+    typeof body.headers === "object"
+      ? body.headers as Record<string, string>
+      : {};
+
+  const headers = {
+    "Message-ID": `<${uniqueMessageId}@${domain}>`,
+    "X-Entity-Ref-ID": uniqueMessageId,
+    ...existingHeaders,
+  };
+
+  const existingTags =
+    Array.isArray(body.tags)
+      ? body.tags
+      : [];
+
+  const validTags = existingTags
+    .filter(
+      (t: any) =>
+        t &&
+        typeof t.name === "string" &&
+        t.name.trim().length > 0,
+    )
+    .map((t: any) => ({
+      name: String(t.name).trim(),
+      value: String(t.value ?? ""),
+    }));
+
+  if (
+    !validTags.some(
+      (t: any) => t.name === "message_id",
+    )
+  ) {
+    validTags.push({
+      name: "message_id",
+      value: uniqueMessageId,
+    });
+  }
+
+  if (
+    !validTags.some(
+      (t: any) => t.name === "platform_source",
+    )
+  ) {
+    validTags.push({
+      name: "platform_source",
+      value: "rentmaikar",
+    });
+  }
+
+  const payload = {
+    ...body,
+    id: uniqueMessageId,
+    headers,
+    tags: validTags,
+
+    ...(from ? { from } : {}),
+    ...(replyTo ? { reply_to: replyTo } : {}),
+  };
+
+  const correlationId =
+    typeof body.correlationId === "string" &&
+    body.correlationId.trim()
+      ? body.correlationId
+      : `resend-adapter-${crypto.randomUUID()}`;
+
+  const idempotencyKey =
+    typeof body.idempotencyKey === "string" &&
+    body.idempotencyKey.trim()
+      ? body.idempotencyKey
+      : uniqueMessageId;
+
+  const result = await sendPlatformEmail(
+    payload,
+    {
+      correlationId,
+      idempotencyKey,
+      platformSource:
+        "resend-gateway-compatibility-adapter",
+      timeoutMs: 30000,
+    },
+  );
+
+  const responseBody = {
+    ok: result.ok,
+    success: result.success,
+
+    ...(result.messageId
+      ? { messageId: result.messageId }
+      : {}),
+
+    ...(result.data !== undefined
+      ? { data: result.data }
+      : {}),
+
+    ...(result.error
+      ? { error: result.error }
+      : {}),
+
+    correlationId: result.correlationId,
+
+    ...(result.ok
+      ? { provider: "backend-email-bridge" }
+      : {}),
+  };
+
+  return new Response(
+    JSON.stringify(responseBody),
+    {
+      status:
+        result.ok
+          ? 200
+          : (result.status || 502),
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+    },
+  );
+}
 
   // Generate or preserve unique message Id for tracking and headers
   const uniqueMessageId = (typeof body.id === "string" && body.id)
@@ -300,24 +417,6 @@ export async function resendSendEmail(body: ResendBody, key?: string | null): Pr
     return res;
   }
 
-  // Fallback: SENT.DM as global fallback email provider
-  if (resendFailed || !res || !res.ok) {
-    console.warn(`[resend-gateway] Resend send ${res ? `status ${res.status}` : 'unavailable'}, trying SENT.DM fallback...`);
-    const sentFallbackRes = await sendEmailViaSent(payload);
-    if (sentFallbackRes && sentFallbackRes.ok) {
-      return sentFallbackRes;
-    }
-  }
-
-  // If fallback was not successful or unavailable, return the original Resend response (or synthetic error)
-  if (res) {
-    return res;
-  }
-
-  return new Response(
-    JSON.stringify({ error: "Resend and SENT.DM email delivery failed or unconfigured" }),
-    { status: 500, headers: { "Content-Type": "application/json" } }
-  );
-}
+  
 
 
