@@ -48,6 +48,8 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
     "status",
     "get_status",
     "diagnostics",
+    "email_lifecycle_test",
+    "test_email_lifecycle",
     "cpaas_simulate",
     "custom",
     "reconcile",
@@ -177,6 +179,16 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
       case "supabase_health": {
         const health = await supabaseBackendService.checkSupabaseHealth();
         result = health;
+        break;
+      }
+
+      case "email_lifecycle_test":
+      case "test_email_lifecycle": {
+        const { runEmailProductionLifecycleTest } = await import("../services/emailLifecycleTest");
+        result = await runEmailProductionLifecycleTest({
+          ...(typeof payload === "object" ? payload : {}),
+          origin: (req.headers.origin as string) || (req.headers.referer as string) || "https://rentmaikar.com",
+        });
         break;
       }
 

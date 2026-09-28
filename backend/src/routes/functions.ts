@@ -49,6 +49,8 @@ import { paymentService } from "../services/paymentService";
  */
 const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "send-outbound-email",
+  "email-lifecycle-test",
+  "test-email-lifecycle",
   "phone-otp-custom",
   "verify-phone",
   "voice-access-token",
@@ -644,6 +646,23 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
               error?.message ||
               "Authoritative Cloud Run -> Resend outbound email dispatch failed",
             source: "cloud-run-resend",
+          });
+        }
+      }
+
+      case "email-lifecycle-test":
+      case "test-email-lifecycle": {
+        try {
+          const { runEmailProductionLifecycleTest } = await import("../services/emailLifecycleTest");
+          const result = await runEmailProductionLifecycleTest({
+            ...body,
+            origin: (req.headers.origin as string) || (req.headers.referer as string) || "https://rentmaikar.com",
+          });
+          return res.status(result.ok ? 200 : 502).json(result);
+        } catch (error: any) {
+          return res.status(502).json({
+            ok: false,
+            error: error?.message || "Lifecycle test failed",
           });
         }
       }

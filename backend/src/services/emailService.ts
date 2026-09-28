@@ -309,7 +309,7 @@ export async function updateEmailSendLogStatus(params: {
 /**
  * Base email layout wrapper for RentMaikar transactional emails
  */
-function emailLayout(content: string, title: string): string {
+export function emailLayout(content: string, title: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
