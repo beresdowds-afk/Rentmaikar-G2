@@ -125,6 +125,7 @@ export default defineConfig(({ mode }) => ({
           }
 
           if (
+            req.url?.startsWith("/api/email/webhooks") ||
             req.url === "/api/email/inbound" ||
             req.url === "/api/email/webhook" ||
             req.url === "/api/webhooks/resend" ||
@@ -144,6 +145,50 @@ export default defineConfig(({ mode }) => ({
               return;
             }
 
+            if (req.method === "GET" && req.url?.startsWith("/api/email/webhooks/stream")) {
+              const { resendWebhookStore } = await import("./src/server/resendWebhookStore");
+              res.setHeader("Content-Type", "text/event-stream");
+              res.setHeader("Cache-Control", "no-cache, no-transform");
+              res.setHeader("Connection", "keep-alive");
+              res.write(`data: ${JSON.stringify({ type: "stream_connected", timestamp: new Date().toISOString() })}\n\n`);
+
+              const unsubscribe = resendWebhookStore.subscribe((event) => {
+                try {
+                  res.write(`data: ${JSON.stringify(event)}\n\n`);
+                } catch {
+                  unsubscribe();
+                }
+              });
+
+              req.on("close", () => {
+                unsubscribe();
+              });
+              return;
+            }
+
+            if (req.method === "GET" && (req.url?.startsWith("/api/email/webhooks/events") || req.url?.startsWith("/api/email/webhooks"))) {
+              const { resendWebhookStore } = await import("./src/server/resendWebhookStore");
+              const parsedUrl = new URL(req.url, "http://localhost:3000");
+              const events = resendWebhookStore.getEvents({
+                type: parsedUrl.searchParams.get("type") || undefined,
+                status: parsedUrl.searchParams.get("status") || undefined,
+                search: parsedUrl.searchParams.get("search") || undefined,
+                emailId: parsedUrl.searchParams.get("emailId") || undefined,
+                limit: parsedUrl.searchParams.get("limit") ? parseInt(parsedUrl.searchParams.get("limit")!, 10) : 50,
+              });
+              const stats = resendWebhookStore.getStats();
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: true, stats, count: events.length, events }));
+              return;
+            }
+
+            if (req.method === "GET" && req.url?.startsWith("/api/email/webhooks/stats")) {
+              const { resendWebhookStore } = await import("./src/server/resendWebhookStore");
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: true, stats: resendWebhookStore.getStats() }));
+              return;
+            }
+
             const chunks: any[] = [];
             req.on("data", (chunk: any) => chunks.push(chunk));
             req.on("end", async () => {
@@ -156,6 +201,41 @@ export default defineConfig(({ mode }) => ({
               }
 
               try {
+                if (req.url === "/api/email/webhooks/simulate-event") {
+                  const { resendWebhookStore } = await import("./src/server/resendWebhookStore");
+                  const type = body?.type || "email.delivered";
+                  const emailId = body?.emailId || `msg_sim_${Date.now()}`;
+                  const recipient = body?.recipient || "support@rentmaikar.com";
+                  const subject = body?.subject || "Simulated Delivery Verification";
+
+                  const event = resendWebhookStore.recordEvent({
+                    type,
+                    created_at: new Date().toISOString(),
+                    data: {
+                      id: emailId,
+                      email_id: emailId,
+                      from: "RentMaikar Support <support@notify.rentmaikar.com>",
+                      to: [recipient],
+                      subject,
+                      ...(body?.data || {}),
+                    },
+                  });
+
+                  res.setHeader("Content-Type", "application/json");
+                  res.statusCode = 200;
+                  res.end(JSON.stringify({ ok: true, event }));
+                  return;
+                }
+
+                if (req.url === "/api/email/webhooks/clear") {
+                  const { resendWebhookStore } = await import("./src/server/resendWebhookStore");
+                  resendWebhookStore.clear();
+                  res.setHeader("Content-Type", "application/json");
+                  res.statusCode = 200;
+                  res.end(JSON.stringify({ ok: true, cleared: true }));
+                  return;
+                }
+
                 if (req.url === "/api/email/test-lifecycle" || req.url === "/api/email/lifecycle-test") {
                   const { runEmailProductionLifecycleTest } = await import("./src/server/emailLifecycleTest");
                   const result = await runEmailProductionLifecycleTest({
