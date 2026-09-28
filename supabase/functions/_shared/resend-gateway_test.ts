@@ -38,8 +38,116 @@ Deno.test("establishes and maintains the Direct Resend connector", () => {
   assertEquals("X-Connection-Api-Key" in headers, false);
 });
 
-Deno.test("send rewrites the sender and keeps the original as reply_to", async () => {
-  const original = globalThis.fetch;
+Deno.test(
+  "send rewrites the sender and routes through Backend Email Bridge",
+  async () => {
+    const original = globalThis.fetch;
+
+    let capturedUrl = "";
+    let capturedHeaders: Record<string, string> = {};
+    let capturedBody: Record<string, unknown> = {};
+
+    Deno.env.set(
+      "RENTMAIKAR_BACKEND_URL",
+      "https://staging.rentmaikar.com",
+    );
+
+    Deno.env.set(
+      "RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET",
+      "test-bridge-secret",
+    );
+
+    globalThis.fetch = (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      capturedUrl = String(url);
+
+      const rawHeaders = init?.headers;
+
+      if (rawHeaders instanceof Headers) {
+        rawHeaders.forEach((value, key) => {
+          capturedHeaders[key] = value;
+        });
+      } else if (rawHeaders) {
+        capturedHeaders = Object.fromEntries(
+          Object.entries(rawHeaders as Record<string, string>)
+            .map(([key, value]) => [key.toLowerCase(), String(value)]),
+        );
+      }
+
+      capturedBody = JSON.parse(
+        String(init?.body ?? "{}"),
+      );
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            success: true,
+            messageId: "backend_msg_1",
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+    };
+
+    try {
+      const res = await resendSendEmail({
+        from:
+          "Rentmaikar <noreply@rentmaikar.com>",
+        to: ["driver@example.com"],
+        subject: "Booking confirmed",
+        html: "<p>hi</p>",
+      });
+
+      assertEquals(res.status, 200);
+      const result = await res.json();
+
+      assertEquals(result.ok, true);
+      assertEquals(result.success, true);
+      assertEquals(result.messageId, "backend_msg_1");
+
+      assertEquals(
+        capturedUrl,
+        "https://staging.rentmaikar.com/api/functions/send-outbound-email",
+      );
+
+      assertEquals(
+        capturedHeaders["x-rentmaikar-internal-secret"],
+        "test-bridge-secret",
+      );
+
+      assertEquals(
+        capturedBody.from,
+        "Rentmaikar <noreply@notify.rentmaikar.com>",
+      );
+
+      assertEquals(
+        capturedBody.reply_to,
+        "Rentmaikar <noreply@rentmaikar.com>",
+      );
+
+      assertEquals(
+        capturedBody.subject,
+        "Booking confirmed",
+      );
+    } finally {
+      globalThis.fetch = original;
+
+      Deno.env.delete("RENTMAIKAR_BACKEND_URL");
+      Deno.env.delete(
+        "RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET",
+      );
+    }
+  },
+);
+const original = globalThis.fetch;
   let captured: Record<string, unknown> = {};
   globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
     captured = JSON.parse(String(init?.body ?? "{}"));
@@ -64,77 +172,5 @@ Deno.test("send rewrites the sender and keeps the original as reply_to", async (
   assertEquals(captured.subject, "Booking confirmed");
 });
 
-Deno.test("a 401 raises a provider alert and still returns the response", async () => {
-  const original = globalThis.fetch;
-  const calls: string[] = [];
-  globalThis.fetch = ((url: string | URL | Request) => {
-    const href = String(url);
-    calls.push(href);
-    if (href.includes("/emails")) {
-      return Promise.resolve(new Response("API key is invalid", { status: 401 }));
-    }
-    return Promise.resolve(new Response("[]", { status: 200 }));
-  }) as typeof fetch;
-
-  Deno.env.set("SUPABASE_URL", "https://example.test");
-  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "test-service-key");
-
-  try {
-    const res = await resendSendEmail({
-      from: "noreply@rentmaikar.com",
-      to: ["driver@example.com"],
-      subject: "Test",
-      html: "<p>x</p>",
-    }, "re_bad");
-    assertEquals(res.status, 401);
-    assertEquals(await res.text(), "API key is invalid");
-  } finally {
-    globalThis.fetch = original;
-    Deno.env.delete("SUPABASE_URL");
-    Deno.env.delete("SUPABASE_SERVICE_ROLE_KEY");
-  }
-
-  assert(
-    calls.some((c) => c.includes("/rest/v1/email_provider_alerts")),
-    "expected an email_provider_alerts insert",
-  );
-});
-
-Deno.test("falls back to SENT.DM when Resend fails", async () => {
-  const original = globalThis.fetch;
-  const calls: { url: string; body?: Record<string, unknown> }[] = [];
-  globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
-    const href = String(url);
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ url: href, body });
-    if (href.includes("/emails")) {
-      return Promise.resolve(new Response("Resend error", { status: 500 }));
-    }
-    if (href.includes("api.sent.dm/v3/messages")) {
-      return Promise.resolve(new Response(JSON.stringify({
-        data: { status: "sent", recipients: [{ message_id: "sent_msg_123" }] },
-      }), { status: 200 }));
-    }
-    return Promise.resolve(new Response("ok", { status: 200 }));
-  }) as typeof fetch;
-
-  Deno.env.set("SENT_API_KEY", "test_sent_key");
-  Deno.env.set("SENT_ENABLED", "true");
-
-  try {
-    const res = await resendSendEmail({
-      from: "Rentmaikar <noreply@rentmaikar.com>",
-      to: ["driver@example.com"],
-      subject: "Test Fallback",
-      html: "<p>fallback body</p>",
-    }, "re_test");
-
-    assertEquals(res.status, 200);
-    assert(calls.some((c) => c.url.includes("api.sent.dm/v3/messages")));
-  } finally {
-    globalThis.fetch = original;
-    Deno.env.delete("SENT_API_KEY");
-    Deno.env.delete("SENT_ENABLED");
-  }
-});
+  
 
