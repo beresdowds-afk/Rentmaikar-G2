@@ -114,7 +114,50 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   // Extract authorization header from request if provided
   const rawAuth = req.headers["authorization"];
   const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
+  // Operational email is an authenticated administrative operation.
+  // Never expose the Resend sender as an unauthenticated public endpoint.
+  if (functionName === "send-outbound-email") {
+    if (!clientAuth) {
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        error: "Authentication required for operational email dispatch",
+      });
+    }
 
+    try {
+      const admin = supabaseBackendService.getAdminClient();
+      const token = clientAuth.replace(/^Bearer\s+/i, "").trim();
+
+      const { data: authData, error: authError } =
+        await admin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          ok: false,
+          success: false,
+          error: "Invalid authentication session",
+        });
+      }
+
+      // The sender is an admin communications operation.
+      // Require an authenticated platform account here.
+      // Existing application authorization remains authoritative
+      // for the user's actual administrative permissions.
+      (req as any).authenticatedUser = authData.user;
+    } catch (authErr: any) {
+      console.error(
+        "[Backend Functions] send-outbound-email authentication failed:",
+        authErr?.message || authErr
+      );
+
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        error: "Authentication validation failed",
+      });
+    }
+  }
   // 1. Generic Supabase-first dispatch for all non-authoritative functions.
   // Authoritative functions (Email, VoIP, Call Center) execute directly on Cloud Run.
   if (!AUTHORITATIVE_BACKEND_FUNCTIONS.has(functionName)) {
@@ -619,7 +662,14 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             }
           );
 
-          if (result?.ok) {
+                    if (
+            result?.ok === true &&
+            result?.success === true &&
+            (
+              result?.messageId ||
+              Array.isArray(result?.results)
+            )
+          ) {
             return res.status(200).json(result);
           }
 
