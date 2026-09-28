@@ -10,6 +10,7 @@ import {
   Inbox,
   CheckCircle2,
   AlertCircle,
+  XCircle,
   RefreshCw,
   ArrowRight,
   Server,
@@ -18,6 +19,9 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Activity,
+  Check,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -73,6 +77,8 @@ export function PlatformEmailDomainVerificationPanel({
   const [outboundFrom, setOutboundFrom] = useState("support@rentmaikar.com");
   const [outboundTo, setOutboundTo] = useState("support@rentmaikar.com");
   const [outboundSending, setOutboundSending] = useState(false);
+  const [lifecycleRunning, setLifecycleRunning] = useState(false);
+  const [lifecycleReport, setLifecycleReport] = useState<any>(null);
 
   // Inbound simulation state
   const [inboundMailbox, setInboundMailbox] = useState("support");
@@ -156,6 +162,50 @@ export function PlatformEmailDomainVerificationPanel({
       toast.error(`Outbound dispatch error: ${err.message}`);
     } finally {
       setOutboundSending(false);
+    }
+  };
+
+  const handleRunLifecycleTest = async () => {
+    setLifecycleRunning(true);
+    setLifecycleReport(null);
+    try {
+      const res = await fetch("/api/email/test-lifecycle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: outboundFrom,
+          to: outboundTo,
+          subject: `RentMaikar Production Lifecycle Verification (${outboundFrom})`,
+          content: `Production lifecycle verification test: validating 6-stage delivery pipeline: rentmaikar.com -> backendBridge -> staging.rentmaikar.com -> /api/functions/send-outbound-email -> Cloud Run emailService -> api.resend.com.`,
+        }),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      let result: any;
+      if (contentType.includes("application/json")) {
+        result = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Server returned status ${res.status}: ${text.slice(0, 100)}`);
+      }
+
+      setLifecycleReport(result);
+      setLastLog(result);
+      setShowConsole(true);
+
+      if (result.ok) {
+        toast.success(
+          `Production email lifecycle verified across all 6 stages! Resend message ID: ${result.messageId?.slice(0, 14)}...`
+        );
+      } else {
+        toast.error(
+          `Lifecycle failure at Stage ${result.failedStageIndex} (${result.failedStage}): ${result.exactPointOfFailure || "Check diagnostics"}`
+        );
+      }
+    } catch (err: any) {
+      toast.error(`Lifecycle test error: ${err.message}`);
+    } finally {
+      setLifecycleRunning(false);
     }
   };
 
@@ -374,17 +424,31 @@ export function PlatformEmailDomainVerificationPanel({
                     className="h-8 text-xs font-mono mt-1"
                   />
                 </div>
-                <Button
-                  id="outbound-platform-email-submit"
-                  name="outbound_platform_email_submit"
-                  size="sm"
-                  onClick={handleSendOutboundTest}
-                  disabled={outboundSending}
-                  className="w-full h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
-                >
-                  {outboundSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                  Send Outbound Verification Email
-                </Button>
+                <div className="flex flex-col gap-2 pt-1">
+                  <Button
+                    id="outbound-platform-email-submit"
+                    name="outbound_platform_email_submit"
+                    size="sm"
+                    onClick={handleSendOutboundTest}
+                    disabled={outboundSending || lifecycleRunning}
+                    className="w-full h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                  >
+                    {outboundSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                    Send Outbound Verification Email
+                  </Button>
+                  <Button
+                    id="outbound-platform-email-lifecycle-submit"
+                    name="outbound_platform_email_lifecycle_submit"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRunLifecycleTest}
+                    disabled={outboundSending || lifecycleRunning}
+                    className="w-full h-8 text-xs border-emerald-600/40 hover:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 gap-1.5"
+                  >
+                    {lifecycleRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
+                    Run 6-Stage Production Lifecycle Test
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -439,6 +503,120 @@ export function PlatformEmailDomainVerificationPanel({
               </div>
             </div>
           </div>
+
+          {/* 6-Stage Production Lifecycle Pipeline Visualizer */}
+          {(lifecycleReport || lifecycleRunning) && (
+            <div className="pt-3 border-t border-border/50 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-xs font-semibold">Production Email Lifecycle Stages</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  rentmaikar.com &rarr; backendBridge &rarr; staging &rarr; /api/functions &rarr; emailService &rarr; Resend
+                </span>
+              </div>
+
+              {/* 6 Stage Pipeline Nodes */}
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                {[
+                  { stage: 1, name: "rentmaikar.com", label: "1. Frontend Client" },
+                  { stage: 2, name: "backendBridge", label: "2. Resilient Bridge" },
+                  { stage: 3, name: "staging.rentmaikar.com", label: "3. Gateway & CORS" },
+                  { stage: 4, name: "/api/functions/send-outbound-email", label: "4. Authoritative Route" },
+                  { stage: 5, name: "Cloud Run emailService", label: "5. Email Engine & Rewrite" },
+                  { stage: 6, name: "api.resend.com", label: "6. Resend Transport" },
+                ].map((s) => {
+                  const stageData = lifecycleReport?.stages?.find((item: any) => item.stage === s.stage);
+                  const isSuccess = stageData?.status === "success";
+                  const isFailure = stageData?.status === "failure";
+                  const isCurrent = lifecycleRunning && !stageData;
+
+                  return (
+                    <div
+                      key={s.stage}
+                      className={`p-2.5 rounded-lg border text-xs transition-all ${
+                        isFailure
+                          ? "bg-destructive/10 border-destructive/50 text-destructive"
+                          : isSuccess
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-300"
+                          : isCurrent
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-700 animate-pulse"
+                          : "bg-muted/40 border-border text-muted-foreground"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="font-semibold text-[11px] truncate">{s.label}</span>
+                        {isSuccess && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />}
+                        {isFailure && <XCircle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />}
+                        {isCurrent && <Loader2 className="h-3.5 w-3.5 text-amber-600 animate-spin flex-shrink-0" />}
+                      </div>
+                      <div className="text-[10px] font-mono truncate text-muted-foreground mb-1">
+                        {s.name}
+                      </div>
+                      <div className="text-[10px]">
+                        {isSuccess && (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                            ✓ {stageData.durationMs}ms
+                          </span>
+                        )}
+                        {isFailure && (
+                          <span className="text-destructive font-medium">
+                            ✗ FAILED
+                          </span>
+                        )}
+                        {!isSuccess && !isFailure && (
+                          <span className="text-muted-foreground">Pending</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Exact Point of Failure Banner & Remediation Advice */}
+              {lifecycleReport && !lifecycleReport.ok && (
+                <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-xs space-y-2">
+                  <div className="flex items-center gap-2 text-destructive font-semibold">
+                    <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                    <span>
+                      Exact Point of Failure: Stage {lifecycleReport.failedStageIndex} ({lifecycleReport.failedStage})
+                    </span>
+                  </div>
+                  <div className="text-destructive/90 text-xs pl-6">
+                    <strong>Root Cause:</strong> {lifecycleReport.exactPointOfFailure}
+                  </div>
+                  {lifecycleReport.remediationAdvice && (
+                    <div className="ml-6 p-2 rounded bg-background/90 border border-destructive/20 text-foreground text-xs">
+                      <strong>Administrator Action Required:</strong> {lifecycleReport.remediationAdvice}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Success Banner */}
+              {lifecycleReport && lifecycleReport.ok && (
+                <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-semibold">
+                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                    <span>
+                      All 6 Lifecycle Stages Operational • Dispatched as {outboundFrom} via notify.rentmaikar.com
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {lifecycleReport.messageId && (
+                      <Badge variant="outline" className="font-mono text-[10px] bg-background">
+                        ID: {lifecycleReport.messageId.slice(0, 16)}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
+                      {lifecycleReport.totalDurationMs}ms total
+                    </Badge>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Diagnostic Log Drawer */}
           <div className="pt-2 border-t border-border/40">

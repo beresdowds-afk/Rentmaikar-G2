@@ -262,3 +262,115 @@ describe("Queue worker delivery end-to-end simulation", () => {
     expect(queue.length).toBe(0);
   });
 });
+
+describe("Production Email Lifecycle: rentmaikar.com -> backendBridge -> staging.rentmaikar.com -> /api/functions/send-outbound-email -> Cloud Run emailService -> api.resend.com", () => {
+  it("validates successful progression across all 6 production stages", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      from: "support@rentmaikar.com",
+      subject: "Lifecycle Verification Test",
+      content: "Validating 6-stage lifecycle dispatch.",
+      skipResendDispatch: true, // dry run for offline unit test
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.stages.length).toBe(6);
+    expect(report.stages.every((s) => s.status === "success")).toBe(true);
+    expect(report.stages[0].name).toBe("rentmaikar.com");
+    expect(report.stages[1].name).toBe("backendBridge");
+    expect(report.stages[2].name).toBe("staging.rentmaikar.com");
+    expect(report.stages[3].name).toBe("/api/functions/send-outbound-email");
+    expect(report.stages[4].name).toBe("Cloud Run emailService");
+    expect(report.stages[5].name).toBe("api.resend.com");
+    expect(report.messageId).toBeTruthy();
+  });
+
+  it("identifies Stage 1 failure when client origin or payload is invalid", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://unauthorized-phishing.org",
+      to: "admin@rentmaikar.com",
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedStageIndex).toBe(1);
+    expect(report.failedStage).toBe("rentmaikar.com");
+    expect(report.exactPointOfFailure).toContain("Invalid frontend client origin");
+    expect(report.stages[0].status).toBe("failure");
+    expect(report.remediationAdvice).toBeTruthy();
+  });
+
+  it("identifies Stage 2 failure when backendBridge is interrupted", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      mockFailureAtStage: 2,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedStageIndex).toBe(2);
+    expect(report.failedStage).toBe("backendBridge");
+    expect(report.exactPointOfFailure).toContain("bridge fault");
+    expect(report.remediationAdvice).toContain("backendBridge");
+  });
+
+  it("identifies Stage 3 failure when staging.rentmaikar.com rejects CORS or connection", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      mockFailureAtStage: 3,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedStageIndex).toBe(3);
+    expect(report.failedStage).toBe("staging.rentmaikar.com");
+    expect(report.exactPointOfFailure).toContain("Gateway returned HTTP 503");
+  });
+
+  it("identifies Stage 4 failure when /api/functions/send-outbound-email is not matched", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      mockFailureAtStage: 4,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedStageIndex).toBe(4);
+    expect(report.failedStage).toBe("/api/functions/send-outbound-email");
+    expect(report.remediationAdvice).toContain("AUTHORITATIVE_BACKEND_FUNCTIONS");
+  });
+
+  it("identifies Stage 5 failure when Cloud Run emailService has configuration issue", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      mockFailureAtStage: 5,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedStageIndex).toBe(5);
+    expect(report.failedStage).toBe("Cloud Run emailService");
+    expect(report.remediationAdvice).toContain("RESEND_API_KEY");
+  });
+
+  it("identifies Stage 6 failure when upstream api.resend.com returns an API rejection", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      mockFailureAtStage: 6,
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.failedStageIndex).toBe(6);
+    expect(report.failedStage).toBe("api.resend.com");
+    expect(report.remediationAdvice).toContain("Resend");
+  });
+});
+
