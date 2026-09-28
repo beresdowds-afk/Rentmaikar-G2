@@ -123,6 +123,7 @@ const AdminNotificationRetryPage = lazy(() => import("./pages/admin/AdminNotific
 const AdminSmsConsentAuditPage = lazy(() => import("./pages/admin/AdminSmsConsentAuditPage"));
 const AdminEmailDeliveryPage = lazy(() => import("./pages/admin/AdminEmailDeliveryPage"));
 const AdminEmailRoutingPage = lazy(() => import("./pages/admin/AdminEmailRoutingPage"));
+const AdminEmailLifecycleCheckpointsPage = lazy(() => import("./pages/admin/AdminEmailLifecycleCheckpointsPage"));
 const AdminCallCenterPage = lazy(() => import("./pages/admin/AdminCallCenterPage"));
 const MessagingCenterPage = lazy(() => import("./pages/admin/MessagingCenterPage"));
 const AdminCasesPage = lazy(() => import("./pages/admin/AdminCasesPage"));
@@ -752,6 +753,22 @@ const App = () => (
                     element={
                       <ProtectedRoute allowedRoles={['admin']}>
                         <AdminEmailDeliveryPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/email-checkpoints"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminEmailLifecycleCheckpointsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/email-lifecycle-webhooks"
+                    element={
+                      <ProtectedRoute allowedRoles={['admin']}>
+                        <AdminEmailLifecycleCheckpointsPage />
                       </ProtectedRoute>
                     }
                   />

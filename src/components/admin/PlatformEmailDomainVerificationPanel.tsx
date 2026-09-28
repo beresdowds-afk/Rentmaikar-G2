@@ -504,28 +504,36 @@ export function PlatformEmailDomainVerificationPanel({
             </div>
           </div>
 
-          {/* 6-Stage Production Lifecycle Pipeline Visualizer */}
+          {/* 6 Observed Production Checkpoints Pipeline Visualizer */}
           {(lifecycleReport || lifecycleRunning) && (
             <div className="pt-3 border-t border-border/50 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-xs font-semibold">Production Email Lifecycle Stages</span>
+                  <span className="text-xs font-semibold">6 Observed Production Checkpoints</span>
                 </div>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  rentmaikar.com &rarr; backendBridge &rarr; staging &rarr; /api/functions &rarr; emailService &rarr; Resend
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    rentmaikar.com &rarr; backendBridge &rarr; staging &rarr; send-outbound-email &rarr; emailService &rarr; Resend & Webhooks
+                  </span>
+                  <Link
+                    to="/admin/email-checkpoints"
+                    className="text-[10px] text-primary hover:underline font-medium inline-flex items-center gap-0.5"
+                  >
+                    Open Live Observer &rarr;
+                  </Link>
+                </div>
               </div>
 
-              {/* 6 Stage Pipeline Nodes */}
+              {/* 6 Checkpoint Pipeline Nodes */}
               <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
                 {[
-                  { stage: 1, name: "rentmaikar.com", label: "1. Frontend Client" },
-                  { stage: 2, name: "backendBridge", label: "2. Resilient Bridge" },
+                  { stage: 1, name: "rentmaikar.com", label: "1. Ingress Payload" },
+                  { stage: 2, name: "backendBridge", label: "2. Bridge Channel" },
                   { stage: 3, name: "staging.rentmaikar.com", label: "3. Gateway & CORS" },
-                  { stage: 4, name: "/api/functions/send-outbound-email", label: "4. Authoritative Route" },
-                  { stage: 5, name: "Cloud Run emailService", label: "5. Email Engine & Rewrite" },
-                  { stage: 6, name: "api.resend.com", label: "6. Resend Transport" },
+                  { stage: 4, name: "/api/functions/send-outbound-email", label: "4. Transaction Under Test" },
+                  { stage: 5, name: "Cloud Run emailService", label: "5. Engine & Rewrite" },
+                  { stage: 6, name: "api.resend.com & Webhooks", label: "6. Resend & Webhook" },
                 ].map((s) => {
                   const stageData = lifecycleReport?.stages?.find((item: any) => item.stage === s.stage);
                   const isSuccess = stageData?.status === "success";
@@ -580,7 +588,7 @@ export function PlatformEmailDomainVerificationPanel({
                   <div className="flex items-center gap-2 text-destructive font-semibold">
                     <AlertCircle className="h-4 w-4 flex-shrink-0" />
                     <span>
-                      Exact Point of Failure: Stage {lifecycleReport.failedStageIndex} ({lifecycleReport.failedStage})
+                      Exact Point of Failure: Checkpoint {lifecycleReport.failedCheckpointIndex || lifecycleReport.failedStageIndex} ({lifecycleReport.failedCheckpoint || lifecycleReport.failedStage})
                     </span>
                   </div>
                   <div className="text-destructive/90 text-xs pl-6">
@@ -594,25 +602,34 @@ export function PlatformEmailDomainVerificationPanel({
                 </div>
               )}
 
-              {/* Success Banner */}
+              {/* Success Banner with Webhook Evidence */}
               {lifecycleReport && lifecycleReport.ok && (
-                <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-semibold">
-                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                    <span>
-                      All 6 Lifecycle Stages Operational • Dispatched as {outboundFrom} via notify.rentmaikar.com
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {lifecycleReport.messageId && (
-                      <Badge variant="outline" className="font-mono text-[10px] bg-background">
-                        ID: {lifecycleReport.messageId.slice(0, 16)}
+                <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-semibold">
+                      <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                      <span>
+                        All 6 Production Checkpoints Verified • Live Transaction Dispatched via notify.rentmaikar.com
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {lifecycleReport.messageId && (
+                        <Badge variant="outline" className="font-mono text-[10px] bg-background">
+                          ID: {lifecycleReport.messageId.slice(0, 16)}
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
+                        {lifecycleReport.totalDurationMs}ms total
                       </Badge>
-                    )}
-                    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
-                      {lifecycleReport.totalDurationMs}ms total
-                    </Badge>
+                    </div>
                   </div>
+
+                  {lifecycleReport.webhookEvidence && (
+                    <div className="text-[11px] text-foreground font-mono bg-background/80 p-2 rounded border border-emerald-500/20 flex items-center justify-between">
+                      <span>Webhook Delivery Evidence: {lifecycleReport.webhookEvidence.eventType} ({lifecycleReport.webhookEvidence.deliveryStatus})</span>
+                      <span className="text-[10px] text-muted-foreground">{new Date(lifecycleReport.webhookEvidence.receivedAt || "").toLocaleTimeString()}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

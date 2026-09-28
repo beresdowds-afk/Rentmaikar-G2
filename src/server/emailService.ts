@@ -1370,6 +1370,14 @@ export async function handleResendWebhookEvent(payload: any, _headers?: Record<s
 
     console.log(`[ResendWebhook] Received event: ${type} for emailId=${emailId || "unknown"} recipient=${recipient || "unknown"}`);
 
+    // Ingest into real-time observer store for admin checkpoints
+    try {
+      const { resendWebhookStore } = await import("./resendWebhookStore");
+      resendWebhookStore.recordEvent(payload, _headers);
+    } catch (storeErr: any) {
+      console.warn("[ResendWebhook] Failed to buffer event in webhookStore:", storeErr.message);
+    }
+
     if (type === "email.received") {
       const inboundRes = await handleInboundEmailWebhook(payload, _headers);
       return { ok: inboundRes.ok, event: type, status: "forwarded" };

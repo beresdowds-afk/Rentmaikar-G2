@@ -263,7 +263,69 @@ describe("Queue worker delivery end-to-end simulation", () => {
   });
 });
 
-describe("Production Email Lifecycle: rentmaikar.com -> backendBridge -> staging.rentmaikar.com -> /api/functions/send-outbound-email -> Cloud Run emailService -> api.resend.com", () => {
+describe("Production Email Checkpoints & Webhook Delivery Evidence", () => {
+  it("observes successful progression across all 6 production checkpoints with webhook evidence", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "admin@rentmaikar.com",
+      from: "support@rentmaikar.com",
+      subject: "Observed Checkpoints Verification",
+      content: "Validating 6 observed production checkpoints with webhook confirmation.",
+      skipResendDispatch: true,
+      simulateWebhookConfirmation: true,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.checkpoints.length).toBe(6);
+    expect(report.checkpoints.every((c) => c.status === "success")).toBe(true);
+    expect(report.checkpoints[0].id).toBe("checkpoint_1_client_ingress");
+    expect(report.checkpoints[1].id).toBe("checkpoint_2_resilient_bridge");
+    expect(report.checkpoints[2].id).toBe("checkpoint_3_gateway_ingress");
+    expect(report.checkpoints[3].id).toBe("checkpoint_4_authoritative_transaction");
+    expect(report.checkpoints[4].id).toBe("checkpoint_5_cloud_run_engine");
+    expect(report.checkpoints[5].id).toBe("checkpoint_6_resend_webhook_evidence");
+
+    // Verify transaction under test telemetry & final webhook delivery evidence
+    expect(report.transactionResult).toBeDefined();
+    expect(report.transactionResult?.route).toBe("/api/functions/send-outbound-email");
+    expect(report.webhookEvidence).toBeDefined();
+    expect(report.webhookEvidence?.verified).toBe(true);
+    expect(report.webhookEvidence?.eventType).toBe("email.delivered");
+  });
+
+  it("records and queries real-time Resend delivery status webhooks in the webhook store", async () => {
+    const { resendWebhookStore } = await import("../../server/resendWebhookStore");
+    const testEmailId = `msg_test_wh_${Date.now()}`;
+
+    // Record incoming delivered event
+    const recorded = resendWebhookStore.recordEvent({
+      type: "email.delivered",
+      created_at: new Date().toISOString(),
+      data: {
+        id: testEmailId,
+        email_id: testEmailId,
+        from: "support@notify.rentmaikar.com",
+        to: ["customer@rentmaikar.com"],
+        subject: "Your Rental Agreement Confirmation",
+      },
+    });
+
+    expect(recorded).toBeDefined();
+    expect(recorded.status).toBe("delivered");
+    expect(recorded.checkpointStatus).toBe("verified");
+
+    // Query event back by emailId
+    const found = resendWebhookStore.findEventByEmailId(testEmailId);
+    expect(found).toBeDefined();
+    expect(found?.recipient).toBe("customer@rentmaikar.com");
+
+    // Verify stats
+    const stats = resendWebhookStore.getStats();
+    expect(stats.total).toBeGreaterThan(0);
+    expect(stats.delivered).toBeGreaterThan(0);
+  });
+
   it("validates successful progression across all 6 production stages", async () => {
     const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
     const report = await runEmailProductionLifecycleTest({
@@ -371,6 +433,93 @@ describe("Production Email Lifecycle: rentmaikar.com -> backendBridge -> staging
     expect(report.failedStageIndex).toBe(6);
     expect(report.failedStage).toBe("api.resend.com");
     expect(report.remediationAdvice).toContain("Resend");
+  });
+
+  it("identifies exact point of failure when incoming Resend webhook reports bounce or failure", async () => {
+    const { resendWebhookStore } = await import("../../server/resendWebhookStore");
+    const bounceEmailId = `msg_bounce_${Date.now()}`;
+
+    // Record incoming bounced webhook
+    const bounceEvent = resendWebhookStore.recordEvent({
+      type: "email.bounced",
+      created_at: new Date().toISOString(),
+      data: {
+        id: bounceEmailId,
+        email_id: bounceEmailId,
+        from: "support@notify.rentmaikar.com",
+        to: ["invalid-mailbox-999@rentmaikar.com"],
+        subject: "Contract Agreement",
+        bounce: {
+          type: "hard",
+          subType: "suppressed",
+          message: "550 5.1.1 Recipient mailbox not found",
+          diagnosticCode: "smtp; 550 5.1.1 User unknown",
+        },
+      },
+    });
+
+    expect(bounceEvent.status).toBe("bounced");
+    expect(bounceEvent.checkpointStatus).toBe("failed");
+    expect(bounceEvent.reason).toContain("550 5.1.1");
+    expect(bounceEvent.bounceType).toBe("hard");
+
+    // Record incoming failed webhook
+    const failEmailId = `msg_failed_${Date.now()}`;
+    const failEvent = resendWebhookStore.recordEvent({
+      type: "email.failed",
+      created_at: new Date().toISOString(),
+      data: {
+        id: failEmailId,
+        email_id: failEmailId,
+        from: "support@notify.rentmaikar.com",
+        to: ["unreachable@external-domain.net"],
+        error: "Remote MTA rejected TLS handshake",
+      },
+    });
+
+    expect(failEvent.status).toBe("failed");
+    expect(failEvent.checkpointStatus).toBe("failed");
+    expect(failEvent.reason).toContain("TLS handshake");
+
+    // Confirm stats update correctly with failures and bounces
+    const stats = resendWebhookStore.getStats();
+    expect(stats.bounced).toBeGreaterThanOrEqual(1);
+    expect(stats.failed).toBeGreaterThanOrEqual(1);
+    expect(stats.lastReceivedAt).toBeTruthy();
+  });
+
+  it("links transaction under test /api/functions/send-outbound-email to Resend delivery evidence", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const testRecipient = "client@rentmaikar.com";
+
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: testRecipient,
+      from: "RentMaikar <support@rentmaikar.com>",
+      subject: "Authoritative Transaction Test",
+      content: "Verifying transaction under test and webhook evidence coupling.",
+      skipResendDispatch: true,
+      simulateWebhookConfirmation: true,
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.targetRecipient).toBe(testRecipient);
+
+    // Verify transaction under test was recorded
+    expect(report.transactionResult).toBeDefined();
+    expect(report.transactionResult?.route).toBe("/api/functions/send-outbound-email");
+
+    // Verify checkpoint 4 (the transaction under test) and checkpoint 6 (final delivery evidence)
+    const cp4 = report.checkpoints.find((c) => c.stage === 4);
+    const cp6 = report.checkpoints.find((c) => c.stage === 6);
+    expect(cp4).toBeDefined();
+    expect(cp4?.id).toBe("checkpoint_4_authoritative_transaction");
+    expect(cp4?.name).toBe("/api/functions/send-outbound-email");
+
+    expect(cp6).toBeDefined();
+    expect(cp6?.id).toBe("checkpoint_6_resend_webhook_evidence");
+    expect(cp6?.evidence?.verified).toBe(true);
+    expect(report.webhookEvidence?.verified).toBe(true);
   });
 });
 

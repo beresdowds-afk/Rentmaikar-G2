@@ -100,6 +100,7 @@ import { ServiceDisruptionDocs } from "@/components/admin/docs/ServiceDisruption
 import { AdminSecurityDashboard } from "@/components/admin/AdminSecurityDashboard";
 import ControlEvidencePlane from "@/components/admin/control-plane/ControlEvidencePlane";
 import AdminEmailDeliveryPage from "@/pages/admin/AdminEmailDeliveryPage";
+import AdminEmailLifecycleCheckpointsPage from "@/pages/admin/AdminEmailLifecycleCheckpointsPage";
 import RegionalOperationsManagement from "@/components/admin/RegionalOperationsManagement";
 import { RegionAutoBuildWorker } from "@/components/admin/RegionAutoBuildWorker";
 import NegativeAttestationReviewPanel from "@/components/admin/NegativeAttestationReviewPanel";
@@ -830,6 +831,7 @@ const AdminAssistantDashboard = () => {
               {activeTab === 'api-endpoints' && <ApiEndpointManagement />}
               {activeTab === 'security' && <AdminSecurityDashboard />}
               {activeTab === 'email-delivery' && <AdminEmailDeliveryPage />}
+              {(activeTab === 'email-checkpoints' || activeTab === 'email-lifecycle-webhooks') && <AdminEmailLifecycleCheckpointsPage />}
               {activeTab === 'cron-jobs' && <CronJobManagement />}
               {activeTab === 'uuid-assignments' && <UserUuidAssignmentsPage />}
               {activeTab === 'tax' && <TaxManagement />}
