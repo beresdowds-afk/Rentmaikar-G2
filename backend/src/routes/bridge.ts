@@ -133,7 +133,12 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
       case "invoke_edge_function":
       case "edge_function": {
         const targetFunction = (payload.functionName || payload.function || req.body.functionName || "").trim();
-        const functionBody = payload.body !== undefined ? payload.body : payload.params || payload;
+        const functionBody =
+          payload.body !== undefined && typeof payload.body === "object" && payload.body !== null
+            ? payload.body
+            : payload.params && typeof payload.params === "object" && payload.params !== null
+              ? payload.params
+              : payload;
         const clientAuth = (req.headers["authorization"] || req.headers["Authorization"]) as string | undefined;
 
         if (!targetFunction) {
@@ -143,6 +148,35 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
             error: "functionName is required for bridge edge function invocation",
             correlationId,
           });
+        }
+
+        // Authoritative Cloud Run execution for Email functions:
+        // Eliminates 404s from un-deployed Supabase edge functions and ensures direct Resend delivery
+        if (targetFunction === "send-outbound-email" || targetFunction === "send-transactional-email") {
+          try {
+            const { handleSendOutboundEmail } = await import("../services/emailService");
+            const emailRes = await handleSendOutboundEmail(functionBody);
+            result = {
+              success: emailRes.ok,
+              status: emailRes.ok ? 200 : 502,
+              functionName: targetFunction,
+              data: emailRes,
+              error: emailRes.error,
+              provider: "cloud_run_authoritative",
+              latencyMs: 1,
+            };
+            break;
+          } catch (emailErr: any) {
+            result = {
+              success: false,
+              status: 502,
+              functionName: targetFunction,
+              error: emailErr.message || "Authoritative email dispatch failed",
+              provider: "cloud_run_authoritative",
+              latencyMs: 1,
+            };
+            break;
+          }
         }
 
         const edgeResult = await supabaseBackendService.invokeEdgeFunction(targetFunction, functionBody, {

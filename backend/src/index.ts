@@ -318,7 +318,7 @@ app.use("/api/portal", portalApiRouter);
 
 app.use("/api/health", healthRouter);
 app.use("/api/cpaas", cpaasRouter);
-app.use("/api/functions", functionsRouter);
+app.use(["/api/functions", "/functions", "/functions/v1"], functionsRouter);
 app.use("/api/marketing", marketingRouter);
 
 // Bridge endpoints for Call, Listen (SSE), Respond, Polling, Telemetry, and Handshake
