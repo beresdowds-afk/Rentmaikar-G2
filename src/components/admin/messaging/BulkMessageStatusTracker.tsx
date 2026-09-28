@@ -332,44 +332,35 @@ export const BulkMessageStatusTracker: React.FC<BulkMessageStatusTrackerProps> =
           };
 
           const bridgeRes = await backendBridge.invokeEdgeFunction(
-  'send-outbound-email',
-  emailPayload,
-  {
-    method: 'POST',
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
-);
+            'send-outbound-email',
+            emailPayload,
+            {
+              method: 'POST',
+              timeoutMs: 15000,
+              skipRetry: true,
+            },
+          );
 
-if (bridgeRes.error) {
-  throw bridgeRes.error;
-}
+          if (bridgeRes.error) {
+            throw bridgeRes.error;
+          }
 
-const json = bridgeRes.data;
+          const json = bridgeRes.data;
 
-if (
-  bridgeRes.status >= 200 &&
-  bridgeRes.status < 300 &&
-  json?.ok !== false &&
-  json?.success !== false
-) {
-  delivered = true;
-  messageId = json?.messageId || json?.id || '';
-  errMsg = '';
-} else {
-  errMsg =
-    json?.error ||
-    json?.message ||
-    `Email delivery failed with HTTP ${bridgeRes.status}`;
-}
-          if (res.ok && (json?.ok !== false && json?.success !== false)) {
+          if (
+            bridgeRes.status >= 200 &&
+            bridgeRes.status < 300 &&
+            json?.ok !== false &&
+            json?.success !== false
+          ) {
             delivered = true;
             messageId = json?.messageId || json?.id || '';
             errMsg = '';
           } else {
             errMsg =
               json?.error ||
-              `Email delivery failed with HTTP ${res.status}`;
+              json?.message ||
+              `Email delivery failed with HTTP ${bridgeRes.status}`;
           }
         } catch (e: any) {
           errMsg = e.message || 'Email gateway request failed';

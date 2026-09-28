@@ -770,8 +770,9 @@ try {
         failures: [...failures],
       });
 
-      // Small 120ms safety throttle to stay inside carrier/provider rate limits
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      // Channel-specific safety throttle: 550ms for email to strictly honor Resend 2 req/s limit, 150ms for SMS/in-app
+      const throttleMs = channel === 'email' ? 550 : 150;
+      await new Promise((resolve) => setTimeout(resolve, throttleMs));
     }
 
     setIsSending(false);

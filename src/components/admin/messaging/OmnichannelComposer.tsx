@@ -763,25 +763,28 @@ export const OmnichannelComposer = ({
       }
 
       // 3. Trigger external delivery via the Cloud Run application email gateway.
-// The backend gateway handles Supabase as the secondary fallback.
-if (channel === 'email' && contact.email) {
-  try {
-    const bridgeRes = await backendBridge.invokeEdgeFunction(
-  'send-outbound-email',
-  {
-    action: 'send',
-    to: emailTarget,
-    subject: subject || 'Message from Rentmaikar',
-    body,
-    recipientName: recipientName || undefined,
-    category: 'general',
-  },
-  {
-    method: 'POST',
-    timeoutMs: 15000,
-    skipRetry: true,
-  },
-);
+      // The backend gateway handles Supabase as the secondary fallback.
+      if (channel === 'email' && contact.email) {
+        const emailTarget = contact.email.trim();
+        const recipientName = (contact.full_name || '').trim();
+
+        try {
+          const bridgeRes = await backendBridge.invokeEdgeFunction(
+            'send-outbound-email',
+            {
+              action: 'send',
+              to: emailTarget,
+              subject: subject || 'Message from Rentmaikar',
+              body,
+              recipientName: recipientName || undefined,
+              category: 'general',
+            },
+            {
+              method: 'POST',
+              timeoutMs: 15000,
+              skipRetry: true,
+            },
+          );
 
 if (bridgeRes.error) {
   throw bridgeRes.error;

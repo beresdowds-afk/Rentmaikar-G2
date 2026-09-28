@@ -766,7 +766,12 @@ export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean;
     }
     const results: any[] = [];
     let sentCount = 0;
-    for (const r of recipients) {
+    for (let i = 0; i < recipients.length; i++) {
+      const r = recipients[i];
+      if (i > 0) {
+        // Rate-limit throttle to stay safely within Resend 2 req/s limit
+        await new Promise((resolve) => setTimeout(resolve, 550));
+      }
       const recipientEmail = typeof r === "string" ? r : (r.email || r.to);
       const recipientSubj = r.subject || body.subject || "Notification from Rentmaikar";
       const recipientContent = r.body || r.content || body.body || body.content || body.message;
