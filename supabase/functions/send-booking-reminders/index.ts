@@ -2,7 +2,7 @@
 // begins within the next 24 hours. Idempotent per booking + start date via
 // the idempotency key passed to send-transactional-email.
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
+import { corsHeaders } from '../_shared/cors.ts'
 import { requireCronSecretAsync } from '../_shared/cron-auth.ts'
 import { isBookingEmailEnabled, loadBookingEmailPayload, sendBookingEmail } from '../_shared/booking-email-data.ts'
 

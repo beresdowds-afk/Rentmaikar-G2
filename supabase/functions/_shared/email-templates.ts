@@ -100,13 +100,13 @@ const emailWrapper = (content: string, title: string) => `
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
+  <div class="container" id="rentmaikar-email-container" name="rentmaikar_email_container">
+    <div class="header" id="rentmaikar-email-header" name="rentmaikar_email_header">
       <img src="https://rentmaikar.com/pwa-icon-192.png" width="64" height="64" alt="Rentmaikar" style="display:block;margin:0 auto 12px;border-radius:14px;" />
-      <div class="logo">Rentmaikar</div>
+      <div class="logo" id="rentmaikar-email-logo" name="rentmaikar_email_logo">Rentmaikar</div>
     </div>
     ${content}
-    <div class="footer">
+    <div class="footer" id="rentmaikar-email-footer" name="rentmaikar_email_footer">
       <p style="margin: 0 0 8px 0; font-weight: 600; color: #1e293b;">Rentmaikar Mobility Solutions</p>
       <p style="margin: 0 0 4px 0;">© ${new Date().getFullYear()} Rentmaikar. All rights reserved.</p>
       <p style="margin: 0 0 4px 0;">

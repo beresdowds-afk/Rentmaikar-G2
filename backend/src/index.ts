@@ -174,12 +174,17 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, apikey, x-client-info, X-Requested-With, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Correlation-ID, X-Client-Timestamp, X-Portal-Token, Accept"
+      "Content-Type, Authorization, apikey, x-client-info, X-Requested-With, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Correlation-ID, X-Client-Timestamp, X-Portal-Token, Accept, Prefer, Origin, Idempotency-Key, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-test-role, x-test-user-id"
+    );
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Length, Content-Range, Content-Type, X-Entity-Ref-ID, Message-ID, Date, X-RentMaikar-Bridge-Status, X-RentMaikar-Fallback-Active, X-RentMaikar-Direct-Connection, X-RentMaikar-Channel"
     );
     res.setHeader("Access-Control-Max-Age", "86400");
   } else if (!origin) {
     // Direct or server-to-server calls
     res.setHeader("Access-Control-Allow-Origin", "*");
+    res.removeHeader("Access-Control-Allow-Credentials");
   }
 
   res.setHeader(

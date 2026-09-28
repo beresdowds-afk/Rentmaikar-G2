@@ -84,16 +84,42 @@ export const INCOMING_EMAIL_CONFIG = {
 export const EMAIL_CONFIG = OUTGOING_EMAIL_CONFIG;
 
 /**
- * Email display names for sender formatting
+ * Email display names for sender formatting (valid Name attributes for all outbound platform emails)
  */
 export const EMAIL_SENDER_NAMES = {
   support: "Rentmaikar Support",
-  noreply: "Rentmaikar",
+  noreply: "Rentmaikar Notifications",
   admin: "Rentmaikar Admin",
   notifications: "Rentmaikar Notifications",
   verify: "Rentmaikar Verification",
   negotiations: "Rentmaikar Pricing",
+  payments: "Rentmaikar Billing & Payments",
+  documents: "Rentmaikar Document Verification",
+  legal: "Rentmaikar Legal",
+  privacy: "Rentmaikar Privacy",
+  dpo: "Rentmaikar Data Protection",
+  nigeria: "Rentmaikar Nigeria Operations",
+  usa: "Rentmaikar USA Operations",
 } as const;
+
+/**
+ * Authoritative list of Outbound Platform Email definitions with unique IDs and valid name attributes.
+ */
+export const OUTGOING_PLATFORM_EMAILS = [
+  { id: "platform-email-support", key: "support", email: OUTGOING_EMAIL_CONFIG.support, name: EMAIL_SENDER_NAMES.support, description: "Customer Support & Inquiries" },
+  { id: "platform-email-noreply", key: "noreply", email: OUTGOING_EMAIL_CONFIG.noreply, name: EMAIL_SENDER_NAMES.noreply, description: "Automated Platform Notifications" },
+  { id: "platform-email-admin", key: "admin", email: OUTGOING_EMAIL_CONFIG.admin, name: EMAIL_SENDER_NAMES.admin, description: "Administrative Alerts & Internal Dispatch" },
+  { id: "platform-email-notifications", key: "notifications", email: OUTGOING_EMAIL_CONFIG.notifications, name: EMAIL_SENDER_NAMES.notifications, description: "User & Fleet Activity Notifications" },
+  { id: "platform-email-verify", key: "verify", email: OUTGOING_EMAIL_CONFIG.verify, name: EMAIL_SENDER_NAMES.verify, description: "Identity & 2FA Verification Codes" },
+  { id: "platform-email-negotiations", key: "negotiations", email: OUTGOING_EMAIL_CONFIG.negotiations, name: EMAIL_SENDER_NAMES.negotiations, description: "Pricing & Rental Agreement Negotiations" },
+  { id: "platform-email-payments", key: "payments", email: OUTGOING_EMAIL_CONFIG.payments, name: EMAIL_SENDER_NAMES.payments, description: "Billing, Receipts, Invoices & Escrow" },
+  { id: "platform-email-documents", key: "documents", email: OUTGOING_EMAIL_CONFIG.documents, name: EMAIL_SENDER_NAMES.documents, description: "Driver & Vehicle Document Verification" },
+  { id: "platform-email-legal", key: "legal", email: OUTGOING_EMAIL_CONFIG.legal, name: EMAIL_SENDER_NAMES.legal, description: "Legal Agreements & Platform Terms" },
+  { id: "platform-email-privacy", key: "privacy", email: OUTGOING_EMAIL_CONFIG.privacy, name: EMAIL_SENDER_NAMES.privacy, description: "Privacy Policy & GDPR/NDPR Compliance" },
+  { id: "platform-email-dpo", key: "dpo", email: OUTGOING_EMAIL_CONFIG.dpo, name: EMAIL_SENDER_NAMES.dpo, description: "Data Protection Officer Enquiries" },
+  { id: "platform-email-nigeria", key: "nigeria", email: OUTGOING_EMAIL_CONFIG.nigeria, name: EMAIL_SENDER_NAMES.nigeria, description: "Nigeria Operations & Regional Fleet" },
+  { id: "platform-email-usa", key: "usa", email: OUTGOING_EMAIL_CONFIG.usa, name: EMAIL_SENDER_NAMES.usa, description: "USA Operations & Regional Fleet" },
+] as const;
 
 /**
  * Format email with display name for Resend API

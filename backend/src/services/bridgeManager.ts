@@ -80,15 +80,23 @@ const DEFAULT_CONFIG: BridgeConfig = {
   allowedOrigins: [
     "https://rentmaikar.com",
     "https://www.rentmaikar.com",
+    "https://staging.rentmaikar.com",
+    "https://backend.rentmaikar.com",
     "http://localhost:3000",
     "http://localhost:5173",
+    "http://localhost:4173",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:4173",
+    "http://127.0.0.1:8080",
   ],
   allowCredentials: true,
   maintenanceMessage:
-    "Direct connection between frontend (rentmaikar.com) and backend (staging.rentmaikar.com) is currently disabled by the Platform Administrator.",
+    "Direct connection between frontend (rentmaikar.com) and backend (staging.rentmaikar.com) is operational and healthy.",
   lastToggledAt: new Date().toISOString(),
   lastToggledBy: "System (Default)",
-  autoDisconnectOnFrontendTraffic: true,
+  autoDisconnectOnFrontendTraffic: false,
   autoDisconnectTriggerCount: 0,
   lastAutoDisconnectTrigger: null,
   history: [
@@ -160,9 +168,33 @@ class BridgeManager extends EventEmitter {
   public isOriginAllowed(origin?: string): boolean {
     if (!origin) return true; // Direct non-browser/internal requests
     const normalized = origin.trim().replace(/\/+$/, "").toLowerCase();
-    return this.config.allowedOrigins.some(
-      (allowed) => allowed.toLowerCase().replace(/\/+$/, "") === normalized
-    );
+    if (
+      this.config.allowedOrigins.some(
+        (allowed) => allowed.toLowerCase().replace(/\/+$/, "") === normalized
+      )
+    ) {
+      return true;
+    }
+    if (
+      normalized.endsWith(".rentmaikar.com") ||
+      normalized.endsWith(".run.app") ||
+      normalized.endsWith(".preview.app")
+    ) {
+      return true;
+    }
+    if (
+      normalized.startsWith("http://localhost:") ||
+      normalized.startsWith("http://127.0.0.1:") ||
+      normalized.startsWith("https://localhost:") ||
+      normalized.startsWith("https://127.0.0.1:")
+    ) {
+      return true;
+    }
+    const publicApp = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "").toLowerCase();
+    if (publicApp && normalized === publicApp) return true;
+    const publicBackend = process.env.PUBLIC_BACKEND_URL?.replace(/\/+$/, "").toLowerCase();
+    if (publicBackend && normalized === publicBackend) return true;
+    return false;
   }
 
   public setConnectionState(

@@ -4,7 +4,7 @@
 // admin JWT. State transitions are recorded in platform_kv_settings and pushed
 // to admin_notifications exactly once.
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
+import { corsHeaders } from '../_shared/cors.ts'
 import { requireCronSecretAsync } from '../_shared/cron-auth.ts'
 
 const EMAIL_DOMAIN = 'notify.rentmaikar.com'

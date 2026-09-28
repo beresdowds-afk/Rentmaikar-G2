@@ -55,16 +55,21 @@ export function isOriginAllowed(origin?: string): boolean {
 }
 
 export function marketingCorsMiddleware(req: Request, res: Response, next: NextFunction) {
-  const origin = req.headers.origin;
+  const rawOrigin = req.headers.origin;
+  const origin = typeof rawOrigin === "string" ? rawOrigin.trim().replace(/\/+$/, "") : undefined;
 
   if (origin && isOriginAllowed(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Test-Role, X-Test-User-Id'
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, apikey, x-client-info, Prefer, Idempotency-Key, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Test-Role, X-Test-User-Id'
     );
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Length, Content-Range, Content-Type, X-Entity-Ref-ID, Message-ID, Date'
+    );
     res.setHeader('Access-Control-Max-Age', '86400');
   }
 

@@ -43,6 +43,10 @@ bridgeRouter.post("/call", async (req: Request, res: Response) => {
     "health",
     "check_health",
     "ping",
+    "domains",
+    "get_domains",
+    "status",
+    "get_status",
     "diagnostics",
     "cpaas_simulate",
     "custom",
@@ -238,12 +242,17 @@ bridgeRouter.get("/events", (req: Request, res: Response) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
 
-  const origin = req.headers.origin as string | undefined;
+  const rawOrigin = req.headers.origin as string | undefined;
+  const origin = typeof rawOrigin === "string" ? rawOrigin.trim().replace(/\/+$/, "") : undefined;
   if (origin && bridgeManager.isOriginAllowed(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
-  } else {
+  } else if (!origin) {
     res.setHeader("Access-Control-Allow-Origin", "*");
+    res.removeHeader("Access-Control-Allow-Credentials");
+  } else {
+    res.removeHeader("Access-Control-Allow-Origin");
+    res.removeHeader("Access-Control-Allow-Credentials");
   }
 
   res.flushHeaders?.();
@@ -460,6 +469,34 @@ bridgeRouter.post("/ping", (req: Request, res: Response) => {
     backendHost: "staging.rentmaikar.com",
     directConnectionEnabled: config.enabled,
     mode: config.mode,
+  });
+});
+
+/**
+ * Get Bridge Health Status
+ */
+bridgeRouter.get("/health", (req: Request, res: Response) => {
+  const config = bridgeManager.getConfig();
+  const rawOrigin = req.headers.origin;
+  const origin = typeof rawOrigin === "string" ? rawOrigin.trim().replace(/\/+$/, "") : undefined;
+
+  if (origin && bridgeManager.isOriginAllowed(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+
+  res.status(200).json({
+    status: "healthy",
+    ok: true,
+    service: "rentmaikar-backend-bridge",
+    frontend_domain: config.frontendDomain,
+    backend_domain: config.backendDomain,
+    direct_connection_enabled: config.enabled,
+    mode: config.mode,
+    auto_disconnect_enabled: config.autoDisconnectOnFrontendTraffic,
+    active_listeners: bridgeManager.getActiveListenersCount(),
+    uptime_seconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
   });
 });
 

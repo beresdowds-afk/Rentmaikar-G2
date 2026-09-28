@@ -110,24 +110,24 @@ function formatComposedEmailHtml(bodyText: string, recipientName?: string): stri
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;padding:32px 16px;">
+<body id="rentmaikar-composed-email-body" name="rentmaikar_composed_email_body" style="margin:0;padding:0;background-color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table id="rentmaikar-composed-email-wrapper" name="rentmaikar_composed_email_wrapper" role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;padding:32px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <table id="rentmaikar-composed-email-card" name="rentmaikar_composed_email_card" role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
           <tr>
-            <td style="background-color:#0f172a;padding:24px 32px;text-align:left;">
-              <span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Rentmaikar</span>
+            <td id="rentmaikar-composed-email-header" name="rentmaikar_composed_email_header" style="background-color:#0f172a;padding:24px 32px;text-align:left;">
+              <span id="rentmaikar-composed-brand-name" name="rentmaikar_composed_brand_name" style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Rentmaikar</span>
             </td>
           </tr>
           <tr>
-            <td style="padding:32px;color:#334155;">
+            <td id="rentmaikar-composed-email-content" name="rentmaikar_composed_email_content" style="padding:32px;color:#334155;">
               ${greeting}
               ${paragraphs}
             </td>
           </tr>
           <tr>
-            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #f1f5f9;text-align:center;font-size:12px;color:#64748b;">
+            <td id="rentmaikar-composed-email-footer" name="rentmaikar_composed_email_footer" style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #f1f5f9;text-align:center;font-size:12px;color:#64748b;">
               <p style="margin:0 0 6px 0;">Rentmaikar Mobility Solutions &middot; Communications Hub</p>
               <p style="margin:0;">Support: <a href="mailto:support@rentmaikar.com" style="color:#0284c7;text-decoration:none;">support@rentmaikar.com</a></p>
             </td>
@@ -314,16 +314,25 @@ async function sendViaResend(
   subject: string,
   html: string,
   text?: string,
-  tags?: { name: string; value: string }[]
+  tags?: { name: string; value: string }[],
+  customId?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const uniqueId = customId || crypto.randomUUID();
+  const validTags = [
+    ...(tags || []),
+    { name: "message_id", value: uniqueId },
+  ].filter((t) => t && typeof t.name === "string" && t.name.trim().length > 0);
+
   const body: Record<string, unknown> = {
+    id: uniqueId,
+    messageId: uniqueId,
     from,
     to: [to],
     subject,
     html,
+    tags: validTags,
   };
   if (text) body.text = text;
-  if (tags) body.tags = tags;
 
   const res = await resendSendEmail(body, apiKey);
 
@@ -337,7 +346,7 @@ async function sendViaResend(
     (result as any)?.id ??
     (result as any)?.data?.recipients?.[0]?.message_id ??
     (result as any)?.messageId ??
-    `msg_${Date.now()}`;
+    uniqueId;
   return { success: true, messageId };
 }
 

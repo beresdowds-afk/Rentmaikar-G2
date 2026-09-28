@@ -175,23 +175,86 @@ export async function sendEmailViaSent(payload: Record<string, unknown>): Promis
 }
 
 /**
+ * Ensures the sender address contains a valid display Name attribute.
+ */
+export function ensureSenderName(addressWithOrWithoutName: string): string {
+  const parsed = parseAddress(addressWithOrWithoutName);
+  if (!parsed) return addressWithOrWithoutName;
+  if (parsed.name && parsed.name.trim().length > 0) return addressWithOrWithoutName;
+  const local = parsed.local.toLowerCase();
+  const nameMap: Record<string, string> = {
+    support: "Rentmaikar Support",
+    noreply: "Rentmaikar Notifications",
+    admin: "Rentmaikar Admin",
+    notifications: "Rentmaikar Notifications",
+    verify: "Rentmaikar Verification",
+    negotiations: "Rentmaikar Pricing",
+    payments: "Rentmaikar Billing & Payments",
+    documents: "Rentmaikar Document Verification",
+    legal: "Rentmaikar Legal",
+    privacy: "Rentmaikar Privacy",
+    dpo: "Rentmaikar Data Protection",
+    nigeria: "Rentmaikar Nigeria Operations",
+    usa: "Rentmaikar USA Operations",
+    security: "Rentmaikar Security",
+  };
+  const derivedName = nameMap[local] || `Rentmaikar ${local.charAt(0).toUpperCase() + local.slice(1)}`;
+  return `${derivedName} <${parsed.local}@${parsed.domain}>`;
+}
+
+/**
  * Single transport for every outbound Resend email with SENT.DM fallback.
  * Resend is the primary Global email service provider and SENT.DM is the fallback.
  * Normalises the sender onto the verified domain and keeps the original address
  * as `reply_to` so replies still reach the human mailbox. A 401/403 from Resend
  * is terminal, so it is alerted to the team with the failing recipient and
  * payload excerpt before attempting the SENT.DM fallback.
+ * Ensures all outbound emails have valid unique Id and Name attributes.
  */
 export async function resendSendEmail(body: ResendBody, key?: string | null): Promise<Response> {
   const apiKey = key ?? Deno.env.get("RESEND_API_KEY") ?? "";
   const originalFrom = typeof body.from === "string" ? body.from : "";
-  const from = originalFrom ? resendFrom(originalFrom) : originalFrom;
+  const rawFrom = originalFrom ? resendFrom(originalFrom) : originalFrom;
+  const from = rawFrom ? ensureSenderName(rawFrom) : rawFrom;
   const replyTo = body.reply_to ??
     (originalFrom && from !== originalFrom ? originalFrom : undefined);
   const caller = callerFunctionName();
 
+  // Generate or preserve unique message Id for tracking and headers
+  const uniqueMessageId = (typeof body.id === "string" && body.id)
+    ? body.id
+    : (typeof body.messageId === "string" && body.messageId)
+      ? body.messageId
+      : (typeof body.message_id === "string" && body.message_id)
+        ? body.message_id
+        : crypto.randomUUID();
+
+  const domain = resendSendingDomain();
+  const existingHeaders = (body.headers && typeof body.headers === "object") ? (body.headers as Record<string, string>) : {};
+  const headers = {
+    "Message-ID": `<${uniqueMessageId}@${domain}>`,
+    "X-Entity-Ref-ID": uniqueMessageId,
+    ...existingHeaders,
+  };
+
+  // Ensure tags array exists and all tags have valid name and value attributes
+  const existingTags = Array.isArray(body.tags) ? body.tags : [];
+  const validTags = existingTags
+    .filter((t: any) => t && typeof t.name === "string" && t.name.trim().length > 0)
+    .map((t: any) => ({ name: String(t.name).trim(), value: String(t.value ?? "") }));
+
+  if (!validTags.some((t: any) => t.name === "message_id")) {
+    validTags.push({ name: "message_id", value: uniqueMessageId });
+  }
+  if (!validTags.some((t: any) => t.name === "platform_source")) {
+    validTags.push({ name: "platform_source", value: "rentmaikar" });
+  }
+
   const payload = {
     ...body,
+    id: uniqueMessageId,
+    headers,
+    tags: validTags,
     ...(from ? { from } : {}),
     ...(replyTo ? { reply_to: replyTo } : {}),
   };

@@ -2,7 +2,7 @@
 // raises admin_notifications. Runs on a 5-minute pg_cron schedule
 // (x-cron-secret) and can also be triggered manually by an admin JWT.
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
+import { corsHeaders } from '../_shared/cors.ts'
 import { requireCronSecretAsync } from '../_shared/cron-auth.ts'
 
 interface WorkerSpec {

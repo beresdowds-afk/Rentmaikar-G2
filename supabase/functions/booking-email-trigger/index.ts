@@ -2,7 +2,7 @@
 // that just transitioned to "accepted". Called by the database trigger
 // trg_booking_accepted_email via pg_net (x-cron-secret) — never by the browser.
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
+import { corsHeaders } from '../_shared/cors.ts'
 import { requireCronSecretAsync } from '../_shared/cron-auth.ts'
 import { isBookingEmailEnabled, loadBookingEmailPayload, sendBookingEmail } from '../_shared/booking-email-data.ts'
 
