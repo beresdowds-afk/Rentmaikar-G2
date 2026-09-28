@@ -171,7 +171,6 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "send-incident-notification",
   "send-meta-capi",
   "send-order-notification",
-  "send-outbound-email",
   "send-password-reset",
   "send-payment-notification",
   "send-persona-digest",
