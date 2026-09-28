@@ -694,34 +694,132 @@ export async function handleSendVerificationEmail(body: {
  * 4. General Outbound Transactional Email Handler (send-outbound-email)
  */
 export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean; success: boolean; messageId?: string; error?: string; results?: any[] }> {
-  // Support bulk send payload
+  // Authoritative server-side bulk email dispatch.
+  // The browser sends ONE request containing the recipient list.
+  // Recipient pacing and delivery accounting remain server-side.
+
   if (body.action === "bulk" || Array.isArray(body.recipients)) {
-    const recipients = body.recipients || [];
-    if (!recipients.length) {
-      return { ok: false, success: false, error: "Recipients array required for bulk action" };
+    const rawRecipients = Array.isArray(body.recipients)
+      ? body.recipients
+      : [];
+
+    if (!rawRecipients.length) {
+      return {
+        ok: false,
+        success: false,
+        error: "Recipients array required for bulk action",
+        results: [],
+      };
     }
+
     const results: any[] = [];
     let sentCount = 0;
-    for (let i = 0; i < recipients.length; i++) {
-      const r = recipients[i];
+    let failedCount = 0;
+
+    for (let i = 0; i < rawRecipients.length; i++) {
+      const rawRecipient = rawRecipients[i];
+
+      // Normalize both string recipients and object recipients.
+      const recipient =
+        typeof rawRecipient === "string"
+          ? { email: rawRecipient }
+          : (rawRecipient || {});
+
+      const recipientEmail = String(
+        recipient.email ||
+        recipient.to ||
+        recipient.recipientEmail ||
+        ""
+      ).trim();
+
+      if (!recipientEmail) {
+        failedCount++;
+
+        results.push({
+          index: i,
+          email: "",
+          success: false,
+          error: "Recipient email required",
+        });
+
+        continue;
+      }
+
       if (i > 0) {
-        // Rate-limit throttle to stay safely within Resend 2 req/s limit
+        // Keep provider pacing on the authoritative server.
         await new Promise((resolve) => setTimeout(resolve, 550));
       }
-      const recipientEmail = typeof r === "string" ? r : (r.email || r.to);
-      const recipientSubj = r.subject || body.subject || "Notification from Rentmaikar";
-      const recipientContent = r.body || r.content || body.body || body.content || body.message;
-      const res = await handleSendOutboundEmail({
+
+      const recipientSubj =
+        recipient.subject ||
+        body.subject ||
+        "Notification from Rentmaikar";
+
+      const recipientContent =
+        recipient.body ||
+        recipient.content ||
+        body.body ||
+        body.content ||
+        body.message ||
+        "";
+
+      const recipientName =
+        recipient.name ||
+        recipient.recipientName ||
+        body.recipientName;
+
+      const recipientData = {
+        ...(body.data || {}),
+        ...(recipient.customData || {}),
+      };
+
+      const result = await handleSendOutboundEmail({
         to: recipientEmail,
         subject: recipientSubj,
         body: recipientContent,
-        recipientName: r.name || r.recipientName,
-        data: { ...(body.data || {}), ...(r.customData || {}) },
+        recipientName,
+        data: recipientData,
+        from: recipient.from || body.from,
+        replyTo: recipient.replyTo || body.replyTo,
+        templateData: recipient.templateData,
+        templateName: recipient.templateName || body.templateName,
       });
-      if (res.ok) sentCount++;
-      results.push({ email: recipientEmail, success: res.ok, messageId: res.messageId, error: res.error });
+
+      if (result.ok === true && result.success === true && result.messageId) {
+        sentCount++;
+
+        results.push({
+          index: i,
+          email: recipientEmail,
+          success: true,
+          messageId: result.messageId,
+        });
+      } else {
+        failedCount++;
+
+        results.push({
+          index: i,
+          email: recipientEmail,
+          success: false,
+          messageId: result.messageId,
+          error: result.error || "Email delivery failed",
+        });
+      }
     }
-    return { ok: sentCount > 0, success: sentCount > 0, results };
+
+    const total = rawRecipients.length;
+    const partial = sentCount > 0 && failedCount > 0;
+    const allSucceeded = sentCount === total && failedCount === 0;
+
+    return {
+      ok: allSucceeded || partial,
+      success: allSucceeded || partial,
+      partial,
+      total,
+      sent: sentCount,
+      failed: failedCount,
+      results,
+    };
   }
 
   const to = body.to || body.recipientEmail || body.recipient || body.recipientContact || body.email;
