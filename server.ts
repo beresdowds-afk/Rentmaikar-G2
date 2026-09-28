@@ -270,6 +270,21 @@ async function startServer() {
     }
   });
 
+  // Query email_send_log database records for honest production verification
+  app.get(["/api/email/logs", "/api/email/send-log"], async (req, res) => {
+    try {
+      const { getEmailSendLogs } = await import("./src/server/emailService");
+      const result = await getEmailSendLogs({
+        messageId: req.query.messageId as string,
+        recipient: req.query.recipient as string,
+        limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 20,
+      });
+      res.status(result.ok ? 200 : 500).json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message, logs: [], count: 0 });
+    }
+  });
+
   // Resend Webhooks Real-Time Observer & Stream
   app.get(["/api/email/webhooks/events", "/api/email/webhooks"], async (req, res) => {
     try {

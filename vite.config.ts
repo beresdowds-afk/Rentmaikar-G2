@@ -126,6 +126,8 @@ export default defineConfig(({ mode }) => ({
 
           if (
             req.url?.startsWith("/api/email/webhooks") ||
+            req.url?.startsWith("/api/email/logs") ||
+            req.url?.startsWith("/api/email/send-log") ||
             req.url === "/api/email/inbound" ||
             req.url === "/api/email/webhook" ||
             req.url === "/api/webhooks/resend" ||
@@ -142,6 +144,20 @@ export default defineConfig(({ mode }) => ({
             if (req.method === "OPTIONS") {
               res.statusCode = 204;
               res.end();
+              return;
+            }
+
+            if (req.method === "GET" && (req.url?.startsWith("/api/email/logs") || req.url?.startsWith("/api/email/send-log"))) {
+              const urlObj = new URL(req.url, "http://localhost");
+              const messageId = urlObj.searchParams.get("messageId") || undefined;
+              const recipient = urlObj.searchParams.get("recipient") || undefined;
+              const limitStr = urlObj.searchParams.get("limit");
+              const limit = limitStr ? parseInt(limitStr, 10) : 20;
+
+              const { getEmailSendLogs } = await import("./src/server/emailService");
+              const result = await getEmailSendLogs({ messageId, recipient, limit });
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(result));
               return;
             }
 
@@ -283,7 +299,7 @@ export default defineConfig(({ mode }) => ({
             return;
           }
 
-          if (req.url?.startsWith("/api/functions/") || req.url?.startsWith("/functions/v1/")) {
+          if (req.url?.startsWith("/api/functions/") || req.url?.startsWith("/functions/v1/") || req.url?.startsWith("/functions/")) {
             const rawOrigin = req.headers.origin;
             const origin = typeof rawOrigin === "string" ? rawOrigin.trim().replace(/\/+$/, "") : undefined;
             const isAllowedOrigin = origin && (
@@ -318,7 +334,7 @@ export default defineConfig(({ mode }) => ({
             }
 
             try {
-              const functionName = (req.url || "").replace(/^\/(?:api\/functions\/v1|api\/functions|functions\/v1)\//, "").split("?")[0].replace(/\/+$/, "");
+              const functionName = (req.url || "").replace(/^\/(?:api\/functions\/v1|api\/functions|functions\/v1|functions)\//, "").split("?")[0].replace(/\/+$/, "");
 
               // Controlled allowlist of functions to execute/route via Supabase Edge Functions
               const SUPABASE_EDGE_FUNCTIONS_ALLOWLIST = new Set([

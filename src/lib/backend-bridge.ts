@@ -385,6 +385,10 @@ class BackendBridge {
     return this.isManuallyDisconnected;
   }
 
+  public generateCorrelationId(prefix: string = "call"): string {
+    return generateBridgeCorrelationId(prefix);
+  }
+
   /**
    * Disconnect or reconnect front end files from the backend files.
    * Toggling this off immediately severs direct contact and switches

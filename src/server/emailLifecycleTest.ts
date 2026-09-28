@@ -88,8 +88,12 @@ export interface EmailLifecycleTestOptions {
   origin?: string;
   skipResendDispatch?: boolean; // For dry-run simulation
   mockFailureAtStage?: number;  // 1 to 6 for testing error handling
-  simulateWebhookConfirmation?: boolean; // Automatically register a confirmed delivery webhook in test store
+  simulateWebhookConfirmation?: boolean; // If explicitly set to true, registers a simulated confirmation for local mock tests
   waitForWebhookMs?: number; // Time to poll/await webhook confirmation (default: 300ms)
+  bridgeCorrelationId?: string;
+  bridgeState?: string;
+  bridgeActiveBaseUrl?: string;
+  bridgeStatus?: any;
 }
 
 const RESEND_API_URL = "https://api.resend.com/emails";
@@ -204,10 +208,10 @@ export async function runEmailProductionLifecycleTest(
       throw new Error("Simulated bridge fault: Channel disconnected and offline queue barred for non-idempotent mutation");
     }
 
-    // Verify bridge contract rules
-    const bridgeChannel = "direct"; // or "staging_fallback"
-    const bridgeTargetDomain = "staging.rentmaikar.com";
-    const correlationHeader = `corr-${testId}`;
+    // Verify bridge contract rules and observe client bridge parameters
+    const bridgeChannel = options.bridgeState || "DIRECT";
+    const bridgeTargetDomain = options.bridgeActiveBaseUrl || "https://staging.rentmaikar.com";
+    const correlationHeader = options.bridgeCorrelationId || `corr-${testId}`;
 
     // Verify anti-simulation guard for email
     const MUST_NEVER_SIMULATE = new Set(["send-outbound-email", "process-email-queue"]);
@@ -230,6 +234,7 @@ export async function runEmailProductionLifecycleTest(
         correlationId: correlationHeader,
         antiSimulationEnforced: true,
         protocol: "HTTP/2 REST with Correlation Envelope",
+        observedClientBridge: Boolean(options.bridgeState || options.bridgeCorrelationId),
       },
       evidence: {
         type: "bridge_transport_resolution",
@@ -608,8 +613,8 @@ export async function runEmailProductionLifecycleTest(
     // Inspect real-time Resend webhook delivery evidence
     let observedWebhook = resendWebhookStore.findEventByEmailId(dispatchedMessageId);
 
-    // If simulation requested (or in test environment), register an immediate delivery confirmation event
-    if (!observedWebhook && (options.simulateWebhookConfirmation || options.skipResendDispatch)) {
+    // Only if simulation is explicitly opted in for unit tests or dry-run, record a mock event
+    if (!observedWebhook && options.simulateWebhookConfirmation === true) {
       observedWebhook = resendWebhookStore.recordEvent({
         type: "email.delivered",
         created_at: new Date().toISOString(),
@@ -623,14 +628,33 @@ export async function runEmailProductionLifecycleTest(
       });
     }
 
+    // Inspect real persistent audit database record from public.email_send_log
+    let dbRecord: any = null;
+    try {
+      const { getEmailSendLogs } = await import("./emailService");
+      const dbLogs = await getEmailSendLogs({ messageId: dispatchedMessageId, limit: 1 });
+      if (dbLogs.ok && dbLogs.logs.length > 0) {
+        dbRecord = dbLogs.logs[0];
+      }
+    } catch {
+      // Non-blocking DB check
+    }
+
+    const isConfirmedDelivered = Boolean(
+      (observedWebhook && observedWebhook.status === "delivered") ||
+      (dbRecord && dbRecord.status === "delivered")
+    );
+
+    const effectiveStatus = observedWebhook?.status || dbRecord?.status || "sent";
+
     webhookEvidence = {
-      verified: Boolean(observedWebhook && observedWebhook.status === "delivered"),
+      verified: isConfirmedDelivered,
       messageId: dispatchedMessageId,
       eventId: observedWebhook?.id,
-      eventType: observedWebhook?.type || "email.sent",
-      deliveryStatus: observedWebhook?.status || "sent",
-      receivedAt: observedWebhook?.receivedAt || new Date().toISOString(),
-      rawExcerpt: observedWebhook?.rawPayload?.data,
+      eventType: observedWebhook?.type || (isConfirmedDelivered ? "email.delivered" : "email.sent"),
+      deliveryStatus: effectiveStatus,
+      receivedAt: observedWebhook?.receivedAt || dbRecord?.updated_at || dbRecord?.created_at || new Date().toISOString(),
+      rawExcerpt: observedWebhook?.rawPayload?.data || dbRecord?.metadata,
     };
 
     checkpoints.push({
@@ -647,15 +671,22 @@ export async function runEmailProductionLifecycleTest(
         apiUrl: RESEND_API_URL,
         messageId: dispatchedMessageId,
         recipient: sanitizedTo,
-        auditLogRecorded: true,
+        auditLogRecorded: Boolean(dbRecord),
+        dbSendLogId: dbRecord?.id || null,
+        dbStatus: dbRecord?.status || "sent",
         protocol: "HTTPS / TLS 1.3",
         status: webhookEvidence.deliveryStatus,
         webhookEventId: webhookEvidence.eventId || null,
-        webhookConfirmed: webhookEvidence.verified,
+        webhookConfirmed: isConfirmedDelivered,
+        honestObservationNote: isConfirmedDelivered
+          ? "Confirmed delivered via incoming Resend webhook evidence"
+          : "Dispatched and recorded in public.email_send_log (status: sent). Awaiting asynchronous webhook callback from Resend.",
       },
       evidence: {
         type: "resend_webhook_delivery_confirmation",
-        description: `Delivered via Resend (ID: ${dispatchedMessageId}); webhook event: ${webhookEvidence.eventType}`,
+        description: isConfirmedDelivered
+          ? `Delivered via Resend (ID: ${dispatchedMessageId}); webhook event: ${webhookEvidence.eventType}`
+          : `Dispatched via Resend (ID: ${dispatchedMessageId}); recorded in email_send_log; webhook awaiting delivery callback`,
         verified: true,
         data: webhookEvidence,
       },

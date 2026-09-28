@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Seo from "@/components/seo/Seo";
+import { backendBridge } from "@/lib/backend-bridge";
 
 interface WebhookRecord {
   id: string;
@@ -223,26 +224,29 @@ export default function AdminEmailLifecycleCheckpointsPage() {
     }
   }, [isLiveStreaming]);
 
-  // 3. Trigger Live 6-Checkpoint Production Lifecycle Test
+  // 3. Trigger Live 6-Checkpoint Production Lifecycle Test via backendBridge
   const handleRunCheckpointTest = async () => {
     setRunningTest(true);
     setLifecycleReport(null);
     setSelectedCheckpoint(null);
 
     try {
-      const res = await fetch("/api/email/test-lifecycle", {
+      const correlationId = backendBridge.generateCorrelationId("page-lifecycle");
+      const data = await backendBridge.call<LifecycleReport>("/api/email/test-lifecycle", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        correlationId,
         body: JSON.stringify({
           to: testTo,
           from: testFrom,
           subject: testSubject || `Production Checkpoint Verification (${Date.now()})`,
           content: `Automated transaction under test verifying the 6 observed checkpoints: rentmaikar.com -> backendBridge -> staging.rentmaikar.com -> /api/functions/send-outbound-email -> Cloud Run emailService -> api.resend.com & Resend Webhook confirmation.`,
-          simulateWebhookConfirmation: true, // ensure immediate evidence capture
+          simulateWebhookConfirmation: false, // Honest observation: observe real delivery evidence without assumption
+          bridgeState: backendBridge.getState(),
+          bridgeCorrelationId: correlationId,
+          bridgeActiveBaseUrl: backendBridge.getActiveBaseUrl(),
+          bridgeStatus: backendBridge.getStatusInfo(),
         }),
       });
-
-      const data: LifecycleReport = await res.json();
       setLifecycleReport(data);
 
       if (data.ok) {

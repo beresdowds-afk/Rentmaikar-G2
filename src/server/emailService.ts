@@ -1686,3 +1686,67 @@ export async function verifyPlatformEmailDomainRouting(options?: {
   };
 }
 
+/**
+ * 10. Query email_send_log database records for honest delivery observation
+ */
+export async function getEmailSendLogs(filter?: {
+  messageId?: string;
+  recipient?: string;
+  limit?: number;
+}): Promise<{
+  ok: boolean;
+  logs: any[];
+  count: number;
+  error?: string;
+}> {
+  try {
+    const pool = getDbPool();
+    const conditions: string[] = [];
+    const values: any[] = [];
+
+    if (filter?.messageId) {
+      values.push(filter.messageId);
+      conditions.push(`message_id = $${values.length}`);
+    }
+
+    if (filter?.recipient) {
+      values.push(filter.recipient.trim().toLowerCase());
+      conditions.push(`LOWER(recipient_email) = $${values.length}`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limit = Math.min(Math.max(filter?.limit || 20, 1), 100);
+
+    const query = `
+      SELECT 
+        id, 
+        recipient_email, 
+        template_name, 
+        status, 
+        message_id, 
+        error_message, 
+        metadata, 
+        created_at
+      FROM public.email_send_log
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ${limit}
+    `;
+
+    const result = await pool.query(query, values);
+    return {
+      ok: true,
+      logs: result.rows || [],
+      count: result.rowCount || 0,
+    };
+  } catch (err: any) {
+    console.warn("[EmailService] Failed to query email_send_log:", err.message);
+    return {
+      ok: false,
+      logs: [],
+      count: 0,
+      error: err.message,
+    };
+  }
+}
+

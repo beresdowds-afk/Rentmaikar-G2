@@ -521,5 +521,52 @@ describe("Production Email Checkpoints & Webhook Delivery Evidence", () => {
     expect(cp6?.evidence?.verified).toBe(true);
     expect(report.webhookEvidence?.verified).toBe(true);
   });
+
+  it("answers test questions honestly without assumptions using observations from backendBridge and not a bypass", async () => {
+    const { runEmailProductionLifecycleTest } = await import("../../server/emailLifecycleTest");
+    const { backendBridge, MUST_NEVER_SIMULATE_EDGE_FUNCTIONS } = await import("../../lib/backend-bridge");
+
+    // 1. Verify backendBridge contract strictly bars simulated success for send-outbound-email
+    expect(MUST_NEVER_SIMULATE_EDGE_FUNCTIONS.has("send-outbound-email")).toBe(true);
+
+    // 2. Generate bridge correlation ID
+    const correlationId = backendBridge.generateCorrelationId("test-honest");
+    expect(correlationId).toMatch(/^test-honest-/);
+
+    // 3. Execute lifecycle test with honest bridge observations (no simulated confirmation)
+    const report = await runEmailProductionLifecycleTest({
+      origin: "https://rentmaikar.com",
+      to: "honest.audit@rentmaikar.com",
+      from: "RentMaikar <support@rentmaikar.com>",
+      subject: "Honest Pipeline Observation Test",
+      content: "Verifying observations from backend bridge and not a bypass.",
+      skipResendDispatch: true,
+      simulateWebhookConfirmation: false, // DO NOT ASSUME OR FAKE CONFIRMATION!
+      bridgeCorrelationId: correlationId,
+      bridgeState: "DIRECT",
+      bridgeActiveBaseUrl: "https://staging.rentmaikar.com",
+    });
+
+    expect(report.ok).toBe(true);
+
+    // 4. Verify Checkpoint 2 observed the real backendBridge client envelope
+    const cp2 = report.checkpoints.find((c) => c.stage === 2);
+    expect(cp2).toBeDefined();
+    expect(cp2?.details.channel).toBe("DIRECT");
+    expect(cp2?.details.correlationId).toBe(correlationId);
+    expect(cp2?.details.observedClientBridge).toBe(true);
+    expect(cp2?.details.antiSimulationEnforced).toBe(true);
+
+    // 5. Verify Checkpoint 4 targeted the authoritative route
+    const cp4 = report.checkpoints.find((c) => c.stage === 4);
+    expect(cp4?.name).toBe("/api/functions/send-outbound-email");
+
+    // 6. Verify Checkpoint 6 honestly reports unconfirmed status when webhook hasn't arrived yet
+    const cp6 = report.checkpoints.find((c) => c.stage === 6);
+    expect(cp6).toBeDefined();
+    expect(cp6?.details.webhookConfirmed).toBe(false);
+    expect(cp6?.details.honestObservationNote).toContain("Awaiting asynchronous webhook callback from Resend");
+  });
 });
+
 
