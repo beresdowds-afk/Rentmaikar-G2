@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { sendInboxReply } from "../services/inboxReplyService";
 import { sentBackendClient } from "../services/sentClient";
@@ -114,48 +115,105 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   // Extract authorization header from request if provided
   const rawAuth = req.headers["authorization"];
   const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
-  // Operational email is an authenticated administrative operation.
-  // Never expose the Resend sender as an unauthenticated public endpoint.
+    // Operational email is an authenticated administrative operation.
+  //
+  // There are TWO permitted callers:
+  //
+  // 1. An authenticated Rentmaikar platform user/admin using a Supabase JWT.
+  //
+  // 2. A trusted server-side automated platform-email caller using the
+  //    dedicated internal bridge secret.
+  //
+  // The internal secret is NEVER accepted from frontend configuration and
+  // NEVER grants access to arbitrary functions. It is valid only for
+  // send-outbound-email.
   if (functionName === "send-outbound-email") {
-    if (!clientAuth) {
-      return res.status(401).json({
-        ok: false,
-        success: false,
-        error: "Authentication required for operational email dispatch",
-      });
+    const rawInternalSecret =
+      req.headers["x-rentmaikar-internal-secret"];
+
+    const internalSecret = Array.isArray(rawInternalSecret)
+      ? rawInternalSecret[0] || ""
+      : String(rawInternalSecret || "");
+
+    const configuredInternalSecret =
+      process.env.RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET || "";
+
+    let trustedServerCaller = false;
+
+    if (
+      internalSecret &&
+      configuredInternalSecret &&
+      internalSecret.length === configuredInternalSecret.length
+    ) {
+      // Constant-time comparison to avoid using ordinary string equality
+      // for the server-to-server authentication secret.
+      const secretBuffer = Buffer.from(internalSecret, "utf8");
+      const configuredBuffer = Buffer.from(
+        configuredInternalSecret,
+        "utf8"
+      );
+
+      trustedServerCaller = crypto.timingSafeEqual(
+        secretBuffer,
+        configuredBuffer
+      );
     }
 
-    try {
-      const admin = supabaseBackendService.getAdminClient();
-      const token = clientAuth.replace(/^Bearer\s+/i, "").trim();
+    if (trustedServerCaller) {
+      (req as any).authenticatedInternalEmailBridge = true;
 
-      const { data: authData, error: authError } =
-        await admin.auth.getUser(token);
-
-      if (authError || !authData?.user) {
+      console.log(
+        "[Backend Functions] Trusted server-side email bridge authenticated",
+        {
+          functionName,
+          correlationId:
+            req.headers["x-correlation-id"] || null,
+          platformSource: body?.platformSource || null,
+        }
+      );
+    } else {
+      // Preserve the existing authenticated-user path for administrative
+      // frontend email operations.
+      if (!clientAuth) {
         return res.status(401).json({
           ok: false,
           success: false,
-          error: "Invalid authentication session",
+          error:
+            "Authentication required for operational email dispatch",
         });
       }
 
-      // The sender is an admin communications operation.
-      // Require an authenticated platform account here.
-      // Existing application authorization remains authoritative
-      // for the user's actual administrative permissions.
-      (req as any).authenticatedUser = authData.user;
-    } catch (authErr: any) {
-      console.error(
-        "[Backend Functions] send-outbound-email authentication failed:",
-        authErr?.message || authErr
-      );
+      try {
+        const admin = supabaseBackendService.getAdminClient();
+        const token = clientAuth
+          .replace(/^Bearer\s+/i, "")
+          .trim();
 
-      return res.status(401).json({
-        ok: false,
-        success: false,
-        error: "Authentication validation failed",
-      });
+        const { data: authData, error: authError } =
+          await admin.auth.getUser(token);
+
+        if (authError || !authData?.user) {
+          return res.status(401).json({
+            ok: false,
+            success: false,
+            error: "Invalid authentication session",
+          });
+        }
+
+        // Preserve the existing authenticated platform-user identity.
+        (req as any).authenticatedUser = authData.user;
+      } catch (authErr: any) {
+        console.error(
+          "[Backend Functions] send-outbound-email authentication failed:",
+          authErr?.message || authErr
+        );
+
+        return res.status(401).json({
+          ok: false,
+          success: false,
+          error: "Authentication validation failed",
+        });
+      }
     }
   }
   // 1. Generic Supabase-first dispatch for all non-authoritative functions.
