@@ -403,6 +403,7 @@ export function InboundEmailRoutingEditor({
                       >
                         <Checkbox
                           id={id}
+                          name={`routing_dest_${rule.mailbox}_${email.replace(/[@.]/g, '_')}`}
                           checked={isSelected}
                           onCheckedChange={(v) => toggleDestination(rule, email, v === true)}
                           className="mt-0.5"
@@ -440,6 +441,7 @@ export function InboundEmailRoutingEditor({
               </Label>
               <Input
                 id="new-inbound-mailbox"
+                name="new_inbound_mailbox"
                 placeholder={`e.g. sales (@${INBOUND_DOMAIN})`}
                 value={newMailbox}
                 onChange={(e) => setNewMailbox(e.target.value)}
@@ -478,6 +480,7 @@ export function InboundEmailRoutingEditor({
               <Label htmlFor="test-mailbox-select" className="text-xs">Target Inbound Mailbox</Label>
               <Input
                 id="test-mailbox-select"
+                name="test_inbound_mailbox"
                 placeholder="e.g. support, payments, admin"
                 value={testMailbox}
                 onChange={(e) => setTestMailbox(e.target.value)}
@@ -489,6 +492,7 @@ export function InboundEmailRoutingEditor({
               <Label htmlFor="test-sender-input" className="text-xs">Simulated Customer Sender</Label>
               <Input
                 id="test-sender-input"
+                name="test_sender_input"
                 placeholder="customer@example.com"
                 value={testSender}
                 onChange={(e) => setTestSender(e.target.value)}

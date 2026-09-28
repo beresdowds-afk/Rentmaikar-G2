@@ -242,13 +242,30 @@ const AddContactForm = ({ region, onAdded }: { region: string; onAdded: () => vo
   );
 };
 
+const DEFAULT_PLATFORM_SENDER_NAMES: Record<string, string> = {
+  support: "Rentmaikar Support",
+  noreply: "Rentmaikar Notifications",
+  admin: "Rentmaikar Admin",
+  notifications: "Rentmaikar Notifications",
+  verify: "Rentmaikar Verification",
+  negotiations: "Rentmaikar Pricing",
+  payments: "Rentmaikar Billing & Payments",
+  documents: "Rentmaikar Document Verification",
+  legal: "Rentmaikar Legal",
+  privacy: "Rentmaikar Privacy",
+  dpo: "Rentmaikar Data Protection",
+  nigeria: "Rentmaikar Nigeria Operations",
+  usa: "Rentmaikar USA Operations",
+};
+
 const EmailConfigRow = ({ entry, onSave }: { 
   entry: { id: string; key: string; email: string; sender_name: string | null; description: string | null; is_active: boolean };
   onSave: () => void;
 }) => {
   const [editing, setEditing] = useState(false);
+  const resolvedDefaultName = DEFAULT_PLATFORM_SENDER_NAMES[entry.key.toLowerCase()] || `Rentmaikar ${entry.key.charAt(0).toUpperCase() + entry.key.slice(1)}`;
   const [email, setEmail] = useState(entry.email);
-  const [senderName, setSenderName] = useState(entry.sender_name || '');
+  const [senderName, setSenderName] = useState(entry.sender_name || resolvedDefaultName);
   const [desc, setDesc] = useState(entry.description || '');
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -257,7 +274,7 @@ const EmailConfigRow = ({ entry, onSave }: {
     setSaving(true);
     const { error } = await supabase
       .from('platform_email_config')
-      .update({ email, sender_name: senderName || null, description: desc || null })
+      .update({ email, sender_name: senderName || resolvedDefaultName, description: desc || null })
       .eq('id', entry.id);
     if (error) { toast.error('Failed to save'); } else { toast.success('Email config updated'); setEditing(false); onSave(); }
     setSaving(false);
@@ -306,27 +323,75 @@ const EmailConfigRow = ({ entry, onSave }: {
 
   if (editing) {
     return (
-      <tr className="border-b border-border/50">
+      <tr id={`platform-email-edit-row-${entry.key}`} className="border-b border-border/50">
         <td className="p-2.5"><Badge variant="outline" className="font-normal">{entry.key}</Badge></td>
-        <td className="p-2.5"><Input value={email} onChange={e => setEmail(e.target.value)} className="h-8 text-xs font-mono" /></td>
+        <td className="p-2.5">
+          <Input
+            id={`platform-email-${entry.key}-address`}
+            name={`platform_email_${entry.key}_address`}
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className="h-8 text-xs font-mono"
+          />
+        </td>
         <td className="p-2.5 text-xs text-muted-foreground">notify.rentmaikar.com</td>
         <td className="p-2.5 text-xs text-muted-foreground">backend.rentmaikar.com</td>
-        <td className="p-2.5"><Input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" className="h-8 text-xs" /></td>
-        <td className="p-2.5"><Input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Description" className="h-8 text-xs" /></td>
+        <td className="p-2.5">
+          <Input
+            id={`platform-email-${entry.key}-sender-name`}
+            name={`platform_email_${entry.key}_sender_name`}
+            value={senderName}
+            onChange={e => setSenderName(e.target.value)}
+            placeholder="Sender name"
+            className="h-8 text-xs"
+          />
+        </td>
+        <td className="p-2.5">
+          <Input
+            id={`platform-email-${entry.key}-description`}
+            name={`platform_email_${entry.key}_description`}
+            value={desc}
+            onChange={e => setDesc(e.target.value)}
+            placeholder="Description"
+            className="h-8 text-xs"
+          />
+        </td>
         <td className="p-2.5 text-right">
           <div className="flex gap-1 justify-end">
-            <Button size="sm" className="h-7 px-2" onClick={handleSave} disabled={saving}>
+            <Button
+              id={`platform-email-${entry.key}-save-btn`}
+              name={`platform_email_${entry.key}_save_btn`}
+              size="sm"
+              className="h-7 px-2"
+              onClick={handleSave}
+              disabled={saving}
+            >
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setEditing(false)}>Cancel</Button>
+            <Button
+              id={`platform-email-${entry.key}-cancel-btn`}
+              name={`platform_email_${entry.key}_cancel_btn`}
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2"
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </Button>
           </div>
         </td>
       </tr>
     );
   }
 
+  const effectiveSenderName = entry.sender_name || resolvedDefaultName;
+
   return (
-    <tr className="border-b border-border/50 group hover:bg-muted/20 transition-colors">
+    <tr
+      id={`platform-email-row-${entry.key}`}
+      data-testid={`platform-email-row-${entry.key}`}
+      className="border-b border-border/50 group hover:bg-muted/20 transition-colors"
+    >
       <td className="p-2.5">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="font-normal capitalize">{entry.key}</Badge>
@@ -344,11 +409,13 @@ const EmailConfigRow = ({ entry, onSave }: {
           via backend.rentmaikar.com
         </Badge>
       </td>
-      <td className="p-2.5 text-muted-foreground text-xs">{entry.sender_name || '—'}</td>
+      <td className="p-2.5 text-xs font-medium text-foreground">{effectiveSenderName}</td>
       <td className="p-2.5 text-muted-foreground text-xs">{entry.description || '—'}</td>
       <td className="p-2.5 text-right">
         <div className="flex gap-1 justify-end items-center">
           <Button
+            id={`platform-email-verify-btn-${entry.key}`}
+            name={`platform_email_verify_btn_${entry.key}`}
             size="sm"
             variant="outline"
             className="h-7 px-2 text-[11px] gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
@@ -359,8 +426,23 @@ const EmailConfigRow = ({ entry, onSave }: {
             {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
             Verify
           </Button>
-          <Switch checked={entry.is_active} onCheckedChange={handleToggle} className="scale-75" />
-          <Button size="sm" variant="ghost" className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setEditing(true)}>Edit</Button>
+          <Switch
+            id={`platform-email-toggle-${entry.key}`}
+            name={`platform_email_toggle_${entry.key}`}
+            checked={entry.is_active}
+            onCheckedChange={handleToggle}
+            className="scale-75"
+          />
+          <Button
+            id={`platform-email-edit-btn-${entry.key}`}
+            name={`platform_email_edit_btn_${entry.key}`}
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
           <CopyButton value={entry.email} />
         </div>
       </td>

@@ -31,6 +31,17 @@ export const SENDERS = {
   support: `RentMaikar Support <support@${VERIFIED_DOMAIN}>`,
   noreply: `RentMaikar Notifications <noreply@${VERIFIED_DOMAIN}>`,
   forwarder: `RentMaikar Forwarder <support@${VERIFIED_DOMAIN}>`,
+  admin: `RentMaikar Admin <admin@${VERIFIED_DOMAIN}>`,
+  payments: `RentMaikar Billing & Payments <payments@${VERIFIED_DOMAIN}>`,
+  documents: `RentMaikar Document Verification <documents@${VERIFIED_DOMAIN}>`,
+  legal: `RentMaikar Legal <legal@${VERIFIED_DOMAIN}>`,
+  privacy: `RentMaikar Privacy <privacy@${VERIFIED_DOMAIN}>`,
+  dpo: `RentMaikar Data Protection <dpo@${VERIFIED_DOMAIN}>`,
+  notifications: `RentMaikar Notifications <notifications@${VERIFIED_DOMAIN}>`,
+  verify: `RentMaikar Verification <verify@${VERIFIED_DOMAIN}>`,
+  negotiations: `RentMaikar Pricing <negotiations@${VERIFIED_DOMAIN}>`,
+  nigeria: `RentMaikar Nigeria Operations <nigeria@${VERIFIED_DOMAIN}>`,
+  usa: `RentMaikar USA Operations <usa@${VERIFIED_DOMAIN}>`,
 };
 
 // Lazy PostgreSQL pool for database queries
@@ -96,6 +107,31 @@ export function rewriteSenderAddress(from?: string): { from: string; preservedRe
     return { from: SENDERS.support, preservedReplyTo: `support@${defaultDomain}` };
   }
 
+  // Helper to derive a valid sender name attribute if missing
+  const getFallbackSenderName = (local: string): string => {
+    const localLower = local.toLowerCase();
+    const map: Record<string, string> = {
+      support: "RentMaikar Support",
+      noreply: "RentMaikar Notifications",
+      security: "RentMaikar Security",
+      forwarder: "RentMaikar Forwarder",
+      admin: "RentMaikar Admin",
+      payments: "RentMaikar Billing & Payments",
+      documents: "RentMaikar Document Verification",
+      legal: "RentMaikar Legal",
+      privacy: "RentMaikar Privacy",
+      dpo: "RentMaikar Data Protection",
+      notifications: "RentMaikar Notifications",
+      verify: "RentMaikar Verification",
+      negotiations: "RentMaikar Pricing",
+      nigeria: "RentMaikar Nigeria Operations",
+      usa: "RentMaikar USA Operations",
+    };
+    return map[localLower] || `RentMaikar ${local.charAt(0).toUpperCase() + local.slice(1)}`;
+  };
+
+  const senderName = parsed.name || getFallbackSenderName(parsed.local);
+
   // If already on an accepted sending domain (rentmaikar.com or notify.rentmaikar.com or defaultDomain), keep it intact!
   const parsedDomain = parsed.domain.toLowerCase();
   if (
@@ -103,14 +139,15 @@ export function rewriteSenderAddress(from?: string): { from: string; preservedRe
     parsedDomain === "notify.rentmaikar.com" ||
     parsedDomain === defaultDomain.toLowerCase()
   ) {
-    const originalFull = parsed.name ? `${parsed.name} <${parsed.local}@${parsedDomain}>` : `${parsed.local}@${parsedDomain}`;
-    return { from: trimmed, preservedReplyTo: originalFull };
+    const formattedWithSenderName = `${senderName} <${parsed.local}@${parsedDomain}>`;
+    const originalFull = `${senderName} <${parsed.local}@${parsedDomain}>`;
+    return { from: formattedWithSenderName, preservedReplyTo: originalFull };
   }
 
   // Rewrite unverified 3rd-party domain to the default verified sending domain
   const rewrittenAddress = `${parsed.local}@${defaultDomain}`;
-  const rewrittenFrom = parsed.name ? `${parsed.name} <${rewrittenAddress}>` : rewrittenAddress;
-  const originalFullAddress = parsed.name ? `${parsed.name} <${parsed.local}@${parsed.domain}>` : `${parsed.local}@${parsed.domain}`;
+  const rewrittenFrom = `${senderName} <${rewrittenAddress}>`;
+  const originalFullAddress = `${senderName} <${parsed.local}@${parsed.domain}>`;
 
   return { from: rewrittenFrom, preservedReplyTo: originalFullAddress };
 }
@@ -175,12 +212,27 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     : sanitizeRecipient(options.to);
 
   try {
+    const uniqueMessageId = options.metadata?.messageId || options.metadata?.message_id || crypto.randomUUID();
+    const headers = {
+      "Message-ID": `<${uniqueMessageId}@${VERIFIED_DOMAIN}>`,
+      "X-Entity-Ref-ID": uniqueMessageId,
+      ...(options.headers || {}),
+    };
+    const tags = [
+      { name: "message_id", value: uniqueMessageId },
+      { name: "template", value: options.templateName || "raw_email" },
+      { name: "platform_source", value: "rentmaikar" },
+    ];
+
     const payloadBody: Record<string, any> = {
+      id: uniqueMessageId,
       from: fromAddress,
       to: dispatchTo,
       subject: options.subject,
       html: options.html,
       text: options.text,
+      headers,
+      tags,
     };
     if (replyToAddress) {
       payloadBody.reply_to = replyToAddress;
@@ -435,15 +487,15 @@ function emailLayout(content: string, title: string): string {
   </style>
 </head>
 <body>
-  <div class="wrapper">
-    <div class="card">
-      <div class="header">
-        <h2 class="brand-name">RentMaikar</h2>
+  <div class="wrapper" id="rentmaikar-email-wrapper" name="rentmaikar_email_wrapper">
+    <div class="card" id="rentmaikar-email-card" name="rentmaikar_email_card">
+      <div class="header" id="rentmaikar-email-header" name="rentmaikar_email_header">
+        <h2 class="brand-name" id="rentmaikar-brand-name" name="rentmaikar_brand_name">RentMaikar</h2>
       </div>
-      <div class="content">
+      <div class="content" id="rentmaikar-email-content" name="rentmaikar_email_content">
         ${content}
       </div>
-      <div class="footer">
+      <div class="footer" id="rentmaikar-email-footer" name="rentmaikar_email_footer">
         <p>&copy; ${new Date().getFullYear()} RentMaikar Mobility Solutions. All rights reserved.</p>
         <p>Sent via RentMaikar Communications Gateway &middot; TLS 1.3 Encrypted</p>
         <p>Support: <a href="mailto:support@${VERIFIED_DOMAIN}">support@${VERIFIED_DOMAIN}</a></p>

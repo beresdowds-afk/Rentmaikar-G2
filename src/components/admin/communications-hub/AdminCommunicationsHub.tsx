@@ -310,27 +310,39 @@ export const AdminCommunicationsHub: React.FC = () => {
             {/* Scrollable Content Container */}
             <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
               <TabsContent value="console" className="mt-0 focus-visible:outline-hidden h-full">
-                <HubMessageConsole />
+                <AdminCommunicationsHubErrorBoundary sectionName="Message Console" compact>
+                  <HubMessageConsole />
+                </AdminCommunicationsHubErrorBoundary>
               </TabsContent>
 
               <TabsContent value="editor" className="mt-0 focus-visible:outline-hidden">
-                <HubMessageComposer />
+                <AdminCommunicationsHubErrorBoundary sectionName="Message Editor" compact>
+                  <HubMessageComposer />
+                </AdminCommunicationsHubErrorBoundary>
               </TabsContent>
 
               <TabsContent value="bulk" className="mt-0 focus-visible:outline-hidden">
-                <HubBulkMessaging />
+                <AdminCommunicationsHubErrorBoundary sectionName="Bulk Messaging" compact>
+                  <HubBulkMessaging />
+                </AdminCommunicationsHubErrorBoundary>
               </TabsContent>
 
               <TabsContent value="call" className="mt-0 focus-visible:outline-hidden">
-                <HubCallDialer />
+                <AdminCommunicationsHubErrorBoundary sectionName="Call & Softphone" compact>
+                  <HubCallDialer />
+                </AdminCommunicationsHubErrorBoundary>
               </TabsContent>
 
               <TabsContent value="history" className="mt-0 focus-visible:outline-hidden">
-                <HubConversationHistory />
+                <AdminCommunicationsHubErrorBoundary sectionName="Conversation History" compact>
+                  <HubConversationHistory />
+                </AdminCommunicationsHubErrorBoundary>
               </TabsContent>
 
               <TabsContent value="context" className="mt-0 focus-visible:outline-hidden">
-                <HubContextActions />
+                <AdminCommunicationsHubErrorBoundary sectionName="Context Actions" compact>
+                  <HubContextActions />
+                </AdminCommunicationsHubErrorBoundary>
               </TabsContent>
             </div>
           </Tabs>

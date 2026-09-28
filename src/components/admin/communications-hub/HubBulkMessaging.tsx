@@ -459,14 +459,26 @@ export const HubBulkMessaging: React.FC = () => {
       try {
         if (channel === 'email' && contact.email) {
           const emailTarget = contact.email.trim();
+          const uniqueId = crypto.randomUUID();
 
           const emailPayload = {
+            id: uniqueId,
+            messageId: uniqueId,
             action: 'send',
             to: emailTarget,
+            from: 'Rentmaikar Notifications <noreply@notify.rentmaikar.com>',
             subject: renderedSubj,
             body: renderedMsg,
             recipientName: fullName !== 'Customer' ? fullName : undefined,
             category: 'general',
+            headers: {
+              'Message-ID': `<${uniqueId}@notify.rentmaikar.com>`,
+              'X-Entity-Ref-ID': uniqueId,
+            },
+            tags: [
+              { name: 'message_id', value: uniqueId },
+              { name: 'platform_source', value: 'hub_bulk_messaging' },
+            ],
             templateData: {
               subject: renderedSubj,
               body: renderedMsg,
@@ -843,6 +855,8 @@ try {
         <div className="relative pt-1">
           <Search className="absolute left-2.5 top-3.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
+            id="hub-bulk-audience-search"
+            name="hub_bulk_audience_search"
             value={audienceSearch}
             onChange={(e) => setAudienceSearch(e.target.value)}
             placeholder="Search and add specific contact by name, phone, or email..."
@@ -1005,8 +1019,10 @@ try {
       {/* Subject Line for Email & In-App */}
       {(channel === 'email' || channel === 'in_app') && (
         <div className="space-y-1">
-          <Label className="text-[11px] font-semibold text-muted-foreground">Subject Line</Label>
+          <Label htmlFor="hub-bulk-email-subject" className="text-[11px] font-semibold text-muted-foreground">Subject Line</Label>
           <Input
+            id="hub-bulk-email-subject"
+            name="hub_bulk_email_subject"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="e.g. Urgent Update for Rentmaikar Fleet"
@@ -1019,13 +1035,15 @@ try {
       {/* Message Body & Segment Counter */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <Label className="text-[11px] font-semibold text-muted-foreground">Message Content</Label>
+          <Label htmlFor="hub-bulk-email-body" className="text-[11px] font-semibold text-muted-foreground">Message Content</Label>
           <span className="text-[10px] text-muted-foreground font-mono">
             {body.length} chars
             {smsSegments && ` · ${smsSegments.segments} SMS segment${smsSegments.segments > 1 ? 's' : ''}`}
           </span>
         </div>
         <Textarea
+          id="hub-bulk-email-body"
+          name="hub_bulk_email_body"
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Compose bulk announcement or reminder..."
@@ -1165,6 +1183,8 @@ try {
       {/* Send Actions Bar */}
       <div className="pt-2">
         <Button
+          id="hub-bulk-dispatch-button"
+          name="hub_bulk_dispatch_button"
           type="button"
           onClick={() => setIsConfirmOpen(true)}
           disabled={isSending || !body.trim() || bulkRecipients.length === 0}
@@ -1211,8 +1231,10 @@ try {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel id="hub-bulk-cancel-button" name="hub_bulk_cancel_button">Cancel</AlertDialogCancel>
             <AlertDialogAction
+              id="hub-bulk-confirm-button"
+              name="hub_bulk_confirm_button"
               onClick={executeBulkDispatch}
               className="bg-primary text-primary-foreground font-semibold"
             >

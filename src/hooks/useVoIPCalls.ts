@@ -4,8 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import type { VoIPCall, VoIPCallParticipant, VoIPCallGroup, VoIPGroupMember, CallRegion, CallType } from '@/types/voip';
 
-export const useVoIPCalls = () => {
-  const ACTIVE_CALL_STATUSES = new Set([
+const ACTIVE_CALL_STATUSES = new Set([
   'pending',
   'ringing',
   'in-progress',
@@ -31,7 +30,9 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
 
   return TERMINAL_CALL_STATUSES.has(call.status);
 };
- const [calls, setCalls] = useState<VoIPCall[]>([]);
+
+export const useVoIPCalls = () => {
+  const [calls, setCalls] = useState<VoIPCall[]>([]);
   const [groups, setGroups] = useState<VoIPCallGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeCall, setActiveCall] = useState<VoIPCall | null>(null);
@@ -184,7 +185,7 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
       console.error('Error fetching VoIP calls:', error);
     }
   }, []);
-  
+
   const fetchGroups = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -195,6 +196,7 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
 
       if (error) throw error;
 
+      // Fetch members for each group
       const groupsWithMembers = await Promise.all(
         (data || []).map(async (group) => {
           const { data: members } = await supabase
@@ -202,11 +204,7 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
             .select('*')
             .eq('group_id', group.id)
             .eq('is_active', true);
-
-          return {
-            ...group,
-            members: members || [],
-          } as VoIPCallGroup;
+          return { ...group, members: members || [] } as VoIPCallGroup;
         })
       );
 
@@ -215,7 +213,7 @@ const isTerminalCallRecord = (call: VoIPCall): boolean => {
       console.error('Error fetching groups:', error);
     }
   }, []);
-  
+
   const initiateCall = async (
     callType: CallType,
     region: CallRegion,

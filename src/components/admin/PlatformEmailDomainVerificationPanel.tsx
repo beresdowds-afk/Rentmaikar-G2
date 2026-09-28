@@ -348,8 +348,10 @@ export function PlatformEmailDomainVerificationPanel({
               </div>
               <div className="space-y-2 text-xs">
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">From Address (Delivered As)</Label>
+                  <Label htmlFor="outbound-platform-email-from" className="text-[11px] text-muted-foreground">From Address (Delivered As)</Label>
                   <select
+                    id="outbound-platform-email-from"
+                    name="outbound_platform_email_from"
                     value={outboundFrom}
                     onChange={(e) => setOutboundFrom(e.target.value)}
                     className="w-full mt-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono"
@@ -362,8 +364,10 @@ export function PlatformEmailDomainVerificationPanel({
                   </select>
                 </div>
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">Test Recipient Address</Label>
+                  <Label htmlFor="outbound-platform-email-to" className="text-[11px] text-muted-foreground">Test Recipient Address</Label>
                   <Input
+                    id="outbound-platform-email-to"
+                    name="outbound_platform_email_to"
                     value={outboundTo}
                     onChange={(e) => setOutboundTo(e.target.value)}
                     placeholder="recipient@example.com"
@@ -371,6 +375,8 @@ export function PlatformEmailDomainVerificationPanel({
                   />
                 </div>
                 <Button
+                  id="outbound-platform-email-submit"
+                  name="outbound_platform_email_submit"
                   size="sm"
                   onClick={handleSendOutboundTest}
                   disabled={outboundSending}
@@ -390,8 +396,10 @@ export function PlatformEmailDomainVerificationPanel({
               </div>
               <div className="space-y-2 text-xs">
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">Target Inbound Mailbox</Label>
+                  <Label htmlFor="inbound-platform-email-mailbox" className="text-[11px] text-muted-foreground">Target Inbound Mailbox</Label>
                   <select
+                    id="inbound-platform-email-mailbox"
+                    name="inbound_platform_email_mailbox"
                     value={inboundMailbox}
                     onChange={(e) => setInboundMailbox(e.target.value)}
                     className="w-full mt-1 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono"
@@ -406,8 +414,10 @@ export function PlatformEmailDomainVerificationPanel({
                   </select>
                 </div>
                 <div>
-                  <Label className="text-[11px] text-muted-foreground">Simulated Sender Email</Label>
+                  <Label htmlFor="inbound-platform-email-from" className="text-[11px] text-muted-foreground">Simulated Sender Email</Label>
                   <Input
+                    id="inbound-platform-email-from"
+                    name="inbound_platform_email_from"
                     value={inboundFrom}
                     onChange={(e) => setInboundFrom(e.target.value)}
                     placeholder="driver.candidate@gmail.com"
@@ -415,6 +425,8 @@ export function PlatformEmailDomainVerificationPanel({
                   />
                 </div>
                 <Button
+                  id="inbound-platform-email-submit"
+                  name="inbound_platform_email_submit"
                   size="sm"
                   variant="outline"
                   onClick={handleSimulateInbound}

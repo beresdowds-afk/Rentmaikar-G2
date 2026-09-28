@@ -309,11 +309,23 @@ export const HubMessageComposer: React.FC = () => {
         // Application email: route through the Supabase client adapter,
 // which dispatches operational email through the authoritative backend gateway.
         try {
+          const uniqueEmailId = crypto.randomUUID();
           const emailPayload = {
+            id: uniqueEmailId,
+            messageId: uniqueEmailId,
             to: recipientContact.trim(),
             subject: subject.trim() || 'Notice from Rentmaikar Admin',
             body: trimmedBody,
             recipientName: recipientName.trim() || undefined,
+            from: 'Rentmaikar Admin <admin@notify.rentmaikar.com>',
+            headers: {
+              'Message-ID': `<${uniqueEmailId}@notify.rentmaikar.com>`,
+              'X-Entity-Ref-ID': uniqueEmailId,
+            },
+            tags: [
+              { name: 'message_id', value: uniqueEmailId },
+              { name: 'platform_source', value: 'hub_composer' },
+            ],
           };
 
           const { data: json, error } = await supabase.functions.invoke(
@@ -477,10 +489,12 @@ emailSent = true;
       {/* Recipient Details & Lookup */}
       <div className="space-y-2 relative">
         <div className="flex items-center justify-between">
-          <Label className="text-[11px] font-medium text-muted-foreground">Recipient</Label>
+          <Label htmlFor="hub-composer-search" className="text-[11px] font-medium text-muted-foreground">Recipient</Label>
           <div className="relative w-48">
             <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
             <Input
+              id="hub-composer-search"
+              name="hub_composer_search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Find user..."
@@ -513,12 +527,16 @@ emailSent = true;
 
         <div className="grid grid-cols-2 gap-2">
           <Input
+            id="hub-composer-recipient-name"
+            name="hub_composer_recipient_name"
             value={recipientName}
             onChange={(e) => setRecipientName(e.target.value)}
             placeholder="Name (e.g. John Doe)"
             className="h-8 text-xs bg-background"
           />
           <Input
+            id="hub-composer-recipient-contact"
+            name="hub_composer_recipient_contact"
             value={recipientContact}
             onChange={(e) => setRecipientContact(e.target.value)}
             placeholder={channel === 'email' ? 'email@example.com' : '+1 or +234 phone'}
@@ -530,8 +548,10 @@ emailSent = true;
       {/* Subject Line (For Email / In-App) */}
       {(channel === 'email' || channel === 'in_app') && (
         <div className="space-y-1">
-          <Label className="text-[11px] font-medium text-muted-foreground">Subject Line</Label>
+          <Label htmlFor="hub-composer-subject" className="text-[11px] font-medium text-muted-foreground">Subject Line</Label>
           <Input
+            id="hub-composer-subject"
+            name="hub_composer_subject"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="e.g. Action Required: Verification Update"
@@ -543,13 +563,15 @@ emailSent = true;
       {/* Message Content & Character Counter */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <Label className="text-[11px] font-medium text-muted-foreground">Message Body</Label>
+          <Label htmlFor="hub-composer-body" className="text-[11px] font-medium text-muted-foreground">Message Body</Label>
           <span className="text-[10px] text-muted-foreground font-mono">
             {body.length} chars
             {channel === 'sms' && ` (${Math.ceil(body.length / 160) || 1} SMS)`}
           </span>
         </div>
         <Textarea
+          id="hub-composer-body"
+          name="hub_composer_body"
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Compose message..."
@@ -608,6 +630,8 @@ emailSent = true;
       {/* Send Action */}
       <div className="pt-1">
         <Button
+          id="hub-composer-send-button"
+          name="hub_composer_send_button"
           type="button"
           onClick={handleSendMessage}
           disabled={isSending || !body.trim()}

@@ -117,6 +117,37 @@ describe("Email delivery & sender rewrite behavior", () => {
     expect(prepared.from).toBe("Rentmaikar <noreply@notify.rentmaikar.com>");
     expect(prepared.reply_to).toBe("custom-replies@rentmaikar.com");
   });
+
+  it("ensures all outbound platform email categories have valid unique Id or name attributes", () => {
+    const platformEmails = [
+      { id: "platform-email-support", key: "support", email: "support@notify.rentmaikar.com", name: "Rentmaikar Support" },
+      { id: "platform-email-noreply", key: "noreply", email: "noreply@notify.rentmaikar.com", name: "Rentmaikar Notifications" },
+      { id: "platform-email-admin", key: "admin", email: "admin@notify.rentmaikar.com", name: "Rentmaikar Admin" },
+      { id: "platform-email-payments", key: "payments", email: "payments@notify.rentmaikar.com", name: "Rentmaikar Billing & Payments" },
+      { id: "platform-email-documents", key: "documents", email: "documents@notify.rentmaikar.com", name: "Rentmaikar Document Verification" },
+      { id: "platform-email-legal", key: "legal", email: "legal@notify.rentmaikar.com", name: "Rentmaikar Legal" },
+      { id: "platform-email-privacy", key: "privacy", email: "privacy@notify.rentmaikar.com", name: "Rentmaikar Privacy" },
+      { id: "platform-email-dpo", key: "dpo", email: "dpo@notify.rentmaikar.com", name: "Rentmaikar Data Protection" },
+      { id: "platform-email-verify", key: "verify", email: "verify@notify.rentmaikar.com", name: "Rentmaikar Verification" },
+      { id: "platform-email-notifications", key: "notifications", email: "notifications@notify.rentmaikar.com", name: "Rentmaikar Notifications" },
+      { id: "platform-email-negotiations", key: "negotiations", email: "negotiations@notify.rentmaikar.com", name: "Rentmaikar Pricing" },
+      { id: "platform-email-nigeria", key: "nigeria", email: "nigeria@notify.rentmaikar.com", name: "Rentmaikar Nigeria Operations" },
+      { id: "platform-email-usa", key: "usa", email: "usa@notify.rentmaikar.com", name: "Rentmaikar USA Operations" },
+    ];
+
+    const seenIds = new Set<string>();
+    for (const item of platformEmails) {
+      expect(item.id).toBeTruthy();
+      expect(typeof item.id).toBe("string");
+      expect(item.id.trim().length).toBeGreaterThan(0);
+      expect(seenIds.has(item.id)).toBe(false);
+      seenIds.add(item.id);
+
+      expect(item.name).toBeTruthy();
+      expect(typeof item.name).toBe("string");
+      expect(item.name.trim().length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe("Queue worker delivery end-to-end simulation", () => {
