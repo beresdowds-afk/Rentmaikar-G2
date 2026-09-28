@@ -130,7 +130,9 @@ export default defineConfig(({ mode }) => ({
             req.url === "/api/webhooks/resend" ||
             req.url === "/api/email/forward" ||
             req.url === "/api/email/test" ||
-            req.url === "/api/email/test-delivery"
+            req.url === "/api/email/test-delivery" ||
+            req.url === "/api/email/test-lifecycle" ||
+            req.url === "/api/email/lifecycle-test"
           ) {
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Access-Control-Allow-Headers", "*");
@@ -154,6 +156,18 @@ export default defineConfig(({ mode }) => ({
               }
 
               try {
+                if (req.url === "/api/email/test-lifecycle" || req.url === "/api/email/lifecycle-test") {
+                  const { runEmailProductionLifecycleTest } = await import("./src/server/emailLifecycleTest");
+                  const result = await runEmailProductionLifecycleTest({
+                    ...body,
+                    origin: (req.headers.origin as string) || (req.headers.referer as string) || "https://rentmaikar.com",
+                  });
+                  res.setHeader("Content-Type", "application/json");
+                  res.statusCode = result.ok ? 200 : 502;
+                  res.end(JSON.stringify(result));
+                  return;
+                }
+
                 if (req.url === "/api/email/forward") {
                   const { handleInboundEmailForward } = await import("./src/server/emailService");
                   const result = await handleInboundEmailForward(body);

@@ -279,10 +279,22 @@ async function startServer() {
       "/api/email/forward",
       "/api/email/test",
       "/api/email/test-delivery",
+      "/api/email/test-lifecycle",
+      "/api/email/lifecycle-test",
     ],
     async (req, res) => {
       try {
         const normalizedPath = req.path.replace(/\/+$/, "");
+        if (normalizedPath === "/api/email/test-lifecycle" || normalizedPath === "/api/email/lifecycle-test") {
+          const { runEmailProductionLifecycleTest } = await import("./src/server/emailLifecycleTest");
+          const result = await runEmailProductionLifecycleTest({
+            ...req.body,
+            origin: (req.headers.origin as string) || (req.headers.referer as string) || "https://rentmaikar.com",
+          });
+          res.status(result.ok ? 200 : 502).json(result);
+          return;
+        }
+
         if (normalizedPath === "/api/email/forward") {
           const { handleInboundEmailForward } = await import("./src/server/emailService");
           const result = await handleInboundEmailForward(req.body);
