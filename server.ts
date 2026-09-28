@@ -346,7 +346,7 @@ async function startServer() {
   });
 
   // Backend / Edge Functions dispatch router with integrated local execution and Supabase fallback
-  app.all(["/api/functions/:functionName", "/functions/v1/:functionName"], async (req, res) => {
+  app.all(["/api/functions/:functionName", "/functions/:functionName", "/functions/v1/:functionName"], async (req, res) => {
     try {
       const functionName = req.params.functionName;
 
