@@ -415,8 +415,192 @@ export const HubBulkMessaging: React.FC = () => {
     let sent = 0;
     let failed = 0;
     const failures: { recipient: string; reason: string }[] = [];
+    // ================================================================
+    // AUTHORITATIVE SERVER-SIDE EMAIL BULK PATH
+    // One browser request -> Cloud Run -> server-side recipient loop
+    // ================================================================
+    if (channel === 'email') {
+      const emailRecipients = usableContacts
+        .filter((contact) => !!contact.email?.trim())
+        .map((contact) => {
+          const fullName = (contact.full_name || '').trim() || 'Customer';
+          const firstName = fullName !== 'Customer'
+            ? fullName.split(' ')[0]
+            : 'there';
 
+          const renderedMsg = renderPlaceholders(
+            body.trim(),
+            {
+              customer_name: fullName,
+              first_name: firstName,
+              customer_email: contact.email || undefined,
+              customer_phone: contact.phone || undefined,
+              today: format(new Date(), 'dd MMM yyyy'),
+            },
+            { keepUnknown: true }
+          );
+
+          const renderedSubj = renderPlaceholders(
+            subject.trim() || 'Notice from Rentmaikar Admin',
+            {
+              customer_name: fullName,
+              first_name: firstName,
+              today: format(new Date(), 'dd MMM yyyy'),
+            },
+            { keepUnknown: true }
+          );
+
+          const uniqueId = crypto.randomUUID();
+
+          return {
+            email: contact.email!.trim(),
+            to: contact.email!.trim(),
+            recipientName: fullName !== 'Customer' ? fullName : undefined,
+            subject: renderedSubj,
+            body: renderedMsg,
+            from: 'Rentmaikar Notifications <noreply@notify.rentmaikar.com>',
+            id: uniqueId,
+            messageId: uniqueId,
+            customData: {
+              user_id: contact.user_id || undefined,
+              role: contact.role || undefined,
+            },
+            headers: {
+              'Message-ID': `<${uniqueId}@notify.rentmaikar.com>`,
+              'X-Entity-Ref-ID': uniqueId,
+            },
+            tags: [
+              { name: 'message_id', value: uniqueId },
+              { name: 'platform_source', value: 'hub_bulk_messaging' },
+            ],
+          };
+        });
+
+      if (emailRecipients.length === 0) {
+        throw new Error('No valid email recipients found.');
+      }
+
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction(
+          'send-outbound-email',
+          {
+            action: 'bulk',
+            recipients: emailRecipients,
+            platformSource: 'hub_bulk_messaging',
+          },
+          {
+            method: 'POST',
+            timeoutMs: 120000,
+            skipRetry: true,
+          },
+        );
+
+        if (
+          bridgeRes.error ||
+          bridgeRes.status < 200 ||
+          bridgeRes.status >= 300 ||
+          bridgeRes.data?.ok !== true ||
+          bridgeRes.data?.success !== true
+        ) {
+          throw new Error(
+            bridgeRes.data?.error ||
+            bridgeRes.data?.message ||
+            bridgeRes.error?.message ||
+            `Bulk email dispatch failed (HTTP ${bridgeRes.status})`
+          );
+        }
+
+        const resultRows = Array.isArray(bridgeRes.data?.results)
+          ? bridgeRes.data.results
+          : [];
+
+        let bulkSent = 0;
+        let bulkFailed = 0;
+
+        resultRows.forEach((result: any, index: number) => {
+          const contact = usableContacts[index];
+          const key =
+            contact?.user_id ||
+            contact?.email ||
+            contact?.phone ||
+            `recipient-${index}`;
+
+          if (result?.success === true && result?.messageId) {
+            bulkSent++;
+
+            setRecipientStatuses((prev) => ({
+              ...prev,
+              [key]: {
+                status: 'success',
+                httpStatus: 200,
+              },
+            }));
+          } else {
+            bulkFailed++;
+
+            const reason =
+              result?.error ||
+              'Authoritative email delivery failed';
+
+            failures.push({
+              recipient: result?.email || contact?.email || key,
+              reason,
+            });
+
+            setRecipientStatuses((prev) => ({
+              ...prev,
+              [key]: {
+                status: 'failed',
+                error: reason,
+                httpStatus: 502,
+              },
+            }));
+          }
+        });
+
+        sent += bulkSent;
+        failed += bulkFailed;
+
+        setProgress({
+          total: usableContacts.length,
+          completed: bulkSent + bulkFailed,
+          sent,
+          failed,
+          skipped: bulkRecipients.length - usableContacts.length,
+          failures,
+        });
+
+        if (bulkFailed > 0) {
+          toast.warning(
+            `Bulk email completed: ${bulkSent} sent, ${bulkFailed} failed.`
+          );
+        } else {
+          toast.success(
+            `Bulk email completed successfully: ${bulkSent} sent.`
+          );
+        }
+
+        setIsSending(false);
+        return;
+      } catch (bulkErr: any) {
+        const message =
+          bulkErr?.message ||
+          'Authoritative bulk email dispatch failed';
+
+        console.error(
+          '[HubBulkMessaging] Authoritative bulk email failure:',
+          message
+        );
+
+        setIsSending(false);
+        toast.error(message);
+        return;
+      }
+      }
     for (let i = 0; i < usableContacts.length; i++) {
+  if (channel === 'email') {
+    break;
+  }
       if (abortRef.current) {
         toast.info('Bulk dispatch paused by admin.');
         break;
