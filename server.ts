@@ -18,34 +18,100 @@ async function startServer() {
     "https://staging.rentmaikar.com",
     "http://localhost:3000",
     "http://localhost:5173",
+    "http://localhost:4173",
     "http://localhost:8080",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:4173",
+    "http://127.0.0.1:8080",
   ];
 
   function isAuthorizedOrigin(origin?: string): boolean {
     if (!origin) return false;
-    const norm = origin.trim().toLowerCase();
-    if (ALLOWED_ORIGINS.some((allowed) => norm === allowed || norm.endsWith(".rentmaikar.com") || norm.endsWith(".run.app"))) {
+    const norm = origin.trim().replace(/\/+$/, "").toLowerCase();
+    if (ALLOWED_ORIGINS.some((allowed) => norm === allowed)) {
       return true;
     }
-    const publicApp = process.env.PUBLIC_APP_URL?.toLowerCase();
+    if (
+      norm.startsWith("http://localhost:") ||
+      norm.startsWith("http://127.0.0.1:") ||
+      norm.startsWith("https://localhost:") ||
+      norm.startsWith("https://127.0.0.1:")
+    ) {
+      return true;
+    }
+    if (
+      norm.endsWith(".rentmaikar.com") ||
+      norm.endsWith(".run.app") ||
+      norm.endsWith(".preview.app")
+    ) {
+      return true;
+    }
+    const publicApp = process.env.PUBLIC_APP_URL?.replace(/\/+$/, "").toLowerCase();
     if (publicApp && norm === publicApp) return true;
-    const publicBackend = process.env.PUBLIC_BACKEND_URL?.toLowerCase();
+    const publicBackend = process.env.PUBLIC_BACKEND_URL?.replace(/\/+$/, "").toLowerCase();
     if (publicBackend && norm === publicBackend) return true;
     return false;
   }
 
+  const CORS_ALLOWED_HEADERS = [
+    "Content-Type",
+    "Authorization",
+    "apikey",
+    "x-client-info",
+    "X-Requested-With",
+    "X-RentMaikar-Client",
+    "X-RentMaikar-Fallback",
+    "X-Test-Role",
+    "X-Test-User-Id",
+    "X-Correlation-ID",
+    "X-Client-Timestamp",
+    "X-Portal-Token",
+    "Idempotency-Key",
+    "Accept",
+    "Origin",
+    "Prefer",
+    "x-supabase-client-platform",
+    "x-supabase-client-platform-version",
+    "x-supabase-client-runtime",
+    "x-supabase-client-runtime-version",
+    "x-internal-secret",
+    "x-cron-secret",
+    "x-api-key",
+  ].join(", ");
+
+  const CORS_EXPOSED_HEADERS = [
+    "Content-Length",
+    "Content-Range",
+    "Content-Type",
+    "Date",
+    "ETag",
+    "X-Entity-Ref-ID",
+    "Message-ID",
+    "X-RentMaikar-Bridge-Status",
+    "X-RentMaikar-Fallback-Active",
+    "X-RentMaikar-Direct-Connection",
+    "X-RentMaikar-Channel",
+    "X-Correlation-ID",
+  ].join(", ");
+
   app.use((req, res, next) => {
-    const origin = req.headers.origin;
+    const rawOrigin = req.headers.origin;
+    const origin = typeof rawOrigin === "string" ? rawOrigin.trim().replace(/\/+$/, "") : undefined;
+
     if (origin && isAuthorizedOrigin(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, X-Requested-With, X-RentMaikar-Client, X-RentMaikar-Fallback, X-Test-Role, X-Test-User-Id"
-      );
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
+      res.setHeader("Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS);
+      res.setHeader("Access-Control-Expose-Headers", CORS_EXPOSED_HEADERS);
+      res.setHeader("Access-Control-Max-Age", "86400");
+    } else if (!origin) {
+      // Direct server-to-server or non-browser request without Origin header
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
+      res.setHeader("Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS);
+      res.setHeader("Access-Control-Expose-Headers", CORS_EXPOSED_HEADERS);
       res.setHeader("Access-Control-Max-Age", "86400");
     }
 

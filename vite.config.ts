@@ -190,9 +190,32 @@ export default defineConfig(({ mode }) => ({
           }
 
           if (req.url?.startsWith("/api/functions/") || req.url?.startsWith("/functions/v1/")) {
-            res.setHeader("Access-Control-Allow-Origin", "*");
-            res.setHeader("Access-Control-Allow-Headers", "*");
-            res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            const rawOrigin = req.headers.origin;
+            const origin = typeof rawOrigin === "string" ? rawOrigin.trim().replace(/\/+$/, "") : undefined;
+            const isAllowedOrigin = origin && (
+              origin.includes("localhost") ||
+              origin.includes("127.0.0.1") ||
+              origin.endsWith(".rentmaikar.com") ||
+              origin.endsWith(".run.app") ||
+              origin.endsWith(".preview.app") ||
+              origin === "https://rentmaikar.com" ||
+              origin === "https://staging.rentmaikar.com"
+            );
+
+            if (origin && isAllowedOrigin) {
+              res.setHeader("Access-Control-Allow-Origin", origin);
+              res.setHeader("Access-Control-Allow-Credentials", "true");
+            } else if (!origin) {
+              res.setHeader("Access-Control-Allow-Origin", "*");
+            }
+
+            res.setHeader(
+              "Access-Control-Allow-Headers",
+              "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-internal-secret, idempotency-key, x-cron-secret, x-api-key, prefer, accept, origin, x-requested-with, x-rentmaikar-client, x-rentmaikar-fallback, x-test-role, x-test-user-id"
+            );
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
+            res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type, X-Entity-Ref-ID, Message-ID, Date");
+            res.setHeader("Access-Control-Max-Age", "86400");
 
             if (req.method === "OPTIONS") {
               res.statusCode = 204;
