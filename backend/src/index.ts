@@ -339,6 +339,80 @@ app.get("/api/domains", (req: Request, res: Response) => {
   });
 });
 
+// Email webhook & production checkpoint observer routes
+app.get(["/api/email/webhooks/events", "/api/email/webhooks"], async (req: Request, res: Response) => {
+  try {
+    const { resendWebhookStore } = await import("./services/resendWebhookStore");
+    const events = resendWebhookStore.getEvents({
+      type: req.query.type as string,
+      status: req.query.status as string,
+      search: req.query.search as string,
+      emailId: req.query.emailId as string,
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 50,
+    });
+    const stats = resendWebhookStore.getStats();
+    res.json({ ok: true, stats, count: events.length, events });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/email/webhooks/stats", async (_req: Request, res: Response) => {
+  try {
+    const { resendWebhookStore } = await import("./services/resendWebhookStore");
+    res.json({ ok: true, stats: resendWebhookStore.getStats() });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post(["/api/webhooks/resend", "/api/email/webhook"], async (req: Request, res: Response) => {
+  try {
+    const { handleInboundEmailWebhook } = await import("./services/emailService");
+    const result = await handleInboundEmailWebhook(req.body, req.headers as Record<string, string>);
+    res.status(result.ok ? 200 : 400).json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/api/email/webhooks/simulate-event", async (req: Request, res: Response) => {
+  try {
+    const { resendWebhookStore } = await import("./services/resendWebhookStore");
+    const type = req.body?.type || "email.delivered";
+    const emailId = req.body?.emailId || `msg_sim_${Date.now()}`;
+    const recipient = req.body?.recipient || "support@rentmaikar.com";
+    const subject = req.body?.subject || "Simulated Delivery Verification";
+
+    const event = resendWebhookStore.recordEvent({
+      type,
+      created_at: new Date().toISOString(),
+      data: {
+        id: emailId,
+        email_id: emailId,
+        from: "RentMaikar Support <support@notify.rentmaikar.com>",
+        to: [recipient],
+        subject,
+        ...(req.body?.data || {}),
+      },
+    });
+
+    res.status(200).json({ ok: true, event });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/email/webhooks/clear", async (_req: Request, res: Response) => {
+  try {
+    const { resendWebhookStore } = await import("./services/resendWebhookStore");
+    resendWebhookStore.clear();
+    res.json({ ok: true, cleared: true });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Global 404 Handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({
