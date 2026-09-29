@@ -186,10 +186,14 @@ const terminateCurrentCall = useCallback(
   [activeCall?.id, endCall, voice.status]
 );
     const endAllCalls = useCallback(async () => {
+  return endCall();
+}, [endCall]);
   const results = await Promise.allSettled(
     activeCalls.map((call) => endCall(call.id))
   );
-
+onEndCall={() => {
+  void terminateCall(activeCall.id);
+}}
   const allSuccessfullyTerminated =
   results.length > 0 &&
   results.every(
