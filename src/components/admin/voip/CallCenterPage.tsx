@@ -188,23 +188,7 @@ const terminateCurrentCall = useCallback(
     const endAllCalls = useCallback(async () => {
   return endCall();
 }, [endCall]);
-  const results = await Promise.allSettled(
-    activeCalls.map((call) => endCall(call.id))
-  );
-onEndCall={() => {
-  void terminateCall(activeCall.id);
-}}
-  const allSuccessfullyTerminated =
-  results.length > 0 &&
-  results.every(
-    (result) =>
-      result.status === 'fulfilled' && result.value === true
-  );
-
-if (allSuccessfullyTerminated) {
-  await voice.hangUp();
-}
-}, [activeCalls, endCall, voice]);
+  
 
 // FIFO router: answering always connects the caller who has waited longest first.
 const answerQueuedCall = useCallback(async (call: QueuedCall) => {
@@ -338,7 +322,9 @@ const answerQueuedCall = useCallback(async (call: QueuedCall) => {
       {activeCall && (
         <ActiveCallPanel
           call={activeCall}
-          onEndCall={() => { void terminateCall(activeCall.id); }}
+          onEndCall={() => {
+  void terminateCurrentCall();
+}}
           isMuted={voice.isMuted}
           onToggleMute={voice.toggleMute}
           accentAgent={accentAgent}
