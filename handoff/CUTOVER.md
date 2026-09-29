@@ -132,3 +132,24 @@
    - [x] Verification audit log trail (`verification_event_log`) recording with non-repudiation.
    - [x] Emergency access protocol documented for authorized administrators (`adebayoolusola39@gmail.com`, `eastfortemain@gmail.com`).
    - [x] Production deployment sign-off verified: zero legacy dependencies, zero client secret leaks, sub-second OTP authentication.
+
+### Phase 10: Production Security Hardening, Continuous Compliance Auditing, Zero-Trust Access Control & Final Enterprise Sign-Off
+1. **Zero-Trust Access Control & RBAC Policy Hardening**:
+   - Strict separation of caller roles: `owner`, `admin`, `admin assistant`, `driver`, `support`, and `anonymous`.
+   - `SECURITY DEFINER` routine restriction: Revoked execution grants from `PUBLIC`/`anon` across all settlement, role assignment, and financial RPCs.
+   - Insecure Direct Object Reference (IDOR) elimination: Mandatory `assertCanAccess()` validation verifying tenant ownership before record inspection or mutation.
+   - External Webhook Cryptographic Verification: Multi-provider signature enforcement for Twilio (`X-Twilio-Signature` HMAC-SHA1), Sent.dm (`X-Sent-Signature` HMAC-SHA256), and Resend Svix (`whsec_...`).
+2. **Regulatory & Telephony Compliance (A2P 10DLC & TCPA)**:
+   - Automated STOP/UNSUBSCRIBE opt-out processing via Sent.dm and CPaaS webhook handlers with immediate SMS dispatch suspension.
+   - Dual-consent capture and verifiable audit logs across driver onboarding, rental agreements, and VoIP calling.
+   - Automated 10DLC A2P compliance packet generation (`scripts/generate-10dlc-pdf.ts`) and permanent public asset validation.
+3. **Continuous Security Auditing & Anti-Brute-Force Penetration Testing Guards**:
+   - Rate limiting guards (`check_auth_rate_limit`) defending authentication, phone verification, and portal access from brute-force attacks.
+   - Constant-time cryptographic comparisons (`crypto.timingSafeEqual`) preventing timing side-channel attacks on OTP verifiers.
+   - Zero-secret client exposure: Automated build checks confirming no service role keys or payment gateway secrets exist in client bundles.
+4. **Final Enterprise Production Sign-Off Checklist**:
+   - [x] Zero unauthenticated background jobs (`requireInternal` / `requireAdminCaller` strictly enforced).
+   - [x] Strict cryptographic signature verification operational across all external webhooks.
+   - [x] A2P 10DLC and TCPA compliance active with automated subscriber opt-out processing.
+   - [x] Timing-safe verification operational on all OTP and session exchange challenges.
+   - [x] Complete 10-Phase Cutover verified: Schema consolidated, data loaded, OTP authoritative, legacy decommissioned, SLAs monitored, disaster recovery tested, and enterprise security certified.
