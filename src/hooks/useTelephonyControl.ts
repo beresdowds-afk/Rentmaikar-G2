@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useVoiceDevice } from "@/hooks/useVoiceDevice";
-import { useVoIPCalls } from "@/hooks/useVoIPCalls";
 import { useAdminTelephonyPreferences } from "@/hooks/useAdminTelephonyPreferences";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -29,7 +28,8 @@ export interface ControlledCallState {
 
 /**
  * Authoritative Telephony Control Hook
- * Delegates all call placement and termination to the canonical TelephonyController.
+ * Delegates all call placement and termination strictly to the canonical TelephonyController.
+ * Maintains one canonical active session without running parallel call tracking hooks.
  * Harmonises:
  * 1. SOFTPHONE: Twilio Voice WebRTC via SoftphoneAdapter attached to useVoiceDevice
  * 2. SERVER_REST: Twilio Cloud REST API via ServerRestAdapter
@@ -43,10 +43,7 @@ export function useTelephonyControl() {
   // Engine A: Browser WebRTC Softphone
   const softphone = useVoiceDevice();
 
-  // Engine B: Twilio Server REST API Calls
-  const serverRest = useVoIPCalls();
-
-  // Active controller session subscription
+  // Canonical active telephony session from TelephonyController (sole authority)
   const [activeSession, setActiveSession] = useState<RentmaikarCallSession | null>(() =>
     telephonyController.getActiveSession()
   );
@@ -86,14 +83,9 @@ export function useTelephonyControl() {
     TWIML: CallingMethod.TWIML,
   }), []);
 
-  // Engine status calculation
+  // Engine status calculation based on canonical session and browser device
   const isSoftphoneActive = softphone.status === "on-call" || softphone.status === "connecting";
-  const isServerRestActive = serverRest.activeCalls.length > 0;
-  const isTwimlActive =
-    activeSession?.calling_method === CallingMethod.TWIML &&
-    (activeSession.status === "ringing" || activeSession.status === "in-progress");
-
-  const isInCall = Boolean(activeSession) || isSoftphoneActive || isServerRestActive || isTwimlActive;
+  const isInCall = Boolean(activeSession) || isSoftphoneActive;
   const currentEngine: TelephonyEngine = activeEngine || preferences.preferred_engine || "SOFTPHONE";
 
   /**
@@ -156,10 +148,6 @@ export function useTelephonyControl() {
           },
         });
 
-        if (callingMethod === CallingMethod.SERVER_REST) {
-          await serverRest.refreshCalls();
-        }
-
         toast({
           title: "Call Dispatched",
           description: `Outbound call to ${phoneNumber} initiated via ${callingMethod}.`,
@@ -177,7 +165,7 @@ export function useTelephonyControl() {
         return false;
       }
     },
-    [methodMap, preferences, serverRest, softphone, toast, user]
+    [methodMap, preferences, softphone, toast, user]
   );
 
   /**
@@ -204,15 +192,6 @@ export function useTelephonyControl() {
           terminated = await telephonyController.endActiveCall();
         }
 
-        // Clean up any remaining server REST calls
-        if (serverRest.activeCalls.length > 0) {
-          for (const call of serverRest.activeCalls) {
-            await telephonyController.endCall(CallingMethod.SERVER_REST, call.id, call.call_sid);
-            terminated = true;
-          }
-          await serverRest.refreshCalls();
-        }
-
         // Hang up local WebRTC browser audio session if active
         if (softphone.status === "on-call" || softphone.status === "connecting") {
           await softphone.hangUp();
@@ -230,7 +209,7 @@ export function useTelephonyControl() {
         return false;
       }
     },
-    [activeEngine, methodMap, serverRest, softphone]
+    [activeEngine, methodMap, softphone]
   );
 
   // Mute control
@@ -264,6 +243,7 @@ export function useTelephonyControl() {
     isConnecting: softphone.status === "connecting" || activeSession?.status === "ringing",
     isMuted: softphone.isMuted,
     isOnHold: false,
+    activeSession,
 
     // Universal operations
     initiateCall,
@@ -275,7 +255,7 @@ export function useTelephonyControl() {
     // Underlying engine instances (never disabled)
     engines: {
       softphone,
-      serverRest,
+      serverRest: telephonyController.serverRestAdapter,
       twiml: {
         isDialing: activeSession?.calling_method === CallingMethod.TWIML && activeSession?.status === "ringing",
         callInfo:
