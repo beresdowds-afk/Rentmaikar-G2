@@ -1650,6 +1650,8 @@ export async function handleInboundEmailWebhook(
  * Persist attachment metadata and store the actual
  * attachment binary in private Supabase Storage.
  */
+let attachmentStorageFailed = false;
+let attachmentStorageError: string | undefined;
 if (receivedEmail.attachments?.length) {
   for (const attachment of receivedEmail.attachments) {
     const attachmentId =
@@ -1793,13 +1795,19 @@ if (receivedEmail.attachments?.length) {
           ` ${storageResult.error || "unknown error"}`,
       );
 
-      throw new Error(
-        storageResult.error ||
-          "Failed to store inbound email attachment",
-      );
+      attachmentStorageFailed = true;
+
+attachmentStorageError =
+  storageResult.error ||
+  "Failed to store inbound email attachment";
     }
   }
-
+if (attachmentStorageFailed) {
+  throw new Error(
+    attachmentStorageError ||
+      "One or more inbound email attachments failed to store",
+  );
+}
   console.log(
     `[ResendInbound] Processed ` +
       `${receivedEmail.attachments.length}` +
