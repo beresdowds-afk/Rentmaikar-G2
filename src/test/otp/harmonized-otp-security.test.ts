@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import crypto from "crypto";
 import { normalizeE164 } from "@/server/communicationServices";
 import { generateTotpSecret, verifyTotpCode } from "@/lib/totp";
+import {
+  calculateOtpVerifier,
+  verifyVerifier,
+  OtpService,
+} from "../../../backend/src/services/phoneOtpService";
 
 describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
   // -----------------------------------------------------------------
@@ -203,6 +208,93 @@ describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
 
       expect(simulatedResult.simulation).toBe(true);
       expect(simulatedResult.deliveryStatus).toBe("simulation");
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 6. Server-Secret HMAC Verifier & Purpose Binding
+  // -----------------------------------------------------------------
+  describe("HMAC-SHA256 Verifier & Purpose Binding", () => {
+    it("generates a 6-digit challenge with HMAC verifier bound to challengeId, purpose, and identity", () => {
+      const otpService = OtpService.getInstance();
+      const phone = "+18482035389";
+      const { challenge, rawCode } = otpService.generateChallenge({
+        identity: phone,
+        purpose: "login",
+      });
+
+      expect(rawCode).toMatch(/^\d{6}$/);
+      expect(challenge.identity).toBe(phone);
+      expect(challenge.purpose).toBe("login");
+      expect(challenge.verifier).toHaveLength(64); // SHA-256 hex string
+
+      // Verifier must match expected HMAC calculation
+      const expectedHmac = calculateOtpVerifier({
+        otp: rawCode,
+        identity: phone,
+        purpose: "login",
+        challengeId: challenge.id,
+      });
+      expect(verifyVerifier(challenge.verifier, expectedHmac)).toBe(true);
+    });
+
+    it("prevents cross-purpose attacks (e.g. phone_link OTP cannot satisfy login)", () => {
+      const otp = "839102";
+      const challengeId = crypto.randomUUID();
+      const identity = "+18482035389";
+
+      // Issued for phone_link
+      const phoneLinkVerifier = calculateOtpVerifier({
+        otp,
+        identity,
+        purpose: "phone_link",
+        challengeId,
+      });
+
+      // Attacker attempts to use this verifier for login
+      const loginAttemptVerifier = calculateOtpVerifier({
+        otp,
+        identity,
+        purpose: "login",
+        challengeId,
+      });
+
+      expect(phoneLinkVerifier).not.toBe(loginAttemptVerifier);
+      expect(verifyVerifier(phoneLinkVerifier, loginAttemptVerifier)).toBe(false);
+    });
+
+    it("prevents identity-substitution attacks (OTP cannot be transferred to a different phone)", () => {
+      const otp = "654321";
+      const challengeId = crypto.randomUUID();
+
+      const victimVerifier = calculateOtpVerifier({
+        otp,
+        identity: "+18482035389",
+        purpose: "auth",
+        challengeId,
+      });
+
+      const attackerVerifier = calculateOtpVerifier({
+        otp,
+        identity: "+18482039999",
+        purpose: "auth",
+        challengeId,
+      });
+
+      expect(verifyVerifier(victimVerifier, attackerVerifier)).toBe(false);
+    });
+
+    it("supports legacy SHA-256 verifiers during transition window", () => {
+      const otp = "123456";
+      const legacySha256 = crypto.createHash("sha256").update(otp).digest("hex");
+      const unmatchingHmac = "0000000000000000000000000000000000000000000000000000000000000000";
+
+      // Should succeed because legacy fallback is supplied
+      expect(verifyVerifier(legacySha256, unmatchingHmac, legacySha256)).toBe(true);
+
+      // Should fail if legacy fallback does not match
+      const wrongSha256 = crypto.createHash("sha256").update("999999").digest("hex");
+      expect(verifyVerifier(legacySha256, unmatchingHmac, wrongSha256)).toBe(false);
     });
   });
 });
