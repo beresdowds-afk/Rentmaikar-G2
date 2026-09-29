@@ -53,6 +53,7 @@ export const TAB_PERMISSION_MAP: Record<AdminTabKey, PermissionKey | null> = {
   'cron-jobs': 'can_view_reports',
   'uuid-assignments': 'can_view_users',
   'email-delivery': 'can_view_communications',
+  'email-checkpoints': 'can_view_communications',
 
   // Support
   inbox: 'can_view_communications',

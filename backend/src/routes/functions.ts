@@ -471,20 +471,54 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
       case "voice-twiml-dial": {
         const baseUrl = getBaseCallbackUrl(req);
+
         const twiml = await handleVoiceTwimlDial({
-          To: body.To || body.to || (req.query.To as string),
-          From: body.From || body.from || (req.query.From as string),
-          CallSid: body.CallSid || body.callSid || (req.query.CallSid as string),
-          Region: body.Region || body.region || (req.query.Region as string),
+          To:
+            body.To ||
+            body.to ||
+            (req.query.To as string),
+
+          From:
+            body.From ||
+            body.from ||
+            (req.query.From as string),
+
+          CallSid:
+            body.CallSid ||
+            body.callSid ||
+            (req.query.CallSid as string),
+
+          SessionId:
+            body.SessionId ||
+            body.sessionId ||
+            (req.query.SessionId as string),
+
+          Region:
+            body.Region ||
+            body.region ||
+            (req.query.Region as string),
+
           baseUrl,
         });
 
         const accept = String(req.headers.accept || "");
-        if (accept.includes("application/json") && !accept.includes("text/xml") && !accept.includes("*/*")) {
-          return res.status(200).json({ xml: twiml, twiml });
+
+        if (
+          accept.includes("application/json") &&
+          !accept.includes("text/xml") &&
+          !accept.includes("*/*")
+        ) {
+          return res.status(200).json({
+            xml: twiml,
+            twiml,
+          });
         }
 
-        res.setHeader("Content-Type", "text/xml; charset=utf-8");
+        res.setHeader(
+          "Content-Type",
+          "text/xml; charset=utf-8"
+        );
+
         return res.status(200).send(twiml);
       }
 

@@ -605,6 +605,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
           To: body.To || body.to,
           From: body.From || body.from,
           CallSid: body.CallSid || body.callSid,
+          SessionId: body.SessionId || body.sessionId,
           Region: body.Region || body.region,
           baseUrl,
         });

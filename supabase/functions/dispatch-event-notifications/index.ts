@@ -1,6 +1,3 @@
-import {
-  sendSinglePlatformEmail,
-} from "../_shared/backend-email-bridge.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
@@ -128,43 +125,35 @@ serve(async (req) => {
             status = "skipped";
             lastError = "No email address on profile";
           } else {
-            const emailResult = await sendSinglePlatformEmail(
-  {
-    action: "send",
-    to,
-    templateName:
-      mapping?.emailTemplate ?? "event_notification",
-    category: "notification",
-    country:
-      profile?.preferred_country ?? undefined,
-    data: {
-      firstName: vars.first_name,
-      title: mapping
-        ? renderEventCopy(mapping.emailSubject, vars)
-        : row.title,
-      body: mapping
-        ? renderEventCopy(mapping.emailBody, vars)
-        : (row.body ?? ""),
-      category: row.category,
-      status: eventStatus ?? undefined,
-      recordId: row.record_id ?? undefined,
-      deepLink: vars.deep_link,
-      ...(row.payload ?? {}),
-    },
-  },
-  {
-    idempotencyKey: `event-notification:${row.id}`,
-    correlationId: `event-notification:${row.id}`,
-    platformSource: "dispatch-event-notifications",
-  },
-);
-
-if (!emailResult.ok || !emailResult.success) {
-  status = "failed";
-  lastError =
-    emailResult.error ||
-    `Backend email dispatch failed with HTTP ${emailResult.status}`;
-}
+            const res = await fetchWithTimeout(`${supabaseUrl}/functions/v1/send-outbound-email`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceKey}`,
+              },
+              body: JSON.stringify({
+                action: "send",
+                to,
+                templateName: mapping?.emailTemplate ?? "event_notification",
+                category: "notification",
+                country: profile?.preferred_country ?? undefined,
+                data: {
+                  firstName: vars.first_name,
+                  title: mapping ? renderEventCopy(mapping.emailSubject, vars) : row.title,
+                  body: mapping ? renderEventCopy(mapping.emailBody, vars) : (row.body ?? ""),
+                  category: row.category,
+                  status: eventStatus ?? undefined,
+                  recordId: row.record_id ?? undefined,
+                  deepLink: vars.deep_link,
+                  ...(row.payload ?? {}),
+                },
+              }),
+            });
+            if (!res.ok) {
+              status = "failed";
+              lastError = `[${res.status}] ${await res.text()}`;
+            }
+          }
 
           // Companion SMS / WhatsApp leg (email stays mandatory, plus one
           // messaging channel when the event map declares it).

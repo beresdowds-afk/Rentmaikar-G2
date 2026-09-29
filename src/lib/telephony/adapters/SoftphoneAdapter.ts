@@ -45,9 +45,55 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
    * Fetches the necessary Twilio Voice JWT token via backendBridge,
    * creates an authoritative call session, and triggers browser WebRTC connection.
    */
-  public async placeCall(params: PlaceCallParams): Promise<RentmaikarCallSession> {
-    const sessionId = `softphone-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  public async placeCall(
+    params: PlaceCallParams
+  ): Promise<RentmaikarCallSession> {
     const now = new Date().toISOString();
+
+    // Ask the authoritative backend to create the canonical
+    // voip_calls record. This does NOT create a second Twilio
+    // call; the browser Device.connect() does that.
+    const prepareResult =
+      await backendBridge.invokeEdgeFunction<{
+        success: boolean;
+        callId?: string;
+        results?: Array<{
+          recipient: string;
+          success: boolean;
+          callSid?: string;
+          error?: string;
+        }>;
+        error?: string;
+        message?: string;
+      }>("initiate-voip-call", {
+        engine: "softphone",
+        recipients: [
+          {
+            phoneNumber: params.toPhoneNumber,
+            displayName: params.recipientName,
+            userId: params.adminUserId,
+          },
+        ],
+        callType: params.callType || "individual",
+        region: params.region || "USA",
+        callerUserId: params.adminUserId,
+        metadata: params.metadata || {},
+      });
+
+    if (
+      prepareResult.error ||
+      !prepareResult.data?.success ||
+      !prepareResult.data.callId
+    ) {
+      throw new Error(
+        prepareResult.error?.message ||
+        prepareResult.data?.error ||
+        prepareResult.data?.message ||
+        "Backend did not create an authoritative softphone call"
+      );
+    }
+
+    const sessionId = prepareResult.data.callId;
 
     const session: RentmaikarCallSession = {
       id: sessionId,
@@ -94,8 +140,11 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
           customParams: {
             adminUserId: params.adminUserId,
             sessionId,
+            SessionId: sessionId,
             region: params.region || "USA",
-            ...(params.recipientName ? { recipientName: params.recipientName } : {}),
+            ...(params.recipientName
+              ? { recipientName: params.recipientName }
+              : {}),
           },
         });
         session.status = "in-progress";
@@ -119,43 +168,90 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
    * Ends an active softphone session.
    * Disconnects browser audio and instructs backend to terminate any active Twilio call leg.
    */
-  public async endCall(sessionId: string, twilioCallSid?: string): Promise<boolean> {
+  public async endCall(
+    sessionId: string,
+    twilioCallSid?: string
+  ): Promise<boolean> {
     const session = this.sessionMap.get(sessionId);
 
-    // 1. Disconnect browser device bridge if attached
-    if (this.deviceBridge) {
-      try {
-        this.deviceBridge.disconnect();
-      } catch (err) {
-        console.warn("[SoftphoneAdapter] Error disconnecting device bridge:", err);
-      }
+    if (!sessionId) {
+      return false;
     }
 
-    // 2. Terminate backend call leg via authoritative gateway
-    const targetSid = twilioCallSid || session?.twilio_call_sid;
-    if (targetSid || sessionId) {
-      try {
-        await backendBridge.invokeEdgeFunction("end-voip-call", {
+    const targetSid =
+      twilioCallSid ||
+      session?.twilio_call_sid;
+
+    try {
+      // Backend/provider termination MUST happen first.
+      const response =
+        await backendBridge.invokeEdgeFunction<{
+          success: boolean;
+          message?: string;
+          error?: string;
+        }>("end-voip-call", {
           callId: sessionId,
           callSid: targetSid,
         });
-      } catch (err) {
-        console.warn("[SoftphoneAdapter] Failed to invoke end-voip-call:", err);
-      }
-    }
 
-    if (session) {
-      session.status = "completed";
-      session.ended_at = new Date().toISOString();
-      if (session.started_at) {
-        session.duration_seconds = Math.round(
-          (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 1000
+      if (
+        response.error ||
+        !response.data?.success
+      ) {
+        console.warn(
+          "[SoftphoneAdapter] Backend did not confirm call termination:",
+          response.error?.message ||
+            response.data?.error ||
+            response.data?.message
+        );
+
+        return false;
+      }
+
+      // Only after authoritative termination succeeds
+      // do we disconnect the browser SDK.
+      if (this.deviceBridge) {
+        try {
+          this.deviceBridge.disconnect();
+        } catch (err) {
+          console.warn(
+            "[SoftphoneAdapter] Local device disconnect failed:",
+            err
+          );
+        }
+      }
+
+      if (session) {
+        session.status = "completed";
+        session.ended_at =
+          new Date().toISOString();
+
+        if (session.started_at) {
+          session.duration_seconds =
+            Math.round(
+              (
+                new Date(session.ended_at).getTime() -
+                new Date(session.started_at).getTime()
+              ) / 1000
+            );
+        }
+
+        this.sessionMap.set(
+          sessionId,
+          session
         );
       }
-      this.sessionMap.set(sessionId, session);
-    }
 
-    return true;
+      return true;
+    } catch (err) {
+      console.warn(
+        "[SoftphoneAdapter] endCall failed:",
+        err
+      );
+
+      // Do NOT falsely mark the session completed.
+      return false;
+    }
   }
 
   /**

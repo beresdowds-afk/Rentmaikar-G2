@@ -369,11 +369,6 @@ export const HubMessageComposer: React.FC = () => {
           emailErr = e.message || 'Email gateway request failed';
         }
 
-
-        } catch (e: any) {
-          emailErr = e.message || 'Email gateway request failed';
-        }
-
         if (!emailSent) throw new Error(emailErr || 'Email dispatch failed');
         toast.success(`Email dispatched to ${recipientContact.trim()}`);
       } else {

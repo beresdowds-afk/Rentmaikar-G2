@@ -286,12 +286,14 @@ export async function handleVoiceTwimlDial(params: {
   To?: string;
   From?: string;
   CallSid?: string;
+  SessionId?: string;
   Region?: string;
   baseUrl: string;
 }): Promise<string> {
   const to = String(params.To || "").trim();
   const from = String(params.From || "").trim();
   const callSid = String(params.CallSid || "");
+  const sessionId = String(params.SessionId || "");
   const region = String(params.Region || "USA");
   const baseUrl = params.baseUrl.replace(/\/+$/, "");
 
@@ -321,32 +323,102 @@ export async function handleVoiceTwimlDial(params: {
     dialTarget = `<Number>${xmlEscape(normalizedTo || to)}</Number>`;
   }
 
-  // Insert initial call record into voip_calls
+  // Resolve the canonical Rentmaikar call record.
+  // Softphone/WebRTC supplies SessionId before Twilio creates
+  // the provider CallSid. The TwiML callback then attaches
+  // that CallSid to the existing canonical voip_calls row.
   const pool = getDbPool();
   let callRecordId: string | null = null;
 
   if (pool) {
     try {
-      const callRes = await pool.query(
-        `INSERT INTO public.voip_calls (
-          call_sid, initiated_by, call_type, region, status, direction, started_at, created_at, updated_at
-        ) VALUES ($1, $2, 'individual', $3, 'in-progress', 'outbound', NOW(), NOW(), NOW())
-        ON CONFLICT (call_sid) DO UPDATE SET updated_at = NOW()
-        RETURNING id`,
-        [callSid || null, callerUserId || null, region]
-      );
-      callRecordId = callRes.rows?.[0]?.id || null;
+      if (sessionId) {
+        const existing = await pool.query(
+          `SELECT id
+           FROM public.voip_calls
+           WHERE id = $1::uuid
+           LIMIT 1`,
+          [sessionId]
+        );
+
+        callRecordId =
+          existing.rows?.[0]?.id || null;
+      }
+
+      if (callRecordId) {
+        await pool.query(
+          `UPDATE public.voip_calls
+           SET
+             call_sid = COALESCE($1, call_sid),
+             status = 'ringing',
+             updated_at = NOW()
+           WHERE id = $2`,
+          [callSid || null, callRecordId]
+        );
+      } else {
+        const callRes = await pool.query(
+          `INSERT INTO public.voip_calls (
+            call_sid,
+            initiated_by,
+            call_type,
+            region,
+            status,
+            direction,
+            started_at,
+            created_at,
+            updated_at
+          ) VALUES (
+            $1,
+            $2,
+            'individual',
+            $3,
+            'in-progress',
+            'outbound',
+            NOW(),
+            NOW(),
+            NOW()
+          )
+          ON CONFLICT (call_sid)
+          DO UPDATE SET updated_at = NOW()
+          RETURNING id`,
+          [
+            callSid || null,
+            callerUserId || null,
+            region,
+          ]
+        );
+
+        callRecordId =
+          callRes.rows?.[0]?.id || null;
+      }
 
       if (callRecordId && to) {
         await pool.query(
           `INSERT INTO public.voip_call_participants (
-            call_id, phone_number, participant_type, region, status, joined_at, created_at
-          ) VALUES ($1, $2, 'recipient', $3, 'ringing', NOW(), NOW())`,
+            call_id,
+            phone_number,
+            participant_type,
+            region,
+            status,
+            joined_at,
+            created_at
+          ) VALUES (
+            $1,
+            $2,
+            'recipient',
+            $3,
+            'ringing',
+            NOW(),
+            NOW()
+          )`,
           [callRecordId, to, region]
-        );
+        ).catch(() => {});
       }
     } catch (dbErr: any) {
-      console.warn("[Voice Dial] Failed to record call in DB:", dbErr.message);
+      console.warn(
+        "[Voice Dial] Failed to resolve/update call record:",
+        dbErr.message
+      );
     }
   }
 
@@ -691,10 +763,28 @@ export async function handleInitiateVoipCall(
     throw new Error("At least one recipient is required");
   }
 
-  const callType = body.callType === "group" || recipients.length > 1 ? "group" : "individual";
+  const callType =
+    body.callType === "group" || recipients.length > 1
+      ? "group"
+      : "individual";
+
   const region = body.region || "USA";
   const isConference = callType === "group";
-  const callResults: Array<{ recipient: string; success: boolean; callSid?: string; error?: string }> = [];
+
+  const engine = String(
+    body.engine ||
+    body.callingMethod ||
+    ""
+  ).toLowerCase();
+
+  const isSoftphone = engine === "softphone";
+
+  const callResults: Array<{
+    recipient: string;
+    success: boolean;
+    callSid?: string;
+    error?: string;
+  }> = [];
 
   let callerUserId: string | null = null;
   if (userToken) {
@@ -724,11 +814,86 @@ export async function handleInitiateVoipCall(
     }
   }
 
-  const callId = callRecordId || `call_${Date.now()}`;
-  const conferenceName = isConference ? `RentMaikar_${callId}` : null;
+  if (!callRecordId) {
+    throw new Error(
+      "Unable to create authoritative voip_calls record"
+    );
+  }
+
+  const callId = callRecordId;
+  const conferenceName = isConference
+    ? `RentMaikar_${callId}`
+    : null;
+
   const callerId = await resolveCallerId(callerUserId, region);
-  const statusCallback = `${baseUrl}/api/functions/voip-status-callback`;
-  const recordingCallback = `${baseUrl}/api/functions/recording-status-callback`;
+  const statusCallback =
+    `${baseUrl}/api/functions/voip-status-callback`;
+
+  const recordingCallback =
+    `${baseUrl}/api/functions/recording-status-callback`;
+
+  // WebRTC / Softphone creates the actual Twilio leg later
+  // through Device.connect(). At this stage we only create
+  // the authoritative voip_calls record and return its UUID.
+  if (isSoftphone) {
+    for (const recipient of recipients) {
+      const rawPhone =
+        recipient.phoneNumber ||
+        recipient.phone ||
+        "";
+
+      const to = normalizeE164(rawPhone);
+
+      if (!to) {
+        callResults.push({
+          recipient: rawPhone,
+          success: false,
+          error: "Invalid phone number",
+        });
+        continue;
+      }
+
+      if (pool && callRecordId) {
+        await pool.query(
+          `INSERT INTO public.voip_call_participants (
+            call_id,
+            phone_number,
+            participant_type,
+            display_name,
+            region,
+            status,
+            created_at
+          ) VALUES (
+            $1,
+            $2,
+            'recipient',
+            $3,
+            $4,
+            'pending',
+            NOW()
+          )`,
+          [
+            callRecordId,
+            to,
+            recipient.displayName || null,
+            region,
+          ]
+        ).catch(() => {});
+      }
+
+      callResults.push({
+        recipient: to,
+        success: true,
+      });
+    }
+
+    return {
+      success: callResults.some((result) => result.success),
+      callId,
+      results: callResults,
+      conferenceName: null,
+    };
+  }
 
   for (const recipient of recipients) {
     const rawPhone = recipient.phoneNumber || recipient.phone || "";

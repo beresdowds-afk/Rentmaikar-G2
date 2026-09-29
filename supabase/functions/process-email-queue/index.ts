@@ -1,8 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { resendSendEmail } from '../_shared/resend-gateway.ts'
 import { requireCronSecretAsync } from '../_shared/cron-auth.ts'
-  import {
-  sendSinglePlatformEmail,
-} from '../_shared/backend-email-bridge.ts'
+
 const MAX_RETRIES = 5
 const DEFAULT_BATCH_SIZE = 10
 const DEFAULT_SEND_DELAY_MS = 200
@@ -26,26 +25,29 @@ class ProviderSendError extends Error {
 
 // Send one message directly through the Direct Resend connector.
 // The `from` domain is normalized onto the verified sending domain.
-async function sendViaBackend(
-  payload: Record<string, unknown>,
-  correlationId: string,
-): Promise<void> {
-  const result = await sendSinglePlatformEmail(payload, {
-    correlationId,
-    idempotencyKey:
-      typeof payload.idempotency_key === 'string'
-        ? payload.idempotency_key
-        : undefined,
-    platformSource: 'process-email-queue',
-  })
+async function sendViaResend(payload: Record<string, unknown>): Promise<void> {
+  const resendKey = Deno.env.get('RESEND_API_KEY')
+  if (!resendKey) {
+    throw new Error('Direct Resend connector not configured (missing RESEND_API_KEY)')
+  }
 
-  if (!result.ok || !result.success) {
-    const error = new ProviderSendError(
-      result.error || 'Backend email bridge rejected transactional email',
-      result.status || 502,
+  const res = await resendSendEmail({
+    from: String(payload.from ?? 'Rentmaikar <noreply@rentmaikar.com>'),
+    to: [payload.to],
+    subject: payload.subject,
+    html: payload.html,
+    ...(payload.text ? { text: payload.text } : {}),
+  }, resendKey)
+
+  if (!res.ok) {
+    const bodyText = await res.text()
+    const retryAfterHeader = res.headers.get('retry-after')
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : null
+    throw new ProviderSendError(
+      `Direct Resend send failed [${res.status}]: ${bodyText.slice(0, 500)}`,
+      res.status,
+      Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null
     )
-
-    throw error
   }
 }
 
@@ -161,24 +163,17 @@ Deno.serve(async (req) => {
 })
 
 async function handleRequest(req: Request): Promise<Response> {
+  const resendKey = Deno.env.get('RESEND_API_KEY')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  console.error(
-    'Missing required environment variables: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY',
-  )
-
-  return new Response(
-    JSON.stringify({
-      error: 'Server configuration error',
-    }),
-    {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    },
-  )
-}
+  if (!supabaseUrl || !supabaseServiceKey || !resendKey) {
+    console.error('Missing required environment variables (need SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and RESEND_API_KEY)')
+    return new Response(
+      JSON.stringify({ error: 'Server configuration error: missing Direct Resend credentials' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
 
   const authDenied = await requireCronSecretAsync(req)
   if (authDenied) {
@@ -187,13 +182,10 @@ if (!supabaseUrl || !supabaseServiceKey) {
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-  console.log('Email provider selected: Cloud Run backend email bridge', {
-  provider: 'cloud-run-resend',
-  route: 'backend-email-bridge',
-  backend_url:
-    Deno.env.get('RENTMAIKAR_BACKEND_URL') ||
-    'https://staging.rentmaikar.com',
-})
+  console.log('Email provider selected: Direct Resend connector', {
+    provider: 'resend-direct',
+    sender_domain: SENDER_DOMAIN,
+  })
 
   // 1. Check rate-limit cooldown and read queue config
   const { data: state } = await supabase
@@ -367,7 +359,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
       }
 
       try {
-        await sendViaBackend(payload, correlationId)
+        await sendViaResend(payload)
 
         // Log success
         await supabase.from('email_send_log').insert({
@@ -375,11 +367,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
           template_name: payload.label || queue,
           recipient_email: payload.to,
           status: 'sent',
-          metadata: {
-  provider: 'cloud-run-resend',
-  route: 'backend-email-bridge',
-  correlation_id: correlationId,
-},
+          metadata: { provider: 'resend-direct', correlation_id: correlationId },
         })
 
         // Delete from queue
@@ -493,8 +481,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
       processed: totalProcessed,
       failed: totalFailed,
       dlq_transfers: totalDlq,
-      provider: 'cloud-run-resend',
-      route: 'backend-email-bridge',
+      provider: 'resend-direct',
       correlation_id: correlationId,
     }),
     {

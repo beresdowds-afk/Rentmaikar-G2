@@ -63,7 +63,14 @@ export class ServerRestAdapter implements ITelephonyAdapter {
     }
 
     const data = bridgeResult.data;
-    const callId = data.callId || `rest-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    if (!data.callId) {
+      throw new Error(
+        "Backend did not return the authoritative voip_calls.id"
+      );
+    }
+
+    const callId = data.callId;
     const primaryResult = data.results?.[0];
 
     const session: RentmaikarCallSession = {
@@ -110,25 +117,45 @@ export class ServerRestAdapter implements ITelephonyAdapter {
         callSid: targetSid,
       });
 
-      if (session) {
-        session.status = "completed";
-        session.ended_at = new Date().toISOString();
-        if (session.started_at) {
-          session.duration_seconds = Math.round(
-            (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 1000
-          );
-        }
-        this.sessionMap.set(sessionId, session);
+      const success = res.data?.success === true;
+
+      if (!success) {
+        console.warn(
+          "[ServerRestAdapter] Backend did not confirm call termination:",
+          res.data?.message
+        );
+
+        return false;
       }
 
-      return res.data?.success ?? true;
-    } catch (err) {
-      console.warn("[ServerRestAdapter] endCall error:", err);
       if (session) {
         session.status = "completed";
-        session.ended_at = new Date().toISOString();
-        this.sessionMap.set(sessionId, session);
+        session.ended_at =
+          new Date().toISOString();
+
+        if (session.started_at) {
+          session.duration_seconds =
+            Math.round(
+              (
+                new Date(session.ended_at).getTime() -
+                new Date(session.started_at).getTime()
+              ) / 1000
+            );
+        }
+
+        this.sessionMap.set(
+          sessionId,
+          session
+        );
       }
+
+      return true;
+    } catch (err) {
+      console.warn(
+        "[ServerRestAdapter] endCall error:",
+        err
+      );
+
       return false;
     }
   }

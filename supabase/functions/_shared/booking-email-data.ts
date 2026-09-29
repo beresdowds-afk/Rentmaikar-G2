@@ -1,10 +1,7 @@
 // Shared helpers for booking-related transactional emails.
 // Loads a booking request with its driver + vehicle, builds template data,
 // and invokes the central send-transactional-email function.
-import {
-  sendSinglePlatformEmail,
-} from './backend-email-bridge.ts'
-  import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
 
 const SITE_URL = 'https://rentmaikar.com'
 
@@ -137,41 +134,35 @@ export async function sendBookingEmail(
   idempotencyKey: string,
   templateData: Record<string, unknown>,
 ): Promise<boolean> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!supabaseUrl || !serviceKey) {
+    console.error('Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY')
+    return false
+  }
+
   try {
-    const result = await sendSinglePlatformEmail(
-      {
-        action: 'send',
-        to: recipientEmail,
-        templateName,
-        category: 'transactional',
-        data: templateData,
+    const res = await fetch(`${supabaseUrl}/functions/v1/send-transactional-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
       },
-      {
+      body: JSON.stringify({
+        templateName,
+        recipientEmail,
         idempotencyKey,
-        platformSource: 'booking-email',
-      },
-    )
-
-    if (!result.ok || !result.success) {
-      console.error('Booking email backend dispatch rejected', {
-        templateName,
-        status: result.status,
-        error: result.error,
-        correlationId: result.correlationId,
-      })
-
+        templateData,
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.text()
+      console.error('send-transactional-email rejected', { status: res.status, body })
       return false
     }
-
     return true
-  } catch (error) {
-    console.error('Booking email backend dispatch failed', {
-      templateName,
-      error: error instanceof Error
-        ? error.message
-        : String(error),
-    })
-
+  } catch (err) {
+    console.error('send-transactional-email call failed', { error: String(err) })
     return false
   }
 }

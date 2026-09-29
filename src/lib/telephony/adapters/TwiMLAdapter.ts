@@ -23,57 +23,109 @@ export class TwiMLAdapter implements ITelephonyAdapter {
   /**
    * Places an outbound call via TwiML dial instruction.
    */
-  public async placeCall(params: PlaceCallParams): Promise<RentmaikarCallSession> {
-    const sessionId = `twiml-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  public async placeCall(
+    params: PlaceCallParams
+  ): Promise<RentmaikarCallSession> {
     const now = new Date().toISOString();
 
+    const result =
+      await backendBridge.invokeEdgeFunction<{
+        success: boolean;
+        callId?: string;
+        results?: Array<{
+          recipient: string;
+          success: boolean;
+          callSid?: string;
+          error?: string;
+        }>;
+        conferenceName?: string | null;
+        error?: string;
+        message?: string;
+      }>("initiate-voip-call", {
+        engine: "twiml",
+        recipients:
+          params.recipients &&
+          params.recipients.length > 0
+            ? params.recipients
+            : [
+                {
+                  phoneNumber:
+                    params.toPhoneNumber,
+                  displayName:
+                    params.recipientName,
+                  userId:
+                    params.adminUserId,
+                },
+              ],
+        callType:
+          params.callType ||
+          (
+            params.recipients &&
+            params.recipients.length > 1
+              ? "group"
+              : "individual"
+          ),
+        region: params.region || "USA",
+        callerUserId: params.adminUserId,
+        metadata: params.metadata || {},
+      });
+
+    if (
+      result.error ||
+      !result.data?.success ||
+      !result.data.callId
+    ) {
+      throw new Error(
+        result.error?.message ||
+        result.data?.error ||
+        result.data?.message ||
+        "Backend did not create an authoritative TwiML call"
+      );
+    }
+
+    const primaryResult =
+      result.data.results?.[0];
+
     const session: RentmaikarCallSession = {
-      id: sessionId,
+      id: result.data.callId,
       admin_user_id: params.adminUserId,
       calling_method: CallingMethod.TWIML,
-      to_phone_number: params.toPhoneNumber,
-      from_phone_number: params.fromPhoneNumber,
-      recipient_name: params.recipientName,
-      status: "initiated",
+      twilio_call_sid:
+        primaryResult?.callSid,
+      to_phone_number:
+        params.toPhoneNumber,
+      from_phone_number:
+        params.fromPhoneNumber,
+      recipient_name:
+        params.recipientName,
+      status:
+        primaryResult?.success
+          ? "in-progress"
+          : "failed",
       direction: "outbound",
-      region: params.region || "USA",
+      region:
+        params.region || "USA",
       created_at: now,
       started_at: now,
-      metadata: params.metadata || {},
+      metadata: {
+        ...params.metadata,
+        conferenceName:
+          result.data.conferenceName,
+        results:
+          result.data.results,
+      },
     };
 
-    this.sessionMap.set(sessionId, session);
-
-    // Invoke authoritative voice-twiml-dial endpoint via backendBridge
-    const result = await backendBridge.invokeEdgeFunction<{
-      twiml?: string;
-      success?: boolean;
-      callSid?: string;
-      error?: string;
-    }>("voice-twiml-dial", {
-      To: params.toPhoneNumber,
-      From: params.fromPhoneNumber,
-      Region: params.region || "USA",
-      sessionId,
-      callerUserId: params.adminUserId,
-    });
-
-    if (result.error || (result.data && result.data.success === false)) {
-      const errMsg =
-        result.error?.message || result.data?.error || "Failed to initiate TwiML dial route";
-      session.status = "failed";
-      session.error_message = errMsg;
-      session.ended_at = new Date().toISOString();
-      this.sessionMap.set(sessionId, session);
-      throw new Error(errMsg);
+    if (primaryResult?.error) {
+      session.error_message =
+        primaryResult.error;
     }
 
-    if (result.data?.callSid) {
-      session.twilio_call_sid = result.data.callSid;
-    }
+    this.sessionMap.set(
+      session.id,
+      session
+    );
 
-    session.status = "in-progress";
-    this.sessionMap.set(sessionId, session);
     return { ...session };
   }
 
@@ -85,11 +137,23 @@ export class TwiMLAdapter implements ITelephonyAdapter {
     const targetSid = twilioCallSid || session?.twilio_call_sid;
 
     try {
-      if (targetSid || sessionId) {
-        await backendBridge.invokeEdgeFunction("end-voip-call", {
-          callId: sessionId,
-          callSid: targetSid,
-        });
+      const res = await backendBridge.invokeEdgeFunction<{
+        success: boolean;
+        message?: string;
+        error?: string;
+      }>("end-voip-call", {
+        callId: sessionId,
+        callSid: targetSid,
+      });
+
+      const success = res.data?.success === true;
+
+      if (!success) {
+        console.warn(
+          "[TwiMLAdapter] Backend did not confirm call termination:",
+          res.error?.message || res.data?.error || res.data?.message
+        );
+        return false;
       }
 
       if (session) {
@@ -106,11 +170,6 @@ export class TwiMLAdapter implements ITelephonyAdapter {
       return true;
     } catch (err) {
       console.warn("[TwiMLAdapter] endCall error:", err);
-      if (session) {
-        session.status = "completed";
-        session.ended_at = new Date().toISOString();
-        this.sessionMap.set(sessionId, session);
-      }
       return false;
     }
   }
