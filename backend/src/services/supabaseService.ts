@@ -13,7 +13,7 @@ const DEFAULT_SUPABASE_URL = "https://jrsydiofzceoeddjogov.supabase.co";
 const DEFAULT_SUPABASE_KEY = "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
 
 // Validate key to reject known revoked/legacy references
-const isValidKey = (k?: string): boolean => {
+export const isValidKey = (k?: string): boolean => {
   if (!k) return false;
   if (k.startsWith("sb_secret_")) return false;
   if (k.includes("bwvocmhcledbwqlpcswp") || k.includes("J3dm9jbWhjbGVkYndxbHBjc3dw")) return false;
