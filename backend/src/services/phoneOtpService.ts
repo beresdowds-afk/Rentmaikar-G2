@@ -23,6 +23,8 @@ import { getDbPool } from "./dbPool";
 import { messagingBridge } from "./messagingBridge";
 import { supabaseBackendService } from "./supabaseService";
 
+import { authenticator } from "./authenticator";
+
 export function normalizeE164(phone: string): string {
   const cleaned = (phone || "").trim().replace(/[^\d+]/g, "");
   if (!cleaned) return "";
@@ -631,7 +633,7 @@ export async function sendPhoneOtp(params: SendOtpParams): Promise<{
 }
 
 /**
- * 2. Verify an application Phone OTP with atomic one-time consumption (delegates to authoritative OtpService)
+ * 2. Verify an application Phone OTP with atomic one-time consumption (delegates to authoritative Authenticator)
  */
 export async function verifyPhoneOtp(params: VerifyOtpParams): Promise<{
   success: boolean;
@@ -643,184 +645,14 @@ export async function verifyPhoneOtp(params: VerifyOtpParams): Promise<{
   message?: string;
   error?: string;
 }> {
-  const phone = otpService.normalizeIdentity(params.phone, "phone");
-  const code = (params.code || "").trim();
-
-  if (!phone || !/^\+[1-9]\d{7,14}$/.test(phone)) {
-    return { success: false, valid: false, error: "Valid phone number required" };
-  }
-  if (!code || !/^\d{6}$/.test(code)) {
-    return { success: false, valid: false, error: "A 6-digit verification code is required" };
-  }
-
-  const action = params.action || "verify";
-  const purpose: OtpPurpose = params.purpose || ((action === "link_verify" || action === "verify_code") ? "phone_link" : "auth");
-
-  const consumeResult = await otpService.consumeChallenge({
-    identity: phone,
-    code,
-    purpose,
+  return authenticator.verifyOtp({
+    identity: params.phone,
+    code: params.code,
+    type: "phone",
+    action: params.action,
+    purpose: params.purpose,
+    callerId: params.callerId,
+    full_name: params.full_name,
+    role: params.role,
   });
-
-  if (!consumeResult.success) {
-    return { success: false, valid: false, error: consumeResult.error };
-  }
-
-  const pool = getDbPool();
-  if (!pool) {
-    return { success: false, valid: false, error: "Database service unavailable" };
-  }
-
-  // -----------------------------------------------------------------
-  // Action Handlers
-  // -----------------------------------------------------------------
-
-  // Case A: link_verify or verify_code (Authenticated user associating phone)
-  if (action === "link_verify" || action === "verify_code" || purpose === "phone_link") {
-    const callerId = params.callerId || consumeResult.userId;
-    if (!callerId) {
-      return { success: false, valid: false, error: "Authentication required to link phone number" };
-    }
-
-    try {
-      await pool.query(
-        `UPDATE public.profiles
-         SET phone = $1, phone_verified = true, updated_at = NOW()
-         WHERE user_id = $2`,
-        [phone, callerId]
-      );
-
-      await pool.query(
-        `UPDATE auth.users
-         SET phone = $1, phone_confirmed_at = NOW()
-         WHERE id = $2`,
-        [phone.replace(/^\+/, ""), callerId]
-      ).catch(() => {});
-    } catch (e: any) {
-      console.warn("[phoneOtpService] Profile update warning:", e.message);
-    }
-
-    return {
-      success: true,
-      valid: true,
-      verified: true,
-      user_id: callerId,
-      message: "Phone number verified and linked successfully",
-    };
-  }
-
-  // Case B: verify (Sign Up / Sign In via Phone OTP)
-  // Authoritative Session Token Minting via Supabase GoTrue Admin API
-  const admin = supabaseBackendService.getAdminClient();
-  const barePhone = phone.replace(/^\+/, "");
-  let userId: string | null = null;
-  let signInEmail: string | null = null;
-  let isNewUser = false;
-
-  // 1. Resolve user ID from profiles
-  try {
-    const profHit = await pool.query(
-      `SELECT user_id, email FROM public.profiles WHERE phone = $1 OR phone = $2 LIMIT 1`,
-      [phone, barePhone]
-    );
-    if (profHit.rows.length > 0) {
-      userId = profHit.rows[0].user_id;
-      signInEmail = profHit.rows[0].email;
-    }
-  } catch (e: any) {
-    console.warn("[phoneOtpService] Profiles lookup warning:", e.message);
-  }
-
-  // 2. Resolve user ID from auth.users if not found in profiles
-  if (!userId) {
-    try {
-      const authHit = await pool.query(
-        `SELECT id, email FROM auth.users WHERE phone = $1 OR phone = $2 LIMIT 1`,
-        [phone, barePhone]
-      );
-      if (authHit.rows.length > 0) {
-        userId = authHit.rows[0].id;
-        signInEmail = authHit.rows[0].email;
-      }
-    } catch (e: any) {
-      console.warn("[phoneOtpService] Auth.users lookup warning:", e.message);
-    }
-  }
-
-  // 3. Create new user if not found
-  if (!userId) {
-    isNewUser = true;
-    signInEmail = syntheticEmail(phone);
-    const { data: created, error: createErr } = await admin.auth.admin.createUser({
-      phone,
-      email: signInEmail,
-      email_confirm: true,
-      phone_confirm: true,
-      user_metadata: {
-        full_name: params.full_name || null,
-        phone,
-      },
-    });
-
-    if (createErr || !created?.user?.id) {
-      console.error("[phoneOtpService] User creation failed:", createErr?.message);
-      return { success: false, valid: false, error: "Could not create user account for this phone number" };
-    }
-    userId = created.user.id;
-  }
-
-  if (!signInEmail) {
-    signInEmail = syntheticEmail(phone);
-  }
-
-  // 4. Update profile & roles
-  try {
-    await pool.query(
-      `INSERT INTO public.profiles (user_id, email, phone, phone_verified, full_name, created_at, updated_at)
-       VALUES ($1, $2, $3, true, $4, NOW(), NOW())
-       ON CONFLICT (user_id) DO UPDATE
-       SET phone = EXCLUDED.phone,
-           phone_verified = true,
-           full_name = COALESCE(profiles.full_name, EXCLUDED.full_name),
-           updated_at = NOW()`,
-      [userId, signInEmail, phone, params.full_name || null]
-    );
-
-    const role = params.role === "owner" ? "owner" : "driver";
-    await pool.query(
-      `INSERT INTO public.user_roles (id, user_id, role)
-       VALUES (gen_random_uuid(), $1, $2)
-       ON CONFLICT DO NOTHING`,
-      [userId, role]
-    );
-  } catch (profErr: any) {
-    console.warn("[phoneOtpService] Profile/role sync warning:", profErr.message);
-  }
-
-  // 5. Mint GoTrue magiclink token_hash for native client session exchange
-  // NEVER write to internal auth.users.recovery_token
-  const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
-    type: "magiclink",
-    email: signInEmail,
-  });
-
-  if (linkErr || !link?.properties?.hashed_token) {
-    console.error("[phoneOtpService] generateLink failed:", linkErr?.message);
-    return {
-      success: true,
-      valid: true,
-      user_id: userId,
-      is_new_user: isNewUser,
-      message: "Phone verified, but session link generation failed. Please sign in.",
-    };
-  }
-
-  return {
-    success: true,
-    valid: true,
-    user_id: userId,
-    is_new_user: isNewUser,
-    token_hash: link.properties.hashed_token,
-    message: "Phone verified successfully",
-  };
 }
