@@ -5,7 +5,7 @@
  * - Persistent Store: public.phone_otp_codes (PostgreSQL)
  * - Cryptography: crypto.randomInt (6-digit), Server-Secret HMAC-SHA-256 verifier
  * - Verifier Binding: HMAC-SHA256(OTP_AUTH_SECRET, challenge_id + purpose + identity + OTP)
- * - Delivery Hierarchy: SENT.dm (Primary) -> Twilio (Fallback) -> Termii (Fallback)
+ * - Delivery: Authoritative Backend Messaging Bridge -> SENT.dm (Single Delivery Provider)
  * - Session Exchange: Supabase GoTrue Admin generateLink (magiclink) -> client verifyOtp
  *
  * Enforces:
@@ -20,7 +20,7 @@
 
 import crypto from "crypto";
 import { getDbPool } from "./dbPool";
-import { sendApplicationMessage } from "./smsService";
+import { messagingBridge } from "./messagingBridge";
 import { supabaseBackendService } from "./supabaseService";
 
 export function normalizeE164(phone: string): string {
@@ -378,22 +378,23 @@ export class OtpService {
     const { challenge, rawOtp, sandbox } = params;
     const messageBody = `${rawOtp} is your RentMaikar verification code. Valid for 10 minutes.`;
 
-    const dispatchRes = await sendApplicationMessage({
+    const dispatchRes = await messagingBridge.sendMessage({
       to: challenge.identity,
       message: messageBody,
       channel: challenge.channel === "whatsapp" ? "whatsapp" : "sms",
-      sandbox,
-      whatsappTemplateId: "efe28f88-ad8d-48a5-af69-33529169d58d",
-      whatsappTemplateParams: {
+      templateId: "efe28f88-ad8d-48a5-af69-33529169d58d",
+      templateParams: {
         "6 digit code": rawOtp,
         var_1: rawOtp,
         code: rawOtp,
       },
+      source: "auth_otp",
       notificationType: "phone_otp",
+      correlationId: challenge.correlationId,
+      sandbox,
       metadata: {
         otp_record_id: challenge.id,
         purpose: challenge.purpose,
-        correlation_id: challenge.correlationId,
       },
     });
 
@@ -409,7 +410,7 @@ export class OtpService {
       }
       return {
         success: false,
-        error: `Failed to deliver verification code: ${dispatchRes.error || "Upstream CPaaS providers unavailable"}`,
+        error: `Failed to deliver verification code: ${dispatchRes.error || "SENT.dm delivery unavailable"}`,
       };
     }
 
@@ -417,15 +418,15 @@ export class OtpService {
     if (pool) {
       await pool.query(
         `UPDATE public.phone_otp_codes
-         SET status = 'delivered', provider = $2, provider_message_id = $3
+         SET status = 'delivered', provider = 'sent', provider_message_id = $2
          WHERE id = $1`,
-        [challenge.id, dispatchRes.provider || "sent", dispatchRes.messageId || null]
+        [challenge.id, dispatchRes.messageId || null]
       ).catch(() => {});
     }
 
     return {
       success: true,
-      provider: dispatchRes.provider,
+      provider: "sent",
       channel: challenge.channel,
     };
   }
