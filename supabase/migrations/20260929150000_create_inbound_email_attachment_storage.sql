@@ -15,5 +15,3 @@ values (
 )
 on conflict (id) do nothing;
 
-comment on table storage.objects is
-  'Supabase Storage objects, including private inbound email attachments.';
