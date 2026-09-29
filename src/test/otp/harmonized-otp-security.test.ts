@@ -7,6 +7,10 @@ import {
   verifyVerifier,
   OtpService,
 } from "../../../backend/src/services/phoneOtpService";
+import {
+  messagingBridge,
+  MessagingBridge,
+} from "../../../backend/src/services/messagingBridge";
 
 describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
   // -----------------------------------------------------------------
@@ -327,6 +331,44 @@ describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
         challengeId: challenge.id,
       });
       expect(verifyVerifier(challenge.verifier, loginAttemptVerifier)).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 7. Consolidated Messaging Bridge & SENT.dm Delivery
+  // -----------------------------------------------------------------
+  describe("Messaging Bridge & SENT.dm Delivery Consolidation", () => {
+    it("routes outbound messaging through MessagingBridge singleton", () => {
+      expect(messagingBridge).toBeDefined();
+      expect(messagingBridge).toBeInstanceOf(MessagingBridge);
+    });
+
+    it("enforces SENT.dm as the authoritative delivery provider for authentication OTPs", async () => {
+      const result = await messagingBridge.sendMessage({
+        to: "+18482035389",
+        message: "123456 is your RentMaikar verification code.",
+        source: "auth_otp",
+        sandbox: true,
+      });
+
+      expect(result.provider).toBe("sent");
+      expect(result.channel).toBe("sms");
+      expect(result.region).toBe("USA");
+      expect(result.deliveryStatus).toBe("simulation");
+      expect(result.messageId).toMatch(/^sent_/);
+    });
+
+    it("routes Nigerian numbers (+234) through SENT.dm without OTP-level Termii branching", async () => {
+      const result = await messagingBridge.sendMessage({
+        to: "+2348012345678",
+        message: "654321 is your RentMaikar verification code.",
+        source: "auth_otp",
+        sandbox: true,
+      });
+
+      expect(result.provider).toBe("sent");
+      expect(result.region).toBe("Nigeria");
+      expect(result.deliveryStatus).toBe("simulation");
     });
   });
 });
