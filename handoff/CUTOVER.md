@@ -86,3 +86,18 @@
    - [x] SENT.dm primary delivery operational.
    - [x] Secret isolation enforced (0 secrets in client bundles).
    - [x] Production database connections pooled via pgBouncer.
+
+### Phase 8: Production Health Monitoring, Automated Telemetry Watchdogs & Operational SLA Assurance
+1. **Continuous Subsystem Health Probing**:
+   - `PlatformHealthService` executes real-time health checks across 6 critical subsystems (`gateway`, `frontend`, `database`, `telecom`, `payments`, `iot`).
+   - Weighted health score calculation (0 - 100) with automatic degradation detection.
+   - Direct connection state verification between `rentmaikar.com` and `staging.rentmaikar.com`.
+2. **Automated Telemetry Watchdogs & Self-Healing**:
+   - Inbound VoIP call watchdog monitoring active call lifecycle and canonical callId resolution.
+   - Outbound CPaaS / SENT.dm message delivery watchdog tracking delivery statuses.
+   - Verification event logger recording all OTP and auth challenges in `public.verification_event_log`.
+3. **Operational SLA Checklist**:
+   - [x] Real-time platform health monitoring active via `/api/health` and `/api/bridge/status`.
+   - [x] Sub-second OTP verification response time SLA verified.
+   - [x] Automated failover and circuit breaker protection active.
+   - [x] Live metrics (CPU, Memory, Uptime, Subsystem Latency) recorded.
