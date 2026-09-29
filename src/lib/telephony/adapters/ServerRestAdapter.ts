@@ -189,6 +189,11 @@ export class ServerRestAdapter implements ITelephonyAdapter {
       });
 
       if (response.data && response.data.success) {
+        const canonicalCallId = response.data.callId || targetId;
+        if (!session && canonicalCallId) {
+          session = this.sessionMap.get(canonicalCallId);
+        }
+
         const statusMap: Record<string, CallSessionStatus> = {
           queued: "initiated",
           initiated: "initiated",
@@ -207,6 +212,9 @@ export class ServerRestAdapter implements ITelephonyAdapter {
           (response.data.active ? "in-progress" : "completed");
 
         if (session) {
+          if (canonicalCallId) {
+            session.id = canonicalCallId;
+          }
           session.status = mappedStatus;
           if (response.data.callSid) {
             session.twilio_call_sid = response.data.callSid;
@@ -214,12 +222,17 @@ export class ServerRestAdapter implements ITelephonyAdapter {
           if (!response.data.active && !session.ended_at) {
             session.ended_at = new Date().toISOString();
           }
-          this.sessionMap.set(targetId, session);
+          if (canonicalCallId) {
+            this.sessionMap.set(canonicalCallId, session);
+            if (targetId && targetId !== canonicalCallId) {
+              this.sessionMap.delete(targetId);
+            }
+          }
           return { ...session };
-        } else if (targetId) {
+        } else if (canonicalCallId) {
           // Recreate session representation if not previously cached
           const reconstructed: RentmaikarCallSession = {
-            id: targetId,
+            id: canonicalCallId,
             admin_user_id: "",
             calling_method: CallingMethod.SERVER_REST,
             twilio_call_sid: response.data.callSid || callSid,
@@ -228,7 +241,7 @@ export class ServerRestAdapter implements ITelephonyAdapter {
             direction: "outbound",
             created_at: new Date().toISOString(),
           };
-          this.sessionMap.set(targetId, reconstructed);
+          this.sessionMap.set(canonicalCallId, reconstructed);
           return reconstructed;
         }
       }

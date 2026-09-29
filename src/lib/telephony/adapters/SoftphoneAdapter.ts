@@ -273,6 +273,7 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
     try {
       const response = await backendBridge.invokeEdgeFunction<{
         success: boolean;
+        callId?: string;
         providerStatus?: string;
         databaseStatus?: string;
         active: boolean;
@@ -283,6 +284,11 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
       });
 
       if (response.data && response.data.success) {
+        const canonicalCallId = response.data.callId || targetId;
+        if (!session && canonicalCallId) {
+          session = this.sessionMap.get(canonicalCallId);
+        }
+
         const statusMap: Record<string, CallSessionStatus> = {
           queued: "initiated",
           initiated: "initiated",
@@ -301,6 +307,9 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
           (response.data.active ? "in-progress" : "completed");
 
         if (session) {
+          if (canonicalCallId) {
+            session.id = canonicalCallId;
+          }
           session.status = mappedStatus;
           if (response.data.callSid) {
             session.twilio_call_sid = response.data.callSid;
@@ -308,8 +317,26 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
           if (!response.data.active && !session.ended_at) {
             session.ended_at = new Date().toISOString();
           }
-          this.sessionMap.set(targetId, session);
+          if (canonicalCallId) {
+            this.sessionMap.set(canonicalCallId, session);
+            if (targetId && targetId !== canonicalCallId) {
+              this.sessionMap.delete(targetId);
+            }
+          }
           return { ...session };
+        } else if (canonicalCallId) {
+          const reconstructed: RentmaikarCallSession = {
+            id: canonicalCallId,
+            admin_user_id: "",
+            calling_method: CallingMethod.SOFTPHONE,
+            twilio_call_sid: response.data.callSid || callSid,
+            to_phone_number: "",
+            status: mappedStatus,
+            direction: "outbound",
+            created_at: new Date().toISOString(),
+          };
+          this.sessionMap.set(canonicalCallId, reconstructed);
+          return reconstructed;
         }
       }
     } catch (err) {

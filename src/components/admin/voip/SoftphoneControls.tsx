@@ -42,7 +42,7 @@ export function SoftphoneControls({
 }: {
   voice: VoiceDevice;
   onEndCall?: () => Promise<boolean>;
-}) { voice: VoiceDevice }) {
+}) {
   const {
     status,
     error,

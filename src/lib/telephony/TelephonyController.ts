@@ -86,11 +86,30 @@ export class TelephonyController implements ITelephonyController {
     }
 
     try {
+      // Rentmaikar maintains one canonical active telephony
+      // session per controller/user context.
+      if (this.activeSession) {
+        throw new Error(
+          `An active telephony session already exists. ` +
+          `Active callId: ${this.activeSession.id}`
+        );
+      }
+
       const session = await adapter.placeCall(params);
+
+      // Every adapter must return the authoritative voip_calls.id.
+      if (!session.id) {
+        throw new Error(
+          "Telephony adapter returned a session without a canonical callId"
+        );
+      }
+
       this.setActiveSession(session);
+
       return session;
     } catch (err: any) {
-      this.setActiveSession(null);
+      // Only clear a session that may have been created by this
+      // attempted operation. Never overwrite an existing active call.
       throw err;
     }
   }
@@ -104,11 +123,30 @@ export class TelephonyController implements ITelephonyController {
     twilioCallSid?: string
   ): Promise<boolean> {
     const adapter = this.getAdapter(callingMethod);
-    const success = await adapter.endCall(sessionId, twilioCallSid);
 
-    if (this.activeSession && (this.activeSession.id === sessionId || this.activeSession.twilio_call_sid === twilioCallSid)) {
+    const success = await adapter.endCall(
+      sessionId,
+      twilioCallSid
+    );
+
+    // The provider/backend is authoritative.
+    // Do not clear the canonical session unless termination
+    // was actually confirmed.
+    if (
+      success &&
+      this.activeSession &&
+      (
+        this.activeSession.id === sessionId ||
+        (
+          Boolean(twilioCallSid) &&
+          this.activeSession.twilio_call_sid === twilioCallSid
+        )
+      )
+    ) {
       this.activeSession.status = "completed";
-      this.activeSession.ended_at = new Date().toISOString();
+      this.activeSession.ended_at =
+        new Date().toISOString();
+
       this.setActiveSession(null);
     }
 

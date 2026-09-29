@@ -1235,7 +1235,7 @@ export async function handleGetVoipCallStatus(
   authoritative: boolean;
   message?: string;
 }> {
-  const callId = body.callId || body.call_id;
+  let callId = body.callId || body.call_id;
   const requestedCallSid = body.callSid || body.call_sid;
 
   const pool = getDbPool();
@@ -1259,6 +1259,8 @@ export async function handleGetVoipCallStatus(
       const row = result.rows?.[0];
 
       if (row) {
+        // The database primary key is the authoritative Rentmaikar call ID.
+        callId = row.id || callId;
         callSid = callSid || row.call_sid || undefined;
         databaseStatus = row.status || undefined;
       }
