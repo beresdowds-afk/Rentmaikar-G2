@@ -5,7 +5,9 @@
  * 
  * Senders use the verified domain: notify.rentmaikar.com
  */
-
+import {
+  fetchResendReceivedEmail,
+} from "./resendReceivingService";
 import crypto from "crypto";
 import pg from "pg";
 import { supabaseBackendService } from "./supabaseService";
@@ -1487,37 +1489,80 @@ export async function handleInboundEmailWebhook(payload: any, _headers?: Record<
 
     let emailData: InboundEmailPayload | null = null;
 
-    // 1. Resend webhook format: { type: "email.received", data: { ... } }
-    if (payload?.type === "email.received" && payload.data) {
-      emailData = {
-        from: payload.data.from,
-        to: payload.data.to,
-        subject: payload.data.subject,
-        html: payload.data.html,
-        text: payload.data.text,
-        messageId: payload.data.email_id || payload.data.id,
-      };
-    } else if (payload?.from && payload?.to) {
-      // 2. Direct inbound email payload
-      emailData = {
-        from: payload.from,
-        to: payload.to,
-        subject: payload.subject || "Incoming Message",
-        html: payload.html,
-        text: payload.text || payload.content || payload.body,
-        messageId: payload.messageId || payload.id,
+    export async function handleInboundEmailWebhook(
+  payload: any,
+  _headers?: Record<string, string>,
+): Promise<InboundForwardResult> {
+  try {
+    const type = String(payload?.type || "");
+
+    if (type !== "email.received") {
+      return {
+        ok: true,
+        forwarded: false,
+        reason: `Ignored Resend event type: ${type || "unknown"}`,
       };
     }
 
-    if (!emailData) {
-      return { ok: true, received: true, error: "Event acknowledged: not an inbound email payload" };
+    const emailId = String(
+      payload?.data?.email_id || "",
+    ).trim();
+
+    if (!emailId) {
+      console.error(
+        "[ResendInbound] email.received event has no data.email_id",
+      );
+
+      return {
+        ok: false,
+        forwarded: false,
+        reason:
+          "Resend email.received event is missing data.email_id",
+      };
     }
 
-    const result = await handleInboundEmailForward(emailData);
-    return { ok: true, received: true, result };
-  } catch (err: any) {
-    console.error("[EmailWebhook] Processing error:", err);
-    return { ok: false, received: false, error: err.message };
+    console.log(
+      `[ResendInbound] Retrieving received email emailId=${emailId}`,
+    );
+
+    const receivedEmail =
+      await fetchResendReceivedEmail(emailId);
+
+    const inboundEmail: InboundEmailPayload = {
+      from: receivedEmail.from,
+      to: receivedEmail.to,
+      subject: receivedEmail.subject,
+      html: receivedEmail.html,
+      text: receivedEmail.text,
+      headers: receivedEmail.headers,
+      messageId: receivedEmail.messageId,
+    };
+
+    console.log(
+      `[ResendInbound] Retrieved email emailId=${emailId} messageId=${
+        receivedEmail.messageId || "unknown"
+      }`,
+    );
+
+    return await handleInboundEmailForward(
+      inboundEmail,
+    );
+  } catch (error: any) {
+    console.error(
+      "[ResendInbound] Failed to retrieve/process inbound email:",
+      error?.message || error,
+    );
+
+    return {
+      ok: false,
+      forwarded: false,
+      reason:
+        error?.message ||
+        "Failed to process Resend inbound email",
+      error:
+        error?.message ||
+        "Failed to process Resend inbound email",
+    };
   }
 }
 
