@@ -79,19 +79,22 @@ export async function storeInboundAttachment(
     input.filename,
   );
 
-  const { error } =
-    await supabaseBackendService.storage
-      .from(STORAGE_BUCKET)
-      .upload(
-        storagePath,
-        content,
-        {
-          contentType:
-            input.contentType ||
-            "application/octet-stream",
-          upsert: false,
-        },
-      );
+  const supabase =
+  supabaseBackendService.getAdminClient();
+
+const { error } =
+  await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(
+      storagePath,
+      content,
+      {
+        contentType:
+          input.contentType ||
+          "application/octet-stream",
+        upsert: false,
+      },
+    );
 
   if (error) {
     return {
