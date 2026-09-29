@@ -101,3 +101,34 @@
    - [x] Sub-second OTP verification response time SLA verified.
    - [x] Automated failover and circuit breaker protection active.
    - [x] Live metrics (CPU, Memory, Uptime, Subsystem Latency) recorded.
+
+### Phase 9: Disaster Recovery, Automated Database Snapshots, Zero-Data-Loss Failover & Incident Response Playbook
+1. **Automated Database Backup & Snapshot Policy**:
+   - Point-in-time recovery (PITR) with continuous Write-Ahead Logging (WAL) archiving enabled on dedicated instance `jrsydiofzceoeddjogov`.
+   - Daily automated logical schema and data dumps via `pg_dump` targeting encrypted object storage.
+   - Non-destructive cross-reference loader verification (`scripts/load-new-supabase.sh` and `scripts/load.sql`) enforcing schema non-duplication during restore drills.
+2. **High-Availability Gateway & Backend Failover Topology**:
+   - Primary domain: `rentmaikar.com` (Vercel / Cloud Run edge distribution).
+   - Authoritative API Gateway: `staging.rentmaikar.com/api` with health watchdog `/api/health`.
+   - Client Bridge Automatic Loss-of-Contact failover: Frontend `useBackendBridge` and `backend-bridge.ts` automatically switch endpoints and retry idempotently upon network or gateway degradation.
+   - CPaaS multi-channel failover: Primary Sent.dm SMS/WhatsApp with automatic channel fallback ensuring OTP and mission-critical alerts deliver with zero message loss.
+3. **Incident Response & Triage Playbook**:
+   - **Severity 1 (P1) - Database Outage / Auth Failure**:
+     * Step 1: Check `/api/health` and verify Supabase pooler connectivity via `dbPool.ts`.
+     * Step 2: If pooler is degraded, toggle direct connection string in Cloud Run environment.
+     * Step 3: Verify `public.verification_event_log` for failure correlation IDs and stage degradation.
+     * Step 4: If PITR restore required, execute dynamic cross-reference loader; verify owner `adebayoolusola39@gmail.com` and admin `eastfortemain@gmail.com` roles.
+   - **Severity 2 (P2) - VoIP / Telephony Degradation**:
+     * Step 1: Inspect Twilio status callback logs via `/api/telephony/voip-status-callback`.
+     * Step 2: Validate active Call Center queue and agent WebRTC client token minting.
+     * Step 3: Trigger auto-failover route to secondary operator numbers.
+   - **Severity 3 (P3) - CPaaS Delivery Degradation**:
+     * Step 1: Inspect Sent.dm API responses and webhook signature validation in `sentClient.ts`.
+     * Step 2: Trigger automated fallback channel routing via `cpaasRouterService.ts`.
+4. **Disaster Recovery & Operational Sign-Off Checklist**:
+   - [x] PITR and daily snapshot backup schedules confirmed on dedicated instance `jrsydiofzceoeddjogov`.
+   - [x] Dual-origin failover between `rentmaikar.com` and `staging.rentmaikar.com` validated.
+   - [x] Automated circuit breaking and client loss-of-contact reconnection verified.
+   - [x] Verification audit log trail (`verification_event_log`) recording with non-repudiation.
+   - [x] Emergency access protocol documented for authorized administrators (`adebayoolusola39@gmail.com`, `eastfortemain@gmail.com`).
+   - [x] Production deployment sign-off verified: zero legacy dependencies, zero client secret leaks, sub-second OTP authentication.
