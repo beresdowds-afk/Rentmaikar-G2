@@ -36,7 +36,13 @@ const STATUS_LABEL: Record<string, string> = {
  * and hang up. These act on the live browser call session (Twilio Voice SDK),
  * not on local UI state.
  */
-export function SoftphoneControls({ voice }: { voice: VoiceDevice }) {
+export function SoftphoneControls({
+  voice,
+  onEndCall,
+}: {
+  voice: VoiceDevice;
+  onEndCall?: () => Promise<boolean>;
+}) { voice: VoiceDevice }) {
   const {
     status,
     error,
@@ -49,8 +55,7 @@ export function SoftphoneControls({ voice }: { voice: VoiceDevice }) {
     speakerVolume,
     setSpeakerVolume,
     testSpeakerSound,
-    initialize,
-    hangUp,
+    initialize,  
     toggleMute,
     toggleSpeakerphone,
     reinitializeAudio,
@@ -179,10 +184,22 @@ export function SoftphoneControls({ voice }: { voice: VoiceDevice }) {
             <RefreshCw className="h-4 w-4" />
           </Button>
 
-          <Button variant="destructive" size="sm" className="gap-2" onClick={hangUp} disabled={!audioActive}>
-            <PhoneOff className="h-4 w-4" />
-            End call
-          </Button>
+          <Button
+  variant="destructive"
+  size="sm"
+  className="gap-2"
+  onClick={() => {
+    if (onEndCall) {
+      void onEndCall();
+    } else {
+      void voice.hangUp();
+    }
+  }}
+  disabled={!audioActive}
+>
+  <PhoneOff className="h-4 w-4" />
+  End call
+</Button>
         </div>
 
         {(permissionBlocked || micPermission === 'denied') && (
