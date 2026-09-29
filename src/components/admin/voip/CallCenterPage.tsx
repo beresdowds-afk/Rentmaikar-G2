@@ -162,30 +162,29 @@ export const CallCenterPage = () => {
     // Authoritative termination first.
 // Local Twilio SDK cleanup happens only after useVoIPCalls.endCall()
 // confirms provider-side termination.
-const terminateCall = useCallback(async (callId: string) => {
-  const terminated = await endCall(callId);
+const terminateCall = useCallback(
+  async (callId: string) => {
+    return endCall(callId);
+  },
+  [endCall]
+);
+const terminateCurrentCall = useCallback(
+  async (): Promise<boolean> => {
+    if (activeCall?.id) {
+      return endCall(activeCall.id);
+    }
 
-  if (terminated && activeCall?.id === callId) {
-    await voice.hangUp();
-  }
+    if (
+      voice.status === "on-call" ||
+      voice.status === "connecting"
+    ) {
+      return endCall();
+    }
 
-  return terminated;
-}, [activeCall?.id, endCall, voice]);
-const terminateCurrentCall = useCallback(async (): Promise<boolean> => {
-  if (activeCall?.id) {
-    return terminateCall(activeCall.id);
-  }
-
-  if (
-    voice.status === 'on-call' ||
-    voice.status === 'connecting'
-  ) {
-    await voice.hangUp();
-    return true;
-  }
-
-  return false;
-}, [activeCall?.id, terminateCall, voice]);
+    return false;
+  },
+  [activeCall?.id, endCall, voice.status]
+);
     const endAllCalls = useCallback(async () => {
   const results = await Promise.allSettled(
     activeCalls.map((call) => endCall(call.id))
