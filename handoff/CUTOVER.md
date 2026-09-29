@@ -69,3 +69,20 @@
 - [x] Inbound phone calls ring the Call Center queue in real time (`TelephonyController` unified single-session architecture).
 - [x] CPaaS messages (SMS / WhatsApp) deliver successfully via SENT.dm.
 - [x] Audit Event Logging: Every verification and session mint logged into `public.verification_event_log`.
+
+### Phase 7: Legacy Decommissioning, Fallback Teardown & Production Infrastructure Lockdown
+1. **Decommission Legacy Instance (`bwvocmhcledbwqlpcswp`)**:
+   - Zero traffic, queries, or webhooks route to legacy `bwvocmhcledbwqlpcswp.supabase.co`.
+   - Legacy access keys and tokens containing ref `bwvocmhcledbwqlpcswp` or `J3dm9jbWhjbGVkYndxbHBjc3dw` are hard-blocked by `isValidKey`.
+   - All client and backend services exclusively target production `https://jrsydiofzceoeddjogov.supabase.co`.
+2. **Secret & Boundary Isolation**:
+   - Client bundle strictly contains only public publishable configurations (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`).
+   - Service role keys, Twilio auth tokens, CPaaS secrets, and payment API keys reside strictly on the server backend.
+   - Frontend authentication exclusively utilizes Bearer tokens from Supabase Auth (`verifyOtp` via GoTrue magiclink `token_hash`).
+3. **Operational Lockdown Checklist**:
+   - [x] Legacy instance `bwvocmhcledbwqlpcswp` references blocked and decommissioned.
+   - [x] Single authoritative OTP engine (`OtpService`) active.
+   - [x] Single authoritative verifier (`Authenticator`) active.
+   - [x] SENT.dm primary delivery operational.
+   - [x] Secret isolation enforced (0 secrets in client bundles).
+   - [x] Production database connections pooled via pgBouncer.
