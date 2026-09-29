@@ -1815,14 +1815,7 @@ if (attachmentStorageFailed) {
       ` resendEmailId=${emailId}`,
   );
 }
-alter table public.inbound_email_attachments
-  add column if not exists attachment_index integer;
-  create index if not exists
-  idx_inbound_email_attachments_email_index
-  on public.inbound_email_attachments (
-    inbound_email_id,
-    attachment_index
-  );
+
     console.log(
         `[ResendInbound] Persisted ${receivedEmail.attachments.length}` +
           ` attachment record(s) for dbId=${inboundDbId}` +
