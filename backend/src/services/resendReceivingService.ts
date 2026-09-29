@@ -350,12 +350,12 @@ export function verifyResendWebhookSignature(
    * Resend/Svix signing secrets are normally whsec_<base64>.
    */
   const secretValue = secret.startsWith("whsec_")
-  ? secret.slice("whsec_".length)
-  : secret;
+   ? secret.slice("whsec_".length)
+   : secret;
 
-let secretBytes: Buffer;
+  let secretBytes: Buffer;
 
-if (!secretValue) {
+  if (!secretValue) {
   return {
     ok: false,
     reason: "Empty Resend webhook signing secret",
