@@ -13,6 +13,7 @@
  * - Strict 10-minute expiration (expires_at)
  * - Failed attempt limiting (max 5 attempts, then invalidated)
  * - Rate limiting (60s minimum cooldown, max 3 requests per 10m)
+ * - Purpose binding: challenges issued for one purpose (e.g. phone_change) cannot be consumed for another (e.g. login)
  * - Zero plaintext OTP storage or logging
  * - Never tampering with internal auth.users recovery_token
  */
@@ -39,6 +40,7 @@ function syntheticEmail(phone: string): string {
 }
 
 export type OtpChannel = "sms" | "whatsapp" | "email";
+
 export type OtpPurpose =
   | "auth"
   | "login"
@@ -46,12 +48,16 @@ export type OtpPurpose =
   | "phone_verification"
   | "phone_link"
   | "phone_change"
+  | "password_reset"
   | "email_verification"
   | "mfa";
+
+export type OtpChallengeStatus = "pending" | "delivered" | "consumed" | "expired" | "failed";
 
 export interface OtpChallenge {
   id: string;
   identity: string;
+  userId?: string | null;
   channel: OtpChannel;
   purpose: OtpPurpose;
   verifier: string;
@@ -59,13 +65,21 @@ export interface OtpChallenge {
   expiresAt: Date;
   consumedAt?: Date | null;
   createdAt: Date;
+  status: OtpChallengeStatus;
+  correlationId: string;
+  provider?: string | null;
+  providerMessageId?: string | null;
+  metadata?: Record<string, any>;
 }
 
 export interface GenerateChallengeParams {
   identity: string;
+  userId?: string | null;
   channel?: OtpChannel;
   purpose?: OtpPurpose;
   expiresInSeconds?: number;
+  correlationId?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface PersistChallengeParams {
@@ -90,6 +104,7 @@ export interface SendOtpParams {
   phone: string;
   channel?: "sms" | "whatsapp";
   action?: "send" | "link_send" | "send_code";
+  purpose?: OtpPurpose;
   callerId?: string;
   sandbox?: boolean;
 }
@@ -98,6 +113,7 @@ export interface VerifyOtpParams {
   phone: string;
   code: string;
   action?: "verify" | "link_verify" | "verify_code";
+  purpose?: OtpPurpose;
   callerId?: string;
   full_name?: string;
   role?: string;
@@ -200,6 +216,7 @@ export class OtpService {
     const expiresIn = params.expiresInSeconds || 600; // 10 minutes default
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
     const createdAt = new Date();
+    const correlationId = params.correlationId || `corr_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
     const verifier = calculateOtpVerifier({
       otp: rawCode,
@@ -211,6 +228,7 @@ export class OtpService {
     const challenge: OtpChallenge = {
       id: challengeId,
       identity: params.identity,
+      userId: params.userId || null,
       channel,
       purpose,
       verifier,
@@ -218,6 +236,9 @@ export class OtpService {
       expiresAt,
       consumedAt: null,
       createdAt,
+      status: "pending",
+      correlationId,
+      metadata: params.metadata || {},
     };
 
     return { challenge, rawCode };
@@ -238,7 +259,7 @@ export class OtpService {
     const { challenge } = params;
 
     // Check linking constraints if this is link_send / send_code
-    if (params.action === "link_send" || params.action === "send_code") {
+    if (params.action === "link_send" || params.action === "send_code" || challenge.purpose === "phone_link") {
       if (!params.callerId) {
         return { success: false, error: "Authentication required to link a phone number" };
       }
@@ -286,7 +307,7 @@ export class OtpService {
     try {
       await pool.query(
         `UPDATE public.phone_otp_codes
-         SET consumed_at = NOW()
+         SET consumed_at = NOW(), status = 'expired'
          WHERE phone = $1 AND consumed_at IS NULL`,
         [challenge.identity]
       );
@@ -294,11 +315,13 @@ export class OtpService {
       console.warn("[OtpService] Invalidate prior codes warning:", e.message);
     }
 
-    // Persist to Postgres phone_otp_codes table
+    // Persist to Postgres phone_otp_codes table (attempt formalized columns first, fall back to base)
     try {
       await pool.query(
-        `INSERT INTO public.phone_otp_codes (id, phone, code_hash, channel, attempts, expires_at, created_at)
-         VALUES ($1, $2, $3, $4, 0, $5, $6)`,
+        `INSERT INTO public.phone_otp_codes (
+          id, phone, code_hash, channel, attempts, expires_at, created_at,
+          identity, user_id, purpose, status, correlation_id, provider, metadata
+        ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [
           challenge.id,
           challenge.identity,
@@ -306,10 +329,38 @@ export class OtpService {
           challenge.channel,
           challenge.expiresAt.toISOString(),
           challenge.createdAt.toISOString(),
+          challenge.identity,
+          challenge.userId || null,
+          challenge.purpose,
+          challenge.status,
+          challenge.correlationId,
+          challenge.provider || null,
+          JSON.stringify(challenge.metadata || {}),
         ]
       );
       return { success: true };
     } catch (dbErr: any) {
+      // Fallback if migration hasn't been executed on the target database yet
+      if (dbErr.code === "42703" || dbErr.message?.includes("column")) {
+        try {
+          await pool.query(
+            `INSERT INTO public.phone_otp_codes (id, phone, code_hash, channel, attempts, expires_at, created_at)
+             VALUES ($1, $2, $3, $4, 0, $5, $6)`,
+            [
+              challenge.id,
+              challenge.identity,
+              challenge.verifier,
+              challenge.channel,
+              challenge.expiresAt.toISOString(),
+              challenge.createdAt.toISOString(),
+            ]
+          );
+          return { success: true };
+        } catch (fallbackErr: any) {
+          console.error("[OtpService] Fallback database insert error:", fallbackErr.message);
+          return { success: false, error: "Failed to persist verification state." };
+        }
+      }
       console.error("[OtpService] Database insert error:", dbErr.message);
       return { success: false, error: "Failed to persist verification state." };
     }
@@ -342,15 +393,17 @@ export class OtpService {
       metadata: {
         otp_record_id: challenge.id,
         purpose: challenge.purpose,
+        correlation_id: challenge.correlationId,
       },
     });
 
+    const pool = getDbPool();
+
     if (!dispatchRes.success && !dispatchRes.simulation) {
       // Fail Closed: invalidate the stored OTP so an undelivered code cannot be guessed
-      const pool = getDbPool();
       if (pool) {
         await pool.query(
-          `UPDATE public.phone_otp_codes SET consumed_at = NOW() WHERE id = $1`,
+          `UPDATE public.phone_otp_codes SET consumed_at = NOW(), status = 'failed' WHERE id = $1`,
           [challenge.id]
         ).catch(() => {});
       }
@@ -358,6 +411,16 @@ export class OtpService {
         success: false,
         error: `Failed to deliver verification code: ${dispatchRes.error || "Upstream CPaaS providers unavailable"}`,
       };
+    }
+
+    // Update status to delivered if successfully dispatched
+    if (pool) {
+      await pool.query(
+        `UPDATE public.phone_otp_codes
+         SET status = 'delivered', provider = $2, provider_message_id = $3
+         WHERE id = $1`,
+        [challenge.id, dispatchRes.provider || "sent", dispatchRes.messageId || null]
+      ).catch(() => {});
     }
 
     return {
@@ -373,6 +436,8 @@ export class OtpService {
   public async consumeChallenge(params: ConsumeChallengeParams): Promise<{
     success: boolean;
     challengeId?: string;
+    userId?: string | null;
+    purpose?: OtpPurpose;
     error?: string;
   }> {
     const pool = getDbPool();
@@ -383,10 +448,21 @@ export class OtpService {
     const { identity, code, purpose = "auth" } = params;
 
     // Fetch the latest active OTP record for this identity
-    let otpRow: { id: string; code_hash: string; attempts: number; expires_at: Date; consumed_at: Date | null } | null = null;
+    let otpRow: {
+      id: string;
+      code_hash: string;
+      attempts: number;
+      expires_at: Date;
+      consumed_at: Date | null;
+      purpose?: string;
+      user_id?: string | null;
+      status?: string;
+    } | null = null;
+
     try {
       const res = await pool.query(
-        `SELECT id, code_hash, attempts, expires_at, consumed_at
+        `SELECT id, code_hash, attempts, expires_at, consumed_at,
+                coalesce(purpose, 'auth') as purpose, user_id, status
          FROM public.phone_otp_codes
          WHERE phone = $1
          ORDER BY created_at DESC
@@ -397,8 +473,23 @@ export class OtpService {
         otpRow = res.rows[0];
       }
     } catch (err: any) {
-      console.error("[OtpService] Query error:", err.message);
-      return { success: false, error: "Failed to verify code at this time" };
+      // Fallback query if migration columns aren't present
+      try {
+        const fallbackRes = await pool.query(
+          `SELECT id, code_hash, attempts, expires_at, consumed_at
+           FROM public.phone_otp_codes
+           WHERE phone = $1
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [identity]
+        );
+        if (fallbackRes.rows.length > 0) {
+          otpRow = fallbackRes.rows[0];
+        }
+      } catch (innerErr: any) {
+        console.error("[OtpService] Query error:", innerErr.message);
+        return { success: false, error: "Failed to verify code at this time" };
+      }
     }
 
     if (!otpRow) {
@@ -417,7 +508,15 @@ export class OtpService {
       return { success: false, error: "Too many incorrect attempts. This code is invalidated. Please request a new code." };
     }
 
-    // Calculate expected HMAC verifier and fallback legacy SHA-256
+    // Defense-in-depth: Check purpose column match if present in DB
+    if (otpRow.purpose && otpRow.purpose !== purpose && otpRow.purpose !== "auth" && purpose !== "auth") {
+      return {
+        success: false,
+        error: "Verification code was issued for a different purpose. Please request a new code.",
+      };
+    }
+
+    // Calculate expected HMAC verifier (and fallback legacy SHA-256)
     const expectedHmac = calculateOtpVerifier({
       otp: code,
       identity,
@@ -437,6 +536,13 @@ export class OtpService {
         [otpRow.id]
       ).catch(() => {});
 
+      if (otpRow.attempts + 1 >= 5) {
+        await pool.query(
+          `UPDATE public.phone_otp_codes SET status = 'expired' WHERE id = $1`,
+          [otpRow.id]
+        ).catch(() => {});
+      }
+
       const remaining = 5 - (otpRow.attempts + 1);
       const retryMsg = remaining > 0
         ? `Invalid verification code. (${remaining} attempts remaining)`
@@ -447,7 +553,7 @@ export class OtpService {
     // Atomically consume the OTP (Race condition & Replay defense)
     const consumeRes = await pool.query(
       `UPDATE public.phone_otp_codes
-       SET consumed_at = NOW()
+       SET consumed_at = NOW(), status = 'consumed'
        WHERE id = $1 AND consumed_at IS NULL
        RETURNING id`,
       [otpRow.id]
@@ -460,6 +566,8 @@ export class OtpService {
     return {
       success: true,
       challengeId: otpRow.id,
+      userId: otpRow.user_id,
+      purpose: (otpRow.purpose as OtpPurpose) || purpose,
     };
   }
 }
@@ -482,11 +590,12 @@ export async function sendPhoneOtp(params: SendOtpParams): Promise<{
     return { success: false, message: "Valid E.164 phone number required (e.g. +18482035389)" };
   }
 
-  const purpose: OtpPurpose = (params.action === "link_send" || params.action === "send_code") ? "phone_link" : "auth";
+  const purpose: OtpPurpose = params.purpose || ((params.action === "link_send" || params.action === "send_code") ? "phone_link" : "auth");
   const channel: OtpChannel = params.channel === "whatsapp" ? "whatsapp" : "sms";
 
   const { challenge, rawCode } = otpService.generateChallenge({
     identity: phone,
+    userId: params.callerId,
     channel,
     purpose,
   });
@@ -544,7 +653,7 @@ export async function verifyPhoneOtp(params: VerifyOtpParams): Promise<{
   }
 
   const action = params.action || "verify";
-  const purpose: OtpPurpose = (action === "link_verify" || action === "verify_code") ? "phone_link" : "auth";
+  const purpose: OtpPurpose = params.purpose || ((action === "link_verify" || action === "verify_code") ? "phone_link" : "auth");
 
   const consumeResult = await otpService.consumeChallenge({
     identity: phone,
@@ -566,8 +675,8 @@ export async function verifyPhoneOtp(params: VerifyOtpParams): Promise<{
   // -----------------------------------------------------------------
 
   // Case A: link_verify or verify_code (Authenticated user associating phone)
-  if (action === "link_verify" || action === "verify_code") {
-    const callerId = params.callerId;
+  if (action === "link_verify" || action === "verify_code" || purpose === "phone_link") {
+    const callerId = params.callerId || consumeResult.userId;
     if (!callerId) {
       return { success: false, valid: false, error: "Authentication required to link phone number" };
     }
