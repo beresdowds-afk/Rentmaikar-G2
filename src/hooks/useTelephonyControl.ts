@@ -82,10 +82,24 @@ export function useTelephonyControl() {
         switch (engineToUse) {
           case "SOFTPHONE": {
             // ENGINE A: WebRTC Softphone
-            if (!softphone.isReady) {
-              // Try initializing token first
-              await softphone.refreshToken();
-            }
+            if (
+  softphone.status !== "ready" &&
+  softphone.status !== "on-call" &&
+  softphone.status !== "connecting"
+) {
+  const ready = await softphone.initialize();
+
+  if (!ready) {
+    toast({
+      title: "Softphone Connection Issue",
+      description:
+        "The calling service could not be initialized.",
+      variant: "destructive",
+    });
+
+    return false;
+  }
+}
 
             const success = await softphone.startCall(phoneNumber, {
               recipientName: params.recipientName,
@@ -193,43 +207,75 @@ export function useTelephonyControl() {
    * Gracefully tears down calls across any active engine
    */
   const endCall = useCallback(
-    async (callId?: string): Promise<boolean> => {
-      try {
-        let terminated = false;
+  async (callId?: string): Promise<boolean> => {
+    try {
+      let terminated = false;
 
-        // 1. If WebRTC Softphone is active, disconnect local media
-        if (softphone.isCallActive || softphone.status === "in-call" || softphone.status === "connecting") {
-          await softphone.endCall();
-          terminated = true;
-        }
+      /*
+       * 1. AUTHORITATIVE TERMINATION
+       *
+       * If we have a canonical backend call ID, terminate the
+       * provider-side call first.
+       */
+      if (callId) {
+        terminated = await serverRest.endCall(callId);
+      } else if (serverRest.activeCalls.length > 0) {
+        for (const call of serverRest.activeCalls) {
+          const result = await serverRest.endCall(call.id);
 
-        // 2. If Server REST call is active, issue end-voip-call
-        if (callId) {
-          await serverRest.endCall(callId);
-          terminated = true;
-        } else if (serverRest.activeCalls.length > 0) {
-          for (const call of serverRest.activeCalls) {
-            await serverRest.endCall(call.id);
+          if (!result) {
+            return false;
           }
+
           terminated = true;
         }
-
-        // 3. Clear TwiML states
-        if (isDialingTwiml || twimlCallInfo) {
-          setIsDialingTwiml(false);
-          setTwimlCallInfo(null);
-          terminated = true;
-        }
-
-        setActiveEngine(null);
-        return terminated;
-      } catch (err: any) {
-        console.error("[Telephony Control] Error terminating call:", err);
-        return false;
       }
-    },
-    [softphone, serverRest, isDialingTwiml, twimlCallInfo]
-  );
+
+      /*
+       * 2. LOCAL SOFTPHONE CLEANUP
+       *
+       * This does NOT terminate the provider call.
+       * The provider has already been terminated above.
+       */
+      if (
+        softphone.status === "on-call" ||
+        softphone.status === "connecting"
+      ) {
+        await softphone.hangUp();
+        terminated = true;
+      }
+
+      /*
+       * 3. CLEAR TWIML STATE
+       */
+      if (isDialingTwiml || twimlCallInfo) {
+        setIsDialingTwiml(false);
+        setTwimlCallInfo(null);
+        terminated = true;
+      }
+
+      /*
+       * 4. CLEAR CONTROLLER ENGINE STATE
+       */
+      setActiveEngine(null);
+
+      return terminated;
+    } catch (err: any) {
+      console.error(
+        "[Telephony Control] Error terminating call:",
+        err
+      );
+
+      return false;
+    }
+  },
+  [
+    serverRest,
+    softphone,
+    isDialingTwiml,
+    twimlCallInfo,
+  ]
+);
 
   // Mute control
   const toggleMute = useCallback(() => {
