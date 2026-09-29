@@ -19,6 +19,12 @@ import { bridgeManager } from "./services/bridgeManager";
 import { platformHealthService } from "./services/platformHealth";
 import { generateServerSitemap } from "./services/sitemapGenerator";
 import {
+  verifyResendWebhookSignature,
+} from "./services/resendReceivingService";
+import {
+  handleResendWebhookEvent,
+} from "./services/emailService";
+import {
   RENTMAIKAR_LOGO_BUFFER,
   RENTMAIKAR_FAVICON_PNG_BUFFER,
   RENTMAIKAR_FAVICON_ICO_BUFFER,
@@ -219,7 +225,7 @@ app.use(
   express.json({
     limit: "25mb",
     verify: (req: any, _res, buf) => {
-      req.rawBody = buf;
+      req.rawBody = Buffer.from(buf);
     },
   })
 );
@@ -366,15 +372,113 @@ app.get("/api/email/webhooks/stats", async (_req: Request, res: Response) => {
   }
 });
 
-app.post(["/api/webhooks/resend", "/api/email/webhook"], async (req: Request, res: Response) => {
-  try {
-    const { handleInboundEmailWebhook } = await import("./services/emailService");
-    const result = await handleInboundEmailWebhook(req.body, req.headers as Record<string, string>);
-    res.status(result.ok ? 200 : 400).json(result);
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+app.post(
+  ["/api/webhooks/resend", "/api/email/webhook"],
+  async (req: Request, res: Response) => {
+    try {
+      const rawBody =
+        Buffer.isBuffer((req as any).rawBody)
+          ? (req as any).rawBody
+          : Buffer.isBuffer(req.body)
+            ? req.body
+            : null;
+
+      if (!rawBody) {
+        console.error(
+          "[Webhook][Resend] Raw request body unavailable",
+        );
+
+        return res.status(400).json({
+          received: false,
+          error:
+            "Raw request body unavailable for webhook verification",
+        });
+      }
+
+      const verification =
+        verifyResendWebhookSignature(
+          rawBody,
+          req.headers as Record<
+            string,
+            string | string[] | undefined
+          >,
+        );
+
+      if (!verification.ok) {
+        console.error(
+          "[Webhook][Resend] Signature verification failed:",
+          verification.reason,
+        );
+
+        return res.status(401).json({
+          received: false,
+          error: "Invalid Resend webhook signature",
+        });
+      }
+
+      let payload: any;
+
+      try {
+        payload = JSON.parse(
+          rawBody.toString("utf8"),
+        );
+      } catch {
+        return res.status(400).json({
+          received: false,
+          error: "Invalid JSON",
+        });
+      }
+
+      const eventType = String(
+        payload?.type || "",
+      );
+
+      console.log(
+        `[Webhook][Resend] Event received type=${eventType} emailId=${
+          payload?.data?.email_id || "unknown"
+        }`,
+      );
+
+      const result =
+        await handleResendWebhookEvent(
+          payload,
+          req.headers as Record<string, string>,
+        );
+
+      if (!result?.ok) {
+        console.error(
+          "[Webhook][Resend] Event processing failed:",
+          result,
+        );
+
+        return res.status(500).json({
+          received: false,
+          error:
+            result?.error ||
+            "Resend webhook processing failed",
+        });
+      }
+
+      return res.status(200).json({
+        received: true,
+        event: eventType,
+        status: result.status || "processed",
+      });
+    } catch (error: any) {
+      console.error(
+        "[Webhook][Resend] Handler error:",
+        error?.message || error,
+      );
+
+      return res.status(500).json({
+        received: false,
+        error:
+          error?.message ||
+          "Resend webhook processing failed",
+      });
+    }
+  },
+);
 
 app.post("/api/email/webhooks/simulate-event", async (req: Request, res: Response) => {
   try {
