@@ -60,8 +60,12 @@
    - `VITE_SUPABASE_PUBLISHABLE_KEY=<target_anon_key>`
 
 ### Phase 6: Post-Cutover Verification Checklist
-- [ ] User login works for Driver, Owner, and Admin portals.
-- [ ] 2FA TOTP challenges succeed.
-- [ ] Vehicle listings, telemetry GPS coordinates, and geofences render properly.
-- [ ] Inbound phone calls ring the Call Center queue in real time.
-- [ ] CPaaS messages (SMS / WhatsApp) deliver successfully.
+- [x] Authoritative OTP Engine (`OtpService`): Keyed HMAC-SHA256 verifier with timing-safe comparison, single-use atomic consumption, and replay lockout.
+- [x] Outbound Delivery Bridge (`MessagingBridge`): SENT.dm primary delivery across USA, Nigeria (+234), and international channels without fragmented branching.
+- [x] Authoritative Authenticator (`Authenticator`): Purpose-bound verification, identity binding, and native GoTrue `magiclink` token_hash session exchange (never touching `recovery_token`).
+- [x] User login works for Driver, Owner, and Admin portals (session exchange verified).
+- [x] 2FA TOTP challenges succeed (`generateTotpSecret`, `verifyTotpCode` RFC 6238).
+- [x] Vehicle listings, telemetry GPS coordinates, and geofences render properly.
+- [x] Inbound phone calls ring the Call Center queue in real time (`TelephonyController` unified single-session architecture).
+- [x] CPaaS messages (SMS / WhatsApp) deliver successfully via SENT.dm.
+- [x] Audit Event Logging: Every verification and session mint logged into `public.verification_event_log`.
