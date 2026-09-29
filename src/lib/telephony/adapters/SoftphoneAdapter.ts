@@ -10,7 +10,7 @@ import { backendBridge } from "@/lib/backend-bridge";
 export interface SoftphoneDeviceBridge {
   connect(params: { to: string; customParams?: Record<string, string> }): Promise<any>;
   disconnect(): void;
-  isReady: boolean;
+  isReady?: boolean;
 }
 
 /**

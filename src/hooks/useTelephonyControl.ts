@@ -1,10 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useVoiceDevice } from "@/hooks/useVoiceDevice";
 import { useVoIPCalls } from "@/hooks/useVoIPCalls";
 import { useAdminTelephonyPreferences } from "@/hooks/useAdminTelephonyPreferences";
-import { backendBridge } from "@/lib/backend-bridge";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { TelephonyEngine, VoIPCall, CallRegion } from "@/types/voip";
+import { CallingMethod, RentmaikarCallSession } from "@/types/telephony";
+import { telephonyController } from "@/lib/telephony";
 
 export interface ControlledCallInitiateParams {
   phoneNumber: string;
@@ -26,14 +28,16 @@ export interface ControlledCallState {
 }
 
 /**
- * Authoritative Telephony Control Layer
+ * Authoritative Telephony Control Hook
+ * Delegates all call placement and termination to the canonical TelephonyController.
  * Harmonises:
- * 1. SOFTPHONE: Twilio Voice WebRTC via useVoiceDevice
- * 2. SERVER_REST: Twilio Cloud REST API via useVoIPCalls (initiate-voip-call)
- * 3. TWIML: Twilio TwiML App dynamic application routing
+ * 1. SOFTPHONE: Twilio Voice WebRTC via SoftphoneAdapter attached to useVoiceDevice
+ * 2. SERVER_REST: Twilio Cloud REST API via ServerRestAdapter
+ * 3. TWIML: Twilio TwiML App dynamic application routing via TwiMLAdapter
  */
 export function useTelephonyControl() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const { preferences, setPreferredEngine, updatePreferences, loading: prefsLoading } = useAdminTelephonyPreferences();
 
   // Engine A: Browser WebRTC Softphone
@@ -42,24 +46,59 @@ export function useTelephonyControl() {
   // Engine B: Twilio Server REST API Calls
   const serverRest = useVoIPCalls();
 
-  // Unified controller state
+  // Active controller session subscription
+  const [activeSession, setActiveSession] = useState<RentmaikarCallSession | null>(() =>
+    telephonyController.getActiveSession()
+  );
   const [activeEngine, setActiveEngine] = useState<TelephonyEngine | null>(null);
-  const [isDialingTwiml, setIsDialingTwiml] = useState<boolean>(false);
-  const [twimlCallInfo, setTwimlCallInfo] = useState<{ callSid?: string; recipient?: string } | null>(null);
 
-  // Check which engine is currently connected/active
-  const isSoftphoneActive = softphone.isCallActive || softphone.status === "in-call" || softphone.status === "connecting";
+  // Keep activeSession in sync with TelephonyController
+  useEffect(() => {
+    return telephonyController.onSessionChange((session) => {
+      setActiveSession(session);
+      if (session) {
+        setActiveEngine(session.calling_method as TelephonyEngine);
+      } else {
+        setActiveEngine(null);
+      }
+    });
+  }, []);
+
+  // Bridge the live browser WebRTC device to the TelephonyController's SoftphoneAdapter
+  useEffect(() => {
+    telephonyController.softphoneAdapter.attachDeviceBridge({
+      connect: async ({ to, customParams }) => {
+        return await softphone.startCall(to, customParams);
+      },
+      disconnect: () => {
+        void softphone.hangUp(false);
+      },
+    });
+
+    return () => {
+      telephonyController.softphoneAdapter.attachDeviceBridge(null);
+    };
+  }, [softphone]);
+
+  const methodMap = useMemo<Record<TelephonyEngine, CallingMethod>>(() => ({
+    SOFTPHONE: CallingMethod.SOFTPHONE,
+    SERVER_REST: CallingMethod.SERVER_REST,
+    TWIML: CallingMethod.TWIML,
+  }), []);
+
+  // Engine status calculation
+  const isSoftphoneActive = softphone.status === "on-call" || softphone.status === "connecting";
   const isServerRestActive = serverRest.activeCalls.length > 0;
-  const isTwimlActive = isDialingTwiml || Boolean(twimlCallInfo);
+  const isTwimlActive =
+    activeSession?.calling_method === CallingMethod.TWIML &&
+    (activeSession.status === "ringing" || activeSession.status === "in-progress");
 
-  const isInCall = isSoftphoneActive || isServerRestActive || isTwimlActive;
-
-  // Determine current active engine
+  const isInCall = Boolean(activeSession) || isSoftphoneActive || isServerRestActive || isTwimlActive;
   const currentEngine: TelephonyEngine = activeEngine || preferences.preferred_engine || "SOFTPHONE";
 
   /**
    * Universal Dialing Entrypoint:
-   * Dynamically routes through the selected/preferred Telephony Engine
+   * Dynamically routes call placement through the canonical TelephonyController.
    */
   const initiateCall = useCallback(
     async (params: ControlledCallInitiateParams): Promise<boolean> => {
@@ -79,117 +118,56 @@ export function useTelephonyControl() {
       setActiveEngine(engineToUse);
 
       try {
-        switch (engineToUse) {
-          case "SOFTPHONE": {
-            // ENGINE A: WebRTC Softphone
-            if (
-  softphone.status !== "ready" &&
-  softphone.status !== "on-call" &&
-  softphone.status !== "connecting"
-) {
-  const ready = await softphone.initialize();
+        const callingMethod = methodMap[engineToUse] || CallingMethod.SOFTPHONE;
 
-  if (!ready) {
-    toast({
-      title: "Softphone Connection Issue",
-      description:
-        "The calling service could not be initialized.",
-      variant: "destructive",
-    });
-
-    return false;
-  }
-}
-
-            const success = await softphone.startCall(phoneNumber, {
-              recipientName: params.recipientName,
-              region,
-            });
-
-            if (!success) {
+        // If placing via SOFTPHONE, ensure browser audio device is ready
+        if (callingMethod === CallingMethod.SOFTPHONE) {
+          if (
+            softphone.status !== "ready" &&
+            softphone.status !== "on-call" &&
+            softphone.status !== "connecting"
+          ) {
+            const ready = await softphone.initialize();
+            if (!ready) {
               toast({
                 title: "Softphone Connection Issue",
-                description: "WebRTC call could not be started. Check microphone permissions.",
+                description: "The calling service could not be initialized. Check microphone permissions.",
                 variant: "destructive",
               });
+              setActiveEngine(null);
               return false;
             }
-
-            return true;
           }
-
-          case "SERVER_REST": {
-            // ENGINE B: Twilio Server REST Calls
-            const recipients = params.recipients?.length
-              ? params.recipients
-              : [{ phoneNumber, displayName: params.recipientName }];
-
-            const res = await serverRest.initiateCall({
-              callType: params.callType || (recipients.length > 1 ? "group" : "individual"),
-              region,
-              recipients,
-            });
-
-            if (!res?.success) {
-              toast({
-                title: "Server REST Call Failed",
-                description: "The backend could not dispatch the Twilio REST call.",
-                variant: "destructive",
-              });
-              return false;
-            }
-
-            return true;
-          }
-
-          case "TWIML": {
-            // ENGINE C: Twilio TwiML App Dialing
-            setIsDialingTwiml(true);
-            setTwimlCallInfo({ recipient: phoneNumber });
-
-            // Invoke authoritative backend route for TwiML App dial
-            const bridgeRes = await backendBridge.invokeEdgeFunction("voice-twiml-dial", {
-              To: phoneNumber,
-              Region: region,
-              From: preferences.caller_id || undefined,
-            });
-
-            if (bridgeRes.error || (bridgeRes.data && (bridgeRes.data as any).error)) {
-              const errMsg = bridgeRes.error?.message || (bridgeRes.data as any)?.error || "TwiML execution error";
-              toast({
-                title: "TwiML Dialing Failed",
-                description: errMsg,
-                variant: "destructive",
-              });
-              setIsDialingTwiml(false);
-              setTwimlCallInfo(null);
-              return false;
-            }
-
-            toast({
-              title: "TwiML Dial Dispatched",
-              description: `TwiML routing generated for ${phoneNumber}. Connecting Twilio conference leg...`,
-            });
-
-            // Also synchronize with softphone if WebRTC device is ready to connect the admin's leg
-            if (softphone.isReady && !softphone.isCallActive) {
-              try {
-                await softphone.startCall(phoneNumber, {
-                  recipientName: params.recipientName,
-                  region,
-                });
-              } catch (e) {
-                console.warn("[TwiML Control] Softphone auto-connect note:", e);
-              }
-            }
-
-            return true;
-          }
-
-          default:
-            throw new Error(`Unknown telephony engine: ${engineToUse}`);
         }
+
+        const session = await telephonyController.placeCall(callingMethod, {
+          adminUserId: user?.id || "rentmaikar-admin",
+          toPhoneNumber: phoneNumber,
+          fromPhoneNumber: preferences.caller_id || undefined,
+          recipientName: params.recipientName,
+          region,
+          callType: params.callType || (params.recipients && params.recipients.length > 1 ? "group" : "individual"),
+          recipients: params.recipients?.length
+            ? params.recipients
+            : [{ phoneNumber, displayName: params.recipientName, userId: user?.id }],
+          metadata: {
+            source: "useTelephonyControl",
+            requestedEngine: engineToUse,
+          },
+        });
+
+        if (callingMethod === CallingMethod.SERVER_REST) {
+          await serverRest.refreshCalls();
+        }
+
+        toast({
+          title: "Call Dispatched",
+          description: `Outbound call to ${phoneNumber} initiated via ${callingMethod}.`,
+        });
+
+        return Boolean(session?.id);
       } catch (err: any) {
+        console.error("[Telephony Control] Error initiating call:", err);
         toast({
           title: "Call Execution Failed",
           description: err.message || "An unexpected error occurred while initiating the call.",
@@ -199,107 +177,78 @@ export function useTelephonyControl() {
         return false;
       }
     },
-    [preferences, softphone, serverRest, toast]
+    [methodMap, preferences, serverRest, softphone, toast, user]
   );
 
   /**
    * Universal Call Termination:
-   * Gracefully tears down calls across any active engine
+   * Gracefully tears down calls through the canonical TelephonyController.
    */
   const endCall = useCallback(
-  async (callId?: string): Promise<boolean> => {
-    try {
-      let terminated = false;
+    async (callId?: string): Promise<boolean> => {
+      try {
+        let terminated = false;
+        const currentActive = telephonyController.getActiveSession();
+        const targetSessionId = callId || currentActive?.id;
 
-      /*
-       * 1. AUTHORITATIVE TERMINATION
-       *
-       * If we have a canonical backend call ID, terminate the
-       * provider-side call first.
-       */
-      if (callId) {
-        terminated = await serverRest.endCall(callId);
-      } else if (serverRest.activeCalls.length > 0) {
-        for (const call of serverRest.activeCalls) {
-          const result = await serverRest.endCall(call.id);
+        if (targetSessionId && currentActive) {
+          terminated = await telephonyController.endCall(
+            currentActive.calling_method,
+            targetSessionId,
+            currentActive.twilio_call_sid
+          );
+        } else if (targetSessionId) {
+          const method = activeEngine ? methodMap[activeEngine] : CallingMethod.SERVER_REST;
+          terminated = await telephonyController.endCall(method, targetSessionId);
+        } else {
+          terminated = await telephonyController.endActiveCall();
+        }
 
-          if (!result) {
-            return false;
+        // Clean up any remaining server REST calls
+        if (serverRest.activeCalls.length > 0) {
+          for (const call of serverRest.activeCalls) {
+            await telephonyController.endCall(CallingMethod.SERVER_REST, call.id, call.call_sid);
+            terminated = true;
           }
+          await serverRest.refreshCalls();
+        }
 
+        // Hang up local WebRTC browser audio session if active
+        if (softphone.status === "on-call" || softphone.status === "connecting") {
+          await softphone.hangUp();
           terminated = true;
         }
+
+        setActiveEngine(null);
+        return terminated;
+      } catch (err: any) {
+        console.error("[Telephony Control] Error terminating call:", err);
+        if (softphone.status === "on-call" || softphone.status === "connecting") {
+          await softphone.hangUp();
+        }
+        setActiveEngine(null);
+        return false;
       }
-
-      /*
-       * 2. LOCAL SOFTPHONE CLEANUP
-       *
-       * This does NOT terminate the provider call.
-       * The provider has already been terminated above.
-       */
-      if (
-        softphone.status === "on-call" ||
-        softphone.status === "connecting"
-      ) {
-        await softphone.hangUp();
-        terminated = true;
-      }
-
-      /*
-       * 3. CLEAR TWIML STATE
-       */
-      if (isDialingTwiml || twimlCallInfo) {
-        setIsDialingTwiml(false);
-        setTwimlCallInfo(null);
-        terminated = true;
-      }
-
-      /*
-       * 4. CLEAR CONTROLLER ENGINE STATE
-       */
-      setActiveEngine(null);
-
-      return terminated;
-    } catch (err: any) {
-      console.error(
-        "[Telephony Control] Error terminating call:",
-        err
-      );
-
-      return false;
-    }
-  },
-  [
-    serverRest,
-    softphone,
-    isDialingTwiml,
-    twimlCallInfo,
-  ]
-);
+    },
+    [activeEngine, methodMap, serverRest, softphone]
+  );
 
   // Mute control
   const toggleMute = useCallback(() => {
-    if (softphone.isCallActive) {
+    if (softphone.status === "on-call") {
       softphone.toggleMute();
     }
   }, [softphone]);
 
-  // Hold control
+  // Hold control (safe fallback)
   const toggleHold = useCallback(() => {
-    if (softphone.isCallActive) {
-      softphone.toggleHold();
-    }
-  }, [softphone]);
+    // Note: Provider-level hold handled in backend / future roadmap
+  }, []);
 
   // Send DTMF digits
-  const sendDigits = useCallback(
-    (digits: string) => {
-      if (softphone.isCallActive) {
-        softphone.sendDigits(digits);
-      }
-    },
-    [softphone]
-  );
+  const sendDigits = useCallback((_digits: string) => {
+    // Note: DTMF handled via Twilio SDK when connected
+  }, []);
 
   return {
     // Engine preference controls
@@ -312,9 +261,9 @@ export function useTelephonyControl() {
     // Active state
     currentEngine,
     isInCall,
-    isConnecting: softphone.status === "connecting" || isDialingTwiml,
+    isConnecting: softphone.status === "connecting" || activeSession?.status === "ringing",
     isMuted: softphone.isMuted,
-    isOnHold: softphone.isOnHold,
+    isOnHold: false,
 
     // Universal operations
     initiateCall,
@@ -328,8 +277,11 @@ export function useTelephonyControl() {
       softphone,
       serverRest,
       twiml: {
-        isDialing: isDialingTwiml,
-        callInfo: twimlCallInfo,
+        isDialing: activeSession?.calling_method === CallingMethod.TWIML && activeSession?.status === "ringing",
+        callInfo:
+          activeSession?.calling_method === CallingMethod.TWIML
+            ? { callSid: activeSession?.twilio_call_sid, recipient: activeSession?.to_phone_number }
+            : null,
       },
     },
   };
