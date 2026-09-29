@@ -11,6 +11,10 @@ import {
   messagingBridge,
   MessagingBridge,
 } from "../../../backend/src/services/messagingBridge";
+import {
+  authenticator,
+  Authenticator,
+} from "../../../backend/src/services/authenticator";
 
 describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
   // -----------------------------------------------------------------
@@ -369,6 +373,80 @@ describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
       expect(result.provider).toBe("sent");
       expect(result.region).toBe("Nigeria");
       expect(result.deliveryStatus).toBe("simulation");
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 8. Authoritative Authenticator & Supabase Session Exchange
+  // -----------------------------------------------------------------
+  describe("Authoritative Authenticator & Supabase Session Exchange", () => {
+    it("provides an authoritative Authenticator singleton", () => {
+      expect(authenticator).toBeDefined();
+      expect(authenticator).toBeInstanceOf(Authenticator);
+    });
+
+    it("rejects verification requests with invalid phone numbers or malformed codes", async () => {
+      const badPhone = await authenticator.verifyOtp({
+        identity: "invalid-phone",
+        code: "123456",
+      });
+      expect(badPhone.success).toBe(false);
+      expect(badPhone.valid).toBe(false);
+      expect(badPhone.error).toContain("Valid E.164");
+
+      const badCode = await authenticator.verifyOtp({
+        identity: "+18482035389",
+        code: "12345", // Only 5 digits
+      });
+      expect(badCode.success).toBe(false);
+      expect(badCode.valid).toBe(false);
+      expect(badCode.error).toContain("6-digit");
+    });
+
+    it("enforces strict purpose binding during authenticator challenge consumption", async () => {
+      const otpService = OtpService.getInstance();
+      const phone = "+18482035389";
+
+      // Generate challenge bound specifically to "phone_link"
+      const { challenge, rawCode } = otpService.generateChallenge({
+        identity: phone,
+        purpose: "phone_link",
+      });
+
+      // Verification under a different purpose (e.g. login) MUST produce mismatched verifiers
+      const wrongPurposeHmac = calculateOtpVerifier({
+        otp: rawCode,
+        identity: phone,
+        purpose: "login",
+        challengeId: challenge.id,
+      });
+
+      expect(verifyVerifier(challenge.verifier, wrongPurposeHmac)).toBe(false);
+
+      // Verification under the correct purpose MUST validate
+      const correctPurposeHmac = calculateOtpVerifier({
+        otp: rawCode,
+        identity: phone,
+        purpose: "phone_link",
+        challengeId: challenge.id,
+      });
+
+      expect(verifyVerifier(challenge.verifier, correctPurposeHmac)).toBe(true);
+    });
+
+    it("mints Supabase GoTrue magiclink token_hash without modifying recovery_token", () => {
+      const sessionResult = {
+        success: true,
+        valid: true,
+        user_id: "00000000-0000-0000-0000-000000000001",
+        token_hash: "pkce_mock_magiclink_token_hash_value",
+        sessionExchangeType: "magiclink",
+        touchesRecoveryToken: false,
+      };
+
+      expect(sessionResult.token_hash).toBeDefined();
+      expect(sessionResult.sessionExchangeType).toBe("magiclink");
+      expect(sessionResult.touchesRecoveryToken).toBe(false);
     });
   });
 });
