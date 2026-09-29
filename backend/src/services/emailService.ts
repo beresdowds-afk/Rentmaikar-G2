@@ -1643,7 +1643,63 @@ export async function handleInboundEmailWebhook(
         "Inbound email was inserted but no database id was returned",
       );
     }
+    /*
+     * Phase 7:
+     * Persist durable attachment metadata before forwarding.
+     *
+     * Binary storage is intentionally deferred to the attachment
+     * storage phase. At this stage we only establish durable
+     * attachment records linked to the inbound email.
+     */
+    if (receivedEmail.attachments?.length) {
+      for (const attachment of receivedEmail.attachments) {
+        const attachmentId =
+          attachment.id || null;
 
+        await pool.query(
+          `
+            INSERT INTO public.inbound_email_attachments (
+              inbound_email_id,
+              resend_email_id,
+              resend_attachment_id,
+              filename,
+              content_type,
+              size_bytes,
+              storage_status
+            )
+            VALUES (
+              $1,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              'pending'
+            )
+            ON CONFLICT (
+              inbound_email_id,
+              resend_attachment_id
+            ) DO NOTHING
+          `,
+          [
+            inboundDbId,
+            emailId,
+            attachmentId,
+            attachment.filename || "unnamed-attachment",
+            attachment.contentType || null,
+            Number.isFinite(attachment.size)
+              ? attachment.size
+              : null,
+          ],
+        );
+      }
+
+      console.log(
+        `[ResendInbound] Persisted ${receivedEmail.attachments.length}` +
+          ` attachment record(s) for dbId=${inboundDbId}` +
+          ` resendEmailId=${emailId}`,
+      );
+    }
     console.log(
       `[ResendInbound] Persisted inbound email dbId=${inboundDbId}` +
         ` resendEmailId=${emailId}` +
