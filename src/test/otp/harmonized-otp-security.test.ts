@@ -296,5 +296,37 @@ describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
       const wrongSha256 = crypto.createHash("sha256").update("999999").digest("hex");
       expect(verifyVerifier(legacySha256, unmatchingHmac, wrongSha256)).toBe(false);
     });
+
+    it("formalizes challenge attributes including correlationId, status, and custom purpose (e.g. phone_change)", () => {
+      const otpService = OtpService.getInstance();
+      const phone = "+2348012345678";
+      const { challenge, rawCode } = otpService.generateChallenge({
+        identity: phone,
+        userId: "user-123",
+        purpose: "phone_change",
+        channel: "sms",
+        metadata: { clientIp: "127.0.0.1" },
+      });
+
+      expect(challenge.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(challenge.identity).toBe(phone);
+      expect(challenge.userId).toBe("user-123");
+      expect(challenge.purpose).toBe("phone_change");
+      expect(challenge.channel).toBe("sms");
+      expect(challenge.status).toBe("pending");
+      expect(challenge.attempts).toBe(0);
+      expect(challenge.consumedAt).toBeNull();
+      expect(challenge.correlationId).toMatch(/^corr_\d+_[0-9a-f]+$/);
+      expect(challenge.metadata?.clientIp).toBe("127.0.0.1");
+
+      // Verify that phone_change challenge cannot be consumed as login
+      const loginAttemptVerifier = calculateOtpVerifier({
+        otp: rawCode,
+        identity: phone,
+        purpose: "login",
+        challengeId: challenge.id,
+      });
+      expect(verifyVerifier(challenge.verifier, loginAttemptVerifier)).toBe(false);
+    });
   });
 });
