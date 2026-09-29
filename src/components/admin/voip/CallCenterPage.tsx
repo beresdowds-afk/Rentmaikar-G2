@@ -171,7 +171,21 @@ const terminateCall = useCallback(async (callId: string) => {
 
   return terminated;
 }, [activeCall?.id, endCall, voice]);
+const terminateCurrentCall = useCallback(async (): Promise<boolean> => {
+  if (activeCall?.id) {
+    return terminateCall(activeCall.id);
+  }
 
+  if (
+    voice.status === 'on-call' ||
+    voice.status === 'connecting'
+  ) {
+    await voice.hangUp();
+    return true;
+  }
+
+  return false;
+}, [activeCall?.id, terminateCall, voice]);
     const endAllCalls = useCallback(async () => {
   const results = await Promise.allSettled(
     activeCalls.map((call) => endCall(call.id))
