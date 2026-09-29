@@ -1470,64 +1470,193 @@ export async function handleResendWebhookEvent(payload: any, _headers?: Record<s
   }
 }
 
-/**
+ /**
  * Generic Inbound Webhook handler.
- * Accommodates Resend inbound webhook events (email.received), delivery events, and direct payloads.
+ *
+ * Cloud Run is the authoritative inbound receiver.
+ * For Resend email.received events:
+ *
+ * 1. Extract the authoritative Resend email_id.
+ * 2. Retrieve the complete received email through the Resend Receiving API.
+ * 3. Persist the normalized email in public.inbound_emails.
+ * 4. Use resend_email_id as the database-enforced idempotency key.
+ * 5. Forward the email using the existing routing engine.
+ * 6. Persist the forwarding result.
+ *
+ * Outbound Resend lifecycle events are handled by handleResendWebhookEvent().
  */
-export async function handleInboundEmailWebhook(payload: any, _headers?: Record<string, string>): Promise<{
-  ok: boolean;
-  received: boolean;
-  result?: InboundForwardResult;
-  error?: string;
-}> {
-  try {
-    // If payload is an outbound delivery lifecycle event (delivered, bounced, failed, etc.), route to event handler
-    if (payload?.type && payload.type !== "email.received") {
-      const eventRes = await handleResendWebhookEvent(payload, _headers);
-      return { ok: eventRes.ok, received: true, error: eventRes.error };
-    }
-
-    let emailData: InboundEmailPayload | null = null;
-
-    export async function handleInboundEmailWebhook(
+export async function handleInboundEmailWebhook(
   payload: any,
   _headers?: Record<string, string>,
 ): Promise<InboundForwardResult> {
+  const type = String(payload?.type || "");
+
+  if (type !== "email.received") {
+    return {
+      ok: true,
+      forwarded: false,
+      reason: `Ignored Resend event type: ${type || "unknown"}`,
+    };
+  }
+
+  const emailId = String(
+    payload?.data?.email_id || "",
+  ).trim();
+
+  if (!emailId) {
+    console.error(
+      "[ResendInbound] email.received event has no data.email_id",
+    );
+
+    return {
+      ok: false,
+      forwarded: false,
+      reason:
+        "Resend email.received event is missing data.email_id",
+      error:
+        "Resend email.received event is missing data.email_id",
+    };
+  }
+
+  const pool = getDbPool();
+
   try {
-    const type = String(payload?.type || "");
-
-    if (type !== "email.received") {
-      return {
-        ok: true,
-        forwarded: false,
-        reason: `Ignored Resend event type: ${type || "unknown"}`,
-      };
-    }
-
-    const emailId = String(
-      payload?.data?.email_id || "",
-    ).trim();
-
-    if (!emailId) {
-      console.error(
-        "[ResendInbound] email.received event has no data.email_id",
-      );
-
-      return {
-        ok: false,
-        forwarded: false,
-        reason:
-          "Resend email.received event is missing data.email_id",
-      };
-    }
-
     console.log(
       `[ResendInbound] Retrieving received email emailId=${emailId}`,
     );
 
+    /*
+     * Phase 5 authoritative retrieval.
+     *
+     * Do not trust the webhook payload as the complete email.
+     * The webhook gives us the Resend email_id; the Receiving API
+     * provides the authoritative message contents and headers.
+     */
     const receivedEmail =
       await fetchResendReceivedEmail(emailId);
 
+    /*
+     * Database-enforced idempotency.
+     *
+     * The UNIQUE constraint on resend_email_id is authoritative.
+     * This INSERT must happen before forwarding.
+     */
+    const insertResult = await pool.query(
+      `
+        INSERT INTO public.inbound_emails (
+          resend_email_id,
+          from_address,
+          to_addresses,
+          cc_addresses,
+          bcc_addresses,
+          subject,
+          text_body,
+          html_body,
+          message_id,
+          headers,
+          received_at,
+          processing_status,
+          forwarding_status,
+          metadata
+        )
+        VALUES (
+          $1,
+          $2,
+          $3::jsonb,
+          $4::jsonb,
+          $5::jsonb,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10::jsonb,
+          now(),
+          'processing',
+          'pending',
+          $11::jsonb
+        )
+        ON CONFLICT (resend_email_id) DO NOTHING
+        RETURNING id
+      `,
+      [
+        emailId,
+        receivedEmail.from,
+        JSON.stringify(receivedEmail.to || []),
+        JSON.stringify(receivedEmail.cc || []),
+        JSON.stringify(receivedEmail.bcc || []),
+        receivedEmail.subject || null,
+        receivedEmail.text || null,
+        receivedEmail.html || null,
+        receivedEmail.messageId || null,
+        JSON.stringify(receivedEmail.headers || {}),
+        JSON.stringify({
+          resend_event_type: type,
+          webhook_received_at: new Date().toISOString(),
+          attachment_count:
+            receivedEmail.attachments?.length || 0,
+        }),
+      ],
+    );
+
+    /*
+     * A zero-row INSERT means Resend delivered a duplicate webhook
+     * for an email already persisted.
+     *
+     * Do not forward it again.
+     */
+    if (insertResult.rowCount === 0) {
+      const existingResult = await pool.query(
+        `
+          SELECT
+            id,
+            forwarding_status,
+            processing_status
+          FROM public.inbound_emails
+          WHERE resend_email_id = $1
+          LIMIT 1
+        `,
+        [emailId],
+      );
+
+      const existing = existingResult.rows[0];
+
+      console.log(
+        `[ResendInbound] Duplicate webhook ignored for resend_email_id=${emailId}` +
+          ` dbId=${existing?.id || "unknown"}` +
+          ` processingStatus=${existing?.processing_status || "unknown"}` +
+          ` forwardingStatus=${existing?.forwarding_status || "unknown"}`,
+      );
+
+      return {
+        ok: true,
+        forwarded:
+          existing?.forwarding_status === "forwarded",
+        reason: "duplicate_resend_event",
+        messageId: receivedEmail.messageId,
+      };
+    }
+
+    const inboundDbId = insertResult.rows[0]?.id;
+
+    if (!inboundDbId) {
+      throw new Error(
+        "Inbound email was inserted but no database id was returned",
+      );
+    }
+
+    console.log(
+      `[ResendInbound] Persisted inbound email dbId=${inboundDbId}` +
+        ` resendEmailId=${emailId}` +
+        ` messageId=${receivedEmail.messageId || "unknown"}`,
+    );
+
+    /*
+     * Convert the authoritative Resend representation into the
+     * existing forwarding-engine contract.
+     *
+     * The existing routing/forwarding implementation remains
+     * unchanged.
+     */
     const inboundEmail: InboundEmailPayload = {
       from: receivedEmail.from,
       to: receivedEmail.to,
@@ -1538,30 +1667,110 @@ export async function handleInboundEmailWebhook(payload: any, _headers?: Record<
       messageId: receivedEmail.messageId,
     };
 
-    console.log(
-      `[ResendInbound] Retrieved email emailId=${emailId} messageId=${
-        receivedEmail.messageId || "unknown"
-      }`,
+    const forwardingResult =
+      await handleInboundEmailForward(inboundEmail);
+
+    /*
+     * Persist the forwarding outcome.
+     */
+    if (
+      forwardingResult.ok &&
+      forwardingResult.forwarded
+    ) {
+      await pool.query(
+        `
+          UPDATE public.inbound_emails
+          SET
+            processing_status = 'forwarded',
+            forwarding_status = 'forwarded',
+            forwarded_at = now(),
+            forward_error = NULL,
+            updated_at = now()
+          WHERE id = $1
+        `,
+        [inboundDbId],
+      );
+
+      console.log(
+        `[ResendInbound] Forwarding completed for dbId=${inboundDbId}` +
+          ` resendEmailId=${emailId}`,
+      );
+    } else {
+      const forwardError =
+        forwardingResult.error ||
+        forwardingResult.reason ||
+        "Inbound forwarding failed";
+
+      await pool.query(
+        `
+          UPDATE public.inbound_emails
+          SET
+            processing_status = 'forward_failed',
+            forwarding_status = 'failed',
+            forward_error = $2,
+            updated_at = now()
+          WHERE id = $1
+        `,
+        [
+          inboundDbId,
+          forwardError,
+        ],
+      );
+
+      console.error(
+        `[ResendInbound] Forwarding failed for dbId=${inboundDbId}` +
+          ` resendEmailId=${emailId}: ${forwardError}`,
+      );
+    }
+
+    return forwardingResult;
+  } catch (error: any) {
+    const errorMessage =
+      error?.message ||
+      "Failed to process Resend inbound email";
+
+    console.error(
+      `[ResendInbound] Failed to retrieve/process inbound email ` +
+        `emailId=${emailId}:`,
+      errorMessage,
     );
 
-    return await handleInboundEmailForward(
-      inboundEmail,
-    );
-  } catch (error: any) {
-    console.error(
-      "[ResendInbound] Failed to retrieve/process inbound email:",
-      error?.message || error,
-    );
+    /*
+     * If the durable row already exists, preserve the failure
+     * state so a later retry/recovery process can identify it.
+     *
+     * If the failure happened before the INSERT, this UPDATE
+     * simply affects zero rows.
+     */
+    try {
+      await pool.query(
+        `
+          UPDATE public.inbound_emails
+          SET
+            processing_status = 'failed',
+            forwarding_status = 'failed',
+            forward_error = $2,
+            updated_at = now()
+          WHERE resend_email_id = $1
+            AND processing_status = 'processing'
+        `,
+        [
+          emailId,
+          errorMessage,
+        ],
+      );
+    } catch (dbError: any) {
+      console.error(
+        "[ResendInbound] Failed to persist inbound processing failure:",
+        dbError?.message || dbError,
+      );
+    }
 
     return {
       ok: false,
       forwarded: false,
-      reason:
-        error?.message ||
-        "Failed to process Resend inbound email",
-      error:
-        error?.message ||
-        "Failed to process Resend inbound email",
+      reason: errorMessage,
+      error: errorMessage,
     };
   }
 }
