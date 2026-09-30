@@ -20,7 +20,10 @@ const mobileDevices = [
 
 for (const device of mobileDevices) {
   test.describe(`${device.name}`, () => {
-    test.use({ ...device });
+    const mobileDevice = { ...device };
+delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
+
+test.use({ ...mobileDevice });
 
     test('alternative auth options are reachable on mobile', async ({ page }) => {
       await page.goto('/auth');
