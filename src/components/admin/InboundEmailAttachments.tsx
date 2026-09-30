@@ -7,12 +7,27 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   getInboundAttachmentUrl,
   type InboundEmailAttachment,
 } from "@/lib/inbound-email-api";
+
+type ResolvedAttachment = {
+  url: string;
+  expiresAt: number;
+};
+
+const URL_CACHE = new Map<
+  string,
+  ResolvedAttachment
+>();
 
 const isImageAttachment = (
   attachment: InboundEmailAttachment,
@@ -25,14 +40,18 @@ const isImageAttachment = (
 
   return (
     contentType.startsWith("image/") ||
-    /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(filename)
+    /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(
+      filename,
+    )
   );
 };
 
 const formatFileSize = (
   bytes: number | null,
 ): string => {
-  if (!bytes || bytes <= 0) return "";
+  if (!bytes || bytes <= 0) {
+    return "";
+  }
 
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -42,7 +61,10 @@ const formatFileSize = (
     return `${(bytes / 1024).toFixed(0)} KB`;
   }
 
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(
+    bytes /
+    (1024 * 1024)
+  ).toFixed(1)} MB`;
 };
 
 const resolveAttachment = async (
@@ -55,6 +77,18 @@ const resolveAttachment = async (
     return {
       url: null,
       error: "Attachment ID is required",
+    };
+  }
+
+  const cached =
+    URL_CACHE.get(attachmentId);
+
+  if (
+    cached &&
+    cached.expiresAt > Date.now() + 30_000
+  ) {
+    return {
+      url: cached.url,
     };
   }
 
@@ -75,6 +109,18 @@ const resolveAttachment = async (
           "Unable to retrieve attachment",
       };
     }
+
+    const expiresIn =
+      Number(
+        result.data.expiresIn,
+      ) || 300;
+
+    URL_CACHE.set(attachmentId, {
+      url: result.data.url,
+      expiresAt:
+        Date.now() +
+        expiresIn * 1000,
+    });
 
     return {
       url: result.data.url,
@@ -98,6 +144,7 @@ const ImageThumb = ({
 }) => {
   const [src, setSrc] =
     useState<string | null>(null);
+
   const [loading, setLoading] =
     useState(true);
 
@@ -105,15 +152,19 @@ const ImageThumb = ({
     let active = true;
 
     setLoading(true);
+    setSrc(null);
 
-    resolveAttachment(attachment.id).then(
-      ({ url }) => {
+    resolveAttachment(attachment.id)
+      .then(({ url }) => {
         if (!active) return;
 
         setSrc(url);
-        setLoading(false);
-      },
-    );
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
 
     return () => {
       active = false;
@@ -139,7 +190,7 @@ const ImageThumb = ({
           className="h-full w-full object-cover"
         />
       ) : (
-        <span className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+        <span className="flex h-full w-full items-center justify-center px-2 text-center text-xs text-muted-foreground">
           Unable to load
         </span>
       )}
@@ -315,6 +366,7 @@ export const InboundEmailAttachments = ({
                   busyId ===
                   attachment.id
                 }
+                aria-label={`Open ${attachment.filename}`}
               >
                 {busyId ===
                 attachment.id ? (
@@ -338,6 +390,7 @@ export const InboundEmailAttachments = ({
                   busyId ===
                   attachment.id
                 }
+                aria-label={`Download ${attachment.filename}`}
               >
                 <Download className="h-3.5 w-3.5" />
               </Button>
@@ -384,6 +437,7 @@ export const InboundEmailAttachments = ({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <ImageIcon className="h-4 w-4" />
+
               <span className="truncate">
                 {preview?.attachment.filename}
               </span>
