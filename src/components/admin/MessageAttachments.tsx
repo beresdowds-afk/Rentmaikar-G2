@@ -11,14 +11,12 @@ import {
   isImageAttachment,
   parseMessageAttachments,
   resolveAttachmentUrl,
+  resolveInboundAttachmentUrl,
   supportsOcr,
 } from '@/lib/inbox-attachments';
 import { useAttachmentOcr } from '@/hooks/useAttachmentOcr';
 import { HighlightedText } from '@/components/admin/HighlightedText';
 import { logAttachmentAccess } from '@/lib/inbox-attachment-audit';
-import {
-  resolveInboundAttachmentUrl,
-} from "@/lib/inbox-attachments";
 
 const ImageThumb = ({ attachment, onOpen }: { attachment: InboxAttachment; onOpen: () => void }) => {
   const [src, setSrc] = useState<string | null>(null);
@@ -90,27 +88,7 @@ export const MessageAttachments = ({
       toast.success(`Text extracted from ${a.name}`);
     }
   };
-const openInboundAttachment =
-  async (attachmentId: string) => {
-    const result =
-      await resolveInboundAttachmentUrl(
-        attachmentId,
-      );
 
-    if (!result.url) {
-      console.error(
-        "Failed to resolve inbound attachment:",
-        result.error,
-      );
-      return;
-    }
-
-    window.open(
-      result.url,
-      "_blank",
-      "noopener,noreferrer",
-    );
-  };
   const OcrPanel = ({ attachment }: { attachment: InboxAttachment }) => {
     if (!messageId || !supportsOcr(attachment)) return null;
     const key = attachmentOcrKey(attachment);
