@@ -44,8 +44,17 @@ const ENTRIES: GlossaryEntry[] = [
   { term: "Referee", category: "Roles", definition: "Third-party reference required during driver registration who attests to the driver's character." },
 
   // Payments
-  { term: "Platform Fee", category: "Payments", definition: "40% total fee on driver payments, split 20% to admin (platform) and 20% to owner operations." },
-  { term: "Owner Payout", category: "Payments", definition: "60% share paid to vehicle owners, disbursed on Fridays via bank transfer." },
+  {term: "Platform Commission",
+  category: "Payments",
+  definition:
+    "The portion of a completed rental payment retained by Rentmaikar after applying the administrator-configured owner_share_pct. It is calculated as 100% minus the configured owner share."
+},
+{ term: "Owner Share",
+  category: "Payments",
+  definition:
+    "The configurable percentage of a rental payment allocated to the vehicle owner. The authoritative value is stored in platform_kv_settings.owner_share_pct."
+},
+  
   { term: "Daily Frequency", category: "Payments", definition: "Payment cadence with a mandatory 10% surcharge. Required after any default event." },
   { term: "Weekly Frequency", category: "Payments", definition: "Standard payment cadence with no surcharge. Loses eligibility on default." },
   { term: "Security Deposit", category: "Payments", definition: "Mandatory refundable deposit collected at registration to cover damages, fines, or defaults." },
