@@ -11,7 +11,6 @@ import {
   isImageAttachment,
   parseMessageAttachments,
   resolveAttachmentUrl,
-  resolveInboundAttachmentUrl,
   supportsOcr,
 } from '@/lib/inbox-attachments';
 import { useAttachmentOcr } from '@/hooks/useAttachmentOcr';
