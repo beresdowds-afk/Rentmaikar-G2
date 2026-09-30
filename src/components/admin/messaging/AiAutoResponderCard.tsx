@@ -37,6 +37,7 @@ interface AiAutoResponderCardProps {
   conversationSubject?: string;
   placeholderValues?: PlaceholderValues;
   onApplyDraft: (draft: { subject?: string; body: string }) => void;
+  onOpenInEditor?: (draft: { subject?: string; body: string }) => void;
   onRefreshTodoList?: () => void;
 }
 
@@ -48,6 +49,7 @@ export function AiAutoResponderCard({
   conversationSubject = '',
   placeholderValues = {},
   onApplyDraft,
+  onOpenInEditor,
   onRefreshTodoList,
 }: AiAutoResponderCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -240,6 +242,23 @@ export function AiAutoResponderCard({
                 <ArrowRight className="h-3 w-3" />
                 Apply to Message Composer
               </Button>
+
+              {onOpenInEditor && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    onOpenInEditor({
+                      subject: channel === 'email' ? analysis.recommendedSubject : undefined,
+                      body: channelDraft,
+                    })
+                  }
+                  className="h-7 text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary/5"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Message Editor
+                </Button>
+              )}
 
               <Button
                 size="sm"

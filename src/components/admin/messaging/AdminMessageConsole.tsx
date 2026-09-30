@@ -71,8 +71,11 @@ import {
   Tag,
   SlidersHorizontal,
   Headphones,
+  PenSquare,
 } from 'lucide-react';
 import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
+import { useInboundMessages, type UnifiedInboundEmailMessage } from '@/hooks/useInboundMessages';
+import { InboundEmailAttachments } from '@/components/admin/InboundEmailAttachments';
 
 import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
@@ -236,7 +239,12 @@ function getPhoneCountryFlag(phone?: string | null): { flag: string; label: stri
 
 interface AdminMessageConsoleProps {
   initialConversationId?: string | null;
-  onComposeNew?: () => void;
+  onComposeNew?: (initial?: {
+    channel?: 'email' | 'sms' | 'whatsapp' | 'in_app';
+    to?: string;
+    subject?: string;
+    body?: string;
+  }) => void;
 }
 
 export const AdminMessageConsole = ({
@@ -273,6 +281,50 @@ export const AdminMessageConsole = ({
     setFlaggedOnly,
     fetchConversations,
   } = useInboxConversations();
+
+  // Authoritative Inbound Email Stream
+  const {
+    messages: inboundEmailList,
+    isLoading: isLoadingInboundEmails,
+    refresh: refreshInboundEmails,
+  } = useInboundMessages();
+
+  // Unified inbound email conversation items (in-memory, preserving provenance)
+  const unifiedInboundConversations = useMemo<InboxConversation[]>(() => {
+    return inboundEmailList.map((emailMsg) => ({
+      id: `inbound_email_${emailMsg.id}`,
+      user_id: null,
+      user_name: emailMsg.sender ? emailMsg.sender.split('@')[0] : 'Inbound Email',
+      user_email: emailMsg.sender,
+      user_phone: null,
+      channel: 'email',
+      region: 'Global',
+      subject: emailMsg.subject || '(No subject)',
+      status: emailMsg.processingStatus === 'completed' ? 'resolved' : 'open',
+      priority: 'normal',
+      assigned_to: null,
+      last_message_at: emailMsg.receivedAt,
+      created_at: emailMsg.receivedAt,
+      unread_count: 0,
+      sourceType: 'inbound_email',
+      sourceId: emailMsg.sourceId,
+      inboundEmail: emailMsg,
+    } as any));
+  }, [inboundEmailList]);
+
+  // Combined conversations list
+  const combinedConversations = useMemo(() => {
+    const list =
+      channelFilter === 'sms' || channelFilter === 'whatsapp' || channelFilter === 'in_app'
+        ? conversations
+        : [...conversations, ...unifiedInboundConversations];
+
+    return list.sort((a, b) => {
+      const timeA = new Date(a.last_message_at || a.created_at).getTime();
+      const timeB = new Date(b.last_message_at || b.created_at).getTime();
+      return timeB - timeA;
+    });
+  }, [conversations, unifiedInboundConversations, channelFilter]);
 
   const staff = useInboxStaff();
   const hub = useCommunicationsHubSafe();
@@ -354,8 +406,11 @@ export const AdminMessageConsole = ({
   // Active conversation resolution
   const current = useMemo(() => {
     if (!selectedConversation) return null;
-    return conversations.find((c) => c.id === selectedConversation.id) ?? selectedConversation;
-  }, [conversations, selectedConversation]);
+    return combinedConversations.find((c) => c.id === selectedConversation.id) ?? selectedConversation;
+  }, [combinedConversations, selectedConversation]);
+
+  const isInboundEmail = (current as any)?.sourceType === 'inbound_email' || !!(current as any)?.inboundEmail;
+  const inboundEmail: UnifiedInboundEmailMessage | null = (current as any)?.inboundEmail ?? null;
 
   // Populate recent message content for all conversations to support message content keyword search
   useEffect(() => {
@@ -401,18 +456,18 @@ export const AdminMessageConsole = ({
 
   // Set initial selected conversation if prop provided
   useEffect(() => {
-    if (initialConversationId && conversations.length > 0) {
-      const found = conversations.find((c) => c.id === initialConversationId);
+    if (initialConversationId && combinedConversations.length > 0) {
+      const found = combinedConversations.find((c) => c.id === initialConversationId);
       if (found) setSelectedConversation(found);
     }
-  }, [initialConversationId, conversations]);
+  }, [initialConversationId, combinedConversations]);
 
   // Set initial conversation if none selected yet
   useEffect(() => {
-    if (!selectedConversation && conversations.length > 0) {
-      setSelectedConversation(conversations[0]);
+    if (!selectedConversation && combinedConversations.length > 0) {
+      setSelectedConversation(combinedConversations[0]);
     }
-  }, [conversations, selectedConversation]);
+  }, [combinedConversations, selectedConversation]);
 
   // Channel sync when selecting conversation
   useEffect(() => {
@@ -468,9 +523,12 @@ export const AdminMessageConsole = ({
 
   // Extract latest inbound message content for AI Auto-Responder analysis
   const latestInboundMessage = useMemo(() => {
+    if (isInboundEmail && inboundEmail) {
+      return inboundEmail.body || inboundEmail.subject || '';
+    }
     const inbound = [...messages].reverse().find((m) => m.sender_type !== 'admin');
     return inbound?.content || current?.subject || '';
-  }, [messages, current?.subject]);
+  }, [messages, current?.subject, isInboundEmail, inboundEmail]);
 
   // Handle setting / updating conversation tags ('Urgent' | 'In Progress' | 'Resolved')
   const handleSetConversationTag = async (convId: string, tag: MessageTag | null) => {
@@ -532,21 +590,21 @@ export const AdminMessageConsole = ({
   // Computed metrics
   const channelCounters = useMemo(() => {
     return {
-      all: conversations.length,
-      email: conversations.filter((c) => c.channel === 'email').length,
-      sms: conversations.filter((c) => c.channel === 'sms').length,
-      whatsapp: conversations.filter((c) => c.channel === 'whatsapp').length,
-      unreadEmail: conversations.filter((c) => c.channel === 'email' && (c.unread_count || 0) > 0).length,
-      unreadSms: conversations.filter((c) => c.channel === 'sms' && (c.unread_count || 0) > 0).length,
-      unreadWhatsapp: conversations.filter((c) => c.channel === 'whatsapp' && (c.unread_count || 0) > 0).length,
-      overdueTotal: conversations.filter((c) => getSlaInfo(c, nowTick).state === 'overdue').length,
+      all: combinedConversations.length,
+      email: combinedConversations.filter((c) => c.channel === 'email').length,
+      sms: combinedConversations.filter((c) => c.channel === 'sms').length,
+      whatsapp: combinedConversations.filter((c) => c.channel === 'whatsapp').length,
+      unreadEmail: combinedConversations.filter((c) => c.channel === 'email' && (c.unread_count || 0) > 0).length,
+      unreadSms: combinedConversations.filter((c) => c.channel === 'sms' && (c.unread_count || 0) > 0).length,
+      unreadWhatsapp: combinedConversations.filter((c) => c.channel === 'whatsapp' && (c.unread_count || 0) > 0).length,
+      overdueTotal: combinedConversations.filter((c) => getSlaInfo(c, nowTick).state === 'overdue').length,
     };
-  }, [conversations, nowTick]);
+  }, [combinedConversations, nowTick]);
 
   // Filtered visible conversations
   const visibleConversations = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return conversations.filter((c) => {
+    return combinedConversations.filter((c) => {
       if (overdueOnly && getSlaInfo(c, nowTick).state !== 'overdue') return false;
       if (attachmentFilterActive && !(attachmentConversationIds || []).includes(c.id)) return false;
 
@@ -707,6 +765,39 @@ export const AdminMessageConsole = ({
     let finalBody = bodyToSend;
     if (replyChannel === 'sms' && replySmsOptOut && !finalBody.toLowerCase().includes('stop to opt out')) {
       finalBody = `${finalBody}\n\nReply STOP to opt out.`;
+    }
+
+    // Direct outbound email delivery for Inbound Email messages
+    if (isInboundEmail && inboundEmail) {
+      const toEmail = inboundEmail.sender || current.user_email;
+      if (!toEmail) {
+        toast.error('Recipient email address missing');
+        setIsSendingReply(false);
+        return;
+      }
+
+      const { error: sendErr } = await supabase.functions.invoke('send-outbound-email', {
+        body: {
+          to: toEmail,
+          subject: replySubject || `Re: ${inboundEmail.subject || 'Inquiry'}`,
+          text: finalBody,
+        },
+      });
+
+      if (sendErr) {
+        toast.error(sendErr.message || 'Failed to send outbound email');
+        setIsSendingReply(false);
+        return;
+      }
+
+      localStorage.removeItem(`rentmaikar:draft:reply:${current.id}`);
+      setReplyBody('');
+      setLastDraftSavedTime(null);
+      setPendingFiles([]);
+      setUsedCanned(null);
+      toast.success(`Reply email sent to ${toEmail}`);
+      setIsSendingReply(false);
+      return;
     }
 
     const success = await sendMessage(
@@ -1583,7 +1674,63 @@ export const AdminMessageConsole = ({
 
                 {/* 2. MESSAGE STREAM / READER PANE */}
                 <ScrollArea className="flex-1 p-4 bg-slate-50/50 dark:bg-slate-950/20 max-h-[380px] lg:max-h-[440px]">
-                  {isLoadingMessages ? (
+                  {isInboundEmail && inboundEmail ? (
+                    <div className="space-y-4">
+                      <div className="bg-card rounded-xl p-5 border shadow-sm space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-xs">
+                                <Mail className="h-3 w-3 mr-1" /> INBOUND EMAIL
+                              </Badge>
+                              <Badge variant="secondary" className="text-[11px]">
+                                Status: {inboundEmail.processingStatus || 'received'}
+                              </Badge>
+                            </div>
+                            <h3 className="font-semibold text-base text-foreground">{inboundEmail.subject || '(No subject)'}</h3>
+                          </div>
+                          <div className="text-right text-xs text-muted-foreground">
+                            <Clock className="h-3.5 w-3.5 inline mr-1" />
+                            {format(new Date(inboundEmail.receivedAt), 'PPP p')}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-muted/40 p-3 rounded-lg border">
+                          <div>
+                            <span className="text-muted-foreground">From: </span>
+                            <span className="font-medium text-foreground">{inboundEmail.sender || 'Unknown'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">To: </span>
+                            <span className="font-medium text-foreground">{inboundEmail.recipient || 'RentMaikar Support'}</span>
+                          </div>
+                        </div>
+
+                        {/* Email Body */}
+                        <div className="pt-2 text-sm text-foreground">
+                          {inboundEmail.htmlBody ? (
+                            <div
+                              className="prose prose-sm dark:prose-invert max-w-none break-words"
+                              dangerouslySetInnerHTML={{ __html: inboundEmail.htmlBody }}
+                            />
+                          ) : (
+                            <div className="whitespace-pre-wrap leading-relaxed font-sans">{inboundEmail.body || '(Empty email body)'}</div>
+                          )}
+                        </div>
+
+                        {/* Inbound Attachments */}
+                        {inboundEmail.attachments && inboundEmail.attachments.length > 0 && (
+                          <div className="pt-4 border-t space-y-2">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                              <Paperclip className="h-3.5 w-3.5" />
+                              <span>Email Attachments ({inboundEmail.attachments.length})</span>
+                            </div>
+                            <InboundEmailAttachments attachments={inboundEmail.attachments} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : isLoadingMessages ? (
                     <div className="flex items-center justify-center h-48">
                       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                     </div>
@@ -1684,6 +1831,14 @@ export const AdminMessageConsole = ({
                       setReplyBody(body);
                       setEditorTab('draft');
                     }}
+                    onOpenInEditor={({ subject, body }) => {
+                      onComposeNew?.({
+                        channel: replyChannel,
+                        to: current.user_email || current.user_phone || undefined,
+                        subject: subject || replySubject,
+                        body,
+                      });
+                    }}
                   />
                 </div>
 
@@ -1723,6 +1878,25 @@ export const AdminMessageConsole = ({
                           <Phone className="h-3.5 w-3.5" /> SMS
                         </Button>
                       </div>
+
+                      {onComposeNew && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs px-2.5 gap-1.5 border-primary/30 text-primary hover:bg-primary/5"
+                          onClick={() => {
+                            onComposeNew({
+                              channel: replyChannel,
+                              to: current.user_email || current.user_phone || undefined,
+                              subject: replySubject,
+                              body: replyBody,
+                            });
+                          }}
+                        >
+                          <PenSquare className="h-3.5 w-3.5" /> Open in Message Editor
+                        </Button>
+                      )}
 
                       {/* Auto-save draft status indicator */}
                       <div className="flex items-center gap-2 text-xs">

@@ -103,19 +103,33 @@ const QUICK_PLACEHOLDERS = [
 
 const ACTIVE_DRAFT_KEY = 'rentmaikar_active_composer_draft';
 
+export interface MessageComposerProps {
+  onSent?: () => void;
+  initialValues?: {
+    channel?: ComposerChannel;
+    to?: string;
+    subject?: string;
+    body?: string;
+  };
+}
+
 /**
  * Upgraded Message Editor & Omnichannel Outbound Composer.
  * Supports Email, WhatsApp HSM & Free-form, SMS with segment calculation, and In-App notifications.
  * Features persistent auto-save, live multi-channel preview, file attachments, and smart templates.
  */
-export function MessageComposer({ onSent }: { onSent?: () => void }) {
-  const [channel, setChannel] = useState<ComposerChannel>('email');
+export function MessageComposer({ onSent, initialValues }: MessageComposerProps) {
+  const [channel, setChannel] = useState<ComposerChannel>(initialValues?.channel || 'email');
   const [recipientUserId, setRecipientUserId] = useState<string | null>(null);
   const [recipientName, setRecipientName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
+  const [email, setEmail] = useState(
+    initialValues?.channel === 'email' || !initialValues?.channel ? initialValues?.to || '' : ''
+  );
+  const [phone, setPhone] = useState(
+    initialValues?.channel === 'sms' || initialValues?.channel === 'whatsapp' ? initialValues?.to || '' : ''
+  );
+  const [subject, setSubject] = useState(initialValues?.subject || '');
+  const [body, setBody] = useState(initialValues?.body || '');
   const [emailFromAlias, setEmailFromAlias] = useState<string>(OUTGOING_EMAIL_CONFIG.support);
   const [smsOptOut, setSmsOptOut] = useState(true);
   const [whatsappTemplateId, setWhatsappTemplateId] = useState<string>('');
@@ -134,6 +148,22 @@ export function MessageComposer({ onSent }: { onSent?: () => void }) {
   const { fetchByRole, isLoading: isLoadingAudience } = useRoleRecipients();
   const { replies } = useCannedReplies();
   const hub = useCommunicationsHubSafe();
+
+  // Synchronize initialValues when passed into MessageComposer
+  useEffect(() => {
+    if (initialValues) {
+      if (initialValues.channel) setChannel(initialValues.channel);
+      if (initialValues.to) {
+        if (initialValues.channel === 'sms' || initialValues.channel === 'whatsapp') {
+          setPhone(initialValues.to);
+        } else {
+          setEmail(initialValues.to);
+        }
+      }
+      if (initialValues.subject) setSubject(initialValues.subject);
+      if (initialValues.body) setBody(initialValues.body);
+    }
+  }, [initialValues]);
 
 
   // Restore active draft from localStorage on mount

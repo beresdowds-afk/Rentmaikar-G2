@@ -30,6 +30,12 @@ interface MessagingCenterProps {
 export function MessagingCenter({ initialTab = 'console', onTabChange }: MessagingCenterProps) {
   const [tab, setTab] = useState(initialTab);
   const [failedCount, setFailedCount] = useState(0);
+  const [composerInitialValues, setComposerInitialValues] = useState<{
+    channel?: 'email' | 'sms' | 'whatsapp' | 'in_app';
+    to?: string;
+    subject?: string;
+    body?: string;
+  } | undefined>();
   const { isFullAdmin, perms, loading } = useAssistantPermissions();
   // Full admins always compose; assistants need the send-communications grant.
   const canCompose = loading || isFullAdmin || !!perms?.can_send_communications;
@@ -102,13 +108,24 @@ export function MessagingCenter({ initialTab = 'console', onTabChange }: Messagi
 
       {/* Primary Message Console: Reader, Drafting & Replying */}
       <TabsContent value="console" className="mt-0">
-        <AdminMessageConsole onComposeNew={() => handleTabChange('compose')} />
+        <AdminMessageConsole
+          onComposeNew={(initial) => {
+            setComposerInitialValues(initial);
+            handleTabChange('compose');
+          }}
+        />
       </TabsContent>
 
       {/* Upgraded Message Editor */}
       {canCompose && (
         <TabsContent value="compose" className="mt-0">
-          <MessageComposer onSent={() => handleTabChange('console')} />
+          <MessageComposer
+            initialValues={composerInitialValues}
+            onSent={() => {
+              setComposerInitialValues(undefined);
+              handleTabChange('console');
+            }}
+          />
         </TabsContent>
       )}
 
