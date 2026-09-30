@@ -75,6 +75,7 @@ import {
 } from 'lucide-react';
 import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 import { useInboundMessages, type UnifiedInboundEmailMessage } from '@/hooks/useInboundMessages';
+import { retryInboundEmail } from '@/lib/inbound-email-api';
 import { InboundEmailAttachments } from '@/components/admin/InboundEmailAttachments';
 
 import { format, formatDistanceToNow } from 'date-fns';
@@ -288,6 +289,24 @@ export const AdminMessageConsole = ({
     isLoading: isLoadingInboundEmails,
     refresh: refreshInboundEmails,
   } = useInboundMessages();
+
+  const [isRetryingInbound, setIsRetryingInbound] = useState(false);
+  const handleRetryInbound = async (id: string) => {
+    setIsRetryingInbound(true);
+    try {
+      const res = await retryInboundEmail(id);
+      if (res?.data?.success || res?.data?.forwarded) {
+        toast.success('Inbound email retried and forwarded successfully');
+        refreshInboundEmails();
+      } else {
+        toast.error(res?.data?.error || 'Inbound email retry failed');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to retry inbound email');
+    } finally {
+      setIsRetryingInbound(false);
+    }
+  };
 
   // Unified inbound email conversation items (in-memory, preserving provenance)
   const unifiedInboundConversations = useMemo<InboxConversation[]>(() => {
@@ -1686,6 +1705,19 @@ export const AdminMessageConsole = ({
                               <Badge variant="secondary" className="text-[11px]">
                                 Status: {inboundEmail.processingStatus || 'received'}
                               </Badge>
+                              {(inboundEmail.processingStatus === 'failed' || inboundEmail.processingStatus === 'forward_failed') && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-5 text-[10px] px-2 gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+                                  onClick={() => handleRetryInbound(inboundEmail.id)}
+                                  disabled={isRetryingInbound}
+                                >
+                                  <RefreshCw className={`h-2.5 w-2.5 ${isRetryingInbound ? 'animate-spin' : ''}`} />
+                                  {isRetryingInbound ? 'Retrying...' : 'Retry Forward'}
+                                </Button>
+                              )}
                             </div>
                             <h3 className="font-semibold text-base text-foreground">{inboundEmail.subject || '(No subject)'}</h3>
                           </div>

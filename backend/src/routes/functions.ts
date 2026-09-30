@@ -26,6 +26,9 @@ import {
   getInboundEmail,
   getInboundAttachmentUrl,
 } from "../services/inboundEmailService";
+import {
+  retryInboundEmail,
+} from "../services/emailService";
 export const functionsRouter = Router();
 
 // Helper to normalize E.164 phone numbers
@@ -110,6 +113,7 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "list-inbound-emails",
   "get-inbound-email",
   "get-inbound-attachment-url",
+  "retry-inbound-email",
 ]);
 
 /**
@@ -880,6 +884,44 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           );
 
         return res.status(200).json(result);
+      }
+
+      case "retry-inbound-email": {
+        const inboundEmailId =
+          String(
+            body.inboundEmailId ||
+              body.inbound_email_id ||
+              "",
+          ).trim();
+
+        if (!inboundEmailId) {
+          return res.status(400).json({
+            ok: false,
+            success: false,
+            error:
+              "inboundEmailId is required",
+          });
+        }
+
+        try {
+          const result =
+            await retryInboundEmail(
+              clientAuth,
+              inboundEmailId,
+            );
+
+          return res.status(
+            result.success ? 200 : 502,
+          ).json(result);
+        } catch (error: any) {
+          return res.status(400).json({
+            ok: false,
+            success: false,
+            error:
+              error?.message ||
+              "Inbound email retry failed",
+          });
+        }
       }  
       case "send-email-reply": {
         const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");

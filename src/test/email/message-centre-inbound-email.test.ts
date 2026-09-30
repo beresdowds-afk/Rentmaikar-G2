@@ -102,4 +102,48 @@ describe("Message Centre: Unified Inbound Email Integration", () => {
       expect(content).toContain("setBody(initialValues.body)");
     });
   });
+
+  describe("5. Phase 14 Failure Recovery & Admin Retry", () => {
+    it("backend exposes retryInboundEmail and routes through functions gateway", () => {
+      const emailServiceFile = path.resolve(
+        process.cwd(),
+        "backend/src/services/emailService.ts"
+      );
+      const emailServiceContent = fs.readFileSync(emailServiceFile, "utf8");
+
+      expect(emailServiceContent).toContain("export async function retryInboundEmail");
+      expect(emailServiceContent).toContain("fetchResendReceivedEmail");
+      expect(emailServiceContent).toContain("handleInboundEmailForward");
+
+      const routesFile = path.resolve(
+        process.cwd(),
+        "backend/src/routes/functions.ts"
+      );
+      const routesContent = fs.readFileSync(routesFile, "utf8");
+
+      expect(routesContent).toContain('"retry-inbound-email"');
+      expect(routesContent).toContain('case "retry-inbound-email":');
+
+      const apiFile = path.resolve(
+        process.cwd(),
+        "src/lib/inbound-email-api.ts"
+      );
+      const apiContent = fs.readFileSync(apiFile, "utf8");
+
+      expect(apiContent).toContain("export async function retryInboundEmail");
+      expect(apiContent).toContain('"retry-inbound-email"');
+    });
+
+    it("AdminMessageConsole renders Retry control for failed inbound emails", () => {
+      const consoleFile = path.resolve(
+        process.cwd(),
+        "src/components/admin/messaging/AdminMessageConsole.tsx"
+      );
+      const consoleContent = fs.readFileSync(consoleFile, "utf8");
+
+      expect(consoleContent).toContain("retryInboundEmail");
+      expect(consoleContent).toContain("handleRetryInbound");
+      expect(consoleContent).toContain("Retry Forward");
+    });
+  });
 });

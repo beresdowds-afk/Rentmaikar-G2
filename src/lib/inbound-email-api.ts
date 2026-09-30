@@ -77,3 +77,14 @@ export async function getInboundAttachmentUrl(
     },
   );
 }
+
+export async function retryInboundEmail(
+  inboundEmailId: string,
+) {
+  return backendBridge.invokeEdgeFunction(
+    "retry-inbound-email",
+    {
+      inboundEmailId,
+    },
+  );
+}

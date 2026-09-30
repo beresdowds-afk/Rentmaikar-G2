@@ -1469,6 +1469,352 @@ export async function handleResendWebhookEvent(payload: any, _headers?: Record<s
   }
 }
 
+export async function retryInboundEmail(
+  authorizationHeader: string | undefined,
+  inboundEmailId: string,
+): Promise<{
+  success: boolean;
+  forwarded: boolean;
+  inboundEmailId: string;
+  resendEmailId: string;
+  error?: string;
+}> {
+  const token = String(
+    authorizationHeader || "",
+  )
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+
+  if (!token) {
+    throw new Error(
+      "Authentication required",
+    );
+  }
+
+  const admin =
+    supabaseBackendService.getAdminClient();
+
+  const {
+    data,
+    error: authError,
+  } = await admin.auth.getUser(token);
+
+  if (
+    authError ||
+    !data?.user?.id
+  ) {
+    throw new Error(
+      "Invalid authentication session",
+    );
+  }
+
+  const pool = getDbPool();
+
+  const roleResult =
+    await pool.query(
+      `
+        SELECT role
+        FROM public.user_roles
+        WHERE user_id = $1
+        LIMIT 1
+      `,
+      [data.user.id],
+    );
+
+  const role = String(
+    roleResult.rows[0]?.role || "",
+  ).trim();
+
+  if (
+    role !== "admin" &&
+    role !== "admin_assistant"
+  ) {
+    throw new Error(
+      "Administrator privileges required",
+    );
+  }
+
+  const emailResult =
+    await pool.query(
+      `
+        SELECT
+          id,
+          resend_email_id,
+          processing_status,
+          forwarding_status
+        FROM public.inbound_emails
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [inboundEmailId],
+    );
+
+  if (emailResult.rowCount === 0) {
+    throw new Error(
+      "Inbound email not found",
+    );
+  }
+
+  const row =
+    emailResult.rows[0];
+
+  if (
+    row.processing_status ===
+      "forwarded" ||
+    row.forwarding_status ===
+      "forwarded"
+  ) {
+    throw new Error(
+      "Inbound email has already been forwarded",
+    );
+  }
+
+  const resendEmailId =
+    String(
+      row.resend_email_id || "",
+    ).trim();
+
+  if (!resendEmailId) {
+    throw new Error(
+      "Resend email identifier is missing",
+    );
+  }
+
+  await pool.query(
+    `
+      UPDATE public.inbound_emails
+      SET
+        processing_status = 'processing',
+        forwarding_status = 'pending',
+        forward_error = NULL,
+        updated_at = now()
+      WHERE id = $1
+    `,
+    [inboundEmailId],
+  );
+
+  try {
+    const receivedEmail =
+      await fetchResendReceivedEmail(
+        resendEmailId,
+      );
+
+    await pool.query(
+      `
+        UPDATE public.inbound_emails
+        SET
+          from_address = $2,
+          to_addresses = $3::jsonb,
+          cc_addresses = $4::jsonb,
+          bcc_addresses = $5::jsonb,
+          subject = $6,
+          text_body = $7,
+          html_body = $8,
+          message_id = $9,
+          headers = $10::jsonb,
+          metadata = metadata || $11::jsonb,
+          updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        inboundEmailId,
+        receivedEmail.from,
+        JSON.stringify(
+          receivedEmail.to || [],
+        ),
+        JSON.stringify(
+          receivedEmail.cc || [],
+        ),
+        JSON.stringify(
+          receivedEmail.bcc || [],
+        ),
+        receivedEmail.subject || null,
+        receivedEmail.text || null,
+        receivedEmail.html || null,
+        receivedEmail.messageId || null,
+        JSON.stringify(
+          receivedEmail.headers || {},
+        ),
+        JSON.stringify({
+          retry_retrieved_at:
+            new Date().toISOString(),
+          retry_attachment_count:
+            receivedEmail.attachments
+              ?.length || 0,
+        }),
+      ],
+    );
+
+    for (
+      const attachment of
+      receivedEmail.attachments || []
+    ) {
+      await pool.query(
+        `
+          INSERT INTO public.inbound_email_attachments (
+            inbound_email_id,
+            resend_email_id,
+            resend_attachment_id,
+            filename,
+            content_type,
+            size_bytes,
+            storage_status,
+            storage_provider
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            'pending',
+            'supabase'
+          )
+          ON CONFLICT (
+            inbound_email_id,
+            resend_attachment_id
+          )
+          DO UPDATE SET
+            filename = EXCLUDED.filename,
+            content_type = EXCLUDED.content_type,
+            size_bytes = EXCLUDED.size_bytes,
+            updated_at = now()
+        `,
+        [
+          inboundEmailId,
+          resendEmailId,
+          attachment.id || null,
+          attachment.filename ||
+            "unnamed-attachment",
+          attachment.contentType ||
+            null,
+          Number.isFinite(
+            attachment.size,
+          )
+            ? attachment.size
+            : null,
+        ],
+      );
+    }
+
+    const forwardingResult =
+      await handleInboundEmailForward({
+        from: receivedEmail.from,
+        to: receivedEmail.to,
+        subject: receivedEmail.subject,
+        html: receivedEmail.html,
+        text: receivedEmail.text,
+        headers: receivedEmail.headers,
+        messageId:
+          receivedEmail.messageId,
+      });
+
+    if (
+      forwardingResult.ok &&
+      forwardingResult.forwarded
+    ) {
+      await pool.query(
+        `
+          UPDATE public.inbound_emails
+          SET
+            processing_status = 'forwarded',
+            forwarding_status = 'forwarded',
+            forwarded_at = now(),
+            forward_error = NULL,
+            metadata = metadata || $2::jsonb,
+            updated_at = now()
+          WHERE id = $1
+        `,
+        [
+          inboundEmailId,
+          JSON.stringify({
+            last_retry_at:
+              new Date().toISOString(),
+            retry_result: "forwarded",
+          }),
+        ],
+      );
+
+      return {
+        success: true,
+        forwarded: true,
+        inboundEmailId,
+        resendEmailId,
+      };
+    }
+
+    const message =
+      forwardingResult.error ||
+      forwardingResult.reason ||
+      "Inbound forwarding failed";
+
+    await pool.query(
+      `
+        UPDATE public.inbound_emails
+        SET
+          processing_status = 'forward_failed',
+          forwarding_status = 'failed',
+          forward_error = $2,
+          metadata = metadata || $3::jsonb,
+          updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        inboundEmailId,
+        message,
+        JSON.stringify({
+          last_retry_at:
+            new Date().toISOString(),
+          retry_result: "forward_failed",
+        }),
+      ],
+    );
+
+    return {
+      success: false,
+      forwarded: false,
+      inboundEmailId,
+      resendEmailId,
+      error: message,
+    };
+  } catch (error: any) {
+    const message =
+      error?.message ||
+      "Inbound email retry failed";
+
+    await pool.query(
+      `
+        UPDATE public.inbound_emails
+        SET
+          processing_status = 'failed',
+          forwarding_status = 'failed',
+          forward_error = $2,
+          metadata = metadata || $3::jsonb,
+          updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        inboundEmailId,
+        message,
+        JSON.stringify({
+          last_retry_at:
+            new Date().toISOString(),
+          retry_result: "failed",
+        }),
+      ],
+    );
+
+    return {
+      success: false,
+      forwarded: false,
+      inboundEmailId,
+      resendEmailId,
+      error: message,
+    };
+  }
+}
+
  /**
  * Generic Inbound Webhook handler.
  *
