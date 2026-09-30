@@ -109,8 +109,10 @@ async function stubOwnerPayouts(page: Page, outcome: "success" | "failure") {
 
 for (const profile of MOBILE_PROFILES) {
   test.describe(`Mobile driver payment · ${profile.name}`, () => {
-    test.use({ ...devices[profile.device] });
+    const mobileDevice = { ...devices[profile.device] };
+     delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
 
+     test.use({ ...mobileDevice });
     test("PSP edge function completes and dashboard updates without reload", async ({ page }) => {
       await stubDriverCheckout(page, "success");
       await page.goto(DRIVER_URL);
@@ -149,8 +151,10 @@ for (const profile of MOBILE_PROFILES) {
   });
 
   test.describe(`Mobile owner withdrawal · ${profile.name}`, () => {
-    test.use({ ...devices[profile.device] });
+     const mobileDevice = { ...devices[profile.device] };
+      delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
 
+     test.use({ ...mobileDevice });
     test("payout edge function succeeds and available balance refreshes", async ({ page }) => {
       await stubOwnerPayouts(page, "success");
       await page.goto(OWNER_URL);
