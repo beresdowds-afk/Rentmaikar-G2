@@ -1815,13 +1815,6 @@ if (attachmentStorageFailed) {
       ` resendEmailId=${emailId}`,
   );
 }
-
-    console.log(
-        `[ResendInbound] Persisted ${receivedEmail.attachments.length}` +
-          ` attachment record(s) for dbId=${inboundDbId}` +
-          ` resendEmailId=${emailId}`,
-      );
-    }
     console.log(
       `[ResendInbound] Persisted inbound email dbId=${inboundDbId}` +
         ` resendEmailId=${emailId}` +
