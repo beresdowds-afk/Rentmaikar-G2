@@ -21,7 +21,11 @@ import {
   getBaseCallbackUrl,
   processCallRecording,
 } from "../services/voipService";
-
+import {
+  listInboundEmails,
+  getInboundEmail,
+  getInboundAttachmentUrl,
+} from "../services/inboundEmailService";
 export const functionsRouter = Router();
 
 // Helper to normalize E.164 phone numbers
@@ -101,6 +105,10 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "persona-create-inquiry",
   "persona-webhook",
   "send-inbox-reply",
+  // Inbound Email Retrieval & Secure Attachment Access
+  "list-inbound-emails",
+  "get-inbound-email",
+  "get-inbound-attachment-url",
 ]);
 
 /**
