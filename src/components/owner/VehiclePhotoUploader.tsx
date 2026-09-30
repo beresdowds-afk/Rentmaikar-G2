@@ -1,5 +1,6 @@
 import { useCallback, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadVehiclePhoto } from "@/lib/file-upload-api";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
@@ -96,22 +97,17 @@ export const VehiclePhotoUploader = forwardRef<VehiclePhotoUploaderHandle, Props
           const optimised = await prepareImageForUpload(item.file, { maxSizeMB: 2, maxWidthOrHeight: 1920 });
           patch(item.id, { progress: 45 });
 
-          const base = `${ownerId}/${draftId}/${newId()}`;
-          const path = `${base}.jpg`;
-          const { error } = await supabase.storage
-            .from(BUCKET)
-            .upload(path, optimised, { contentType: optimised.type || "image/jpeg", upsert: false });
-          if (error) throw error;
-          patch(item.id, { progress: 80 });
-
           const thumb = await createThumbnail(item.file);
-          if (thumb) {
-            await supabase.storage
-              .from(BUCKET)
-              .upload(`${base}${THUMB_SUFFIX}`, thumb, { contentType: "image/jpeg", upsert: true });
-          }
+          patch(item.id, { progress: 70 });
 
-          const url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+          const uploadResult = await uploadVehiclePhoto({
+            file: optimised,
+            fileName: item.file.name,
+            thumbnailFile: thumb || undefined,
+            draftId,
+          });
+
+          const url = uploadResult.publicUrl || "";
           patch(item.id, { status: "done", progress: 100, url });
           return url;
         } catch (err: any) {

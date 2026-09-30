@@ -219,6 +219,10 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "voip-status-callback",
   "whatchimp-webhook",
   "whatsapp-commands",
+  // Driver & Owner File/Picture Storage Operations
+  "upload-file",
+  "delete-file",
+  "get-file-url",
 ]);
 
 async function getLinkBridge() {
@@ -243,15 +247,32 @@ async function callLocalGateway(functionName: string, options?: any) {
     }
   }
 
+  const isFormData = typeof FormData !== "undefined" && options?.body instanceof FormData;
+  const isBlob = typeof Blob !== "undefined" && (options?.body instanceof Blob || (typeof File !== "undefined" && options?.body instanceof File));
+
+  const headers: Record<string, string> = {
+    ...(authHeader ? { Authorization: authHeader } : {}),
+    ...(options?.headers || {}),
+  };
+
+  if (isFormData) {
+    delete headers["Content-Type"];
+    delete headers["content-type"];
+  } else if (!headers["Content-Type"] && !headers["content-type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const body = isFormData || isBlob
+    ? options.body
+    : options?.body
+      ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body))
+      : undefined;
+
   try {
     const res = await fetch(`/api/functions/${functionName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(authHeader ? { Authorization: authHeader } : {}),
-        ...(options?.headers || {}),
-      },
-      body: options?.body ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body)) : undefined,
+      method: options?.method || "POST",
+      headers,
+      body,
     });
 
     const contentType = res.headers.get("content-type") || "";
@@ -259,8 +280,18 @@ async function callLocalGateway(functionName: string, options?: any) {
       // Attempt bridge fallback if available
       const bridge = await getLinkBridge();
       if (bridge) {
-        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
-        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        if (isFormData) {
+          const bridgeRaw = await bridge.invokeRawEdgeFunction(functionName, {
+            ...options,
+            body,
+            headers,
+          });
+          const rawJson = await bridgeRaw.json().catch(() => null);
+          if (rawJson) return { data: rawJson, error: null };
+        } else {
+          const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+          if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        }
       }
       const err = new Error(`Local gateway returned non-JSON response (${res.status} ${contentType})`);
       (err as any).status = res.status;
@@ -275,8 +306,18 @@ async function callLocalGateway(functionName: string, options?: any) {
     if (!json) {
       const bridge = await getLinkBridge();
       if (bridge) {
-        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
-        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        if (isFormData) {
+          const bridgeRaw = await bridge.invokeRawEdgeFunction(functionName, {
+            ...options,
+            body,
+            headers,
+          });
+          const rawJson = await bridgeRaw.json().catch(() => null);
+          if (rawJson) return { data: rawJson, error: null };
+        } else {
+          const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+          if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        }
       }
       const err = new Error(`Failed to parse JSON response from local gateway for '${functionName}'`);
       (err as any).status = res.status;
@@ -302,8 +343,18 @@ async function callLocalGateway(functionName: string, options?: any) {
       // If 404 or server error on local gateway, try through Link Bridge
       const bridge = await getLinkBridge();
       if (bridge) {
-        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
-        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        if (isFormData) {
+          const bridgeRaw = await bridge.invokeRawEdgeFunction(functionName, {
+            ...options,
+            body,
+            headers,
+          });
+          const rawJson = await bridgeRaw.json().catch(() => null);
+          if (rawJson) return { data: rawJson, error: null };
+        } else {
+          const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+          if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        }
       }
 
       const errorMsg = json?.error || json?.message || `Edge function '${functionName}' failed (HTTP ${res.status})`;
@@ -317,8 +368,18 @@ async function callLocalGateway(functionName: string, options?: any) {
     try {
       const bridge = await getLinkBridge();
       if (bridge) {
-        const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
-        if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        if (isFormData) {
+          const bridgeRaw = await bridge.invokeRawEdgeFunction(functionName, {
+            ...options,
+            body,
+            headers,
+          });
+          const rawJson = await bridgeRaw.json().catch(() => null);
+          if (rawJson) return { data: rawJson, error: null };
+        } else {
+          const bridgeRes = await bridge.invokeEdgeFunction(functionName, options?.body, options);
+          if (bridgeRes.data) return { data: bridgeRes.data, error: null };
+        }
       }
     } catch {
       // Ignore secondary bridge error

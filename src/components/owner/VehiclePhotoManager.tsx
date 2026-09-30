@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { uploadVehiclePhoto, deleteUploadedFile } from '@/lib/file-upload-api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -100,22 +101,18 @@ export function VehiclePhotoManager({ vehicleId, ownerId, photoUrls, onChange, r
           const optimised = await prepareImageForUpload(file, { maxSizeMB: 2, maxWidthOrHeight: 1920 });
           if (cancelRef.current) break;
 
-          const base = `${ownerId}/${vehicleId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          const path = `${base}.jpg`;
-          const { error: upErr } = await supabase.storage
-            .from(BUCKET)
-            .upload(path, optimised, { contentType: optimised.type || 'image/jpeg', upsert: false });
-          if (upErr) throw upErr;
-
-          // Best-effort thumbnail for fast mobile grids; failure is non-fatal.
           const thumb = await createThumbnail(file);
-          if (thumb) {
-            await supabase.storage
-              .from(BUCKET)
-              .upload(`${base}${THUMB_SUFFIX}`, thumb, { contentType: 'image/jpeg', upsert: true });
-          }
 
-          uploaded.push(supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl);
+          const uploadResult = await uploadVehiclePhoto({
+            file: optimised,
+            fileName: file.name,
+            thumbnailFile: thumb || undefined,
+            vehicleId,
+          });
+
+          if (uploadResult.publicUrl) {
+            uploaded.push(uploadResult.publicUrl);
+          }
         } catch (err: any) {
           failures.push(`${file.name}: ${err?.message ?? 'upload failed'}`);
         }
@@ -153,11 +150,11 @@ export function VehiclePhotoManager({ vehicleId, ownerId, photoUrls, onChange, r
   const removePhoto = async (url: string) => {
     setBusy(true);
     try {
-      const path = objectPathOf(url);
-      if (path) {
-        const thumbPath = path.replace(/\.[^.]+$/, THUMB_SUFFIX);
-        await supabase.storage.from(BUCKET).remove([path, thumbPath]);
-      }
+      await deleteUploadedFile({
+        purpose: 'vehicle_photo',
+        fileUrl: url,
+        vehicleId,
+      });
       await persist(urls.filter((u) => u !== url));
       toast({ title: 'Photo removed' });
     } catch (err: any) {

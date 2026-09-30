@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 import { Shield, Loader2, CheckCircle2, IdCard } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadUserDocument } from "@/lib/file-upload-api";
 import { useRegion } from "@/contexts/RegionContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -503,26 +504,14 @@ export default function PersonaVerification({
                 onFileSelected={async (file: File) => {
                   setDlChecking(true);
                   try {
-                    const ext = file.name.split(".").pop() || "bin";
-                    const path = `${user.id}/drivers_license/${Date.now()}.${ext}`;
-                    const up = await supabase.storage
-                      .from("user-documents")
-                      .upload(path, file, { upsert: false, contentType: file.type });
-                    if (up.error) throw up.error;
-                    const { data: doc, error: insErr } = await supabase
-                      .from("user_documents")
-                      .insert({
-                        user_id: user.id,
-                        document_type: "drivers_license",
-                        file_name: file.name,
-                        file_path: path,
-                        file_size: file.size,
-                        mime_type: file.type,
-                      } as any)
-                      .select("id")
-                      .single();
-                    if (insErr) throw insErr;
-                    setDlDocId((doc as any).id);
+                    const result = await uploadUserDocument({
+                      file,
+                      documentType: "drivers_license",
+                      category: "identification",
+                    });
+                    if (result.documentId) {
+                      setDlDocId(result.documentId);
+                    }
                     toast.success("Driver's license uploaded");
                   } catch (e: any) {
                     toast.error(e?.message ?? "Upload failed");

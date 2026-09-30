@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { uploadUserDocument, deleteUploadedFile, getUploadedFileUrl } from '@/lib/file-upload-api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRegion } from '@/contexts/RegionContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -167,44 +168,17 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
     mutationFn: async ({ file, documentType, category }: { file: File; documentType: DocumentType; category: DocumentCategory }) => {
       if (!user) throw new Error('Not authenticated');
       
-      setUploadProgress(10);
+      setUploadProgress(20);
       
-      // Create file path: userId/documentType/filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${documentType}_${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${documentType}/${fileName}`;
-      
-      setUploadProgress(30);
-      
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('user-documents')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-      
-      if (uploadError) throw uploadError;
-      
-      setUploadProgress(70);
-      
-      // Create database record
-      const { error: dbError } = await supabase
-        .from('user_documents')
-        .insert({
-          user_id: user.id,
-          document_type: documentType,
-          document_category: category,
-          file_path: filePath,
-          file_name: file.name,
-          file_size: file.size,
-          mime_type: file.type,
-          vehicle_id: vehicleId || null,
-        });
-      
-      if (dbError) throw dbError;
-      
+      const res = await uploadUserDocument({
+        file,
+        documentType,
+        category,
+        vehicleId,
+      });
+
       setUploadProgress(100);
+      return res;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-documents'] });
@@ -221,20 +195,11 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (doc: UserDocument) => {
-      // Delete from storage
-      const { error: storageError } = await supabase.storage
-        .from('user-documents')
-        .remove([doc.file_path]);
-      
-      if (storageError) throw storageError;
-      
-      // Delete from database
-      const { error: dbError } = await supabase
-        .from('user_documents')
-        .delete()
-        .eq('id', doc.id);
-      
-      if (dbError) throw dbError;
+      await deleteUploadedFile({
+        purpose: 'user_document',
+        documentId: doc.id,
+        filePath: doc.file_path,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-documents'] });
@@ -269,15 +234,22 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
     return documents.find(d => d.document_type === type);
   };
 
-  const getDocumentUrl = async (filePath: string): Promise<string | null> => {
-    const { data } = await supabase.storage
-      .from('user-documents')
-      .createSignedUrl(filePath, 3600);
-    return data?.signedUrl || null;
+  const getDocumentUrl = async (filePath: string, docId?: string): Promise<string | null> => {
+    try {
+      const res = await getUploadedFileUrl({
+        purpose: 'user_document',
+        filePath,
+        documentId: docId,
+        expiresIn: 3600,
+      });
+      return res.url || null;
+    } catch {
+      return null;
+    }
   };
 
   const handleViewDocument = async (doc: UserDocument) => {
-    const url = await getDocumentUrl(doc.file_path);
+    const url = await getDocumentUrl(doc.file_path, doc.id);
     if (url) {
       if (typeof window !== 'undefined' && url) {
   window.open(url, '_blank', 'noopener,noreferrer');

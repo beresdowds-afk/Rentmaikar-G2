@@ -29,6 +29,13 @@ import {
 import {
   retryInboundEmail,
 } from "../services/emailService";
+import multer from "multer";
+import {
+  authenticateCaller,
+  handleFileUpload,
+  handleDeleteFile,
+  handleGetFileUrl,
+} from "../services/fileUploadService";
 export const functionsRouter = Router();
 
 // Helper to normalize E.164 phone numbers
@@ -114,7 +121,133 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "get-inbound-email",
   "get-inbound-attachment-url",
   "retry-inbound-email",
+  // Driver & Owner File/Picture Storage Operations
+  "upload-file",
+  "delete-file",
+  "get-file-url",
 ]);
+
+const storageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+});
+
+async function processFileUploadRequest(req: Request, res: Response) {
+  try {
+    const rawAuth = req.headers["authorization"];
+    const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
+    const auth = await authenticateCaller(clientAuth);
+
+    let filePayload: any = null;
+    let thumbnailPayload: any = null;
+
+    const reqFiles = (req as any).files;
+    if (reqFiles?.file?.[0]) {
+      const f = reqFiles.file[0];
+      filePayload = {
+        buffer: f.buffer,
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+      };
+    } else if ((req as any).file) {
+      const f = (req as any).file;
+      filePayload = {
+        buffer: f.buffer,
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+      };
+    }
+
+    if (reqFiles?.thumbnail?.[0]) {
+      const t = reqFiles.thumbnail[0];
+      thumbnailPayload = {
+        buffer: t.buffer,
+        originalname: t.originalname,
+        mimetype: t.mimetype,
+        size: t.size,
+      };
+    }
+
+    // JSON base64 fallback
+    const body = req.body || {};
+    if (!filePayload && body.fileBase64) {
+      filePayload = {
+        buffer: Buffer.from(body.fileBase64, "base64"),
+        originalname: body.fileName || "uploaded_file.jpg",
+        mimetype: body.contentType || "image/jpeg",
+        size: Number(body.fileSize) || 0,
+      };
+    }
+    if (!thumbnailPayload && body.thumbnailBase64) {
+      thumbnailPayload = {
+        buffer: Buffer.from(body.thumbnailBase64, "base64"),
+        originalname: body.thumbnailName || "thumb.jpg",
+        mimetype: "image/jpeg",
+        size: 0,
+      };
+    }
+
+    if (!filePayload) {
+      return res.status(400).json({
+        ok: false,
+        success: false,
+        error: "No file content provided for upload",
+      });
+    }
+
+    const metadata = {
+      purpose: body.purpose,
+      documentType: body.documentType,
+      documentCategory: body.documentCategory,
+      vehicleId: body.vehicleId,
+      expiresAt: body.expiresAt,
+      ownerId: body.ownerId,
+      draftId: body.draftId,
+      isPrimary: body.isPrimary === true || body.isPrimary === "true",
+      driverId: body.driverId,
+      weekStartDate: body.weekStartDate,
+      platform: body.platform,
+      currentRating: body.currentRating ? parseFloat(body.currentRating) : undefined,
+    };
+
+    const result = await handleFileUpload(auth, filePayload, metadata as any, thumbnailPayload);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({
+      ok: false,
+      success: false,
+      error: err.message || "File upload failed",
+    });
+  }
+}
+
+// Scoped multipart endpoint for direct POST /upload-file
+functionsRouter.post(
+  "/upload-file",
+  (req, res, next) => {
+    const contentType = req.headers["content-type"] || "";
+    if (contentType.includes("multipart/form-data")) {
+      return storageUpload.fields([
+        { name: "file", maxCount: 1 },
+        { name: "thumbnail", maxCount: 1 },
+      ])(req, res, (err) => {
+        if (err) {
+          return res.status(400).json({
+            ok: false,
+            success: false,
+            error: err.message || "Multipart upload parsing failed",
+          });
+        }
+        next();
+      });
+    }
+    next();
+  },
+  processFileUploadRequest
+);
 
 /**
  * ALL /api/functions/:functionName
@@ -922,7 +1055,45 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
               "Inbound email retry failed",
           });
         }
-      }  
+      }
+
+      // -----------------------------------------------------------------
+      // Driver & Owner File/Picture Storage Operations
+      // -----------------------------------------------------------------
+      case "upload-file": {
+        return processFileUploadRequest(req, res);
+      }
+
+      case "delete-file": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await handleDeleteFile(auth, body);
+          return res.status(200).json(result);
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "File deletion failed",
+          });
+        }
+      }
+
+      case "get-file-url": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await handleGetFileUrl(auth, body);
+          return res.status(200).json(result);
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "Failed to retrieve file URL",
+          });
+        }
+      }
+
       case "send-email-reply": {
         const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
         const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";

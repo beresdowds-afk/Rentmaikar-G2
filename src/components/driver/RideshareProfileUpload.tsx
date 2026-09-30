@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
+import { uploadRideshareProfile, deleteUploadedFile } from '@/lib/file-upload-api';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   Star, 
@@ -107,46 +108,13 @@ export function RideshareProfileUpload({ vehicleId }: RideshareProfileUploadProp
 
     setUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${user.id}/${weekStart}/rideshare-profile.${fileExt}`;
-
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('user-documents')
-        .upload(filePath, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('user-documents')
-        .getPublicUrl(filePath);
-
-      // Create or update submission
-      if (submission) {
-        const { error } = await supabase
-          .from('rideshare_profile_submissions')
-          .update({
-            rating_screenshot_url: publicUrl,
-            platform: platform || null,
-            current_rating: rating ? parseFloat(rating) : null,
-          })
-          .eq('id', submission.id);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('rideshare_profile_submissions')
-          .insert({
-            driver_id: user.id,
-            vehicle_id: vehicleId || null,
-            week_start_date: weekStart,
-            rating_screenshot_url: publicUrl,
-            platform: platform || null,
-            current_rating: rating ? parseFloat(rating) : null,
-          });
-
-        if (error) throw error;
-      }
+      await uploadRideshareProfile({
+        file,
+        weekStartDate: weekStart,
+        vehicleId,
+        platform: platform || undefined,
+        currentRating: rating ? parseFloat(rating) : undefined,
+      });
 
       toast.success('Screenshot uploaded successfully');
       fetchSubmission();
@@ -185,20 +153,10 @@ export function RideshareProfileUpload({ vehicleId }: RideshareProfileUploadProp
     if (!submission?.rating_screenshot_url || !user) return;
 
     try {
-      // Extract file path from URL
-      const urlParts = submission.rating_screenshot_url.split('/');
-      const filePath = urlParts.slice(-3).join('/');
-
-      await supabase.storage
-        .from('user-documents')
-        .remove([filePath]);
-
-      const { error } = await supabase
-        .from('rideshare_profile_submissions')
-        .update({ rating_screenshot_url: null })
-        .eq('id', submission.id);
-
-      if (error) throw error;
+      await deleteUploadedFile({
+        purpose: 'rideshare_profile',
+        fileUrl: submission.rating_screenshot_url,
+      });
 
       toast.success('Screenshot removed');
       fetchSubmission();
