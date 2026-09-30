@@ -89,7 +89,7 @@ export class Authenticator {
     const action = params.action || "verify";
     const purpose: OtpPurpose =
       params.purpose ||
-      (action === "link_verify" || action === "verify_code" ? "phone_link" : "auth");
+      (action === "link_verify" || action === "verify_code" ? "phone_link" : "login");
 
     // 1. Atomically consume challenge via OtpService (enforces expiry, attempts, timing-safe verifier, single consumption)
     const consumeResult = await otpService.consumeChallenge({
@@ -235,10 +235,16 @@ export class Authenticator {
 
       if (createErr || !created?.user?.id) {
         console.error("[Authenticator] User creation failed:", createErr?.message);
+        if (consumeResult.challengeId && pool) {
+          await pool.query(
+            `UPDATE public.phone_otp_codes SET consumed_at = NULL, status = 'delivered' WHERE id = $1`,
+            [consumeResult.challengeId]
+          ).catch(() => {});
+        }
         return {
           success: false,
           valid: false,
-          error: "Could not create user account for this phone number",
+          error: "Could not create user account for this phone number. Please try again.",
         };
       }
       userId = created.user.id;
@@ -281,13 +287,18 @@ export class Authenticator {
 
     if (linkErr || !link?.properties?.hashed_token) {
       console.error("[Authenticator] generateLink failed:", linkErr?.message);
+      if (consumeResult.challengeId && pool) {
+        await pool.query(
+          `UPDATE public.phone_otp_codes SET consumed_at = NULL, status = 'delivered' WHERE id = $1`,
+          [consumeResult.challengeId]
+        ).catch(() => {});
+      }
       return {
-        success: true,
-        valid: true,
+        success: false,
+        valid: false,
         user_id: userId,
-        is_new_user: isNewUser,
         purpose,
-        message: "Phone verified, but session link generation failed. Please sign in.",
+        error: "Failed to establish authenticated session link. Please try again.",
       };
     }
 

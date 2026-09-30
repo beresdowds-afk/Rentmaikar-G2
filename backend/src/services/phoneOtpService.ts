@@ -124,14 +124,21 @@ export interface VerifyOtpParams {
 /**
  * Returns the authoritative server secret for HMAC-SHA256 verifier computation.
  * Never stores or leaks this secret to the client.
+ * Strictly requires configured environment secret; zero hardcoded fallback in production.
  */
 export function getOtpAuthSecret(): string {
-  return (
+  const secret =
     process.env.OTP_AUTH_SECRET ||
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.JWT_SECRET ||
-    "rentmaikar_default_secure_otp_secret_key"
-  );
+    (process.env.NODE_ENV === "test" || process.env.VITEST ? "test_otp_secret_key_for_unit_tests" : "");
+
+  if (!secret) {
+    throw new Error(
+      "CRITICAL SECURITY CONFIGURATION MISSING: OTP_AUTH_SECRET or SUPABASE_SERVICE_ROLE_KEY must be configured."
+    );
+  }
+  return secret;
 }
 
 /**
@@ -150,12 +157,12 @@ export function calculateOtpVerifier(params: {
 }
 
 /**
- * Timing-safe verifier comparison with fallback support for legacy un-keyed SHA-256
+ * Strict timing-safe verifier comparison.
+ * Strictly enforces server-secret HMAC-SHA256; legacy un-keyed SHA-256 is permanently rejected.
  */
 export function verifyVerifier(
   storedHash: string,
-  expectedHash: string,
-  fallbackSha256?: string
+  expectedHash: string
 ): boolean {
   try {
     const storedBuf = Buffer.from(storedHash, "hex");
@@ -164,17 +171,6 @@ export function verifyVerifier(
       return true;
     }
   } catch {}
-
-  // Fallback to legacy SHA-256 for in-flight tokens generated prior to HMAC upgrade
-  if (fallbackSha256) {
-    try {
-      const storedBuf = Buffer.from(storedHash, "hex");
-      const fallbackBuf = Buffer.from(fallbackSha256, "hex");
-      if (storedBuf.length === fallbackBuf.length && crypto.timingSafeEqual(storedBuf, fallbackBuf)) {
-        return true;
-      }
-    } catch {}
-  }
 
   return false;
 }
@@ -214,7 +210,7 @@ export class OtpService {
     const rawCode = crypto.randomInt(100000, 1000000).toString();
     const challengeId = crypto.randomUUID();
     const channel: OtpChannel = params.channel || "sms";
-    const purpose: OtpPurpose = params.purpose || "auth";
+    const purpose: OtpPurpose = params.purpose || "login";
     const expiresIn = params.expiresInSeconds || 600; // 10 minutes default
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
     const createdAt = new Date();
@@ -279,12 +275,12 @@ export class OtpService {
       }
     }
 
-    // Rate Limiting & Cooldown Protection
+    // Rate Limiting & Cooldown Protection (Strict Fail-Closed Policy)
     try {
       // Cooldown: at least 60 seconds between consecutive requests for the same identity
       const recentCheck = await pool.query(
         `SELECT id FROM public.phone_otp_codes
-         WHERE phone = $1 AND created_at >= NOW() - INTERVAL '60 seconds'
+         WHERE (phone = $1 OR identity = $1) AND created_at >= NOW() - INTERVAL '60 seconds'
          LIMIT 1`,
         [challenge.identity]
       );
@@ -295,26 +291,34 @@ export class OtpService {
       // Velocity check: max 3 in the last 10 minutes
       const velocityCheck = await pool.query(
         `SELECT COUNT(*)::int as count FROM public.phone_otp_codes
-         WHERE phone = $1 AND created_at >= NOW() - INTERVAL '10 minutes'`,
+         WHERE (phone = $1 OR identity = $1) AND created_at >= NOW() - INTERVAL '10 minutes'`,
         [challenge.identity]
       );
       if (velocityCheck.rows[0]?.count >= 3) {
         return { success: false, error: "Too many code requests. Please wait a few minutes." };
       }
     } catch (err: any) {
-      console.warn("[OtpService] Rate limit query warning:", err.message);
+      console.error("[OtpService] Rate limit query failed closed:", err.message);
+      return {
+        success: false,
+        error: "Security rate limit verification failed. Request rejected.",
+      };
     }
 
-    // Invalidate any previously unconsumed OTPs for this identity to prevent concurrent codes
+    // Invalidate any previously unconsumed OTPs for this identity AND purpose to prevent concurrent codes
     try {
       await pool.query(
         `UPDATE public.phone_otp_codes
          SET consumed_at = NOW(), status = 'expired'
-         WHERE phone = $1 AND consumed_at IS NULL`,
-        [challenge.identity]
+         WHERE (phone = $1 OR identity = $1) AND purpose = $2 AND consumed_at IS NULL`,
+        [challenge.identity, challenge.purpose]
       );
     } catch (e: any) {
-      console.warn("[OtpService] Invalidate prior codes warning:", e.message);
+      console.error("[OtpService] Invalidate prior codes failed closed:", e.message);
+      return {
+        success: false,
+        error: "Failed to initialize verification challenge state.",
+      };
     }
 
     // Persist to Postgres phone_otp_codes table (attempt formalized columns first, fall back to base)
@@ -448,130 +452,154 @@ export class OtpService {
       return { success: false, error: "Database service unavailable" };
     }
 
-    const { identity, code, purpose = "auth" } = params;
+    const { identity, code } = params;
+    const purpose: OtpPurpose = params.purpose || "login";
 
-    // Fetch the latest active OTP record for this identity
-    let otpRow: {
-      id: string;
-      code_hash: string;
-      attempts: number;
-      expires_at: Date;
-      consumed_at: Date | null;
-      purpose?: string;
-      user_id?: string | null;
-      status?: string;
-    } | null = null;
-
+    const client = await pool.connect();
     try {
-      const res = await pool.query(
-        `SELECT id, code_hash, attempts, expires_at, consumed_at,
-                coalesce(purpose, 'auth') as purpose, user_id, status
-         FROM public.phone_otp_codes
-         WHERE phone = $1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [identity]
-      );
-      if (res.rows.length > 0) {
-        otpRow = res.rows[0];
-      }
-    } catch (err: any) {
-      // Fallback query if migration columns aren't present
+      await client.query("BEGIN");
+
+      // 1. Strict identity + purpose query with row-level transaction lock (FOR UPDATE)
+      let otpRow: {
+        id: string;
+        code_hash: string;
+        attempts: number;
+        expires_at: Date;
+        consumed_at: Date | null;
+        purpose?: string;
+        user_id?: string | null;
+        status?: string;
+      } | null = null;
+
       try {
-        const fallbackRes = await pool.query(
-          `SELECT id, code_hash, attempts, expires_at, consumed_at
+        const res = await client.query(
+          `SELECT id, code_hash, attempts, expires_at, consumed_at,
+                  purpose, user_id, status
            FROM public.phone_otp_codes
-           WHERE phone = $1
+           WHERE (identity = $1 OR phone = $1) AND purpose = $2
            ORDER BY created_at DESC
-           LIMIT 1`,
-          [identity]
+           LIMIT 1
+           FOR UPDATE`,
+          [identity, purpose]
         );
-        if (fallbackRes.rows.length > 0) {
-          otpRow = fallbackRes.rows[0];
+        if (res.rows.length > 0) {
+          otpRow = res.rows[0];
         }
-      } catch (innerErr: any) {
-        console.error("[OtpService] Query error:", innerErr.message);
-        return { success: false, error: "Failed to verify code at this time" };
+      } catch (err: any) {
+        // Fallback for legacy schema before formalize migration
+        try {
+          const fallbackRes = await client.query(
+            `SELECT id, code_hash, attempts, expires_at, consumed_at
+             FROM public.phone_otp_codes
+             WHERE (identity = $1 OR phone = $1)
+             ORDER BY created_at DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [identity]
+          );
+          if (fallbackRes.rows.length > 0) {
+            otpRow = {
+              ...fallbackRes.rows[0],
+              purpose,
+            };
+          }
+        } catch (innerErr: any) {
+          await client.query("ROLLBACK").catch(() => {});
+          console.error("[OtpService] Query error:", innerErr.message);
+          return { success: false, error: "Failed to verify code at this time" };
+        }
       }
-    }
 
-    if (!otpRow) {
-      return { success: false, error: "No verification code requested for this phone number" };
-    }
+      if (!otpRow) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          error: "No active verification code requested for this phone number and purpose.",
+        };
+      }
 
-    if (otpRow.consumed_at) {
-      return { success: false, error: "Verification code has already been used. Please request a new one." };
-    }
+      if (otpRow.consumed_at) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Verification code has already been used. Please request a new one." };
+      }
 
-    if (new Date(otpRow.expires_at).getTime() <= Date.now()) {
-      return { success: false, error: "Verification code has expired. Please request a new one." };
-    }
+      if (new Date(otpRow.expires_at).getTime() <= Date.now()) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Verification code has expired. Please request a new one." };
+      }
 
-    if ((otpRow.attempts || 0) >= 5) {
-      return { success: false, error: "Too many incorrect attempts. This code is invalidated. Please request a new code." };
-    }
+      if ((otpRow.attempts || 0) >= 5) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Too many incorrect attempts. This code is invalidated. Please request a new code." };
+      }
 
-    // Defense-in-depth: Check purpose column match if present in DB
-    if (otpRow.purpose && otpRow.purpose !== purpose && otpRow.purpose !== "auth" && purpose !== "auth") {
-      return {
-        success: false,
-        error: "Verification code was issued for a different purpose. Please request a new code.",
-      };
-    }
+      // Strict Purpose Check: No cross-purpose bypass permitted
+      if (otpRow.purpose && otpRow.purpose !== purpose) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          error: "Verification code was issued for a different purpose. Request rejected.",
+        };
+      }
 
-    // Calculate expected HMAC verifier (and fallback legacy SHA-256)
-    const expectedHmac = calculateOtpVerifier({
-      otp: code,
-      identity,
-      purpose,
-      challengeId: otpRow.id,
-    });
-    const fallbackSha256 = crypto.createHash("sha256").update(code).digest("hex");
+      // Calculate expected server-secret-bound HMAC verifier (Strict HMAC-SHA256)
+      const expectedHmac = calculateOtpVerifier({
+        otp: code,
+        identity,
+        purpose,
+        challengeId: otpRow.id,
+      });
 
-    const isValid = verifyVerifier(otpRow.code_hash, expectedHmac, fallbackSha256);
+      const isValid = verifyVerifier(otpRow.code_hash, expectedHmac);
 
-    if (!isValid) {
-      // Atomically increment failed attempts
-      await pool.query(
+      if (!isValid) {
+        const newAttempts = (otpRow.attempts || 0) + 1;
+        const newStatus = newAttempts >= 5 ? "expired" : (otpRow.status || "pending");
+
+        await client.query(
+          `UPDATE public.phone_otp_codes
+           SET attempts = $1, status = $2
+           WHERE id = $3 AND consumed_at IS NULL`,
+          [newAttempts, newStatus, otpRow.id]
+        );
+        await client.query("COMMIT");
+
+        const remaining = Math.max(0, 5 - newAttempts);
+        const retryMsg = remaining > 0
+          ? `Invalid verification code. (${remaining} attempts remaining)`
+          : "Too many incorrect attempts. Please request a new code.";
+        return { success: false, error: retryMsg };
+      }
+
+      // Atomically consume the OTP (Race condition & Replay defense)
+      const consumeRes = await client.query(
         `UPDATE public.phone_otp_codes
-         SET attempts = attempts + 1
-         WHERE id = $1 AND consumed_at IS NULL`,
+         SET consumed_at = NOW(), status = 'consumed'
+         WHERE id = $1 AND consumed_at IS NULL
+         RETURNING id`,
         [otpRow.id]
-      ).catch(() => {});
+      );
 
-      if (otpRow.attempts + 1 >= 5) {
-        await pool.query(
-          `UPDATE public.phone_otp_codes SET status = 'expired' WHERE id = $1`,
-          [otpRow.id]
-        ).catch(() => {});
+      if (consumeRes.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Verification code already consumed or invalid" };
       }
 
-      const remaining = 5 - (otpRow.attempts + 1);
-      const retryMsg = remaining > 0
-        ? `Invalid verification code. (${remaining} attempts remaining)`
-        : "Too many incorrect attempts. Please request a new code.";
-      return { success: false, error: retryMsg };
+      await client.query("COMMIT");
+
+      return {
+        success: true,
+        challengeId: otpRow.id,
+        userId: otpRow.user_id,
+        purpose: (otpRow.purpose as OtpPurpose) || purpose,
+      };
+    } catch (err: any) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[OtpService] Atomic consume transaction error:", err.message);
+      return { success: false, error: "Database transaction failed during code verification." };
+    } finally {
+      client.release();
     }
-
-    // Atomically consume the OTP (Race condition & Replay defense)
-    const consumeRes = await pool.query(
-      `UPDATE public.phone_otp_codes
-       SET consumed_at = NOW(), status = 'consumed'
-       WHERE id = $1 AND consumed_at IS NULL
-       RETURNING id`,
-      [otpRow.id]
-    );
-
-    if (consumeRes.rowCount === 0) {
-      return { success: false, error: "Verification code already consumed or invalid" };
-    }
-
-    return {
-      success: true,
-      challengeId: otpRow.id,
-      userId: otpRow.user_id,
-      purpose: (otpRow.purpose as OtpPurpose) || purpose,
-    };
   }
 }
 
@@ -593,7 +621,7 @@ export async function sendPhoneOtp(params: SendOtpParams): Promise<{
     return { success: false, message: "Valid E.164 phone number required (e.g. +18482035389)" };
   }
 
-  const purpose: OtpPurpose = params.purpose || ((params.action === "link_send" || params.action === "send_code") ? "phone_link" : "auth");
+  const purpose: OtpPurpose = params.purpose || ((params.action === "link_send" || params.action === "send_code") ? "phone_link" : "login");
   const channel: OtpChannel = params.channel === "whatsapp" ? "whatsapp" : "sms";
 
   const { challenge, rawCode } = otpService.generateChallenge({
