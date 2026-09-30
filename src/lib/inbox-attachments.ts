@@ -147,6 +147,21 @@ export const parseMessageAttachments = (metadata: unknown): InboxAttachment[] =>
   return out;
 };
 
+/** Returns a viewable URL, signing private storage objects on demand. */
+export const resolveAttachmentUrl = async (
+  attachment: InboxAttachment,
+): Promise<{ url: string | null; error?: string }> => {
+  if (attachment.bucket && attachment.path) {
+    const { data, error } = await supabase.storage
+      .from(attachment.bucket)
+      .createSignedUrl(attachment.path, SIGNED_URL_TTL_SECONDS);
+    if (data?.signedUrl) return { url: data.signedUrl };
+    if (!attachment.url) return { url: null, error: error?.message || 'Could not open attachment' };
+  }
+  return attachment.url
+    ? { url: attachment.url }
+    : { url: null, error: 'Attachment location unavailable' };
+};
 
 /* ────────────────────────────────────────────────────────────────
  * Outbound (composer) attachments

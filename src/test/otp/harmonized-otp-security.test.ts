@@ -292,17 +292,13 @@ describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
       expect(verifyVerifier(victimVerifier, attackerVerifier)).toBe(false);
     });
 
-    it("supports legacy SHA-256 verifiers during transition window", () => {
+    it("strictly rejects legacy un-keyed SHA-256 verifiers", () => {
       const otp = "123456";
       const legacySha256 = crypto.createHash("sha256").update(otp).digest("hex");
       const unmatchingHmac = "0000000000000000000000000000000000000000000000000000000000000000";
 
-      // Should succeed because legacy fallback is supplied
-      expect(verifyVerifier(legacySha256, unmatchingHmac, legacySha256)).toBe(true);
-
-      // Should fail if legacy fallback does not match
-      const wrongSha256 = crypto.createHash("sha256").update("999999").digest("hex");
-      expect(verifyVerifier(legacySha256, unmatchingHmac, wrongSha256)).toBe(false);
+      // Must strictly reject unmatching hashes without any un-keyed fallback
+      expect(verifyVerifier(legacySha256, unmatchingHmac)).toBe(false);
     });
 
     it("formalizes challenge attributes including correlationId, status, and custom purpose (e.g. phone_change)", () => {
