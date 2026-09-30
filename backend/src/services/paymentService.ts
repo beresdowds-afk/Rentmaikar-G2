@@ -585,14 +585,33 @@ class PaymentService {
     amount: number;
     currency: string;
   }) {
+    
+
+    if (!opts.paymentId) {
+  throw new Error("paymentId is required for authoritative settlement");
+}
+
+const result = await pool.query(
+  `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
+  [
+    opts.paymentId,
+    opts.provider,
+    opts.providerReference,
+  ]
+);
+
+const settlement = result.rows[0]?.result;
+
+if (!settlement?.ok) {
+  throw new Error(
+    settlement?.reason || "Authoritative payment settlement failed"
+  );
+}
+
+return settlement;
     const pool = getDbPool();
     const currency = opts.currency.toUpperCase();
     const totalAmount = opts.amount;
-
-    // Platform take rate: 15% platform fee, 85% owner share
-    const platformFee = Number((totalAmount * 0.15).toFixed(2));
-    const ownerShare = Number((totalAmount - platformFee).toFixed(2));
-
     try {
       // 1. Resolve owner if not provided
       let ownerId = opts.ownerId;
