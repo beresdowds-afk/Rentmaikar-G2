@@ -645,7 +645,74 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     .status(result.success ? 200 : 502)
     .json(result);
     }
-      
+          // -----------------------------------------------------------------
+      // Inbound Email Retrieval & Secure Attachment Access
+      // -----------------------------------------------------------------
+
+      case "list-inbound-emails": {
+        const result = await listInboundEmails(
+          clientAuth,
+          {
+            page: body.page,
+            pageSize: body.pageSize,
+            search: body.search,
+            processingStatus:
+              body.processingStatus,
+            forwardingStatus:
+              body.forwardingStatus,
+          },
+        );
+
+        return res.status(200).json(result);
+      }
+
+      case "get-inbound-email": {
+        const inboundEmailId = String(
+          body.inboundEmailId ||
+            body.id ||
+            "",
+        ).trim();
+
+        if (!inboundEmailId) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "inboundEmailId is required",
+          });
+        }
+
+        const result =
+          await getInboundEmail(
+            clientAuth,
+            inboundEmailId,
+          );
+
+        return res.status(200).json(result);
+      }
+
+      case "get-inbound-attachment-url": {
+        const attachmentId = String(
+          body.attachmentId ||
+            body.id ||
+            "",
+        ).trim();
+
+        if (!attachmentId) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "attachmentId is required",
+          });
+        }
+
+        const result =
+          await getInboundAttachmentUrl(
+            clientAuth,
+            attachmentId,
+          );
+
+        return res.status(200).json(result);
+      }  
       case "send-email-reply": {
         const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
         const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
