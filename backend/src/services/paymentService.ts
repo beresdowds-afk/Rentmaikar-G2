@@ -9,7 +9,30 @@
  */
 
 import { getDbPool } from "./dbPool";
+export const PAYMENT_PURPOSES = [
+  "rental",
+  "security_deposit",
+  "late_fee",
+  "subscription_training",
+  "subscription_insurance",
+  "subscription_roadside",
+  "iot_device",
+  "other",
+] as const;
 
+export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
+
+function normalizePaymentPurpose(value?: string | null): PaymentPurpose {
+  const purpose = (value || "rental").trim();
+
+  if ((PAYMENT_PURPOSES as readonly string[]).includes(purpose)) {
+    return purpose as PaymentPurpose;
+  }
+
+  throw new Error(
+    `Invalid payment purpose "${purpose}". Allowed purposes: ${PAYMENT_PURPOSES.join(", ")}`
+  );
+}
 export interface CreateOrderParams {
   amount: number;
   currency?: string;
@@ -38,10 +61,10 @@ export interface PaystackInitParams {
   vehicle_id?: string;
   driver_id?: string;
   owner_id?: string;
+  purpose?: PaymentPurpose;
   callback_url?: string;
   metadata?: Record<string, unknown>;
 }
-
 export interface OPayInitParams {
   amount: number;
   currency?: string;
@@ -139,14 +162,12 @@ class PaymentService {
   // ---------------------------------------------------------------------------
 
   async createPayPalOrder(params: CreateOrderParams) {
+      async createPayPalOrder(params: CreateOrderParams) {
     const amountVal = Number(params.amount);
+    const purpose = normalizePaymentPurpose(params.purpose);
+
     if (!amountVal || amountVal <= 0) {
       throw new Error("Payment amount must be greater than 0");
-    }
-
-    const currency = (params.currency || "USD").toUpperCase();
-    if (currency !== "USD") {
-      throw new Error("PayPal only supports USD currency for USA transactions");
     }
 
     const token = await this.getPayPalAccessToken();
@@ -210,7 +231,7 @@ class PaymentService {
           params.owner_id || null,
           params.rental_id || null,
           params.vehicle_id || null,
-          params.purpose || "rental",
+          purpose,
           params.payment_frequency || "weekly",
           orderId,
         ]
@@ -239,8 +260,9 @@ class PaymentService {
           JSON.stringify(paypalOrder),
         ]
       );
-    } catch (e: any) {
-      console.error("[PayPal Service] Error recording paypal_transactions row:", e.message);
+        } catch (e: any) {
+      console.error("[PayPal Service] Error recording payments row:", e.message);
+      throw new Error(`Failed to create payment record: ${e.message}`);
     }
 
     return {
@@ -378,8 +400,9 @@ class PaymentService {
   }
 
   async createPaystackTransaction(params: PaystackInitParams) {
-    const config = this.getPaystackConfig();
+        const config = this.getPaystackConfig();
     const amountVal = Number(params.amount);
+    const purpose = normalizePaymentPurpose(params.purpose);
     if (!amountVal || amountVal <= 0) {
       throw new Error("Payment amount must be greater than 0");
     }
@@ -435,9 +458,18 @@ class PaymentService {
     let paymentId: string | null = null;
     try {
       const pRes = await pool.query(
-        `INSERT INTO public.payments (
-          amount, currency, payment_method, status, driver_id, owner_id, rental_id, vehicle_id, transaction_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                `INSERT INTO public.payments (
+          amount,
+          currency,
+          payment_method,
+          status,
+          driver_id,
+          owner_id,
+          rental_id,
+          vehicle_id,
+          purpose,
+          transaction_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id`,
         [
           amountVal,
@@ -446,14 +478,16 @@ class PaymentService {
           "pending",
           params.driver_id || null,
           params.owner_id || null,
-          params.rental_id || null,
+                    params.rental_id || null,
           params.vehicle_id || null,
+          purpose,
           reference,
         ]
       );
       paymentId = pRes.rows[0]?.id || null;
-    } catch (e: any) {
+        } catch (e: any) {
       console.error("[Paystack Service] Error recording payments row:", e.message);
+      throw new Error(`Failed to create payment record: ${e.message}`);
     }
 
     // Record paystack_transactions
@@ -658,39 +692,41 @@ return settlement;
             opts.provider,
             opts.providerReference,
           ]
-        );
-
-        await pool.query(
-          `SELECT public.post_wallet_entry(
-            $1, 'owner', $2, 'credit', $3, 'owner_share', $4, 'payments', $5, $6, $7, $8
-          )`,
-          [
-            ownerId,
-            currency,
-            ownerShare,
-            `own_share_${opts.provider}_${opts.providerReference}`,
-            opts.paymentId || null,
-            opts.provider,
-            opts.providerReference,
-            `Owner rental earnings from ${opts.provider.toUpperCase()} (less platform fee)`,
-          ]
-        );
-      }
-
-      // 4. Update payments breakdown amounts
-      if (opts.paymentId) {
-        await pool.query(
-          `UPDATE public.payments
-           SET owner_share_amount = $1,
-               platform_fee_amount = $2,
-               settled_at = now()
-           WHERE id = $3`,
-          [ownerShare, platformFee, opts.paymentId]
-        );
-      }
-    } catch (settleErr: any) {
-      console.error("[Payment Settlement Error]:", settleErr.message);
+  async settlePaymentFinancials(opts: {
+    paymentId?: string | null;
+    provider: string;
+    providerReference: string;
+    driverId?: string | null;
+    ownerId?: string | null;
+    rentalId?: string | null;
+    vehicleId?: string | null;
+    amount: number;
+    currency: string;
+  }) {
+    if (!opts.paymentId) {
+      throw new Error("paymentId is required for authoritative settlement");
     }
+
+    const pool = getDbPool();
+
+    const result = await pool.query(
+      `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
+      [
+        opts.paymentId,
+        opts.provider,
+        opts.providerReference,
+      ]
+    );
+
+    const settlement = result.rows[0]?.result;
+
+    if (!settlement?.ok) {
+      throw new Error(
+        settlement?.reason || "Authoritative payment settlement failed"
+      );
+    }
+
+    return settlement;
   }
 
   // ---------------------------------------------------------------------------
