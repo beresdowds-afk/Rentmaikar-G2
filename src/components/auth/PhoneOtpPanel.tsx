@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { assignRole } from '@/lib/user-provisioning';
 import type { AppRole } from '@/lib/role-home';
 import { Button } from '@/components/ui/button';
@@ -118,6 +119,19 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
 
   /** Surface the real edge function error instead of "non-2xx status code". */
   const invokeOtp = async (body: Record<string, unknown>) => {
+    // Stage B: Caller Migration to backend Authenticator via backendBridge / authoritative gateway
+    try {
+      const bridgeRes = await backendBridge.invokeEdgeFunction('phone-otp-custom', body);
+      if (bridgeRes?.data) {
+        if ((bridgeRes.data as any)?.error) throw new Error((bridgeRes.data as any).error);
+        return bridgeRes.data as any;
+      }
+    } catch (bridgeErr: any) {
+      if (bridgeErr?.message && !bridgeErr.message.includes('fetch') && !bridgeErr.message.includes('network')) {
+        throw bridgeErr;
+      }
+    }
+
     const { data, error: fnError } = await supabase.functions.invoke('phone-otp-custom', { body });
     if (fnError) {
       let detail = fnError.message;
@@ -150,11 +164,8 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
       const ok = await trigger(async () => {
         if (mode === 'link') {
           await invokeOtp({ action: 'link_send', phone: e164 });
-        } else if (provider === 'sent' || provider === 'custom') {
-          await invokeOtp({ action: 'send', phone: e164 });
         } else {
-          const { error: otpErr } = await supabase.auth.signInWithOtp({ phone: e164 });
-          if (otpErr) throw otpErr;
+          await invokeOtp({ action: 'send', phone: e164 });
         }
       });
       if (!ok) return;
@@ -183,7 +194,7 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
       if (mode === 'link') {
         await invokeOtp({ action: 'link_verify', phone: e164, code });
         toast.success('Phone number verified and added to your account');
-      } else if (provider === 'sent' || provider === 'custom') {
+      } else {
         const data = await invokeOtp({ action: 'verify', phone: e164, code, full_name: name, role });
         // Set session directly if provided, or exchange one-time token for a real session
         if (data.session?.access_token && data.session?.refresh_token) {
@@ -201,20 +212,6 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
         }
         if (data.is_new_user && name) {
           await supabase.from('profiles').update({ full_name: name }).eq('user_id', data.user_id);
-        }
-        toast.success('Signed in');
-      } else {
-        const { data, error: verifyErr } = await supabase.auth.verifyOtp({ phone: e164, token: code, type: 'sms' });
-        if (verifyErr) throw verifyErr;
-        if (data.user) {
-          try {
-            await assignRole(data.user.id, role as AppRole);
-          } catch (roleErr) {
-            console.warn('Role assignment after phone sign-in failed:', roleErr);
-          }
-          if (name) {
-            await supabase.from('profiles').update({ full_name: name }).eq('user_id', data.user.id);
-          }
         }
         toast.success('Signed in');
       }

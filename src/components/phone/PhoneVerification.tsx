@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -117,34 +118,46 @@ export const PhoneVerification = ({ onVerified, showAsCard = true }: PhoneVerifi
 
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('verify-phone', {
-        body: {
-          action: 'send_code',
-          phone: parsed.number,
-          channel,
-        },
-      });
+      const payload = {
+        action: 'send_code',
+        phone: parsed.number,
+        channel,
+      };
 
-      if (error) {
-        // functions.invoke masks non-2xx bodies — read the real reason
-        // (e.g. the number already belongs to another account).
-        let detail = error.message;
-        try {
-          const ctx = (error as any)?.context;
-          if (ctx && typeof ctx.text === 'function') {
-            const parsedBody = JSON.parse(await ctx.text());
-            if (parsedBody?.error) detail = parsedBody.error;
-          }
-        } catch { /* keep the generic message */ }
-        throw new Error(detail);
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {
+        // Fallback to direct client gateway
       }
 
-      if (data.success) {
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('verify-phone', {
+          body: payload,
+        });
+
+        if (error) {
+          // functions.invoke masks non-2xx bodies — read the real reason
+          let detail = error.message;
+          try {
+            const ctx = (error as any)?.context;
+            if (ctx && typeof ctx.text === 'function') {
+              const parsedBody = JSON.parse(await ctx.text());
+              if (parsedBody?.error) detail = parsedBody.error;
+            }
+          } catch { /* keep generic */ }
+          throw new Error(detail);
+        }
+        resultData = data;
+      }
+
+      if (resultData?.success) {
         setShowOTPDialog(true);
         setCountdown(60);
         toast.success(`Verification code sent via ${channel.toUpperCase()}`);
       } else {
-        throw new Error(data.error || 'Failed to send code');
+        throw new Error(resultData?.error || 'Failed to send code');
       }
     } catch (error) {
       console.error('Error sending verification code:', error);
@@ -162,28 +175,36 @@ export const PhoneVerification = ({ onVerified, showAsCard = true }: PhoneVerifi
 
     setIsVerifying(true);
     try {
-      const { data, error } = await supabase.functions.invoke('verify-phone', {
-        body: {
-          action: 'verify_code',
-          phone: getFullPhoneNumber(),
-          code: otpValue,
-        },
-      });
+      const payload = {
+        action: 'verify_code',
+        phone: getFullPhoneNumber(),
+        code: otpValue,
+      };
 
-      if (error) throw error;
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {
+        // Fallback to direct client gateway
+      }
 
-      if (data.success) {
-        // The verify-phone edge function already persists the normalized E.164
-        // number and flips phone_verified — writing it again from the client is
-        // blocked by RLS/column guards and silently masked verification errors.
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('verify-phone', {
+          body: payload,
+        });
+        if (error) throw error;
+        resultData = data;
+      }
+
+      if (resultData?.success) {
         setIsPhoneVerified(true);
-
         setShowOTPDialog(false);
         setOtpValue('');
         toast.success('Phone number verified successfully!');
         onVerified?.();
       } else {
-        throw new Error(data.error || 'Verification failed');
+        throw new Error(resultData?.error || 'Verification failed');
       }
     } catch (error) {
       console.error('Error verifying code:', error);

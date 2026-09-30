@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -268,11 +269,22 @@ export const TwoFactorSetup = () => {
     }
     setSendingCode(true);
     try {
-      const { data, error } = await supabase.functions.invoke('verify-phone', {
-        body: { action: 'send_code', phone: normalizedPhone, channel: verifyChannel },
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Failed to send code');
+      const payload = { action: 'send_code', phone: normalizedPhone, channel: verifyChannel };
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {
+        // Fallback to client gateway
+      }
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('verify-phone', {
+          body: payload,
+        });
+        if (error) throw error;
+        resultData = data;
+      }
+      if (!resultData?.success) throw new Error(resultData?.error || 'Failed to send code');
       setCodeSent(true);
       setCooldown(45);
       toast.success(`Code sent via ${verifyChannel.toUpperCase()}`);
@@ -290,11 +302,22 @@ export const TwoFactorSetup = () => {
     }
     setVerifyingPhone(true);
     try {
-      const { data, error } = await supabase.functions.invoke('verify-phone', {
-        body: { action: 'verify_code', phone: normalizedPhone, code: phoneOtp },
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Invalid code');
+      const payload = { action: 'verify_code', phone: normalizedPhone, code: phoneOtp };
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {
+        // Fallback to client gateway
+      }
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('verify-phone', {
+          body: payload,
+        });
+        if (error) throw error;
+        resultData = data;
+      }
+      if (!resultData?.success) throw new Error(resultData?.error || 'Invalid code');
       setPhoneVerified(true);
       toast.success('Phone verified — you can now enable 2FA.');
     } catch (err) {
@@ -312,11 +335,22 @@ export const TwoFactorSetup = () => {
     }
     setIsSaving(true);
     try {
-      const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-        body: { action: 'setup', phone: normalizedPhone, channel },
-      });
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error);
+      const payload = { action: 'setup', phone: normalizedPhone, channel };
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {
+        // Fallback to client gateway
+      }
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('send-2fa-code', {
+          body: payload,
+        });
+        if (error) throw error;
+        resultData = data;
+      }
+      if (!resultData?.success) throw new Error(resultData?.error || 'Failed to save 2FA settings');
       setIsEnabled(true);
       setExistingPhone(normalizedPhone);
       toast.success('Two-factor authentication enabled via SMS/WhatsApp!');

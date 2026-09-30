@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
@@ -59,17 +60,30 @@ export const TwoFactorChallenge = ({
     setError(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-        body: {
-          action: 'send_code',
-          user_id: userId,
-          phone,
-          channel,
-        },
-      });
+      const payload = {
+        action: 'send_code',
+        user_id: userId,
+        phone,
+        channel,
+      };
 
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error);
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {
+        // Fallback to client gateway
+      }
+
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('send-2fa-code', {
+          body: payload,
+        });
+        if (error) throw error;
+        resultData = data;
+      }
+
+      if (!resultData?.success) throw new Error(resultData?.error || 'Failed to send code');
 
       setCodeSent(true);
       toast.success(`Verification code sent via ${channel.toUpperCase()}`);
@@ -114,12 +128,21 @@ export const TwoFactorChallenge = ({
               }
             }
           } catch (mfaErr) {
-            // If edge function has verify_totp or verify_code
-            const { data } = await supabase.functions.invoke('send-2fa-code', {
-              body: { action: 'verify_code', user_id: userId, code: otpValue },
-            });
-            if (data && !data.success) {
-              throw new Error(data.error || 'Verification failed');
+            // Verify via backend
+            const payload = { action: 'verify_code', user_id: userId, code: otpValue };
+            let resultData: any = null;
+            try {
+              const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
+              if (bridgeRes?.data) resultData = bridgeRes.data;
+            } catch {}
+            if (!resultData) {
+              const { data } = await supabase.functions.invoke('send-2fa-code', {
+                body: payload,
+              });
+              resultData = data;
+            }
+            if (resultData && !resultData.success) {
+              throw new Error(resultData.error || 'Verification failed');
             }
           }
         }
@@ -130,16 +153,27 @@ export const TwoFactorChallenge = ({
       }
 
       // 2. Phone SMS / WhatsApp Verification
-      const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-        body: {
-          action: 'verify_code',
-          user_id: userId,
-          code: otpValue,
-        },
-      });
+      const payload = {
+        action: 'verify_code',
+        user_id: userId,
+        code: otpValue,
+      };
 
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error);
+      let resultData: any = null;
+      try {
+        const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
+        if (bridgeRes?.data) resultData = bridgeRes.data;
+      } catch {}
+
+      if (!resultData) {
+        const { data, error } = await supabase.functions.invoke('send-2fa-code', {
+          body: payload,
+        });
+        if (error) throw error;
+        resultData = data;
+      }
+
+      if (!resultData?.success) throw new Error(resultData?.error || 'Verification failed');
 
       toast.success('Identity verified!');
       onVerified();

@@ -130,7 +130,19 @@ export class Authenticator {
       };
     }
 
-    // 2. Case A: Authenticated user linking phone number (link_verify / verify_code / phone_link)
+    // 2. Case MFA: Two-factor verification
+    if (purpose === "mfa") {
+      const callerId = params.callerId || consumeResult.userId;
+      return {
+        success: true,
+        valid: true,
+        user_id: callerId,
+        purpose: "mfa",
+        message: "Two-factor authentication verified successfully",
+      };
+    }
+
+    // 3. Case A: Authenticated user linking phone number (link_verify / verify_code / phone_link)
     if (action === "link_verify" || action === "verify_code" || purpose === "phone_link") {
       const callerId = params.callerId || consumeResult.userId;
       if (!callerId) {
