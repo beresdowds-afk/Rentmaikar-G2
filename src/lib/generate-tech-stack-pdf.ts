@@ -199,13 +199,23 @@ export const generateTechStackPDF = (): void => {
   yPos += 10;
 
   // Fee Structure
-  addSectionHeader('Revenue & Fee Structure');
-  addParagraph('The platform operates on a 40% total fee model split between drivers and owners:');
-  addBulletPoint('Driver Payment: Base rental + 20% admin fee');
-  addBulletPoint('Owner Payout: Base rental - 20% management fee');
-  addBulletPoint('Payout Schedule: Weekly on Fridays');
-  addBulletPoint('Currency Separation: Strict USD/NGN isolation per region');
-  yPos += 5;
+  addSectionHeader("Revenue & Fee Structure");
+
+addParagraph(
+  "Rental-payment commission is configured by administrators through the Admin Dashboard Fee Structure and stored as the authoritative owner_share_pct setting. Platform commission is calculated as the remainder of the payment."
+);
+
+addBulletPoint(
+  "Owner Share: configurable through the Admin Dashboard"
+);
+
+addBulletPoint(
+  "Platform Commission: 100% minus the configured Owner Share"
+);
+
+addBulletPoint(
+  "Payment purpose: controlled by the canonical Rentmaikar payment-purpose vocabulary"
+);
 
   // Security Features
   addSectionHeader('Security Implementation');
