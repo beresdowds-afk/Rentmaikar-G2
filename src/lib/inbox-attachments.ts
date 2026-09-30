@@ -1,3 +1,6 @@
+import {
+  getInboundAttachmentUrl,
+} from "@/lib/inbound-email-api";
 import { supabase } from '@/integrations/supabase/client';
 
 export interface InboxAttachment {
@@ -149,20 +152,50 @@ export const parseMessageAttachments = (metadata: unknown): InboxAttachment[] =>
 };
 
 /** Returns a viewable URL, signing private storage objects on demand. */
-export const resolveAttachmentUrl = async (
-  attachment: InboxAttachment,
-): Promise<{ url: string | null; error?: string }> => {
-  if (attachment.bucket && attachment.path) {
-    const { data, error } = await supabase.storage
-      .from(attachment.bucket)
-      .createSignedUrl(attachment.path, SIGNED_URL_TTL_SECONDS);
-    if (data?.signedUrl) return { url: data.signedUrl };
-    if (!attachment.url) return { url: null, error: error?.message || 'Could not open attachment' };
-  }
-  return attachment.url
-    ? { url: attachment.url }
-    : { url: null, error: 'Attachment location unavailable' };
-};
+export const resolveInboundAttachmentUrl =
+  async (
+    attachmentId: string,
+  ): Promise<{
+    url: string | null;
+    error?: string;
+  }> => {
+    if (!attachmentId) {
+      return {
+        url: null,
+        error: "Attachment ID is required",
+      };
+    }
+
+    try {
+      const result =
+        await getInboundAttachmentUrl(
+          attachmentId,
+        );
+
+      if (
+        result.error ||
+        !result.data?.url
+      ) {
+        return {
+          url: null,
+          error:
+            result.error?.message ||
+            "Unable to retrieve attachment",
+        };
+      }
+
+      return {
+        url: result.data.url,
+      };
+    } catch (error: any) {
+      return {
+        url: null,
+        error:
+          error?.message ||
+          "Unable to retrieve attachment",
+      };
+    }
+  };
 
 /* ────────────────────────────────────────────────────────────────
  * Outbound (composer) attachments
