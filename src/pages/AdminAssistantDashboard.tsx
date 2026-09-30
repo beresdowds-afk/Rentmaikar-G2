@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAssistantPermissions } from "@/hooks/useAssistantPermissions";
 import { assistantExcludedTabs, warnTabPermissionDrift, getPortalForTab, getDefaultTabForPortal } from "@/lib/admin-tab-registry";
 import { usePersistedTab } from "@/hooks/usePersistedTab";
-
+import { AdminFeeStructure } from "@/components/admin/AdminFeeStructure";
 import { Lock } from "lucide-react";
 import { Shield, Car, Users, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, CreditCard, Wallet, Mail, Loader2, RefreshCw, TrendingUp, HelpCircle, Inbox, Phone, Headphones, ShieldCheck } from "lucide-react";
 import { CallCenterPage } from "@/components/admin/voip/CallCenterPage";
