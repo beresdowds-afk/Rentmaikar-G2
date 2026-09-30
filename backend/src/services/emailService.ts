@@ -8,9 +8,6 @@
 import {
   fetchResendReceivedEmail,
 } from "./resendReceivingService";
-import {
-  storeInboundAttachment,
-} from "./inboundAttachmentStorageService";
 import crypto from "crypto";
 import pg from "pg";
 import { supabaseBackendService } from "./supabaseService";
@@ -1646,175 +1643,67 @@ export async function handleInboundEmailWebhook(
       );
     }
     /*
- * Phase 8:
- * Persist attachment metadata and store the actual
- * attachment binary in private Supabase Storage.
- */
-let attachmentStorageFailed = false;
-let attachmentStorageError: string | undefined;
-if (receivedEmail.attachments?.length) {
-  for (const attachment of receivedEmail.attachments) {
-    const attachmentId =
-      attachment.id || null;
-
-    const attachmentInsert =
-      await pool.query(
-        `
-          INSERT INTO public.inbound_email_attachments (
-            inbound_email_id,
-            resend_email_id,
-            resend_attachment_id,
-            filename,
-            content_type,
-            size_bytes,
-            storage_status
-          )
-          VALUES (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            'pending'
-          )
-          ON CONFLICT (
-            inbound_email_id,
-            resend_attachment_id
-          ) DO NOTHING
-          RETURNING id
-        `,
-        [
-          inboundDbId,
-          emailId,
-          attachmentId,
-          attachment.filename ||
-            "unnamed-attachment",
-          attachment.contentType ||
-            null,
-          Number.isFinite(attachment.size)
-            ? attachment.size
-            : attachment.content.length,
-        ],
-      );
-
-    /*
-     * If this attachment record already exists,
-     * do not upload it again.
+     * Attachment handling is metadata-first.
+     *
+     * The webhook stores attachment metadata only.
+     * Binary retrieval is deferred until an authorized
+     * Admin Communications Hub request needs the file.
+     *
+     * Resend credentials remain server-side.
      */
-    if (
-      attachmentInsert.rowCount === 0
-    ) {
-      console.log(
-        `[ResendInbound] Attachment record already exists` +
-          ` for resendEmailId=${emailId}` +
-          ` attachmentId=${attachmentId || "unknown"}`,
-      );
+    if (receivedEmail.attachments?.length) {
+      for (const attachment of receivedEmail.attachments) {
+        const attachmentId =
+          attachment.id || null;
 
-      continue;
-    }
-
-    const attachmentDbId =
-      attachmentInsert.rows[0]?.id;
-
-    if (!attachmentDbId) {
-      throw new Error(
-        "Attachment record was inserted but no database id was returned",
-      );
-    }
-
-    const storageResult =
-      await storeInboundAttachment({
-        inboundEmailId:
-          inboundDbId,
-        filename:
-          attachment.filename ||
-          "unnamed-attachment",
-        contentType:
-          attachment.contentType ||
-          null,
-        size:
-          Number.isFinite(attachment.size)
-            ? attachment.size
-            : attachment.content.length,
-        content:
-          attachment.content,
-      });
-
-    if (storageResult.ok) {
-      await pool.query(
-        `
-          UPDATE public.inbound_email_attachments
-          SET
-            storage_status = 'stored',
-            storage_provider = 'supabase',
-            storage_bucket = $2,
-            storage_path = $3,
-            download_error = NULL,
-            updated_at = now()
-          WHERE id = $1
-        `,
-        [
-          attachmentDbId,
-          storageResult.storageBucket,
-          storageResult.storagePath,
-        ],
-      );
+        await pool.query(
+          `
+            INSERT INTO public.inbound_email_attachments (
+              inbound_email_id,
+              resend_email_id,
+              resend_attachment_id,
+              filename,
+              content_type,
+              size_bytes,
+              storage_status,
+              storage_provider
+            )
+            VALUES (
+              $1,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              'pending',
+              'supabase'
+            )
+            ON CONFLICT (
+              inbound_email_id,
+              resend_attachment_id
+            ) DO NOTHING
+          `,
+          [
+            inboundDbId,
+            emailId,
+            attachmentId,
+            attachment.filename ||
+              "unnamed-attachment",
+            attachment.contentType ||
+              null,
+            Number.isFinite(attachment.size)
+              ? attachment.size
+              : null,
+          ],
+        );
+      }
 
       console.log(
-        `[ResendInbound] Stored attachment` +
-          ` dbId=${attachmentDbId}` +
-          ` path=${storageResult.storagePath}`,
+        `[ResendInbound] Persisted metadata for ` +
+          `${receivedEmail.attachments.length}` +
+          ` attachment(s) for dbId=${inboundDbId}`,
       );
-    } else {
-      await pool.query(
-        `
-          UPDATE public.inbound_email_attachments
-          SET
-            storage_status = 'failed',
-            storage_provider = 'supabase',
-            storage_bucket = $2,
-            storage_path = $3,
-            download_error = $4,
-            updated_at = now()
-          WHERE id = $1
-        `,
-        [
-          attachmentDbId,
-          storageResult.storageBucket,
-          storageResult.storagePath ||
-            null,
-          storageResult.error ||
-            "Attachment storage failed",
-        ],
-      );
-
-      console.error(
-        `[ResendInbound] Attachment storage failed` +
-          ` dbId=${attachmentDbId}:` +
-          ` ${storageResult.error || "unknown error"}`,
-      );
-
-      attachmentStorageFailed = true;
-
-attachmentStorageError =
-  storageResult.error ||
-  "Failed to store inbound email attachment";
     }
-  }
-if (attachmentStorageFailed) {
-  throw new Error(
-    attachmentStorageError ||
-      "One or more inbound email attachments failed to store",
-  );
-}
-  console.log(
-    `[ResendInbound] Processed ` +
-      `${receivedEmail.attachments.length}` +
-      ` attachment(s) for dbId=${inboundDbId}` +
-      ` resendEmailId=${emailId}`,
-  );
-}
     console.log(
       `[ResendInbound] Persisted inbound email dbId=${inboundDbId}` +
         ` resendEmailId=${emailId}` +

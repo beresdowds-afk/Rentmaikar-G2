@@ -28,7 +28,7 @@ export interface ResendReceivedEmail {
     filename: string;
     contentType: string;
     size: number;
-    content: Buffer;
+    downloadUrl?: string;
   }>;
 }
 
@@ -104,14 +104,34 @@ async function resendGet(path: string): Promise<any> {
   return response.json();
 }
 
-async function downloadAttachment(
+export async function fetchResendReceivedAttachment(
   emailId: string,
   attachmentId: string,
-): Promise<Buffer | null> {
+): Promise<Buffer> {
+  const normalizedEmailId =
+    String(emailId || "").trim();
+
+  const normalizedAttachmentId =
+    String(attachmentId || "").trim();
+
+  if (!normalizedEmailId) {
+    throw new Error(
+      "Resend inbound email_id is required",
+    );
+  }
+
+  if (!normalizedAttachmentId) {
+    throw new Error(
+      "Resend attachment_id is required",
+    );
+  }
+
   const response = await fetch(
     `${RESEND_API_BASE}/emails/receiving/${encodeURIComponent(
-      emailId,
-    )}/attachments/${encodeURIComponent(attachmentId)}`,
+      normalizedEmailId,
+    )}/attachments/${encodeURIComponent(
+      normalizedAttachmentId,
+    )}`,
     {
       method: "GET",
       headers: resendHeaders(),
@@ -119,21 +139,23 @@ async function downloadAttachment(
   );
 
   if (!response.ok) {
-    console.warn(
-      `[ResendReceiving] Attachment retrieval failed: status=${response.status} attachmentId=${attachmentId}`,
-    );
+    const detail = await response.text();
 
-    return null;
+    throw new Error(
+      `Resend attachment retrieval failed: HTTP ${response.status}: ${detail}`,
+    );
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
+  const buffer =
+    Buffer.from(await response.arrayBuffer());
 
-  if (buffer.length > MAX_ATTACHMENT_BYTES) {
-    console.warn(
-      `[ResendReceiving] Attachment exceeds ${MAX_ATTACHMENT_BYTES} bytes: attachmentId=${attachmentId}`,
+  if (
+    buffer.length >
+    MAX_ATTACHMENT_BYTES
+  ) {
+    throw new Error(
+      `Resend attachment exceeds the ${MAX_ATTACHMENT_BYTES} byte limit`,
     );
-
-    return null;
   }
 
   return buffer;
@@ -187,60 +209,35 @@ export async function fetchResendReceivedEmail(
     }
   }
 
-  const attachments: ResendReceivedEmail["attachments"] = [];
+  const attachments: ResendReceivedEmail["attachments"] =
+    attachmentMetadata
+      .slice(0, MAX_ATTACHMENTS)
+      .map((attachment) => ({
+        id: attachment.id
+          ? String(attachment.id)
+          : undefined,
 
-  for (
-    const attachment of attachmentMetadata.slice(0, MAX_ATTACHMENTS)
-  ) {
-    let content: Buffer | null = null;
+        filename:
+          String(
+            attachment.filename || "attachment",
+          ),
 
-    if (attachment.download_url) {
-      try {
-        const response = await fetch(attachment.download_url);
+        contentType:
+          String(
+            attachment.content_type ||
+              "application/octet-stream",
+          ),
 
-        if (response.ok) {
-          const candidate = Buffer.from(
-            await response.arrayBuffer(),
-          );
+        size:
+          Number.isFinite(attachment.size)
+            ? Number(attachment.size)
+            : 0,
 
-          if (candidate.length <= MAX_ATTACHMENT_BYTES) {
-            content = candidate;
-          }
-        }
-      } catch (error: any) {
-        console.warn(
-          "[ResendReceiving] Attachment URL retrieval failed:",
-          error?.message || error,
-        );
-      }
-    }
-
-    if (!content && attachment.id) {
-      content = await downloadAttachment(
-        normalizedEmailId,
-        String(attachment.id),
-      );
-    }
-
-    if (!content) {
-      continue;
-    }
-
-    attachments.push({
-      id: attachment.id
-        ? String(attachment.id)
-        : undefined,
-      filename:
-        String(attachment.filename || "attachment"),
-      contentType:
-        String(
-          attachment.content_type ||
-            "application/octet-stream",
-        ),
-      size: content.length,
-      content,
-    });
-  }
+        downloadUrl:
+          attachment.download_url
+            ? String(attachment.download_url)
+            : undefined,
+      }));
 
   return {
     from: String(email?.from || ""),

@@ -1,5 +1,11 @@
 import { supabaseBackendService } from "./supabaseService";
 import { getDbPool } from "./dbPool";
+import {
+  fetchResendReceivedAttachment,
+} from "./resendReceivingService";
+import {
+  storeInboundAttachment,
+} from "./inboundAttachmentStorageService";
 
 const ALLOWED_ROLES = new Set([
   "admin",
@@ -158,8 +164,10 @@ export async function listInboundEmails(
 
     conditions.push(`
       (
-        e.from_email ILIKE $${index}
-        OR e.to_email ILIKE $${index}
+        e.from_address ILIKE $${index}
+        OR e.to_addresses::text ILIKE $${index}
+        OR e.cc_addresses::text ILIKE $${index}
+        OR e.bcc_addresses::text ILIKE $${index}
         OR e.subject ILIKE $${index}
         OR e.text_body ILIKE $${index}
         OR e.message_id ILIKE $${index}
@@ -192,10 +200,10 @@ export async function listInboundEmails(
       SELECT
         e.id,
         e.resend_email_id,
-        e.from_email,
-        e.to_email,
-        e.cc,
-        e.bcc,
+        e.from_address,
+        e.to_addresses,
+        e.cc_addresses,
+        e.bcc_addresses,
         e.subject,
         e.text_body,
         e.html_body,
@@ -233,11 +241,19 @@ export async function listInboundEmails(
         resendEmailId:
           row.resend_email_id,
         fromEmail:
-          row.from_email,
+          row.from_address,
         toEmail:
-          row.to_email,
-        cc: row.cc,
-        bcc: row.bcc,
+          Array.isArray(row.to_addresses)
+            ? row.to_addresses.join(", ")
+            : "",
+        cc:
+          Array.isArray(row.cc_addresses)
+            ? row.cc_addresses.join(", ")
+            : "",
+        bcc:
+          Array.isArray(row.bcc_addresses)
+            ? row.bcc_addresses.join(", ")
+            : "",
         subject:
           row.subject,
         textBody:
@@ -282,10 +298,10 @@ export async function getInboundEmail(
       SELECT
         id,
         resend_email_id,
-        from_email,
-        to_email,
-        cc,
-        bcc,
+        from_address,
+        to_addresses,
+        cc_addresses,
+        bcc_addresses,
         subject,
         text_body,
         html_body,
@@ -345,11 +361,22 @@ export async function getInboundEmail(
       resendEmailId:
         row.resend_email_id,
       fromEmail:
-        row.from_email,
+        row.from_address,
+
       toEmail:
-        row.to_email,
-      cc: row.cc,
-      bcc: row.bcc,
+        Array.isArray(row.to_addresses)
+          ? row.to_addresses.join(", ")
+          : "",
+
+      cc:
+        Array.isArray(row.cc_addresses)
+          ? row.cc_addresses.join(", ")
+          : "",
+
+      bcc:
+        Array.isArray(row.bcc_addresses)
+          ? row.bcc_addresses.join(", ")
+          : "",
       subject:
         row.subject,
       textBody:
@@ -449,9 +476,109 @@ export async function getInboundAttachmentUrl(
   const attachment = result.rows[0];
 
   if (attachment.storage_status !== "stored") {
-    throw new Error(
-      "Attachment is not available in storage",
-    );
+    const attachmentResult =
+      await pool.query(
+        `
+          SELECT
+            a.inbound_email_id,
+            a.resend_email_id,
+            a.resend_attachment_id,
+            a.filename,
+            a.content_type,
+            a.size_bytes
+          FROM public.inbound_email_attachments a
+          WHERE a.id = $1
+          LIMIT 1
+        `,
+        [attachmentId],
+      );
+
+    if (attachmentResult.rowCount === 0) {
+      throw new Error(
+        "Inbound attachment not found",
+      );
+    }
+
+    const source =
+      attachmentResult.rows[0];
+
+    if (!source.resend_attachment_id) {
+      throw new Error(
+        "Resend attachment identifier is missing",
+      );
+    }
+
+    try {
+      const content =
+        await fetchResendReceivedAttachment(
+          source.resend_email_id,
+          source.resend_attachment_id,
+        );
+
+      const storageResult =
+        await storeInboundAttachment({
+          inboundEmailId:
+            source.inbound_email_id,
+          filename:
+            source.filename,
+          contentType:
+            source.content_type,
+          size:
+            source.size_bytes,
+          content,
+        });
+
+      if (!storageResult.ok) {
+        throw new Error(
+          storageResult.error ||
+            "Failed to store inbound attachment",
+        );
+      }
+
+      await pool.query(
+        `
+          UPDATE public.inbound_email_attachments
+          SET
+            storage_status = 'stored',
+            storage_provider = 'supabase',
+            storage_bucket = $2,
+            storage_path = $3,
+            size_bytes = $4,
+            download_error = NULL,
+            updated_at = now()
+          WHERE id = $1
+        `,
+        [
+          attachmentId,
+          storageResult.storageBucket,
+          storageResult.storagePath,
+          storageResult.sizeBytes,
+        ],
+      );
+
+      attachment.storage_status = "stored";
+      attachment.storage_bucket = storageResult.storageBucket;
+      attachment.storage_path = storageResult.storagePath;
+      attachment.size_bytes = storageResult.sizeBytes;
+    } catch (error: any) {
+      await pool.query(
+        `
+          UPDATE public.inbound_email_attachments
+          SET
+            storage_status = 'failed',
+            download_error = $2,
+            updated_at = now()
+          WHERE id = $1
+        `,
+        [
+          attachmentId,
+          error?.message ||
+            "Attachment retrieval failed",
+        ],
+      );
+
+      throw error;
+    }
   }
 
   if (
