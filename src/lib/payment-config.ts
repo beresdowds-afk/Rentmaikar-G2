@@ -1,66 +1,38 @@
-// Payment Fee Structure Configuration
-// Based on 40% platform fee model:
-// - Drivers pay: base + 20% (admin fee)
-// - Owners receive: base - 20% (management fee)
-// - Platform earns: 40% total
+// Commission is authoritative in public.platform_kv_settings.owner_share_pct
+// and applied by public.settle_payment_financials().
+// Do not hard-code owner/platform commission percentages here.
 
 export const PAYMENT_CONFIG = {
-  // Fee percentages
-  ADMIN_FEE_PERCENT: 20, // Driver pays base + 20%
-  MANAGEMENT_FEE_PERCENT: 20, // Owner receives base - 20%
-  PLATFORM_FEE_PERCENT: 40, // Total platform earnings
-  DAILY_PAYMENT_FINE_PERCENT: 10, // 10% extra admin fee for daily payment option
-  
-  // Payment frequency settings
-  MINIMUM_DOWN_PAYMENT_DAYS: 2, // Minimum 2 days down payment required
-  
-  // Payment schedule
-  DAILY_DEBIT_TIME: '00:01', // 12:01 AM
-  WEEKLY_PAYOUT_DAY: 5, // Friday (0 = Sunday)
-  
-  // Default sequence for WEEKLY payments (72 hours / 3 days)
+  DAILY_PAYMENT_FINE_PERCENT: 10,
+
+  MINIMUM_DOWN_PAYMENT_DAYS: 2,
+
+  DAILY_DEBIT_TIME: "00:01",
+  WEEKLY_PAYOUT_DAY: 5,
+
   WEEKLY_DEFAULT: {
     GRACE_PERIOD_HOURS: 72,
-    NOTIFICATION_HOURS: [24, 48, 72], // 3 notifications at 24-hour intervals
+    NOTIFICATION_HOURS: [24, 48, 72],
     LOCKDOWN_AFTER_HOURS: 72,
   },
-  
-  // Default sequence for DAILY payments (36 hours)
+
   DAILY_DEFAULT: {
     GRACE_PERIOD_HOURS: 36,
-    NOTIFICATION_HOURS: [12, 24, 36], // 3 notifications at 12-hour intervals
+    NOTIFICATION_HOURS: [12, 24, 36],
     LOCKDOWN_AFTER_HOURS: 36,
   },
-  
-  // Currency settings
+
   CURRENCIES: {
-    USD: { symbol: '$', decimals: 2, minAmount: 1 },
-    NGN: { symbol: '₦', decimals: 2, minAmount: 100 },
+    USD: { symbol: "$", decimals: 2, minAmount: 1 },
+    NGN: { symbol: "₦", decimals: 2, minAmount: 100 },
   },
-  
-  // Payment methods
+
   PAYMENT_METHODS: {
-    USA: ['paypal', 'stripe', 'bank_transfer'] as const,
-    NIGERIA: ['paystack', 'opay', 'flutterwave', 'bank_transfer'] as const,
+    USA: ["paypal", "stripe",] as const,
+    NIGERIA: ["paystack", "opay"] as const,
   },
-  
-  // Bank details for manual transfers
-  BANK_ACCOUNTS: {
-    USA: {
-      bankName: 'Chase Bank',
-      accountName: 'RideShare Platform LLC',
-      accountNumber: 'XXXX-XXXX-1234',
-      routingNumber: '021000021',
-      accountType: 'Business Checking',
-    },
-    NIGERIA: {
-      bankName: 'GTBank',
-      accountName: 'RideShare Nigeria Ltd',
-      accountNumber: '0123456789',
-      bankCode: '058',
-    },
-  },
-} as const;
+   },
+  } as const;
 
 /**
  * Currency codes are open-ended: 'USD' and 'NGN' are the built-in launch
@@ -130,10 +102,8 @@ export function calculatePaymentBreakdown(
   currency: CurrencyCode,
   frequency: PaymentFrequency = 'weekly',
   downPaymentDays: number = PAYMENT_CONFIG.MINIMUM_DOWN_PAYMENT_DAYS
-): PaymentBreakdown {
-  const adminFee = baseAmount * (PAYMENT_CONFIG.ADMIN_FEE_PERCENT / 100);
-  const managementFee = baseAmount * (PAYMENT_CONFIG.MANAGEMENT_FEE_PERCENT / 100);
-  
+):  
+    
   // Calculate daily rates
   const dailyRate = baseAmount / 7;
   const dailyFine = frequency === 'daily' 
