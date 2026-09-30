@@ -1,8 +1,4 @@
-import {
-  getInboundAttachmentUrl,
-} from "@/lib/inbound-email-api";
 import { supabase } from '@/integrations/supabase/client';
-
 export interface InboxAttachment {
   id: string;
   name: string;
@@ -151,51 +147,6 @@ export const parseMessageAttachments = (metadata: unknown): InboxAttachment[] =>
   return out;
 };
 
-/** Returns a viewable URL, signing private storage objects on demand. */
-export const resolveInboundAttachmentUrl =
-  async (
-    attachmentId: string,
-  ): Promise<{
-    url: string | null;
-    error?: string;
-  }> => {
-    if (!attachmentId) {
-      return {
-        url: null,
-        error: "Attachment ID is required",
-      };
-    }
-
-    try {
-      const result =
-        await getInboundAttachmentUrl(
-          attachmentId,
-        );
-
-      if (
-        result.error ||
-        !result.data?.url
-      ) {
-        return {
-          url: null,
-          error:
-            result.error?.message ||
-            "Unable to retrieve attachment",
-        };
-      }
-
-      return {
-        url: result.data.url,
-      };
-    } catch (error: any) {
-      return {
-        url: null,
-        error:
-          error?.message ||
-          "Unable to retrieve attachment",
-      };
-    }
-  };
 
 /* ────────────────────────────────────────────────────────────────
  * Outbound (composer) attachments
