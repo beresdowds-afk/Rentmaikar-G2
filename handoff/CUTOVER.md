@@ -233,3 +233,69 @@
    - [x] PWA manifest and icons verified for offline-capable progressive installation.
    - [x] Multi-region currency and localization verified for USA and Nigeria markets.
    - [x] Complete 14-Phase Enterprise Architecture officially certified for live production operation.
+
+### Phase 15: Unified Authentication Modernization, Hardened OTP Architecture, Legacy Auth Decommissioning & Zero-Trust Provider Consolidation
+1. **Four-Stage Phased Authentication Migration Execution**:
+   - **Stage A — Security Corrections First**:
+     - Hardcoded OTP secret fallback permanently eliminated; `getOtpAuthSecret()` strictly requires production environment secret (`OTP_AUTH_SECRET` or `SUPABASE_SERVICE_ROLE_KEY`).
+     - Legacy un-keyed SHA-256 fallback permanently removed from `verifyVerifier()`; strictly enforces timing-safe HMAC-SHA256 evaluation.
+     - Strict challenge lookup: `WHERE (identity = $1 OR phone = $1) AND purpose = $2` utilizing compound index `idx_phone_otp_codes_identity_purpose`.
+     - Elimination of the loose `"auth"` purpose bypass; cross-purpose verification attempts are rejected.
+     - Fail-closed rate limiting: database cooldown (60s) and velocity (max 3 per 10m) query failures immediately reject requests.
+     - Atomic transactional consumption: PostgreSQL `SELECT ... FOR UPDATE` locking prevents concurrent replay or race condition consumption attacks.
+     - Resolved OTP-consumption/session-creation transaction boundary: automatic rollback of challenge status (`consumed_at = NULL, status = 'delivered'`) if user creation or GoTrue session link minting fails.
+   - **Stage B — Caller Migration**:
+     - `PhoneOtpPanel` migrated from direct Edge Function invocation to backend Authenticator (`/api/functions/phone-otp-custom` / backend auth router).
+     - `PhoneVerification` migrated from legacy `verify-phone` Edge Function to backend `OtpService` verification endpoint via `backendBridge`.
+     - `TwoFactorSetup` migrated to unified backend verification endpoint.
+     - Email verification and OTP consolidated under unified `OtpService`.
+   - **Stage C — Legacy Shutdown**:
+     - Decommissioning pipeline for legacy Supabase Edge Functions: `phone-otp-custom`, `verify-phone`, and `send-2fa-code`.
+     - Progressive shutdown order: `disable` &rarr; `monitor` &rarr; `remove`.
+   - **Stage D — Provider Consolidation**:
+     - OTP-specific Twilio, Termii, and Lovable gateway branching stripped from authentication path.
+     - Single authoritative CPaaS provider: `SENT.dm` via `MessagingBridge`.
+2. **Canonical Production Authentication Topology**:
+   ```
+                       AUTHENTICATION ARCHITECTURE
+   Frontend (Browser)
+      │
+      ▼
+   Backend Auth API (/api/functions)
+      │
+      ├──────────────────► OtpService (HMAC-SHA256, atomic transactions)
+      │                       │
+      │                       ▼
+      │                 public.phone_otp_codes (PostgreSQL)
+      │                       │
+      │                       ▼
+      │                 MessagingBridge (Singleton)
+      │                       │
+      │                       ▼
+      │                    SENT.dm (Single Authoritative Provider)
+      │
+      ▼
+   Authenticator (Singleton)
+      │
+      ▼
+   Supabase GoTrue Admin (generateLink magiclink session exchange)
+      │
+      ▼
+   Supabase Auth Session (Native client verifyOtp exchange)
+      │
+      ▼
+   Supabase JWT & Row Level Security (RLS)
+   ```
+3. **Operational Guarantees & Anti-Tamper Policy**:
+   - Zero plaintext OTP storage; verifier is HMAC-SHA256 bound to `challenge_id:purpose:identity:code`.
+   - Zero tampering with internal `auth.users.recovery_token`.
+   - Strict 10-minute expiration window with automatic lockout after 5 incorrect attempts.
+   - Full non-repudiation audit logging in `public.verification_event_log`.
+4. **Final 15-Phase Production Sign-Off Checklist**:
+   - [x] Hardcoded OTP secret fallback removed and validated fail-closed.
+   - [x] Legacy un-keyed SHA-256 fallback removed and timing-safe HMAC enforced.
+   - [x] Strict `identity + purpose` challenge lookup active with compound index.
+   - [x] Atomic transactional challenge consumption with `SELECT ... FOR UPDATE` verified.
+   - [x] OTP consumption rollback on session creation failure verified.
+   - [x] Single-provider CPaaS routing via `MessagingBridge` &rarr; `SENT.dm` verified.
+   - [x] Complete 15-Phase Enterprise Architecture verified, certified, and ready for commercial operation.
