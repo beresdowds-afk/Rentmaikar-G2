@@ -1223,7 +1223,12 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "persona-webhook": {
-      return { status: 200, data: { received: true } };
+      const { personaWebhookService } = await import("../../backend/src/services/personaWebhookService");
+      const res = await personaWebhookService.handle({
+        headers: (request.headers || {}) as any,
+        body: request.body,
+      });
+      return { status: res.status, data: res.body };
     }
 
     case "billing-portal": {
@@ -1337,6 +1342,166 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         };
       } catch (err: any) {
         return { status: 200, data: { success: true, ok: true, requires_2fa: false } };
+      }
+    }
+
+    case "billing-reconciliation": {
+      try {
+        const limit = Math.min(Number(body?.limit || 500), 1000);
+        const admin = getSupabase();
+        const { data, error } = await admin
+          .from("billing_reconciliation_view")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (error) {
+          return { status: 500, data: { ok: false, error: error.message, rows: [] } };
+        }
+        return { status: 200, data: { ok: true, rows: data ?? [] } };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message, rows: [] } };
+      }
+    }
+
+    case "owner-withdrawal-data": {
+      try {
+        const ownerId = body.owner_id || body.ownerId || body.userId;
+        const currency = body.currency || "USD";
+        if (!ownerId) {
+          return { status: 400, data: { ok: false, error: "owner_id is required" } };
+        }
+        const { paymentService } = await import("../../backend/src/services/paymentService");
+        const data = await paymentService.getOwnerWithdrawalData(ownerId, currency);
+        return { status: 200, data: { ok: true, ...data } };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message } };
+      }
+    }
+
+    case "initiate-owner-withdrawal": {
+      try {
+        const ownerId = body.owner_id || body.ownerId || body.userId;
+        const amount = Number(body.amount);
+        const currency = body.currency || "USD";
+        const provider = body.provider || "paypal";
+        const payoutAccountId = body.payout_account_id || body.payoutAccountId;
+        if (!ownerId || !amount || amount <= 0) {
+          return { status: 400, data: { ok: false, error: "owner_id and valid amount are required" } };
+        }
+        const { paymentService } = await import("../../backend/src/services/paymentService");
+        const result = await paymentService.processOwnerPayout({
+          owner_id: ownerId,
+          amount,
+          currency,
+          provider,
+          payout_account_id: payoutAccountId,
+          initiated_by: body.initiated_by || "owner",
+        });
+        return { status: 200, data: result };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message } };
+      }
+    }
+
+    case "submit-vehicle-for-review": {
+      try {
+        const vehicleId = body.vehicleId || body.vehicle_id;
+        const photoUrls = body.photoUrls || body.photo_urls || [];
+        const pickupCity = body.pickupCity || body.pickup_city;
+        const pickupLocation = body.pickupLocation || body.pickup_location;
+        const pickupAddress = body.pickupAddress || body.pickup_address;
+        const pickupInstructions = body.pickupInstructions || body.pickup_instructions;
+
+        if (!vehicleId) {
+          return { status: 400, data: { ok: false, error: "vehicleId is required" } };
+        }
+
+        const admin = getSupabase();
+        const { error } = await admin
+          .from("vehicles")
+          .update({
+            review_status: "pending",
+            is_public: false,
+            status: "pending",
+            pickup_city: pickupCity || null,
+            pickup_location: pickupLocation || null,
+            pickup_address: pickupAddress || null,
+            pickup_instructions: pickupInstructions || null,
+            photo_urls: photoUrls,
+            updated_at: new Date().toISOString(),
+          } as never)
+          .eq("id", vehicleId);
+
+        if (error) {
+          return { status: 500, data: { ok: false, error: error.message } };
+        }
+
+        return {
+          status: 200,
+          data: {
+            ok: true,
+            success: true,
+            vehicleId,
+            review_status: "pending",
+            message: "Vehicle submitted for administrative review",
+          },
+        };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message } };
+      }
+    }
+
+    case "driver-vehicle-command": {
+      try {
+        const driverId = body.driverId || body.driver_id;
+        const vehicleId = body.vehicleId || body.vehicle_id;
+        const command = body.command;
+        const parameters = body.parameters || {};
+
+        if (!driverId || !vehicleId || !command) {
+          return { status: 400, data: { ok: false, error: "driver_id, vehicle_id, and command are required" } };
+        }
+
+        const admin = getSupabase();
+
+        // 1. Authenticate user & role check
+        const { data: roles } = await admin
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", driverId)
+          .eq("role", "driver");
+
+        if (!roles || roles.length === 0) {
+          return { status: 403, data: { ok: false, error: "Not authorized: User does not have driver role" } };
+        }
+
+        // 2. Authoritative Active Rental Check
+        const { data: rentals } = await admin
+          .from("rentals")
+          .select("id, status")
+          .eq("driver_id", driverId)
+          .eq("vehicle_id", vehicleId)
+          .eq("status", "active")
+          .limit(1);
+
+        if (!rentals || rentals.length === 0) {
+          return {
+            status: 403,
+            data: { ok: false, error: "Not authorized: Driver does not have an active rental for this vehicle" },
+          };
+        }
+
+        return {
+          status: 200,
+          data: {
+            ok: true,
+            success: true,
+            command,
+            message: `Command '${command}' verified against active rental ${rentals[0].id}`,
+          },
+        };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message } };
       }
     }
 

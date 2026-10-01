@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useImpersonation } from "@/contexts/ImpersonationContext";
 import { useRegion } from "@/contexts/RegionContext";
@@ -114,32 +115,56 @@ export const OwnerWithdrawalPanel = () => {
   const load = useCallback(async () => {
     if (!targetId) return;
     setLoading(true);
-    const [bal, accs, hist] = await Promise.all([
-      supabase.rpc("get_owner_available_balance", { _owner_id: targetId, _currency: currency }),
-      supabase
-        .from("owner_payout_accounts")
-        .select("id,provider,currency,bank_name,account_number,account_name,paypal_email,recipient_code,is_default")
-        .eq("owner_id", targetId)
-        .order("is_default", { ascending: false }),
-      supabase
-        .from("owner_payouts")
-        .select("id,amount,currency,status,provider,transfer_reference,failure_reason,created_at,processed_at")
-        .eq("owner_id", targetId)
-        .order("created_at", { ascending: false })
-        .limit(25),
-    ]);
-    setBalance(Number(bal.data ?? 0));
-    const list = (accs.data ?? []) as PayoutAccount[];
-    setAccounts(list);
-    setAccountId((prev) => prev || list.find((a) => a.currency === currency)?.id || list[0]?.id || "");
-    setPayouts((hist.data ?? []) as Payout[]);
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("phone_verified")
-      .eq("user_id", targetId)
-      .maybeSingle();
-    setPhoneVerified(!!profile?.phone_verified);
-    setLoading(false);
+    try {
+      const data = await backendBridge.call<{
+        ok?: boolean;
+        balance?: number;
+        accounts?: PayoutAccount[];
+        payouts?: Payout[];
+        phoneVerified?: boolean;
+      }>("owner-withdrawal-data", {
+        owner_id: targetId,
+        currency,
+      });
+
+      setBalance(Number(data?.balance ?? 0));
+      if (data?.phoneVerified !== undefined) {
+        setPhoneVerified(data.phoneVerified);
+      }
+      const list = (data?.accounts ?? []) as PayoutAccount[];
+      setAccounts(list);
+      setAccountId((prev) => prev || list.find((a) => a.currency === currency)?.id || list[0]?.id || "");
+      setPayouts((data?.payouts ?? []) as Payout[]);
+    } catch {
+      // Graceful fallback to direct queries if bridge is offline
+      const [bal, accs, hist, prof] = await Promise.all([
+        supabase.rpc("get_owner_available_balance", { _owner_id: targetId, _currency: currency }),
+        supabase
+          .from("owner_payout_accounts")
+          .select("id,provider,currency,bank_name,account_number,account_name,paypal_email,recipient_code,is_default")
+          .eq("owner_id", targetId)
+          .order("is_default", { ascending: false }),
+        supabase
+          .from("owner_payouts")
+          .select("id,amount,currency,status,provider,transfer_reference,failure_reason,created_at,processed_at")
+          .eq("owner_id", targetId)
+          .order("created_at", { ascending: false })
+          .limit(25),
+        supabase
+          .from("profiles")
+          .select("phone_verified")
+          .eq("user_id", targetId)
+          .maybeSingle(),
+      ]);
+      setBalance(Number(bal.data ?? 0));
+      const list = (accs.data ?? []) as PayoutAccount[];
+      setAccounts(list);
+      setAccountId((prev) => prev || list.find((a) => a.currency === currency)?.id || list[0]?.id || "");
+      setPayouts((hist.data ?? []) as Payout[]);
+      setPhoneVerified(!!prof.data?.phone_verified);
+    } finally {
+      setLoading(false);
+    }
   }, [targetId, currency]);
 
   useEffect(() => {
@@ -189,13 +214,14 @@ export const OwnerWithdrawalPanel = () => {
     if (!selected) return;
     setSubmitting(true);
     try {
-      const fn = selected.provider === "paypal" ? "initiate-paypal-payout" : "initiate-paystack-transfer";
-      const { data, error } = await supabase.functions.invoke(fn, {
-        body: { amount: numericAmount, payoutAccountId: selected.id, authorizationId },
+      await backendBridge.call("initiate-owner-withdrawal", {
+        owner_id: targetId,
+        amount: numericAmount,
+        currency,
+        provider: selected.provider,
+        payout_account_id: selected.id,
+        authorization_id: authorizationId,
       });
-      if (error) throw new Error(await readEdgeError(error, "Withdrawal failed"));
-      const err = (data as { error?: string })?.error;
-      if (err) throw new Error(err);
       toast.success("Withdrawal submitted — funds are on their way.");
       setAmount("");
       await load();

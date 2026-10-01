@@ -162,7 +162,6 @@ class PaymentService {
   // ---------------------------------------------------------------------------
 
   async createPayPalOrder(params: CreateOrderParams) {
-      async createPayPalOrder(params: CreateOrderParams) {
     const amountVal = Number(params.amount);
     const purpose = normalizePaymentPurpose(params.purpose);
 
@@ -260,9 +259,9 @@ class PaymentService {
           JSON.stringify(paypalOrder),
         ]
       );
-        } catch (e: any) {
-      console.error("[PayPal Service] Error recording payments row:", e.message);
-      throw new Error(`Failed to create payment record: ${e.message}`);
+    } catch (e: any) {
+      console.error("[PayPal Service] Error recording paypal_transactions row:", e.message);
+      throw new Error(`Failed to create paypal transaction record: ${e.message}`);
     }
 
     return {
@@ -619,90 +618,6 @@ class PaymentService {
     amount: number;
     currency: string;
   }) {
-    
-
-    if (!opts.paymentId) {
-  throw new Error("paymentId is required for authoritative settlement");
-}
-
-const result = await pool.query(
-  `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
-  [
-    opts.paymentId,
-    opts.provider,
-    opts.providerReference,
-  ]
-);
-
-const settlement = result.rows[0]?.result;
-
-if (!settlement?.ok) {
-  throw new Error(
-    settlement?.reason || "Authoritative payment settlement failed"
-  );
-}
-
-return settlement;
-    const pool = getDbPool();
-    const currency = opts.currency.toUpperCase();
-    const totalAmount = opts.amount;
-    try {
-      // 1. Resolve owner if not provided
-      let ownerId = opts.ownerId;
-      if (!ownerId && opts.rentalId) {
-        const rRes = await pool.query(`SELECT owner_id FROM public.rentals WHERE id = $1`, [opts.rentalId]);
-        if (rRes.rows[0]?.owner_id) ownerId = rRes.rows[0].owner_id;
-      }
-      if (!ownerId && opts.vehicleId) {
-        const vRes = await pool.query(`SELECT owner_id FROM public.vehicles WHERE id = $1`, [opts.vehicleId]);
-        if (vRes.rows[0]?.owner_id) ownerId = vRes.rows[0].owner_id;
-      }
-
-      // 2. Post Driver Ledger Entry
-      if (opts.driverId) {
-        await pool.query(
-          `SELECT public.post_wallet_entry(
-            $1, 'driver', $2, 'credit', $3, 'rental_payment', $4, 'payments', $5, $6, $7, $8
-          )`,
-          [
-            opts.driverId,
-            currency,
-            totalAmount,
-            `drv_pay_${opts.provider}_${opts.providerReference}`,
-            opts.paymentId || null,
-            opts.provider,
-            opts.providerReference,
-            `Rental payment completed via ${opts.provider.toUpperCase()}`,
-          ]
-        );
-      }
-
-      // 3. Post Owner Earnings and Owner Wallet Credit
-      if (ownerId && ownerShare > 0) {
-        await pool.query(
-          `INSERT INTO public.owner_earnings (
-            owner_id, vehicle_id, rental_id, amount, currency, status, payout_method, payout_reference, processed_at
-          ) VALUES ($1, $2, $3, $4, $5, 'completed', $6, $7, now())`,
-          [
-            ownerId,
-            opts.vehicleId || null,
-            opts.rentalId || null,
-            ownerShare,
-            currency,
-            opts.provider,
-            opts.providerReference,
-          ]
-  async settlePaymentFinancials(opts: {
-    paymentId?: string | null;
-    provider: string;
-    providerReference: string;
-    driverId?: string | null;
-    ownerId?: string | null;
-    rentalId?: string | null;
-    vehicleId?: string | null;
-    amount: number;
-    currency: string;
-  }) {
     if (!opts.paymentId) {
       throw new Error("paymentId is required for authoritative settlement");
     }
@@ -730,8 +645,47 @@ return settlement;
   }
 
   // ---------------------------------------------------------------------------
-  // Owner Payout Initiation
+  // Owner Payout Initiation & Withdrawal Query
   // ---------------------------------------------------------------------------
+
+  async getOwnerWithdrawalData(ownerId: string, currency: string = "USD") {
+    const pool = getDbPool();
+    const curr = (currency || "USD").toUpperCase();
+    const [balRes, accsRes, payoutsRes, profileRes] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(available_balance, 0) as balance
+         FROM public.wallet_accounts
+         WHERE user_id = $1 AND account_type = 'owner' AND currency = $2`,
+        [ownerId, curr]
+      ),
+      pool.query(
+        `SELECT id, provider, currency, bank_name, account_number, account_name, paypal_email, recipient_code, is_default
+         FROM public.owner_payout_accounts
+         WHERE owner_id = $1
+         ORDER BY is_default DESC, created_at DESC`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT id, amount, currency, status, provider, transfer_reference, failure_reason, created_at, processed_at
+         FROM public.owner_payouts
+         WHERE owner_id = $1
+         ORDER BY created_at DESC
+         LIMIT 25`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT phone_verified FROM public.profiles WHERE user_id = $1`,
+        [ownerId]
+      ),
+    ]);
+
+    return {
+      balance: Number(balRes.rows[0]?.balance || 0),
+      accounts: accsRes.rows,
+      payouts: payoutsRes.rows,
+      phoneVerified: Boolean(profileRes.rows[0]?.phone_verified),
+    };
+  }
 
   async processOwnerPayout(opts: {
     owner_id: string;
@@ -749,66 +703,80 @@ return settlement;
       throw new Error("Invalid owner_id or payout amount");
     }
 
-    // Verify wallet balance
-    const wRes = await pool.query(
-      `SELECT available_balance FROM public.wallet_accounts WHERE user_id = $1 AND currency = $2 AND account_type = 'owner'`,
-      [opts.owner_id, currency]
-    );
-    const balance = Number(wRes.rows[0]?.available_balance || 0);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    if (balance < amountVal) {
-      throw new Error(`Insufficient available balance ($${balance.toFixed(2)} available, requested $${amountVal.toFixed(2)})`);
+      // Verify wallet balance with atomic FOR UPDATE row-level lock
+      const wRes = await client.query(
+        `SELECT id, available_balance FROM public.wallet_accounts
+         WHERE user_id = $1 AND currency = $2 AND account_type = 'owner'
+         FOR UPDATE`,
+        [opts.owner_id, currency]
+      );
+      const balance = Number(wRes.rows[0]?.available_balance || 0);
+
+      if (balance < amountVal) {
+        throw new Error(`Insufficient available balance ($${balance.toFixed(2)} available, requested $${amountVal.toFixed(2)})`);
+      }
+
+      const transferRef = `payout_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      const initiatedBy = ["owner", "cron", "admin"].includes(opts.initiated_by || "")
+        ? opts.initiated_by
+        : "owner";
+
+      // 1. Insert into owner_payouts
+      const pRes = await client.query(
+        `INSERT INTO public.owner_payouts (
+          owner_id, payout_account_id, provider, amount, currency, status, transfer_reference, initiated_by, scheduled_for
+        ) VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, now())
+        RETURNING id`,
+        [
+          opts.owner_id,
+          opts.payout_account_id || null,
+          opts.provider || "paypal",
+          amountVal,
+          currency,
+          transferRef,
+          initiatedBy,
+        ]
+      );
+      const payoutId = pRes.rows[0]?.id;
+
+      // 2. Post debit from owner wallet
+      await client.query(
+        `SELECT public.post_wallet_entry(
+          $1, 'owner', $2, 'debit', $3, 'payout', $4, 'owner_payouts', $5, $6, $7, $8
+        )`,
+        [
+          opts.owner_id,
+          currency,
+          amountVal,
+          `payout_debit_${transferRef}`,
+          payoutId || null,
+          opts.provider || "paypal",
+          transferRef,
+          `Withdrawal request via ${opts.provider || "PayPal"}`,
+        ]
+      );
+
+      await client.query("COMMIT");
+
+      return {
+        success: true,
+        payout_id: payoutId,
+        transfer_reference: transferRef,
+        status: "processing",
+        amount: amountVal,
+        currency,
+      };
+    } catch (err: any) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
-
-    const transferRef = `payout_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-    const initiatedBy = ["owner", "cron", "admin"].includes(opts.initiated_by || "")
-      ? opts.initiated_by
-      : "owner";
-
-    // 1. Insert into owner_payouts
-    const pRes = await pool.query(
-      `INSERT INTO public.owner_payouts (
-        owner_id, payout_account_id, provider, amount, currency, status, transfer_reference, initiated_by, scheduled_for
-      ) VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, now())
-      RETURNING id`,
-      [
-        opts.owner_id,
-        opts.payout_account_id || null,
-        opts.provider || "paypal",
-        amountVal,
-        currency,
-        transferRef,
-        initiatedBy,
-      ]
-    );
-    const payoutId = pRes.rows[0]?.id;
-
-    // 2. Post debit from owner wallet
-    await pool.query(
-      `SELECT public.post_wallet_entry(
-        $1, 'owner', $2, 'debit', $3, 'payout', $4, 'owner_payouts', $5, $6, $7, $8
-      )`,
-      [
-        opts.owner_id,
-        currency,
-        amountVal,
-        `payout_debit_${transferRef}`,
-        payoutId || null,
-        opts.provider || "paypal",
-        transferRef,
-        `Withdrawal request via ${opts.provider || "PayPal"}`,
-      ]
-    );
-
-    return {
-      success: true,
-      payout_id: payoutId,
-      transfer_reference: transferRef,
-      status: "processing",
-      amount: amountVal,
-      currency,
-    };
   }
 
   // ---------------------------------------------------------------------------

@@ -189,13 +189,25 @@ export async function publishAndAuthorizeVehicle(
   const effectivePickupLocation = params.pickupLocation || params.pickupAddress || null;
   const effectivePickupAddress = params.pickupAddress || params.pickupLocation || null;
 
-  // 1. Update vehicle row in database to make it public on Catalogue with pickup location
+  // 1. Submit vehicle for administrative review via authoritative backend
   try {
+    const { backendBridge } = await import('@/lib/backend-bridge');
+    await backendBridge.call("submit-vehicle-for-review", {
+      vehicleId: params.vehicleId,
+      photoUrls: params.photoUrls,
+      pickupCity: params.pickupCity,
+      pickupLocation: effectivePickupLocation,
+      pickupAddress: effectivePickupAddress,
+      pickupInstructions: params.pickupInstructions,
+    });
+  } catch (err) {
+    console.warn('Backend submit-vehicle-for-review call failed, falling back to direct update:', err);
     await supabase
       .from('vehicles')
       .update({
-        is_public: true,
-        status: 'available',
+        review_status: 'pending',
+        is_public: false,
+        status: 'pending',
         photo_urls: params.photoUrls,
         pickup_city: params.pickupCity || null,
         pickup_location: effectivePickupLocation,
@@ -204,8 +216,6 @@ export async function publishAndAuthorizeVehicle(
         updated_at: now,
       } as never)
       .eq('id', params.vehicleId);
-  } catch (err) {
-    console.warn('Could not update vehicle table via supabase, proceeding with authorization record:', err);
   }
 
   // 2. Build or update authorization record in the shared database
@@ -230,8 +240,8 @@ export async function publishAndAuthorizeVehicle(
     owner_name: params.ownerName || 'Vehicle Owner',
     owner_email: params.ownerEmail || '',
     owner_phone: params.ownerPhone || null,
-    status: 'ACTIVE',
-    matching_status: 'matching_pool_active',
+    status: 'PENDING',
+    matching_status: 'pending',
     authorization_text: LEGAL_AUTHORIZATION_TEXT,
     terms_version: 'v2026.1',
     authorized_at: now,
@@ -254,7 +264,19 @@ export async function publishAndAuthorizeVehicle(
     ],
   };
 
-  const { error: upsertError } = await db().upsert(newAuthRecord, { onConflict: 'vehicle_id' });
+  let upsertError: any = null;
+  if (existing?.id) {
+    const res = await db().update(newAuthRecord).eq('id', existing.id);
+    upsertError = res.error;
+  } else {
+    const res = await db().insert(newAuthRecord);
+    if (res.error && (res.error.code === '23505' || res.error.message?.includes('duplicate'))) {
+      const upd = await db().update(newAuthRecord).eq('vehicle_id', params.vehicleId);
+      upsertError = upd.error;
+    } else {
+      upsertError = res.error;
+    }
+  }
   if (upsertError) {
     console.error('Failed to persist vehicle authorization:', upsertError);
     throw new Error(upsertError.message || 'Could not save the vehicle rental authorization record.');

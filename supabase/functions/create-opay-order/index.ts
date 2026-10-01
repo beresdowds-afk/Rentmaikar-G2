@@ -17,9 +17,7 @@ const BodySchema = z.object({
   description: z.string().max(255).optional(),
   callbackUrl: z.string().url().optional(),
   returnUrl: z.string().url().optional(),
-  import {
-  PAYMENT_PURPOSES,
-} from "../../../src/lib/payment-purpose";
+  purpose: z.string().optional(),
   iotDeviceId: z.string().uuid().optional(),
   metadata: z.record(z.unknown()).optional(),
 });

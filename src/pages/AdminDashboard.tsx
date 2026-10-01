@@ -129,10 +129,12 @@ import { StaffOnboardingDownloads } from '@/components/staff/StaffOnboardingDown
 import { ScrollableStrip } from '@/components/ui/scrollable-strip';
 import ErrorBoundary from "@/components/errors/ErrorBoundary";
 import { usePersistedTab } from '@/hooks/usePersistedTab';
+
+
 import { useAdminFinancials, useAdminFleetCounts } from "@/hooks/useAdminFinancials";
 import { usePaymentDefaults } from "@/hooks/usePaymentDefaultsList";
 import { usePendingApprovals, type PendingApprovalItem } from "@/hooks/usePendingApprovals";
-import { AdminFeeStructure } from "@/components/admin/AdminFeeStructure";
+
 
 const AdminDashboard = () => {
   const _region = useRegion();
@@ -669,11 +671,69 @@ const AdminDashboard = () => {
               )}
               {activeTab === 'daily-plans' && <DailyPlanManagement />}
               {activeTab === 'weekly-reports' && <AdminWeeklyReportManagement />}
-              {activeTab === "fees" && (
-  <SectionErrorBoundary section="fee-structure">
-    <AdminFeeStructure />
-  </SectionErrorBoundary>
-)}
+              {activeTab === 'fees' && (
+                <Card className="p-6">
+                  <div className="flex items-center gap-3 mb-6">
+                    <Wallet className="h-5 w-5 text-primary" />
+                    <h3 className="text-lg font-semibold">Fee Structure &amp; Payment Gateways</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    Illustrative fee calculations at sample rental amounts — not live revenue figures.
+                  </p>
+                  
+                  <div className="grid md:grid-cols-2 gap-6 mb-6">
+                    {/* USA - PayPal */}
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🇺🇸</span>
+                        <h4 className="font-semibold">USA (PayPal)</h4>
+                      </div>
+                      <PaymentBreakdownCard
+                        baseAmount={48}
+                        currency="USD"
+                        gateway="paypal"
+                      />
+                      <PaymentBreakdownCard
+                        baseAmount={48}
+                        currency="USD"
+                        gateway="paypal"
+                        showOwnerView
+                      />
+                    </div>
+
+                    {/* Nigeria - Paystack */}
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🇳🇬</span>
+                        <h4 className="font-semibold">Nigeria (Paystack)</h4>
+                      </div>
+                      <PaymentBreakdownCard
+                        baseAmount={25000}
+                        currency="NGN"
+                        gateway="paystack"
+                      />
+                      <PaymentBreakdownCard
+                        baseAmount={25000}
+                        currency="NGN"
+                        gateway="paystack"
+                        showOwnerView
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-lg bg-muted space-y-2">
+                    <h5 className="font-semibold flex items-center gap-2">
+                      <CreditCard className="h-4 w-4" />
+                      Payment Schedule
+                    </h5>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      <li>• <strong>Daily Auto-Debit:</strong> 12:01 AM local time</li>
+                      <li>• <strong>Owner Payouts:</strong> Every Friday (weekly)</li>
+                      <li>• <strong>Platform Fee:</strong> 40% total (20% admin + 20% management)</li>
+                    </ul>
+                  </div>
+                </Card>
+              )}
               {activeTab === 'secrets' && (
                 <div className="space-y-6">
                   <div className="flex justify-end">

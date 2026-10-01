@@ -670,7 +670,11 @@ export default function OwnerDashboard() {
                       onPublished={() => queryClient.invalidateQueries({ queryKey: ['owner-vehicles'] })}
                     />
                     <VehicleSubmissionBadge status={(vehicle as any).review_status} />
-                    <Badge variant="secondary" className="capitalize">{vehicle.status}</Badge>
+                    <Badge variant="secondary" className="capitalize">
+                      {(vehicle as any).review_status && (vehicle as any).review_status !== 'published'
+                        ? `In Review (${(vehicle as any).review_status})`
+                        : vehicle.status}
+                    </Badge>
                   </div>
                 </div>
               </div>

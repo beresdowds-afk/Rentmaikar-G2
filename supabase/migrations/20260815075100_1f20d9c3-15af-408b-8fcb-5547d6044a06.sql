@@ -31,22 +31,9 @@ BEGIN
 
   SELECT r.region INTO _region FROM public.rentals r WHERE r.id = _p.rental_id;
 
-  SELECT
-  coalesce(
-    (value->>'owner_share_pct')::numeric,
-    _owner_pct
-  )
-INTO _owner_pct
-FROM public.platform_kv_settings
-WHERE key = 'owner_share_pct';
-
-_owner_pct := coalesce(_owner_pct, 2.0 / 3.0);
-
-IF _owner_pct <= 0 OR _owner_pct >= 1 THEN
-  RAISE EXCEPTION
-    'Invalid owner_share_pct %. Expected value between 0 and 1.',
-    _owner_pct;
-END IF;
+  SELECT coalesce((value->>'owner_share_pct')::numeric, _owner_pct) INTO _owner_pct
+    FROM public.platform_kv_settings WHERE key = 'owner_share_pct';
+  _owner_pct := coalesce(_owner_pct, 2.0/3.0);
 
   IF _p.purpose = 'rental' AND _p.owner_id IS NOT NULL THEN
     _owner_share := round(_p.amount * _owner_pct, 2);

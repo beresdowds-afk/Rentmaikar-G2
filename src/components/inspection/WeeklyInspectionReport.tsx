@@ -29,10 +29,15 @@ export function WeeklyInspectionReport({
     currentReport,
     settings,
     activeAgreement,
+    findings,
+    schedule,
+    isAnalyzingDamage,
     isLoading,
     uploadPhoto,
     createOrUpdateReport,
     submitReport,
+    runDamageDetection,
+    updateFinding,
   } = useWeeklyInspection(vehicleId);
 
   const [uploadingType, setUploadingType] = useState<PhotoType | null>(null);
@@ -255,6 +260,113 @@ export function WeeklyInspectionReport({
               </div>
             </CardContent>
           </Card>
+
+          {/* Automated Visual Damage Detection Panel */}
+          {uploadedCount > 0 && (
+            <Card className="border-primary/20">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ShieldAlert className="h-4 w-4 text-primary" />
+                      Automated Visual Damage Detection
+                    </CardTitle>
+                    <CardDescription>
+                      Computer vision scans inspection photos against baseline references to highlight damage or wear.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => currentReport && runDamageDetection(currentReport.id)}
+                    disabled={isAnalyzingDamage || !currentReport}
+                    className="shrink-0"
+                  >
+                    {isAnalyzingDamage ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        Analyzing Photos...
+                      </>
+                    ) : (
+                      <>
+                        <ShieldAlert className="h-3.5 w-3.5 mr-1.5" />
+                        Scan for Damage
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {findings.length === 0 ? (
+                  <div className="p-3 bg-muted/40 rounded-lg text-sm text-muted-foreground flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <span>No unverified damage recorded for this inspection report.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Structured Findings ({findings.length})
+                    </p>
+                    <div className="grid gap-2">
+                      {findings.map((f, idx) => (
+                        <div
+                          key={f.id || idx}
+                          className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 border rounded-lg bg-card text-sm gap-2"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{f.title}</span>
+                              <Badge
+                                variant={
+                                  f.severity === "critical"
+                                    ? "destructive"
+                                    : f.severity === "high"
+                                    ? "destructive"
+                                    : f.severity === "medium"
+                                    ? "secondary"
+                                    : "outline"
+                                }
+                                className="text-[10px] uppercase font-bold px-1.5 py-0"
+                              >
+                                {f.severity}
+                              </Badge>
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                {f.diffStatus.replace("_", " ")}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{f.description}</p>
+                            {f.recommendation && (
+                              <p className="text-xs text-primary/80">
+                                <strong>Rec:</strong> {f.recommendation}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge
+                              variant={f.status === "resolved" ? "default" : "secondary"}
+                              className="text-xs"
+                            >
+                              {f.status}
+                            </Badge>
+                            {f.status === "open" && f.id && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                                onClick={() => updateFinding(f.id!, "acknowledged")}
+                              >
+                                Acknowledge
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {!isSubmitted && (
             <Card>

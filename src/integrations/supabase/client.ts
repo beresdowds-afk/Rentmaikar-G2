@@ -223,6 +223,18 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "upload-file",
   "delete-file",
   "get-file-url",
+  // Inspection & Visual Damage Evidence Operations
+  "detect-inspection-damage",
+  "compare-inspections",
+  "get-inspection-findings",
+  "update-inspection-finding",
+  "process-inspection-reminders",
+  "get-inspection-schedule",
+  // Billing, Withdrawal & Vehicle Review Operations
+  "billing-reconciliation",
+  "owner-withdrawal-data",
+  "initiate-owner-withdrawal",
+  "submit-vehicle-for-review",
 ]);
 
 async function getLinkBridge() {
@@ -409,15 +421,25 @@ async function callLocalGateway(functionName: string, options?: any) {
   }
 }
 
-const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
-supabase.functions.invoke = (async (functionName: string, options?: any) => {
+const protoFunctionsGetter = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(supabase),
+  "functions"
+)?.get;
+
+const singletonFunctions = protoFunctionsGetter
+  ? protoFunctionsGetter.call(supabase)
+  : (supabase as any).functions;
+
+const originalInvoke = singletonFunctions.invoke.bind(singletonFunctions);
+
+singletonFunctions.invoke = (async (functionName: string, options?: any) => {
   // 1. Authoritative Backend Functions: Route directly to Cloud Run backend gateway first.
-// Authoritative Backend Functions:
-// Cloud Run/backend gateway is the ONLY frontend execution path.
-// Do not fall back to direct Supabase Edge Function invocation here.
-if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
-  return await callLocalGateway(functionName, options);
-}
+  // Authoritative Backend Functions:
+  // Cloud Run/backend gateway is the ONLY frontend execution path.
+  // Do not fall back to direct Supabase Edge Function invocation here.
+  if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
+    return await callLocalGateway(functionName, options);
+  }
 
   // 2. Otherwise prioritize authoritative Supabase Edge Function
   let originalError: any = null;
@@ -430,50 +452,50 @@ if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
     originalError = res.error;
     const errMsg = String(res.error?.message || "").toLowerCase();
     const errorStatus =
-  (res.error as any)?.context?.status ??
-  (res.error as any)?.status ??
-  undefined;
+      (res.error as any)?.context?.status ??
+      (res.error as any)?.status ??
+      undefined;
 
-const isNetworkOrNotFound =
-  errMsg.includes("404") ||
-  errMsg.includes("not found") ||
-  errMsg.includes("failed to send a request") ||
-  errMsg.includes("failed to fetch") ||
-  errMsg.includes("functionsfetcherror") ||
-  errMsg.includes("network") ||
-  errorStatus === 404;
+    const isNetworkOrNotFound =
+      errMsg.includes("404") ||
+      errMsg.includes("not found") ||
+      errMsg.includes("failed to send a request") ||
+      errMsg.includes("failed to fetch") ||
+      errMsg.includes("functionsfetcherror") ||
+      errMsg.includes("network") ||
+      errorStatus === 404;
 
-const isMethodRoutingFailure =
-  errorStatus === 405 ||
-  errMsg.includes("405") ||
-  errMsg.includes("method not allowed");
+    const isMethodRoutingFailure =
+      errorStatus === 405 ||
+      errMsg.includes("405") ||
+      errMsg.includes("method not allowed");
 
-if (!isNetworkOrNotFound && !isMethodRoutingFailure) {
-  // Return authoritative response from Edge Function
-  // for genuine application/business errors.
-  return res;
-}
+    if (!isNetworkOrNotFound && !isMethodRoutingFailure) {
+      // Return authoritative response from Edge Function
+      // for genuine application/business errors.
+      return res;
+    }
   } catch (ex: any) {
     originalError = ex;
   }
 
   // 2. Secondary fallback: Local gateway.
-// This is also used for HTTP 405 because a 405 can indicate
-// that the request was intercepted by an intermediate router/proxy.
-const localRes = await callLocalGateway(functionName, options);
- console.warn(
-  `[Supabase Functions] Primary invocation failed for '${functionName}'. ` +
-  `Attempting local gateway fallback.`,
-  {
-    status:
-      (originalError as any)?.context?.status ??
-      (originalError as any)?.status ??
-      null,
-    message:
-      originalError?.message ??
-      String(originalError ?? ''),
-  }
-);
+  // This is also used for HTTP 405 because a 405 can indicate
+  // that the request was intercepted by an intermediate router/proxy.
+  const localRes = await callLocalGateway(functionName, options);
+  console.warn(
+    `[Supabase Functions] Primary invocation failed for '${functionName}'. ` +
+    `Attempting local gateway fallback.`,
+    {
+      status:
+        (originalError as any)?.context?.status ??
+        (originalError as any)?.status ??
+        null,
+      message:
+        originalError?.message ??
+        String(originalError ?? ''),
+    }
+  );
   if (!localRes.error) return localRes;
 
   // 3. Final fallback through Link Bridge if configured
@@ -496,3 +518,9 @@ const localRes = await callLocalGateway(functionName, options);
 
   return localRes;
 }) as typeof supabase.functions.invoke;
+
+Object.defineProperty(supabase, "functions", {
+  get: () => singletonFunctions,
+  configurable: true,
+  enumerable: true,
+});

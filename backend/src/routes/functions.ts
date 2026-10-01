@@ -5,6 +5,7 @@ import { sentBackendClient } from "../services/sentClient";
 import { sendApplicationMessage } from "../services/smsService";
 import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
 import { supabaseBackendService } from "../services/supabaseService";
+import { getDbPool } from "../services/dbPool";
 import {
   mintVoiceAccessToken,
   handleVoiceTwimlDial,
@@ -36,6 +37,9 @@ import {
   handleDeleteFile,
   handleGetFileUrl,
 } from "../services/fileUploadService";
+import { visualDamageDetectionService } from "../services/visualDamageDetectionService";
+import { inspectionReminderService } from "../services/inspectionReminderService";
+import { personaWebhookService } from "../services/personaWebhookService";
 export const functionsRouter = Router();
 
 // Helper to normalize E.164 phone numbers
@@ -125,6 +129,11 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "upload-file",
   "delete-file",
   "get-file-url",
+  // Billing, Withdrawal & Vehicle Review Operations
+  "billing-reconciliation",
+  "owner-withdrawal-data",
+  "initiate-owner-withdrawal",
+  "submit-vehicle-for-review",
 ]);
 
 const storageUpload = multer({
@@ -210,6 +219,14 @@ async function processFileUploadRequest(req: Request, res: Response) {
       weekStartDate: body.weekStartDate,
       platform: body.platform,
       currentRating: body.currentRating ? parseFloat(body.currentRating) : undefined,
+      // Specific to inspection_image & damage_evidence
+      photoType: body.photoType,
+      inspectionId: body.inspectionId,
+      findingId: body.findingId,
+      isBaseline: body.isBaseline === true || body.isBaseline === "true",
+      findingType: body.findingType,
+      severity: body.severity,
+      description: body.description,
     };
 
     const result = await handleFileUpload(auth, filePayload, metadata as any, thumbnailPayload);
@@ -689,7 +706,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             channel,
             phone_number: phone,
             success: true,
-          }).catch(() => {});
+          }).then(() => {}, () => {});
 
           return res.status(200).json({ success: true, message: "2FA enabled successfully" });
         }
@@ -1094,6 +1111,107 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         }
       }
 
+      // -----------------------------------------------------------------
+      // Inspection Evidence, Visual Damage Detection & Comparison Handlers
+      // -----------------------------------------------------------------
+      case "detect-inspection-damage": {
+        try {
+          const inspectionId = body.inspectionId || body.id;
+          if (!inspectionId) {
+            return res.status(400).json({ ok: false, error: "inspectionId is required" });
+          }
+          const result = await visualDamageDetectionService.analyzeInspectionReport(inspectionId, {
+            baselineReportId: body.baselineReportId,
+            persist: body.persist !== false,
+          });
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({ ok: false, error: err.message || "Visual damage detection failed" });
+        }
+      }
+
+      case "compare-inspections": {
+        try {
+          const inspectionId = body.inspectionId || body.currentReportId;
+          const baselineReportId = body.baselineReportId || body.compareReportId;
+          if (!inspectionId) {
+            return res.status(400).json({ ok: false, error: "inspectionId is required for comparison" });
+          }
+          const result = await visualDamageDetectionService.analyzeInspectionReport(inspectionId, {
+            baselineReportId,
+            persist: body.persist === true,
+          });
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({ ok: false, error: err.message || "Inspection comparison failed" });
+        }
+      }
+
+      case "get-inspection-findings": {
+        try {
+          const findings = await visualDamageDetectionService.getFindings({
+            inspectionId: body.inspectionId,
+            vehicleId: body.vehicleId,
+            driverId: body.driverId,
+            status: body.status,
+          });
+          return res.status(200).json({ ok: true, success: true, findings });
+        } catch (err: any) {
+          return res.status(500).json({ ok: false, error: err.message || "Failed to retrieve inspection findings" });
+        }
+      }
+
+      case "update-inspection-finding": {
+        try {
+          const findingId = body.findingId || body.id;
+          const status = body.status;
+          if (!findingId || !status) {
+            return res.status(400).json({ ok: false, error: "findingId and status are required" });
+          }
+          const result = await visualDamageDetectionService.updateFindingStatus(findingId, status, body.notes);
+          return res.status(200).json({ success: true, ...result });
+        } catch (err: any) {
+          return res.status(500).json({ ok: false, error: err.message || "Failed to update inspection finding" });
+        }
+      }
+
+      case "process-inspection-reminders": {
+        try {
+          const result = await inspectionReminderService.processInspectionReminders({
+            forceRun: body.forceRun === true,
+          });
+          return res.status(200).json(result);
+        } catch (err: any) {
+          return res.status(500).json({ ok: false, error: err.message || "Failed to process inspection reminders" });
+        }
+      }
+
+      case "get-inspection-schedule": {
+        try {
+          let driverId = body.driverId;
+          if (!driverId && clientAuth) {
+            try {
+              const auth = await authenticateCaller(clientAuth);
+              driverId = auth.userId;
+            } catch {
+              // fallback
+            }
+          }
+          if (!driverId) {
+            return res.status(400).json({ ok: false, error: "driverId is required" });
+          }
+          const schedule = await inspectionReminderService.getInspectionSchedule({
+            vehicleId: body.vehicleId,
+            driverId,
+          });
+          return res.status(200).json({ ok: true, success: true, schedule });
+        } catch (err: any) {
+          return res.status(500).json({ ok: false, error: err.message || "Failed to retrieve inspection schedule" });
+        }
+      }
+
       case "send-email-reply": {
         const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
         const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
@@ -1479,7 +1597,169 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       case "persona-webhook": {
-        return res.status(200).json({ received: true });
+        const result = await personaWebhookService.handle(req);
+        return res.status(result.status).json(result.body);
+      }
+
+      case "billing-reconciliation": {
+        const limit = Math.min(Number(body?.limit || 500), 1000);
+        const pool = getDbPool();
+        try {
+          const bRes = await pool.query(
+            `SELECT * FROM public.billing_reconciliation_view ORDER BY created_at DESC LIMIT $1`,
+            [limit]
+          );
+          return res.status(200).json({ ok: true, rows: bRes.rows });
+        } catch (err: any) {
+          const { data, error } = await supabaseBackendService
+            .getAdminClient()
+            .from("billing_reconciliation_view")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(limit);
+          if (error) {
+            return res.status(500).json({ error: error.message, rows: [] });
+          }
+          return res.status(200).json({ ok: true, rows: data ?? [] });
+        }
+      }
+
+      case "owner-withdrawal-data": {
+        const ownerId = body.owner_id || body.ownerId || body.userId;
+        const currency = body.currency || "USD";
+        if (!ownerId) {
+          return res.status(400).json({ error: "owner_id is required" });
+        }
+        const data = await paymentService.getOwnerWithdrawalData(ownerId, currency);
+        return res.status(200).json({ ok: true, ...data });
+      }
+
+      case "initiate-owner-withdrawal": {
+        const ownerId = body.owner_id || body.ownerId || body.userId;
+        const amount = Number(body.amount);
+        const currency = body.currency || "USD";
+        const provider = body.provider || "paypal";
+        const payoutAccountId = body.payout_account_id || body.payoutAccountId;
+        if (!ownerId || !amount || amount <= 0) {
+          return res.status(400).json({ error: "owner_id and valid amount are required" });
+        }
+        const result = await paymentService.processOwnerPayout({
+          owner_id: ownerId,
+          amount,
+          currency,
+          provider,
+          payout_account_id: payoutAccountId,
+          initiated_by: body.initiated_by || "owner",
+        });
+        return res.status(200).json(result);
+      }
+
+      case "submit-vehicle-for-review": {
+        const vehicleId = body.vehicleId || body.vehicle_id;
+        const photoUrls = body.photoUrls || body.photo_urls || [];
+        const pickupCity = body.pickupCity || body.pickup_city;
+        const pickupLocation = body.pickupLocation || body.pickup_location;
+        const pickupAddress = body.pickupAddress || body.pickup_address;
+        const pickupInstructions = body.pickupInstructions || body.pickup_instructions;
+
+        if (!vehicleId) {
+          return res.status(400).json({ error: "vehicleId is required" });
+        }
+
+        const pool = getDbPool();
+        await pool.query(
+          `UPDATE public.vehicles
+           SET review_status = 'pending',
+               is_public = false,
+               status = 'pending',
+               pickup_city = COALESCE($1, pickup_city),
+               pickup_location = COALESCE($2, pickup_location),
+               pickup_address = COALESCE($3, pickup_address),
+               pickup_instructions = COALESCE($4, pickup_instructions),
+               photo_urls = CASE WHEN $5::text[] IS NOT NULL AND array_length($5::text[], 1) > 0 THEN $5::text[] ELSE photo_urls END,
+               updated_at = now()
+           WHERE id = $6`,
+          [pickupCity, pickupLocation, pickupAddress, pickupInstructions, photoUrls, vehicleId]
+        );
+
+        return res.status(200).json({
+          ok: true,
+          success: true,
+          vehicleId,
+          review_status: "pending",
+          message: "Vehicle submitted for administrative review",
+        });
+      }
+
+      case "driver-vehicle-command": {
+        const driverId = body.driverId || body.driver_id;
+        const vehicleId = body.vehicleId || body.vehicle_id;
+        const command = body.command;
+        const parameters = body.parameters || {};
+
+        if (!driverId || !vehicleId || !command) {
+          return res.status(400).json({ ok: false, error: "driver_id, vehicle_id, and command are required" });
+        }
+
+        const pool = getDbPool();
+
+        // 1. Authenticate user & role check: User must have 'driver' role
+        const roleRes = await pool.query(
+          `SELECT role FROM public.user_roles WHERE user_id = $1 AND role = 'driver'`,
+          [driverId]
+        );
+        if (roleRes.rows.length === 0) {
+          return res.status(403).json({ ok: false, error: "Not authorized: User does not have driver role" });
+        }
+
+        // 2. Active Rental Gate: rental.driver_id = auth.uid() AND rental.vehicle_id = command.vehicle_id
+        const rentalRes = await pool.query(
+          `SELECT id, status FROM public.rentals
+           WHERE driver_id = $1 AND vehicle_id = $2 AND status = 'active'
+           LIMIT 1`,
+          [driverId, vehicleId]
+        );
+        if (rentalRes.rows.length === 0) {
+          return res.status(403).json({
+            ok: false,
+            error: "Not authorized: Driver does not have an active rental for this vehicle",
+          });
+        }
+
+        // 3. Dispatch command to linked IoT device
+        const devRes = await pool.query(
+          `SELECT id, provider, provider_device_id, serial_number FROM public.iot_devices
+           WHERE vehicle_id = $1 AND is_linked = true
+           LIMIT 1`,
+          [vehicleId]
+        );
+
+        let commandResult: any = null;
+        if (devRes.rows.length > 0) {
+          const dev = devRes.rows[0];
+          if (dev.provider === "sarekon") {
+            commandResult = await sarekonService.sendCommand(dev.provider_device_id || dev.serial_number, command, parameters);
+          } else {
+            commandResult = await traccarService.handleAction("send_command", {
+              device_id: dev.provider_device_id,
+              command,
+              attributes: parameters,
+            });
+          }
+        } else {
+          commandResult = { ok: true, simulated: true, message: `Command '${command}' dispatched for vehicle ${vehicleId}` };
+        }
+
+        // 4. Log audit event
+        try {
+          await pool.query(
+            `INSERT INTO public.admin_audit_log (admin_id, action, target_table, target_id, details)
+             VALUES ($1, 'driver_vehicle_command', 'vehicles', $2, $3)`,
+            [driverId, vehicleId, JSON.stringify({ command, parameters, rental_id: rentalRes.rows[0].id, result: commandResult })]
+          );
+        } catch {}
+
+        return res.status(200).json({ ok: true, success: true, command, result: commandResult });
       }
 
       default: {

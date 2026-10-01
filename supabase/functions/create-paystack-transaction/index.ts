@@ -15,9 +15,7 @@ const BodySchema = z.object({
   channels: z.array(z.enum(["card", "bank", "ussd", "bank_transfer", "mobile_money", "qr"])).optional(),
   description: z.string().max(255).optional(),
   callbackUrl: z.string().url().optional(),
-  import {
-  PAYMENT_PURPOSES,
-} from "../../../src/lib/payment-purpose";
+  purpose: z.string().optional(),
   iotDeviceId: z.string().uuid().optional(),
   metadata: z.record(z.unknown()).optional(),
 });

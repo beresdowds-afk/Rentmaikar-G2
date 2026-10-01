@@ -7,7 +7,12 @@
 
 export type StorageOperation = "upload-file" | "delete-file" | "get-file-url";
 
-export type StoragePurpose = "user_document" | "vehicle_photo" | "rideshare_profile";
+export type StoragePurpose =
+  | "user_document"
+  | "vehicle_photo"
+  | "rideshare_profile"
+  | "inspection_image"
+  | "damage_evidence";
 
 export interface PurposeConfig {
   bucket: string;
@@ -52,6 +57,28 @@ export const PURPOSE_CONFIGS: Record<StoragePurpose, PurposeConfig> = {
     ],
     defaultSignedUrlExpirySeconds: 86400, // 24 hours
   },
+  inspection_image: {
+    bucket: "weekly-inspection-photos",
+    isPublic: false,
+    maxSizeBytes: 10 * 1024 * 1024, // 10MB
+    allowedMimeTypes: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ],
+    defaultSignedUrlExpirySeconds: 86400, // 24 hours
+  },
+  damage_evidence: {
+    bucket: "weekly-inspection-photos",
+    isPublic: false,
+    maxSizeBytes: 10 * 1024 * 1024, // 10MB
+    allowedMimeTypes: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ],
+    defaultSignedUrlExpirySeconds: 86400, // 24 hours
+  },
 };
 
 // -------------------------------------------------------------
@@ -74,6 +101,14 @@ export interface UploadFileMetadata {
   weekStartDate?: string;
   platform?: string;
   currentRating?: number;
+  // Specific to inspection_image & damage_evidence
+  photoType?: string;
+  inspectionId?: string;
+  findingId?: string;
+  isBaseline?: boolean;
+  findingType?: string;
+  severity?: string;
+  description?: string;
 }
 
 export interface UploadFileRequestParams extends UploadFileMetadata {

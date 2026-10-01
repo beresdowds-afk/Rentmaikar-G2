@@ -2,7 +2,44 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useImpersonation } from '@/contexts/ImpersonationContext';
+import { uploadInspectionImage, getInspectionImageUrl } from '@/lib/file-upload-api';
 import { toast } from 'sonner';
+
+export interface InspectionFinding {
+  id?: string;
+  inspectionId?: string;
+  vehicleId: string;
+  driverId: string;
+  photoType: string;
+  photoUrl?: string;
+  baselinePhotoUrl?: string;
+  findingType: "damage" | "wear" | "scratch" | "dent" | "cleanliness" | "crack" | "normal" | "other" | (string & {});
+  severity: "low" | "medium" | "high" | "critical";
+  title: string;
+  description: string;
+  confidence: number;
+  diffStatus: "new_damage" | "pre_existing" | "repaired" | "unchanged";
+  status: "open" | "acknowledged" | "disputed" | "resolved";
+  boundingBox?: { x: number; y: number; width: number; height: number };
+  recommendation?: string;
+  detectedBy?: string;
+  createdAt?: string;
+}
+
+export interface InspectionScheduleInfo {
+  vehicleId: string;
+  driverId: string;
+  periodStart: string;
+  dueDate: string;
+  reminderWindowStart: string;
+  daysRemaining: number;
+  isInReminderWindow: boolean;
+  isOverdue: boolean;
+  isSubmitted: boolean;
+  isApproved: boolean;
+  cycleState: "upcoming" | "due_soon" | "overdue" | "submitted" | "approved";
+  renewalCount: number;
+}
 
 export interface InspectionReport {
   id: string;
@@ -119,7 +156,104 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
   const [currentReport, setCurrentReport] = useState<InspectionReport | null>(null);
   const [settings, setSettings] = useState<ReportSettings | null>(null);
   const [activeAgreement, setActiveAgreement] = useState<ActiveAgreement | null>(null);
+  const [findings, setFindings] = useState<InspectionFinding[]>([]);
+  const [schedule, setSchedule] = useState<InspectionScheduleInfo | null>(null);
+  const [isAnalyzingDamage, setIsAnalyzingDamage] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  const fetchFindings = async (reportId?: string) => {
+    const targetId = reportId || currentReport?.id;
+    if (!targetId) return;
+    try {
+      const { data, error } = await supabase.functions.invoke('get-inspection-findings', {
+        body: { inspectionId: targetId },
+      });
+      if (!error && data?.findings) {
+        setFindings(data.findings);
+      }
+    } catch {
+      // non-blocking
+    }
+  };
+
+  const fetchSchedule = async () => {
+    if (!effectiveDriverId) return;
+    try {
+      const { data, error } = await supabase.functions.invoke('get-inspection-schedule', {
+        body: { driverId: effectiveDriverId, vehicleId },
+      });
+      if (!error && data?.schedule) {
+        setSchedule(data.schedule);
+      }
+    } catch {
+      // non-blocking
+    }
+  };
+
+  const runDamageDetection = async (reportId?: string) => {
+    const targetId = reportId || currentReport?.id;
+    if (!targetId) {
+      toast.error('No inspection report selected for analysis');
+      return null;
+    }
+    setIsAnalyzingDamage(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('detect-inspection-damage', {
+        body: { inspectionId: targetId, persist: true },
+      });
+      if (error) throw error;
+      toast.success(
+        data?.hasDamage
+          ? `Analysis complete: ${data.totalFindings} observations detected`
+          : 'Analysis complete: No vehicle damage detected'
+      );
+      if (data?.findings) {
+        setFindings(data.findings);
+      }
+      return data;
+    } catch (err: any) {
+      toast.error(err?.message || 'Visual damage detection failed');
+      return null;
+    } finally {
+      setIsAnalyzingDamage(false);
+    }
+  };
+
+  const compareWithBaseline = async (compareReportId: string, currentId?: string) => {
+    const targetId = currentId || currentReport?.id;
+    if (!targetId) return null;
+    try {
+      const { data, error } = await supabase.functions.invoke('compare-inspections', {
+        body: { currentReportId: targetId, baselineReportId: compareReportId },
+      });
+      if (error) throw error;
+      return data;
+    } catch (err: any) {
+      toast.error(err?.message || 'Inspection comparison failed');
+      return null;
+    }
+  };
+
+  const updateFinding = async (
+    findingId: string,
+    status: 'open' | 'acknowledged' | 'disputed' | 'resolved',
+    notes?: string
+  ) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('update-inspection-finding', {
+        body: { findingId, status, notes },
+      });
+      if (error) throw error;
+      toast.success(`Finding status updated to ${status}`);
+      setFindings(prev =>
+        prev.map(f => (f.id === findingId ? { ...f, status } : f))
+      );
+      return data;
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update finding');
+      return null;
+    }
+  };
 
   const fetchSettings = async () => {
     const { data, error } = await supabase
@@ -184,24 +318,21 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
     if (!effectiveDriverId) return null;
 
     const periodStart = get30DayPeriodStart(activeAgreement?.expires_at);
-    const fileExt = file.name.split('.').pop();
-    const filePath = `${effectiveDriverId}/${vehicleId}/${periodStart}/${photoType}.${fileExt}`;
+    try {
+      const uploadRes = await uploadInspectionImage({
+        file,
+        vehicleId,
+        photoType,
+        weekStartDate: periodStart,
+        inspectionId: currentReport?.id,
+      });
 
-    const { error: uploadError } = await supabase.storage
-      .from('weekly-inspection-photos')
-      .upload(filePath, file, { upsert: true });
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      toast.error('Failed to upload photo');
+      return uploadRes.signedUrl || uploadRes.filePath || null;
+    } catch (uploadError: any) {
+      console.error('Upload error via centralized gateway:', uploadError);
+      toast.error(uploadError?.message || 'Failed to upload photo');
       return null;
     }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('weekly-inspection-photos')
-      .getPublicUrl(filePath);
-
-    return publicUrl;
   };
 
   const createOrUpdateReport = async (
@@ -369,21 +500,36 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
   useEffect(() => {
     fetchSettings();
     fetchActiveAgreement();
-  }, [effectiveDriverId]);
+    fetchSchedule();
+  }, [effectiveDriverId, vehicleId]);
 
   useEffect(() => {
     fetchReports();
   }, [effectiveDriverId, vehicleId, activeAgreement]);
+
+  useEffect(() => {
+    if (currentReport?.id) {
+      fetchFindings(currentReport.id);
+    }
+  }, [currentReport?.id]);
 
   return {
     reports,
     currentReport,
     settings,
     activeAgreement,
+    findings,
+    schedule,
+    isAnalyzingDamage,
     isLoading,
     uploadPhoto,
     createOrUpdateReport,
     submitReport,
+    runDamageDetection,
+    compareWithBaseline,
+    updateFinding,
+    fetchFindings,
+    fetchSchedule,
     updateOwnerReview,
     updateAdminDecision,
     updateSettings,

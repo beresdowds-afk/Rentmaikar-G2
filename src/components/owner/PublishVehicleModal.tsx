@@ -438,14 +438,14 @@ export function PublishVehicleModal({
               <div className="flex items-center justify-between">
                 <DialogTitle className="text-xl font-bold flex items-center gap-2">
                   <Car className="h-5 w-5 text-primary" />
-                  Publish Vehicle to Catalogue
+                  Submit Vehicle for Admin Review
                 </DialogTitle>
                 {isAlreadyActive && (
                   <Badge className="bg-emerald-600 text-white text-xs">Currently Published</Badge>
                 )}
               </div>
               <DialogDescription>
-                Authorise Rentmaikar to list your vehicle, match verified drivers, and display high-resolution photos on the Catalogue.
+                Authorise Rentmaikar and submit your vehicle for administrative review. Once verified by compliance, it will be published to the public Catalogue.
               </DialogDescription>
             </DialogHeader>
 
@@ -787,12 +787,12 @@ export function PublishVehicleModal({
                     {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Authorizing...
+                        Submitting...
                       </>
                     ) : (
                       <>
                         <ShieldCheck className="h-4 w-4" />
-                        {isAlreadyActive ? 'Update & Re-Authorize' : 'Publish & Authorize'}
+                        {isAlreadyActive ? 'Update & Re-Authorize' : 'Submit for Admin Review'}
                       </>
                     )}
                   </Button>

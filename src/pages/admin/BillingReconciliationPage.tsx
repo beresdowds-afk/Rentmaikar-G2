@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -25,13 +25,17 @@ export default function BillingReconciliationPage() {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("billing_reconciliation_view" as never)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    setRows((data as Row[]) ?? []);
-    setLoading(false);
+    try {
+      const result = await backendBridge.call<{ ok?: boolean; rows?: Row[] }>("billing-reconciliation", {
+        limit: 500,
+      });
+      setRows(result?.rows ?? []);
+    } catch (err) {
+      console.warn("Could not load billing reconciliation via bridge, falling back to empty:", err);
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { load(); }, []);
 

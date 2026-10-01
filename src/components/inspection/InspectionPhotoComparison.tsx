@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,10 +10,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, ChevronRight, Expand, ZoomIn, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Expand, ZoomIn, Calendar, ShieldAlert, CheckCircle, AlertTriangle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { PhotoZoomModal } from './PhotoZoomModal';
-import { PHOTO_TYPES, type InspectionReport } from '@/hooks/useWeeklyInspection';
+import { PHOTO_TYPES, type InspectionReport, type InspectionFinding } from '@/hooks/useWeeklyInspection';
+import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 
 interface InspectionPhotoComparisonProps {
@@ -30,6 +31,8 @@ export function InspectionPhotoComparison({
   const [activePhotoType, setActivePhotoType] = useState<string>(PHOTO_TYPES[0].key);
   const [zoomModalOpen, setZoomModalOpen] = useState(false);
   const [zoomSide, setZoomSide] = useState<'current' | 'compare'>('current');
+  const [comparisonFindings, setComparisonFindings] = useState<InspectionFinding[]>([]);
+  const [isComparing, setIsComparing] = useState(false);
 
   const sortedReports = useMemo(() => 
     [...reports].sort((a, b) => 
@@ -40,6 +43,33 @@ export function InspectionPhotoComparison({
 
   const currentReport = sortedReports[selectedWeekIndex];
   const compareReport = sortedReports[compareWeekIndex];
+
+  useEffect(() => {
+    if (!currentReport?.id) return;
+    const fetchComparison = async () => {
+      setIsComparing(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('compare-inspections', {
+          body: {
+            currentReportId: currentReport.id,
+            baselineReportId: compareReport?.id,
+          },
+        });
+        if (!error && data?.findings) {
+          setComparisonFindings(data.findings);
+        }
+      } catch {
+        // non-blocking
+      } finally {
+        setIsComparing(false);
+      }
+    };
+    fetchComparison();
+  }, [currentReport?.id, compareReport?.id]);
+
+  const activeSlotFindings = useMemo(() => {
+    return comparisonFindings.filter(f => f.photoType === activePhotoType);
+  }, [comparisonFindings, activePhotoType]);
 
   const getPhotoUrl = (report: InspectionReport | undefined, photoType: string): string | null => {
     if (!report) return null;
@@ -267,6 +297,72 @@ export function InspectionPhotoComparison({
                     </div>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Automated Structured Comparison Card */}
+          <div className="mt-4">
+            <Card className="border-muted bg-card/60">
+              <CardHeader className="py-3 px-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold">Automated Comparison Analysis ({activePhotoInfo?.label})</span>
+                  </div>
+                  {isComparing && (
+                    <span className="text-xs text-muted-foreground animate-pulse">
+                      Analyzing comparison diff...
+                    </span>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="py-2 px-4 space-y-2">
+                {activeSlotFindings.length === 0 ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                    <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                    <span>No structural difference or new damage detected for this angle compared to baseline.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {activeSlotFindings.map((finding, idx) => (
+                      <div
+                        key={finding.id || idx}
+                        className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-2.5 border rounded bg-background text-xs gap-2"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">{finding.title}</span>
+                            <Badge
+                              variant={
+                                finding.diffStatus === "new_damage"
+                                  ? "destructive"
+                                  : finding.diffStatus === "repaired"
+                                  ? "default"
+                                  : "secondary"
+                              }
+                              className="text-[10px] font-bold uppercase"
+                            >
+                              {finding.diffStatus.replace("_", " ")}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase font-bold">
+                              {finding.severity}
+                            </Badge>
+                          </div>
+                          <p className="text-muted-foreground">{finding.description}</p>
+                          {finding.recommendation && (
+                            <p className="text-primary/90">
+                              <strong>Recommendation:</strong> {finding.recommendation}
+                            </p>
+                          )}
+                        </div>
+                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                          Confidence: {Math.round(finding.confidence * 100)}%
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

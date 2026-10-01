@@ -108,15 +108,11 @@ describe("Phase 11: Telematics Operations, Multi-Region Ledger & Day-2 Operation
         return Math.abs(totalDebit - totalCredit) < 0.0001;
       };
 
-      const ownerSharePct = 2 / 3;
-
-const expectedOwner = Number(
-  (paymentAmount * ownerSharePct).toFixed(2)
-);
-
-const expectedPlatform = Number(
-  (paymentAmount - expectedOwner).toFixed(2)
-);
+      const rentalCharge = [
+        { debit: 250.0, credit: 0.0 }, // Driver account debited
+        { debit: 0.0, credit: 212.5 }, // Owner account credited (85%)
+        { debit: 0.0, credit: 37.5 },  // Platform fee credited (15%)
+      ];
 
       expect(validateLedgerBalance(rentalCharge)).toBe(true);
 
