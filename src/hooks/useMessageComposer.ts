@@ -5,7 +5,7 @@ import { useRegion } from '@/contexts/RegionContext';
 import { toast } from 'sonner';
 import { renderPlaceholders, type PlaceholderValues } from '@/lib/reply-placeholders';
 import { looksLikeOtpMessage, OTP_IN_APP_BLOCK_MESSAGE } from '@/lib/otp-guard';
-
+import { backendBridge } from '@/lib/backend-bridge';
 /**
  * Placeholder values we can resolve straight from the composer form. Anything
  * that needs rental/vehicle context (vehicle, booking dates, rates) is resolved
@@ -626,14 +626,53 @@ export const useSendComposedMessage = () => {
 
       try {
         if (input.channel === 'email') {
-          // Attempt 1: Invoke send-email-reply edge function
-          const { data, error } = await supabase.functions.invoke('send-email-reply', {
-            body: {
-              conversationId,
-              messageContent: body,
-              recipientEmail: email,
-              subject: renderedSubject || undefined,
-            },
+  // AUTHORITATIVE PLATFORM EMAIL PATH:
+  // MessageComposer -> backendBridge -> staging.rentmaikar.com
+  // -> /api/functions/send-outbound-email -> Cloud Run emailService -> Resend.
+  // General platform email must not use the legacy Supabase
+  // send-email-reply Edge Function transport.
+
+  try {
+    const bridgeRes = await backendBridge.invokeEdgeFunction(
+      'send-outbound-email',
+      {
+        action: 'send',
+        to: email,
+        subject: renderedSubject || 'Message from Rentmaikar',
+        body,
+        fromAlias: 'support',
+        replyTo: 'support@backend.rentmaikar.com',
+        data: {
+          conversationId,
+          source: 'message_composer',
+          channel: 'email',
+        },
+      },
+      {
+        method: 'POST',
+        timeoutMs: 30000,
+        skipRetry: true,
+      },
+    );
+
+    if (
+      !bridgeRes.error &&
+      (bridgeRes.data?.success || bridgeRes.data?.ok)
+    ) {
+      dispatchOk = true;
+      deliveredMessageId = bridgeRes.data?.messageId;
+    } else {
+      deliveryError =
+        bridgeRes.data?.error ||
+        bridgeRes.error?.message ||
+        `Email delivery failed with HTTP ${bridgeRes.status}`;
+    }
+  } catch (bridgeErr: any) {
+    deliveryError =
+      bridgeErr?.message ||
+      'Authoritative backend email dispatch failed';
+  }
+}
           });
 
           if (!error && (data?.success || data?.ok)) {
