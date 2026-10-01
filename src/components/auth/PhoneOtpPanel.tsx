@@ -119,36 +119,42 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
 
   /** Surface the real edge function error instead of "non-2xx status code". */
   const invokeOtp = async (body: Record<string, unknown>) => {
-    // Stage B: Caller Migration to backend Authenticator via backendBridge / authoritative gateway
-    try {
-      const bridgeRes = await backendBridge.invokeEdgeFunction('phone-otp-custom', body);
-      if (bridgeRes?.data) {
-        if ((bridgeRes.data as any)?.error) throw new Error((bridgeRes.data as any).error);
-        return bridgeRes.data as any;
-      }
-    } catch (bridgeErr: any) {
-      if (bridgeErr?.message && !bridgeErr.message.includes('fetch') && !bridgeErr.message.includes('network')) {
-        throw bridgeErr;
-      }
-    }
+  // AUTHORITATIVE PHONE OTP PATH:
+  // PhoneOtpPanel -> backendBridge -> /api/functions/phone-otp-custom
+  // -> Rentmaikar backend -> OtpService -> MessagingBridge -> SENT.dm.
+  //
+  // Do not fall back to the legacy Supabase Edge Function.
 
-    const { data, error: fnError } = await supabase.functions.invoke('phone-otp-custom', { body });
-    if (fnError) {
-      let detail = fnError.message;
-      const ctx = (fnError as { context?: Response }).context;
-      if (ctx && typeof ctx.text === 'function') {
-        try {
-          const raw = await ctx.text();
-          const parsedBody = JSON.parse(raw);
-          detail = parsedBody?.error ?? raw ?? detail;
-        } catch { /* keep default message */ }
-      }
-      throw new Error(detail);
-    }
-    if ((data as any)?.error) throw new Error((data as any).error);
-    return data as any;
-  };
+  const bridgeRes = await backendBridge.invokeEdgeFunction(
+    'phone-otp-custom',
+    body,
+    {
+      method: 'POST',
+      timeoutMs: 30000,
+      skipRetry: true,
+    },
+  );
 
+  if (bridgeRes?.error) {
+    throw new Error(
+      bridgeRes.error.message || 'Phone OTP service request failed',
+    );
+  }
+
+  const data = bridgeRes?.data;
+
+  if (!data) {
+    throw new Error(
+      'No response received from the phone OTP service',
+    );
+  }
+
+  if ((data as any)?.error) {
+    throw new Error((data as any).error);
+  }
+
+  return data as any;
+};
   const sendCode = async () => {
     setError(null);
     let e164: string;
