@@ -155,9 +155,19 @@ export class MessagingBridge {
         },
       });
 
-      const messageId = sentRes?.data?.id || sentRes?.id || `sent_${Date.now()}`;
-      const deliveryStatus = isSandbox ? "simulation" : "queued";
+      // SENT.dm returns the provider message ID inside the recipient record.
+// Preserve the real provider ID because delivery webhooks use it to
+// reconcile subsequent queued/sent/delivered/failed events.
+const messageId =
+  sentRes?.data?.recipients?.[0]?.message_id ||
+  sentRes?.recipients?.[0]?.message_id ||
+  sentRes?.data?.message_id ||
+  sentRes?.data?.id ||
+  sentRes?.message_id ||
+  sentRes?.id ||
+  undefined;
 
+const deliveryStatus = isSandbox ? "simulation" : "queued";
       await this.logDispatch({
         phone: to,
         region,
