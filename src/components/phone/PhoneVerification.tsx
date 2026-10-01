@@ -124,33 +124,22 @@ export const PhoneVerification = ({ onVerified, showAsCard = true }: PhoneVerifi
         channel,
       };
 
-      let resultData: any = null;
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {
-        // Fallback to direct client gateway
-      }
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'verify-phone',
+  payload,
+);
 
-      if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('verify-phone', {
-          body: payload,
-        });
+if (bridgeRes?.error) {
+  throw new Error(
+    bridgeRes.error.message || 'Failed to send verification code',
+  );
+}
 
-        if (error) {
-          // functions.invoke masks non-2xx bodies — read the real reason
-          let detail = error.message;
-          try {
-            const ctx = (error as any)?.context;
-            if (ctx && typeof ctx.text === 'function') {
-              const parsedBody = JSON.parse(await ctx.text());
-              if (parsedBody?.error) detail = parsedBody.error;
-            }
-          } catch { /* keep generic */ }
-          throw new Error(detail);
-        }
-        resultData = data;
-      }
+const resultData = bridgeRes?.data;
+
+if (!resultData) {
+  throw new Error('No response received from the phone verification service');
+}
 
       if (resultData?.success) {
         setShowOTPDialog(true);
@@ -181,21 +170,22 @@ export const PhoneVerification = ({ onVerified, showAsCard = true }: PhoneVerifi
         code: otpValue,
       };
 
-      let resultData: any = null;
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {
-        // Fallback to direct client gateway
-      }
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'verify-phone',
+  payload,
+);
 
-      if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('verify-phone', {
-          body: payload,
-        });
-        if (error) throw error;
-        resultData = data;
-      }
+if (bridgeRes?.error) {
+  throw new Error(
+    bridgeRes.error.message || 'Phone verification failed',
+  );
+}
+
+const resultData = bridgeRes?.data;
+
+if (!resultData) {
+  throw new Error('No response received from the phone verification service');
+}
 
       if (resultData?.success) {
         setIsPhoneVerified(true);
