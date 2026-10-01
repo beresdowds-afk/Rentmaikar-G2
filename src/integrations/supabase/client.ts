@@ -166,6 +166,7 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "send-approval-notification",
   "send-booking-reminders",
   "send-email-reply",
+  "send-outbound-email",
   "send-in-app-message",
   "send-inbox-reply",
   "send-incident-notification",
