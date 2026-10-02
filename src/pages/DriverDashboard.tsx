@@ -486,10 +486,6 @@ export default function DriverDashboard() {
               <InvoiceStatusPanel scope="driver" userId={targetId} />
               <ProxyBillingSettings userId={targetId} />
                 
-                    isProcessing={isProcessing}
-                  />
-                </div>
-              ) : (
                 <Card>
                   <CardHeader>
                     <CardTitle>Payment History</CardTitle>
