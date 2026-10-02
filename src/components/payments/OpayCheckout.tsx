@@ -18,7 +18,7 @@ interface OpayCheckoutProps {
   onError?: (msg: string) => void;
 }
 
-export function OpayCheckout(}, [
+export function OpayCheckout({
   amount,
   rentalId,
   vehicleId,
@@ -29,8 +29,8 @@ export function OpayCheckout(}, [
   iotDeviceId,
   onSuccess,
   onError,
-]);
-OpayCheckoutProps) {
+}: OpayCheckoutProps) {
+
   const [loading, setLoading] = useState(false);
   const [configured, setConfigured] = useState(false);
   const pollRef = useRef<number | null>(null);
