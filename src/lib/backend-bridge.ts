@@ -130,6 +130,11 @@ type StateChangeListener = (state: ConnectionState, info: BridgeStatusInfo) => v
 
 class BackendBridge {
   private primaryBaseUrl: string;
+  private readonly publicGatewayUrl: string =
+  "https://rentmaikar-g2-672260445879.europe-west1.run.app/api";
+
+  private readonly stagingBackendUrl: string =
+  "https://staging.rentmaikar.com/api";
   private readonly stagingBackendUrl: string = "https://staging.rentmaikar.com/api";
   private readonly stagingHost: string = "https://staging.rentmaikar.com";
 
@@ -185,10 +190,12 @@ class BackendBridge {
       import.meta.env?.MODE === "production";
 
     if (isProduction) {
-      this.primaryBaseUrl = this.stagingBackendUrl;
-    } else {
-      this.primaryBaseUrl =
-        configuredBase || this.stagingBackendUrl;
+  // Public production traffic MUST enter through rentmaikar-g2.
+  // staging.rentmaikar.com remains the admin-only backend surface.
+  this.primaryBaseUrl = this.publicGatewayUrl;
+} else {
+  this.primaryBaseUrl =
+    configuredBase || this.publicGatewayUrl;
     }
 
     if (typeof window !== "undefined") {
