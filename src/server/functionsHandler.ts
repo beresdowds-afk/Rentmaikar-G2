@@ -1191,7 +1191,56 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "process-owner-payouts":
-    case "initiate-paypal-payout":
+    case "initiate-paypal-payout": {
+  try {
+    const {
+      paymentService,
+    } = await import(
+      "../../backend/src/services/paymentService"
+    );
+
+    const result =
+      await paymentService.processPayPalOwnerPayout({
+        owner_id:
+          body.owner_id ||
+          body.user_id,
+        amount:
+          Number(body.amount),
+        currency:
+          String(
+            body.currency || "USD",
+          ).toUpperCase(),
+        payout_account_id:
+          body.payout_account_id ||
+          body.payoutAccountId,
+        authorization_id:
+          body.authorization_id ||
+          body.authorizationId,
+        note:
+          body.note,
+        idempotency_key:
+          body.idempotencyKey,
+      });
+
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        ...result,
+      },
+    };
+  } catch (err: any) {
+    return {
+      status: 502,
+      data: {
+        ok: false,
+        error:
+          err?.message ||
+          "PayPal payout failed",
+      },
+    };
+  }
+}
     case "initiate-paystack-transfer": {
       try {
         const result = await paymentService.processOwnerPayout({
