@@ -11,7 +11,6 @@ import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
 import { useRegion } from '@/contexts/RegionContext';
 import { formatCurrency, PAYMENT_CONFIG } from '@/lib/payment-config';
-import { PaymentOptionsSelector, type PaymentSelection } from '@/components/payment/PaymentOptionsSelector';
 import { DriverPriceNegotiation } from '@/components/negotiation/DriverPriceNegotiation';
 import { PhoneVerification } from '@/components/phone/PhoneVerification';
 import { EmailVerification } from '@/components/auth/EmailVerification';
@@ -40,7 +39,6 @@ import { InstallAppBanner } from '@/components/pwa/InstallAppBanner';
 import { UserIdentityCard } from '@/components/profile/UserIdentityCard';
 import { useDriverDashboard } from '@/hooks/useDriverDashboard';
 import { CallInPanel } from '@/components/driver/CallInPanel';
-import { PayPalCheckout } from '@/components/payments/PayPalCheckout';
 import { PaymentMethodPicker } from '@/components/payments/PaymentMethodPicker';
 import { RentalPaymentStatusPanel } from '@/components/payments/RentalPaymentStatusPanel';
 import { UnifiedBillingPanel } from '@/components/payments/UnifiedBillingPanel';
@@ -118,7 +116,6 @@ export default function DriverDashboard() {
   const [showFullDashboard, setShowFullDashboard] = useState(true);
   const isAdminView = userRole === 'admin';
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [paymentRefreshKey, setPaymentRefreshKey] = useState(0);
   const [preferredPSP, setPreferredPSP] = useState<"paystack" | "opay" | "paypal" | undefined>();
@@ -476,7 +473,10 @@ export default function DriverDashboard() {
                   onError={() => setPaymentRefreshKey((k) => k + 1)}
                 />
               )}
-
+                </div>
+                <div className="flex justify-end">
+                <EnablePushButton />
+                 </div>
               <SubscriptionPlansPanel
                 title="Add-on payments (Training · Insurance · Roadside)"
                 planTypes={["training", "insurance", "roadside_support"]}
@@ -485,28 +485,7 @@ export default function DriverDashboard() {
               <UnifiedBillingPanel userId={targetId} role="driver" country={country} />
               <InvoiceStatusPanel scope="driver" userId={targetId} />
               <ProxyBillingSettings userId={targetId} />
-
-
-              {showPaymentModal ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <span className="font-semibold text-sm">Select Payment Schedule &amp; Method</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowPaymentModal(false)}
-                    >
-                      Back to Payment History
-                    </Button>
-                  </div>
-                  <PaymentOptionsSelector
-                    baseAmount={weeklyRate}
-                    currency={currency}
-                    country={country}
-                    onPaymentSubmit={async (opts) => {
-                      await handlePaymentSubmit(opts);
-                      setShowPaymentModal(false);
-                    }}
+                
                     isProcessing={isProcessing}
                   />
                 </div>
@@ -547,12 +526,16 @@ export default function DriverDashboard() {
                         ))
                       )}
                     </div>
-                    <Button 
-                      className="w-full mt-6" 
-                      onClick={() => setShowPaymentModal(true)}
-                    >
-                      Make New Payment
-                    </Button>
+                    <Button
+  className="w-full mt-6"
+  onClick={() => {
+    document
+      .getElementById("payment-picker")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }}
+>
+  Make New Payment
+</Button>
                   </CardContent>
                 </Card>
               )}
