@@ -268,22 +268,25 @@ export const TwoFactorSetup = () => {
       return;
     }
     setSendingCode(true);
-    try {
-      const payload = { action: 'send_code', phone: normalizedPhone, channel: verifyChannel };
-      let resultData: any = null;
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {
-        // Fallback to client gateway
-      }
-      if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('verify-phone', {
-          body: payload,
-        });
-        if (error) throw error;
-        resultData = data;
-      }
+    const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'verify-phone',
+  payload,
+  {
+    method: 'POST',
+    timeoutMs: 30000,
+    skipRetry: true,
+  },
+);
+
+if (bridgeRes?.error) {
+  throw bridgeRes.error;
+}
+
+const resultData = bridgeRes?.data;
+
+if (!resultData) {
+  throw new Error('No response received from the phone verification service');
+}
       if (!resultData?.success) throw new Error(resultData?.error || 'Failed to send code');
       setCodeSent(true);
       setCooldown(45);
@@ -304,19 +307,25 @@ export const TwoFactorSetup = () => {
     try {
       const payload = { action: 'verify_code', phone: normalizedPhone, code: phoneOtp };
       let resultData: any = null;
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {
-        // Fallback to client gateway
-      }
-      if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('verify-phone', {
-          body: payload,
-        });
-        if (error) throw error;
-        resultData = data;
-      }
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+  'verify-phone',
+  payload,
+  {
+    method: 'POST',
+    timeoutMs: 30000,
+    skipRetry: true,
+  },
+);
+
+if (bridgeRes?.error) {
+  throw bridgeRes.error;
+}
+
+const resultData = bridgeRes?.data;
+
+if (!resultData) {
+  throw new Error('No response received from the phone verification service');
+}
       if (!resultData?.success) throw new Error(resultData?.error || 'Invalid code');
       setPhoneVerified(true);
       toast.success('Phone verified — you can now enable 2FA.');
