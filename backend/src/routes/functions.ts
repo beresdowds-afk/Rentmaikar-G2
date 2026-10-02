@@ -1812,22 +1812,114 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       case "initiate-owner-withdrawal": {
-        const ownerId = body.owner_id || body.ownerId || body.userId;
-        const amount = Number(body.amount);
-        const currency = body.currency || "USD";
-        const provider = body.provider || "paypal";
-        const payoutAccountId = body.payout_account_id || body.payoutAccountId;
-        if (!ownerId || !amount || amount <= 0) {
-          return res.status(400).json({ error: "owner_id and valid amount are required" });
-        }
-        const result = await paymentService.processOwnerPayout({
-          owner_id: ownerId,
-          amount,
-          currency,
-          provider,
-          payout_account_id: payoutAccountId,
-          initiated_by: body.initiated_by || "owner",
-        });
+  try {
+    const ownerId = body.owner_id || body.ownerId || body.userId;
+    const amount = Number(body.amount);
+    const currency = String(body.currency || "USD").toUpperCase();
+    const provider = String(body.provider || "paypal").toLowerCase();
+    const payoutAccountId =
+      body.payout_account_id || body.payoutAccountId;
+    const authorizationId =
+      body.authorization_id || body.authorizationId;
+
+    if (!ownerId || !Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "owner_id and valid amount are required",
+      });
+    }
+
+    if (!payoutAccountId) {
+      return res.status(400).json({
+        ok: false,
+        error: "payout_account_id is required",
+      });
+    }
+
+    if (!authorizationId) {
+      return res.status(428).json({
+        ok: false,
+        error: "withdrawal authorization required",
+      });
+    }
+
+    if (provider !== "paypal") {
+      return res.status(400).json({
+        ok: false,
+        error: `Unsupported payout provider: ${provider}`,
+      });
+    }
+
+    const authHeader = req.headers.authorization || "";
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        ok: false,
+        error: "Authentication required",
+      });
+    }
+
+    const token = authHeader.slice("Bearer ".length);
+    const supabase = supabaseBackendService.getAdminClient();
+
+    const {
+      data: userData,
+      error: userError,
+    } = await supabase.auth.getUser(token);
+
+    if (userError || !userData?.user) {
+      return res.status(401).json({
+        ok: false,
+        error: "Invalid authentication token",
+      });
+    }
+
+    if (userData.user.id !== ownerId) {
+      return res.status(403).json({
+        ok: false,
+        error: "Owner identity mismatch",
+      });
+    }
+
+    const result = await paymentService.processPayPalOwnerPayout({
+      owner_id: ownerId,
+      amount,
+      currency,
+      payout_account_id: payoutAccountId,
+      authorization_id: authorizationId,
+      note: body.note,
+      idempotency_key:
+        (req.headers["idempotency-key"] as string | undefined) ||
+        body.idempotencyKey,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error(
+      "[Backend Functions] initiate-owner-withdrawal failed",
+      err,
+    );
+
+    const message =
+      err?.message || "Owner withdrawal failed";
+
+    const status =
+      /authorization required/i.test(message)
+        ? 428
+        : /authorization|forbidden|belongs to another/i.test(message)
+          ? 403
+          : /insufficient|amount|payout account|currency/i.test(message)
+            ? 400
+            : 502;
+
+    return res.status(status).json({
+      ok: false,
+      error: message,
+    });
+  }
+}
         return res.status(200).json(result);
       }
 
