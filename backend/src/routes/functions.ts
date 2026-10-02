@@ -1543,34 +1543,211 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       case "create-opay-order": {
-        const amount = Number(body.amount || 0);
-        const reference = `rm_opay_${Date.now()}`;
-        return res.status(200).json({
-          code: "00000",
-          message: "SUCCESS",
-          data: {
-            orderNo: reference,
-            cashierUrl: `https://cashier.opayweb.com/pay/${reference}`,
-            amount,
-            currency: "NGN",
-          },
-        });
-      }
+  try {
+    const authHeader =
+      req.headers.authorization || "";
+
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        ok: false,
+        error: "Authentication required",
+      });
+    }
+
+    const token =
+      authHeader.slice("Bearer ".length);
+
+    const supabase =
+      supabaseBackendService.getAdminClient();
+
+    const {
+      data: userData,
+      error: userError,
+    } =
+      await supabase.auth.getUser(token);
+
+    if (
+      userError ||
+      !userData?.user
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthenticated",
+      });
+    }
+
+    const {
+      createOpayOrder,
+    } = await import(
+      "../services/opayService"
+    );
+
+    const result =
+      await createOpayOrder({
+        amount: Number(body.amount),
+        rentalId: body.rentalId,
+        vehicleId: body.vehicleId,
+        ownerId: body.ownerId,
+        driverId: userData.user.id,
+        paymentFrequency:
+          body.paymentFrequency,
+        description:
+          body.description,
+        callbackUrl:
+          body.callbackUrl,
+        returnUrl:
+          body.returnUrl,
+        purpose:
+          body.purpose,
+        iotDeviceId:
+          body.iotDeviceId,
+        metadata:
+          body.metadata,
+        idempotencyKey:
+          req.headers[
+            "idempotency-key"
+          ] as string | undefined,
+      });
+
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error(
+      "[Backend Functions] create-opay-order failed",
+      err,
+    );
+
+    return res.status(502).json({
+      ok: false,
+      error:
+        err?.message ||
+        "OPay order creation failed",
+    });
+  }
+}
 
       case "verify-opay-order": {
-        const orderNo = body.orderNo || body.reference;
-        return res.status(200).json({
-          code: "00000",
-          status: "SUCCESS",
-          orderNo,
-          message: "Transaction verified successfully",
-        });
-      }
+  try {
+    const authHeader =
+      req.headers.authorization || "";
+
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        ok: false,
+        error: "Authentication required",
+      });
+    }
+
+    const token =
+      authHeader.slice("Bearer ".length);
+
+    const supabase =
+      supabaseBackendService.getAdminClient();
+
+    const {
+      data: userData,
+      error: userError,
+    } =
+      await supabase.auth.getUser(token);
+
+    if (
+      userError ||
+      !userData?.user
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: "Unauthenticated",
+      });
+    }
+
+    const reference =
+      String(body.reference || "").trim();
+
+    if (!reference) {
+      return res.status(400).json({
+        ok: false,
+        error: "reference is required",
+      });
+    }
+
+    const {
+      verifyOpayOrder,
+    } = await import(
+      "../services/opayService"
+    );
+
+    const result =
+      await verifyOpayOrder(
+        reference,
+        userData.user.id,
+      );
+
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error(
+      "[Backend Functions] verify-opay-order failed",
+      err,
+    );
+
+    const status =
+      err?.message === "Forbidden"
+        ? 403
+        : 502;
+
+    return res.status(status).json({
+      ok: false,
+      error:
+        err?.message ||
+        "OPay verification failed",
+    });
+  }
+}
 
       case "opay-webhook": {
-        return res.status(200).json({ code: "00000", message: "SUCCESS" });
-      }
+        case "opay-webhook": {
+  try {
+    const {
+      handleOpayWebhook,
+    } = await import(
+      "../services/opayService"
+    );
 
+    const rawBody =
+      typeof req.body === "string"
+        ? req.body
+        : JSON.stringify(req.body || {});
+
+    const result =
+      await handleOpayWebhook(
+        req.headers as Record<string, any>,
+        rawBody,
+      );
+
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error(
+      "[Backend Functions] opay-webhook failed",
+      err,
+    );
+
+    if (
+      String(err?.message || "")
+        .toLowerCase()
+        .includes("invalid opay webhook signature")
+    ) {
+      return res.status(401).json({
+        received: false,
+        error: "Invalid webhook signature",
+      });
+    }
+
+    return res.status(500).json({
+      received: false,
+      error:
+        err?.message ||
+        "OPay webhook processing failed",
+    });
+  }
+      }
       case "process-owner-payouts":
       case "initiate-paypal-payout":
       case "initiate-paystack-transfer": {
