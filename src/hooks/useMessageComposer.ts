@@ -673,14 +673,6 @@ export const useSendComposedMessage = () => {
       'Authoritative backend email dispatch failed';
   }
 }
-          });
-
-          if (!error && (data?.success || data?.ok)) {
-            dispatchOk = true;
-            deliveredMessageId = data?.messageId;
-          } else {
-            deliveryError = data?.error || error?.message || 'Edge function delivery warning';
-          }
 
           // Attempt 2: Resilient direct local API gateway fallback
           if (!dispatchOk) {
