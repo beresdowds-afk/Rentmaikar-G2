@@ -1749,19 +1749,51 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   }
       }
       case "process-owner-payouts":
-      case "initiate-paypal-payout":
       case "initiate-paystack-transfer": {
-        const result = await paymentService.processOwnerPayout({
-          owner_id: body.owner_id || body.user_id,
-          amount: Number(body.amount),
-          currency: body.currency || "USD",
-          provider: functionName.includes("paystack") ? "paystack" : "paypal",
-          payout_account_id: body.payout_account_id,
-          initiated_by: body.initiated_by,
-        });
-        return res.status(200).json(result);
-      }
+        case "initiate-paypal-payout": {
+  const ownerId =
+    body.owner_id || body.user_id;
 
+  const amount =
+    Number(body.amount);
+
+  const payoutAccountId =
+    body.payout_account_id ||
+    body.payoutAccountId;
+
+  const authorizationId =
+    body.authorization_id ||
+    body.authorizationId;
+
+  if (!ownerId || !payoutAccountId) {
+    return res.status(400).json({
+      ok: false,
+      error:
+        "owner_id and payout_account_id are required",
+    });
+  }
+
+  const result =
+    await paymentService.processPayPalOwnerPayout({
+      owner_id: ownerId,
+      amount,
+      currency:
+        String(body.currency || "USD").toUpperCase(),
+      payout_account_id:
+        payoutAccountId,
+      authorization_id:
+        authorizationId,
+      note: body.note,
+      idempotency_key:
+        (req.headers["idempotency-key"] as string | undefined) ||
+        body.idempotencyKey,
+    });
+
+  return res.status(200).json({
+    ok: true,
+    ...result,
+  });
+}
       case "persona-create-inquiry": {
         const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         return res.status(200).json({
