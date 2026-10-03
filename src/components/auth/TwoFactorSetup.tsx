@@ -358,16 +358,111 @@ if (bridgeRes?.error) {
   throw bridgeRes.error;
 }
 
-const resultData = bridgeRes?.data;
+  const handleSendPhoneCode = async () => {
+    if (!phoneIsValid || !normalizedPhone) {
+      toast.error('Enter a valid phone number first');
+      return;
+    }
 
-if (!resultData) {
-  throw new Error('No response received from the phone verification service');
-}
-      if (!resultData?.success) throw new Error(resultData?.error || 'Invalid code');
-      setPhoneVerified(true);
-      toast.success('Phone verified — you can now enable 2FA.');
+    setSendingCode(true);
+    try {
+      const payload = {
+        action: 'send_code',
+        phone: normalizedPhone,
+        channel: verifyChannel,
+      };
+
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+        'verify-phone',
+        payload,
+        {
+          method: 'POST',
+          timeoutMs: 30000,
+          skipRetry: true,
+        },
+      );
+
+      if (bridgeRes?.error) {
+        throw bridgeRes.error;
+      }
+
+      const resultData = bridgeRes?.data;
+
+      if (!resultData) {
+        throw new Error(
+          'No response received from the phone verification service',
+        );
+      }
+
+      if (!resultData.success) {
+        throw new Error(resultData.error || 'Failed to send code');
+      }
+
+      setCodeSent(true);
+      setCooldown(45);
+      toast.success(`Code sent via ${verifyChannel.toUpperCase()}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Verification failed');
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to send code',
+      );
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async () => {
+    if (!/^\d{6}$/.test(phoneOtp) || !normalizedPhone) {
+      toast.error('Enter the 6-digit code');
+      return;
+    }
+
+    setVerifyingPhone(true);
+
+    try {
+      const payload = {
+        action: 'verify_code',
+        phone: normalizedPhone,
+        code: phoneOtp,
+      };
+
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+        'verify-phone',
+        payload,
+        {
+          method: 'POST',
+          timeoutMs: 30000,
+          skipRetry: true,
+        },
+      );
+
+      if (bridgeRes?.error) {
+        throw bridgeRes.error;
+      }
+
+      const resultData = bridgeRes?.data;
+
+      if (!resultData) {
+        throw new Error(
+          'No response received from the phone verification service',
+        );
+      }
+
+      if (!resultData.success || resultData.verified === false) {
+        throw new Error(
+          resultData.error ||
+            resultData.message ||
+            'Invalid code',
+        );
+      }
+
+      setPhoneVerified(true);
+      toast.success(
+        'Phone verified — you can now enable 2FA.',
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Verification failed',
+      );
     } finally {
       setVerifyingPhone(false);
     }
@@ -375,33 +470,68 @@ if (!resultData) {
 
   const handleSavePhone2FA = async () => {
     if (!user || !normalizedPhone) return;
+
     if (!phoneVerified) {
-      toast.error('Please verify your phone number before enabling 2FA.');
+      toast.error(
+        'Please verify your phone number before enabling 2FA.',
+      );
       return;
     }
+
     setIsSaving(true);
+
     try {
-      const payload = { action: 'setup', phone: normalizedPhone, channel };
-      
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {
-        // Fallback to client gateway
+      const setupChannel =
+        channel === 'whatsapp' ? 'whatsapp' : 'sms';
+
+      const payload = {
+        action: 'setup',
+        phone: normalizedPhone,
+        channel: setupChannel,
+      };
+
+      const bridgeRes = await backendBridge.invokeEdgeFunction(
+        'send-2fa-code',
+        payload,
+        {
+          method: 'POST',
+          timeoutMs: 30000,
+          skipRetry: true,
+        },
+      );
+
+      if (bridgeRes?.error) {
+        throw bridgeRes.error;
       }
+
+      const resultData = bridgeRes?.data;
+
       if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-          body: payload,
-        });
-        if (error) throw error;
-        resultData = data;
+        throw new Error(
+          'No response received from the 2FA service',
+        );
       }
-      if (!resultData?.success) throw new Error(resultData?.error || 'Failed to save 2FA settings');
+
+      if (!resultData.success) {
+        throw new Error(
+          resultData.error ||
+            'Failed to save 2FA settings',
+        );
+      }
+
       setIsEnabled(true);
+      setChannel(setupChannel);
       setExistingPhone(normalizedPhone);
-      toast.success('Two-factor authentication enabled via SMS/WhatsApp!');
+
+      toast.success(
+        'Two-factor authentication enabled via SMS/WhatsApp!',
+      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to enable 2FA');
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : 'Failed to enable 2FA',
+      );
     } finally {
       setIsSaving(false);
     }
