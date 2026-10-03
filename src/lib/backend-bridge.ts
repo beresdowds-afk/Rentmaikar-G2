@@ -690,9 +690,9 @@ class BackendBridge {
     correlationId,
     true,
     maxRetries
-  );
+   );
+  }
 }
-
 private async executeCallWithRetry<T>(
     url: string,
     options: BackendCallOptions,
