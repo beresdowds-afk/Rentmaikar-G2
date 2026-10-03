@@ -209,7 +209,6 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "verify-credentials",
   "verify-opay-order",
   "verify-paystack-transaction",
-  "verify-phone",
   "verify-referees",
   "voice-access-token",
   "voice-call-request",
