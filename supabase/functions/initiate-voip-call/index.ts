@@ -17,7 +17,7 @@ interface Recipient {
 
 interface CallRequest {
   callType: 'individual' | 'group';
-  region: 'USA' | 'Nigeria';
+  region: string;
   recipients: Recipient[];
   groupId?: string;
   callerRole?: string;
@@ -174,8 +174,6 @@ const handler = async (req: Request): Promise<Response> => {
 
     for (const recipient of recipients) {
       try {
-        const recipientRegion = recipient.phoneNumber.startsWith('+234') ? 'Nigeria' : 'USA';
-
         // Bridge the answered leg to the operator endpoint — never back to the
         // recipient's own number (that self-dial made single calls drop).
         const twiml = isConference
