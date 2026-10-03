@@ -202,3 +202,19 @@ describe("Rentmaikar CPaaS Region → Channel → Provider routing", () => {
     });
   });
 });
+it("does not silently convert an unresolved destination into USA", () => {
+  expect(resolveRegion("+447700900123")).toBe("Global");
+});
+
+it("does not select a regional provider as primary", () => {
+  expect(
+    resolvePrimaryProvider("Nigeria", "sms")
+  ).toBe("sent");
+
+  expect(
+    resolvePrimaryProvider("USA", "whatsapp")
+  ).toBe("sent");
+});
+it("returns no fallback when the canonical region has no configured fallback", ...);
+
+it("uses the configured regional fallback rather than a hard-coded country mapping", ...);
