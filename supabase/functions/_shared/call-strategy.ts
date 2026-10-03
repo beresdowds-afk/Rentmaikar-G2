@@ -129,11 +129,11 @@ export function getCurrentHourInTimezone(timezone: string): number {
  * Determine the region code from a phone number.
  */
 export function getRegionFromPhone(phone: string): string {
-  if (phone.startsWith('+234')) return 'NG';
-  if (phone.startsWith('+1')) return 'US';
-  return 'US'; // default
-}
+  if (phone.startsWith("+234")) return "NG";
+  if (phone.startsWith("+1")) return "US";
 
+  return "Global";
+}
 /**
  * Check if a call can be placed right now to this region.
  */
