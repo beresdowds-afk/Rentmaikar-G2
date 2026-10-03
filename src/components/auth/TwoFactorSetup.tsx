@@ -268,9 +268,46 @@ export const TwoFactorSetup = () => {
       return;
     }
     setSendingCode(true);
-    const bridgeRes = await backendBridge.invokeEdgeFunction(
-  'verify-phone',
-  payload,
+
+try {
+  const payload = {
+    action: 'send_code',
+    phone: normalizedPhone,
+    channel: verifyChannel,
+  };
+
+  const bridgeRes = await backendBridge.invokeEdgeFunction(
+    'verify-phone',
+    payload,
+    {
+      method: 'POST',
+      timeoutMs: 30000,
+      skipRetry: true,
+    },
+  );
+
+  if (bridgeRes?.error) {
+    throw bridgeRes.error;
+  }
+
+  const resultData = bridgeRes?.data;
+
+  if (!resultData) {
+    throw new Error('No response received from the phone verification service');
+  }
+
+  if (!resultData?.success) {
+    throw new Error(resultData?.error || 'Failed to send code');
+  }
+
+  setCodeSent(true);
+  setCooldown(45);
+  toast.success(`Code sent via ${verifyChannel.toUpperCase()}`);
+} catch (err) {
+  toast.error(err instanceof Error ? err.message : 'Failed to send code');
+} finally {
+  setSendingCode(false);
+}
   {
     method: 'POST',
     timeoutMs: 30000,
@@ -345,7 +382,7 @@ if (!resultData) {
     setIsSaving(true);
     try {
       const payload = { action: 'setup', phone: normalizedPhone, channel };
-      let resultData: any = null;
+      
       try {
         const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
         if (bridgeRes?.data) resultData = bridgeRes.data;
