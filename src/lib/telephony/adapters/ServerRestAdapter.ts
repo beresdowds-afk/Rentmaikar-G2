@@ -39,7 +39,7 @@ export class ServerRestAdapter implements ITelephonyAdapter {
     const callPayload = {
       recipients,
       callType: params.callType || (recipients.length > 1 ? "group" : "individual"),
-      region: params.region || "USA",
+      region: params.region || country,
       callerUserId: params.adminUserId,
       metadata: params.metadata || {},
     };
@@ -83,7 +83,7 @@ export class ServerRestAdapter implements ITelephonyAdapter {
       recipient_name: params.recipientName,
       status: primaryResult?.success ? "in-progress" : "failed",
       direction: "outbound",
-      region: params.region || "USA",
+      region: params.region || country,
       created_at: now,
       started_at: now,
       metadata: {
