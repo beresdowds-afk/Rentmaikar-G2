@@ -1,7 +1,7 @@
 import { SentChannel } from "@/integrations/sent/types";
 import { supabase } from "@/integrations/supabase/client";
 
-export type CPaaSProvider = "sent" | "twilio" | "termii" | "auto";
+export type CPaaSProvider = "sent" | "twilio" | "termii" ;
 
 export interface CPaaSConfig {
   primaryProvider: CPaaSProvider;
