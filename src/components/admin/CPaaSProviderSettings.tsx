@@ -94,12 +94,14 @@ export function CPaaSProviderSettings() {
               onClick={() => {
                 updateConfig({
                   enableFailover: true,
-                  primaryProvider: "auto",
+                  primaryProvider: "sent",
                   sandboxMode: false,
                   channelRouting: { sms: "sent", whatsapp: "sent", rcs: "sent" },
                 });
-                toast.success("All CPaaS service providers enabled with automatic regional routing & failover!");
-              }}
+             toast.success(
+  "CPaaS providers enabled with Sent.dm primary routing and configured regional failover."
+);
+}}
               className="gap-1.5 text-xs h-8 bg-purple-600 hover:bg-purple-700 text-white shadow-xs"
             >
               <Sparkles className="w-3.5 h-3.5" />
@@ -247,27 +249,71 @@ export function CPaaSProviderSettings() {
               htmlFor="twilio-direct"
               className={`p-4 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-3 ${
                 config.primaryProvider === "twilio"
-                  ? "border-primary bg-primary/5 ring-1 ring-primary"
-                  : "border-border hover:bg-muted/30"
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem value="twilio" id="twilio-direct" />
-                    <strong className="text-sm font-bold text-foreground">Twilio Direct Only</strong>
-                  </div>
-                  <p className="text-xs text-muted-foreground pl-6">
-                    Enforces Twilio as the primary dispatcher for all supported regions.
-                  </p>
-                </div>
-              </div>
-              <div className="pl-6 text-[11px] text-muted-foreground">
-                Dedicated US carrier route
-              </div>
-            </label>
-          </RadioGroup>
+<RadioGroup
+  value="sent"
+  onValueChange={() => {
+    updateConfig({
+      primaryProvider: "sent",
+      channelRouting: {
+        ...config.channelRouting,
+        sms: "sent",
+        whatsapp: "sent",
+      },
+    });
+  }}
+  className="grid grid-cols-1 gap-3"
+>
+  <label
+    htmlFor="sent-global"
+    className="p-4 rounded-xl border border-primary bg-primary/5 ring-1 ring-primary cursor-default transition flex flex-col justify-between gap-3"
+  >
+    <div className="flex items-start justify-between">
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <RadioGroupItem
+            value="sent"
+            id="sent-global"
+            checked
+            disabled
+          />
+
+          <strong className="text-sm font-bold text-foreground">
+            Sent.dm — Universal Primary
+          </strong>
         </div>
+
+        <p className="text-xs text-muted-foreground pl-6">
+          Sent.dm is the primary provider for SMS and WhatsApp across
+          supported regions. Regional providers are used only as configured
+          fallbacks when Sent.dm dispatch fails.
+        </p>
+      </div>
+
+      <Badge
+        variant="secondary"
+        className="text-[10px] bg-primary/10 text-primary"
+      >
+        PRIMARY
+      </Badge>
+    </div>
+
+    <div className="pl-6 space-y-1 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2">
+        <Sparkles className="w-3 h-3 text-primary" />
+        <span>
+          Nigeria fallback: Termii when configured
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Sparkles className="w-3 h-3 text-primary" />
+        <span>
+          USA fallback: Twilio when configured
+        </span>
+      </div>
+    </div>
+  </label>
+</RadioGroup>
 
         {/* Delivery Mode & Live / Sandbox Toggle */}
         <div className="p-4 rounded-xl border bg-muted/20 space-y-3">
