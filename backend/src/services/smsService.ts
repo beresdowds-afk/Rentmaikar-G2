@@ -183,7 +183,12 @@ export async function sendApplicationMessage(
   const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
 
-  if (twilioAccountSid && twilioAuthToken && (!override || override === "twilio")) {
+  if (
+  twilioAccountSid &&
+  twilioAuthToken &&
+  region === "USA" &&
+  (!override || override === "twilio")
+) {
     try {
       const isWa = channel === "whatsapp";
       const fromNumber = isWa
@@ -248,8 +253,13 @@ export async function sendApplicationMessage(
   // -----------------------------------------------------------------
   const termiiApiKey = process.env.TERMII_API_KEY;
 
-  if (termiiApiKey && (region === "Nigeria" || override === "termii") && channel === "sms") {
-    try {
+if (
+  termiiApiKey &&
+  region === "Nigeria" &&
+  channel === "sms" &&
+  (!override || override === "termii")
+) {
+  try {
       const termiiSenderId = process.env.TERMII_SENDER_ID || "Rentmaikar";
       const cleanPhone = to.replace(/^\+/, "");
 
