@@ -294,7 +294,12 @@ const handler = async (req: Request): Promise<Response> => {
 
     // ─── Rate limiting ───
 
-    const region = body.phone.startsWith('+234') ? 'NIGERIA' : 'USA';
+    const region =
+  body.phone.startsWith("+234")
+    ? "NIGERIA"
+    : body.phone.startsWith("+1")
+      ? "USA"
+      : "GLOBAL";
     if (!checkGlobalRateLimit() || !checkRateLimit(region)) {
       return new Response(
         JSON.stringify({ success: false, error: "Rate limited. Try again shortly." }),
@@ -416,7 +421,7 @@ const handler = async (req: Request): Promise<Response> => {
       }
     }
 
-    if (isNigeria) {
+    if (region === "NIGERIA") {
 
       // ─── TERMII (Nigeria) ───
       const termiiApiKey = Deno.env.get("TERMII_API_KEY");
@@ -519,7 +524,17 @@ const handler = async (req: Request): Promise<Response> => {
         "Twilio fallback is not available for this destination. SMS/WhatsApp must route via Sent.dm.",
       );
     }
+if (region !== "USA") {
+  throw new Error(
+    "No configured regional fallback is available for this destination."
+  );
+}
 
+if (!twilioFallbackAllowed(body.phone)) {
+  throw new Error(
+    "Twilio fallback is not available for this destination. SMS/WhatsApp must route via Sent.dm."
+  );
+}
 
     const accountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
     const authToken = Deno.env.get("TWILIO_AUTH_TOKEN");
