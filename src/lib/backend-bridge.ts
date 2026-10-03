@@ -129,6 +129,7 @@ type EventListener = (event: BridgeEventPacket) => void;
 type StateChangeListener = (state: ConnectionState, info: BridgeStatusInfo) => void;
 
 class BackendBridge {
+  private primaryBaseUrl: string;
   private readonly publicGatewayUrl: string =
   "https://rentmaikar-g2-672260445879.europe-west1.run.app/api";
   private readonly stagingBackendUrl: string = "https://staging.rentmaikar.com/api";
