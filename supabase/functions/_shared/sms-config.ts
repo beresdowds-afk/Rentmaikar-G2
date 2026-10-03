@@ -53,18 +53,35 @@ export const smsConfig: SMSConfig = {
 };
 
 // ─── Get config for a phone number ───
-export const getRegionConfig = (phone: string): RegionSMSConfig => {
+export const getRegionConfig = (
+  phone: string
+): RegionSMSConfig | null => {
   if (phone.startsWith("+234") || phone.startsWith("234")) {
     return smsConfig.regions.NIGERIA;
   }
-  return smsConfig.regions.USA;
+
+  if (phone.startsWith("+1")) {
+    return smsConfig.regions.USA;
+  }
+
+  return null;
 };
 
 // ─── Get the correct "From" number based on message type ───
 export type SMSNumberType = "main" | "support" | "emergency";
 
-export const getFromNumber = (phone: string, numberType: SMSNumberType = "main"): string => {
+export const getFromNumber = (
+  phone: string,
+  numberType: SMSNumberType = "main"
+): string => {
   const config = getRegionConfig(phone);
+
+  if (!config) {
+    throw new Error(
+      "No configured messaging line exists for the destination region."
+    );
+  }
+
   return config[numberType];
 };
 
