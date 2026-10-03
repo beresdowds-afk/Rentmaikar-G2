@@ -35,12 +35,34 @@ export interface SendApplicationMessageResult {
   channel: "sms" | "whatsapp";
   provider: "sent" | "twilio" | "termii" | "none";
   deliveryStatus: "queued" | "submitted" | "sent" | "failed" | "simulation";
-  region: "USA" | "Nigeria";
+  region: "USA" | "Nigeria" | "Global";
   error?: string;
   simulation?: boolean;
 }
 
-export function normalizeE164(phone: string): function resolveMessagingRegion(
+export function normalizeE164(phone: string): string {
+  const cleaned = phone.replace(/[^\d+]/g, "");
+
+  if (!cleaned) return "";
+
+  if (cleaned.startsWith("+")) return cleaned;
+
+  if (cleaned.startsWith("234") && cleaned.length === 13) {
+    return `+${cleaned}`;
+  }
+
+  if (cleaned.startsWith("0") && cleaned.length === 11) {
+    return `+234${cleaned.slice(1)}`;
+  }
+
+  if (cleaned.length === 10) {
+    return `+1${cleaned}`;
+  }
+
+  return `+${cleaned}`;
+}
+
+function resolveMessagingRegion(
   phone: string
 ): "USA" | "Nigeria" | "Global" {
   if (phone.startsWith("+234")) {
@@ -53,19 +75,10 @@ export function normalizeE164(phone: string): function resolveMessagingRegion(
 
   return "Global";
 }
-string {
-  const cleaned = phone.replace(/[^\d+]/g, "");
-  if (!cleaned) return "";
-  if (cleaned.startsWith("+")) return cleaned;
-  if (cleaned.startsWith("234") && cleaned.length === 13) return `+${cleaned}`;
-  if (cleaned.startsWith("0") && cleaned.length === 11) return `+234${cleaned.slice(1)}`;
-  if (cleaned.length === 10) return `+1${cleaned}`;
-  return `+${cleaned}`;
-}
 
 async function logMessageDispatch(params: {
   phone: string;
-  region: "USA" | "Nigeria";
+  region: "USA" | "Nigeria" | "Global";
   provider: "sent" | "twilio" | "termii" | "none";
   channel: "sms" | "whatsapp";
   message: string;
@@ -108,7 +121,7 @@ export async function sendApplicationMessage(
   const rawTo = payload.to || "";
   const to = normalizeE164(rawTo);
   const channel = payload.channel === "whatsapp" ? "whatsapp" : "sms";
-  region: "USA" | "Nigeria" | "Global";
+  const region = resolveMessagingRegion(to);
   const isSandbox = Boolean(payload.sandbox || process.env.SENT_SANDBOX_MODE === "true");
 
   if (!to) {
