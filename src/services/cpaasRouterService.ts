@@ -158,11 +158,7 @@ export class CPaaSRouterService {
       // Handle Failover if enabled
       if (this.config.enableFailover) {
         const fallback = this.getFallbackProvider(selectedProvider, formattedTo);
-        if (
-  fallback &&
-  fallback !== "auto" &&
-  fallback !== selectedProvider
-) {
+        if (fallback && fallback !== selectedProvider) {
           console.info(`[CPaaSRouter] Triggering automatic failover from ${selectedProvider} to ${fallback}`);
           try {
             let fallbackResult: UnifiedMessageResult;
@@ -199,28 +195,30 @@ export class CPaaSRouterService {
   private getFallbackProvider(
   current: CPaaSProvider,
   destinationPhone: string
-): CPaaSProvider {
+): CPaaSProvider | null {
   if (current !== "sent") {
-    // SENT.dm is the universal primary, so a provider that was
-    // explicitly selected falls back to SENT.dm.
+    // SENT.dm is the universal primary provider.
+    // Explicitly selected providers may fall back to SENT.dm.
     return "sent";
   }
 
   const normalized = destinationPhone.trim();
 
   if (normalized.startsWith("+234")) {
-    // Nigerian regional fallback.
+    // Nigeria regional fallback.
     return "termii";
   }
 
   if (normalized.startsWith("+1")) {
-    // USA/Canada numbering-plan fallback.
+    // USA regional fallback.
     return "twilio";
   }
 
-  // Unknown region:
-  // do not silently classify it as USA.
-  return "auto";
+  // Unknown/unresolved region:
+  // SENT.dm remains the only automatic provider.
+  // Never silently classify the destination as USA.
+  return null;
+}
 }
   private async dispatchViaSent(
     to: string, 
