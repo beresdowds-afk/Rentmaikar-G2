@@ -276,16 +276,18 @@ export function IncidentReportForm({ vehicleId, vehicleName, ownerId, onSuccess 
 
         if (error) throw error;
 
-        const { data: urlData } = supabase.storage
+        // Bucket is private; generate authenticated signed URL for preview & storage
+        const { data: signedData } = await supabase.storage
           .from('incident-photos')
-          .getPublicUrl(data.path);
+          .createSignedUrl(data.path, 86400 * 30);
 
-        uploadedUrls.push(urlData.publicUrl);
+        const photoUrl = signedData?.signedUrl || data.path;
+        uploadedUrls.push(photoUrl);
 
         // Update photo with URL
         setPhotos(prev => {
           const updated = [...prev];
-          updated[i] = { ...updated[i], uploading: false, url: urlData.publicUrl };
+          updated[i] = { ...updated[i], uploading: false, url: photoUrl };
           return updated;
         });
       } catch (error) {
@@ -373,6 +375,37 @@ export function IncidentReportForm({ vehicleId, vehicleName, ownerId, onSuccess 
         });
       } catch (notifError) {
         console.error('[IncidentReport] Notification failed:', notifError);
+      }
+
+      // For high or critical incidents, create immediate unified support ticket & audit event
+      try {
+        if (severity === 'critical' || severity === 'high') {
+          await supabase.from('support_tickets').insert({
+            requester_id: user.id,
+            channel: 'in_app',
+            category: 'incident_report',
+            priority: severity === 'critical' ? 'urgent' : 'high',
+            subject: `[${severity.toUpperCase()}] Incident Reported: ${title.trim()}`,
+            description: `Vehicle: ${vehicleId || 'N/A'}. Incident Type: ${incidentType}. Location: ${location.trim() || 'N/A'}.\n\nDetails:\n${description.trim()}`,
+            source_reference: incident.id,
+            metadata: { incident_id: incident.id, vehicle_id: vehicleId, severity, incident_type: incidentType },
+          });
+        }
+
+        // Authoritative audit event
+        await supabase.rpc('append_system_audit_event' as any, {
+          _actor_id: user.id,
+          _actor_role: 'driver',
+          _event_type: 'INCIDENT_REPORTED',
+          _vector: 'safety',
+          _target_type: 'incidents',
+          _target_id: incident.id,
+          _action: 'SUBMIT_INCIDENT_REPORT',
+          _status: severity,
+          _metadata: { vehicle_id: vehicleId, severity, incident_type: incidentType, photo_count: uploadedUrls.length },
+        });
+      } catch (escErr) {
+        console.warn('[IncidentReport] Escalation log notice:', escErr);
       }
 
       toast.success('Incident reported successfully', {

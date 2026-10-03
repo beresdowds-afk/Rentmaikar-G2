@@ -2,6 +2,7 @@ import crypto from "crypto";
 import path from "path";
 import { supabaseBackendService } from "./supabaseService";
 import { getDbPool } from "./dbPool";
+import { registerEvidenceArtifact } from "./evidenceHashService";
 import {
   StoragePurpose,
   PURPOSE_CONFIGS,
@@ -175,7 +176,9 @@ export async function handleFileUpload(
       throw new Error(`Storage upload failed: ${uploadErr.message}`);
     }
 
-    // Persist to public.user_documents table
+    const contentSha256 = crypto.createHash("sha256").update(file.buffer).digest("hex");
+
+    // Persist to public.user_documents table with version and cryptographic hash
     const insertRes = await pool.query(
       `
         INSERT INTO public.user_documents (
@@ -188,9 +191,12 @@ export async function handleFileUpload(
           mime_type,
           vehicle_id,
           expires_at,
-          status
+          status,
+          content_sha256,
+          document_version,
+          access_classification
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending'
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, 1, 'restricted'
         )
         RETURNING id
       `,
@@ -204,10 +210,32 @@ export async function handleFileUpload(
         mimeType,
         metadata.vehicleId || null,
         metadata.expiresAt || null,
+        contentSha256,
       ]
     );
 
     documentId = insertRes.rows[0]?.id;
+
+    // Register into authoritative cryptographic evidence store
+    try {
+      await registerEvidenceArtifact({
+        evidenceType: "document",
+        sourceTable: "user_documents",
+        sourceId: documentId || "",
+        storageBucket: config.bucket,
+        storagePath: filePath,
+        contentSha256,
+        capturedBy: auth.userId,
+        metadata: {
+          documentType,
+          fileName: file.originalname || fileName,
+          fileSize,
+          mimeType,
+        },
+      });
+    } catch (evErr) {
+      console.warn("[fileUploadService] Evidence artifact registration notice:", evErr);
+    }
 
     // Generate signed URL
     const { data: signedData } = await admin.storage

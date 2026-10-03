@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { download10DlcPdf } from "@/lib/generate-10dlc-pdf";
+import { PersonaVerificationSettings } from "@/components/admin/PersonaVerificationSettings";
 
 export const CompliancePanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>("a2p-10dlc");
@@ -223,6 +224,9 @@ export const CompliancePanel: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Authoritative Persona and Background Screening Switch Control */}
+              <PersonaVerificationSettings />
             </TabsContent>
 
             {/* Data Privacy Tab */}

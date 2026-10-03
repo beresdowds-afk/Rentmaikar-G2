@@ -9,12 +9,29 @@ import { EMAIL_CONFIG, COMPANY_INFO } from "@/lib/email-config";
 
 const Terms = () => {
   const { country } = useRegion();
+  const LEGAL_VERSION = "2026-10-01-v2";
 
   const USATerms = () => (
     <div className="prose prose-lg max-w-none space-y-8">
-      <p className="text-muted-foreground text-lg">
-        Last updated: February 12, 2026
-      </p>
+      <div>
+        <p className="text-muted-foreground text-lg">
+          Last updated: October 1, 2026
+        </p>
+        <p className="text-muted-foreground text-sm font-mono mt-1">
+          Legal version: {LEGAL_VERSION}
+        </p>
+        <div className="flex flex-wrap gap-3 mt-3 text-xs not-prose">
+          <Link to="/privacy" className="text-primary hover:underline font-medium">Privacy Policy</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/driver-agreement" className="text-primary hover:underline font-medium">Driver Agreement</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/proxy-consent" className="text-primary hover:underline font-medium">Proxy Consent</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/data-rights" className="text-primary hover:underline font-medium">Data Rights</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/cookies" className="text-primary hover:underline font-medium">Cookie Policy</Link>
+        </div>
+      </div>
       
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">1. Acceptance of Terms</h2>
@@ -239,9 +256,25 @@ const Terms = () => {
 
   const NigeriaTerms = () => (
     <div className="prose prose-lg max-w-none space-y-8">
-      <p className="text-muted-foreground text-lg">
-        Last updated: February 12, 2026
-      </p>
+      <div>
+        <p className="text-muted-foreground text-lg">
+          Last updated: October 1, 2026
+        </p>
+        <p className="text-muted-foreground text-sm font-mono mt-1">
+          Legal version: {LEGAL_VERSION}
+        </p>
+        <div className="flex flex-wrap gap-3 mt-3 text-xs not-prose">
+          <Link to="/privacy" className="text-primary hover:underline font-medium">Privacy Policy</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/driver-agreement" className="text-primary hover:underline font-medium">Driver Agreement</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/proxy-consent" className="text-primary hover:underline font-medium">Proxy Consent</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/data-rights" className="text-primary hover:underline font-medium">Data Rights</Link>
+          <span className="text-muted-foreground">•</span>
+          <Link to="/legal/cookies" className="text-primary hover:underline font-medium">Cookie Policy</Link>
+        </div>
+      </div>
       
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold">1. Acceptance of Terms</h2>

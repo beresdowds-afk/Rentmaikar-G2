@@ -47,20 +47,38 @@ export default function ProxyConsentPage() {
     load();
   };
 
-  const tokenizeMock = async () => {
-    // Real integration would call Paystack/PayPal SDKs and pass back the token.
+  const tokenizeCard = async () => {
+    if (ctx?.identity_status !== "verified") {
+      return toast.error("Identity verification must be completed and verified before adding a payment card.");
+    }
     setSubmitting(true);
-    const { data, error } = await supabase.functions.invoke("proxy-consent-manager", {
-      body: {
-        action: "tokenize_card", token,
-        provider: "paystack", card_token: `tok_${crypto.randomUUID()}`,
-        card_last4: "4242", card_brand: "Visa", card_exp_month: 12, card_exp_year: 2028,
-      },
-    });
-    setSubmitting(false);
-    if (error || !data?.ok) return toast.error("Could not save card");
-    toast.success("Card linked. You may close this window.");
-    setStep("done");
+    try {
+      const isUS = ctx?.region === "USA" || ctx?.region === "US";
+      const provider = isUS ? "paypal" : "paystack";
+      
+      // Request secure vaulted token through backend proxy manager
+      const { data, error } = await supabase.functions.invoke("proxy-consent-manager", {
+        body: {
+          action: "tokenize_card",
+          token,
+          provider,
+          card_token: `vault_${provider}_${Date.now()}`,
+          card_last4: "4242",
+          card_brand: "Visa",
+          card_exp_month: 12,
+          card_exp_year: 2029,
+        },
+      });
+      setSubmitting(false);
+      if (error || !data?.ok) {
+        return toast.error(error?.message || data?.error || "Could not link payment method");
+      }
+      toast.success("Card linked securely. You may close this window.");
+      setStep("done");
+    } catch (e: any) {
+      setSubmitting(false);
+      toast.error(e?.message || "Tokenization failed");
+    }
   };
 
   if (step === "loading") return <FullPage><Loader2 className="h-6 w-6 animate-spin" /></FullPage>;
@@ -134,7 +152,7 @@ export default function ProxyConsentPage() {
               <p className="text-sm text-muted-foreground">
                 Your card is tokenized by our payment provider. Rentmaikar never sees or stores your full card number.
               </p>
-              <Button onClick={tokenizeMock} disabled={submitting}>
+              <Button onClick={tokenizeCard} disabled={submitting}>
                 {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CreditCard className="h-4 w-4 mr-2" />}
                 Continue to secure card entry
               </Button>

@@ -71,7 +71,40 @@ export const EvidenceStorePanel: React.FC = () => {
     queryFn: async (): Promise<EvidenceArtifact[]> => {
       const artifacts: EvidenceArtifact[] = [];
 
-      // 1. Fetch Signed Legal Agreements
+      // 1. Authoritative Evidence Artifacts Store
+      try {
+        const { data: realEv } = await supabase
+          .from("evidence_artifacts" as any)
+          .select("*")
+          .order("captured_at", { ascending: false })
+          .limit(100);
+
+        if (realEv && realEv.length > 0) {
+          realEv.forEach((ea: any) => {
+            artifacts.push({
+              id: ea.id,
+              created_at: ea.captured_at || ea.created_at,
+              category: ea.evidence_type || "document",
+              title: `${(ea.evidence_type || "artifact").toUpperCase()} (${ea.source_table || "source"}: ${ea.source_id?.slice(0, 8) || ""})`,
+              source_table: ea.source_table,
+              reference_id: ea.source_id,
+              sha256_hash: ea.content_sha256 ? `sha256:${ea.content_sha256}` : (ea.custody_hash || "verified"),
+              tamper_status: "verified",
+              metadata: {
+                ...ea.metadata,
+                custody_hash: ea.custody_hash,
+                previous_artifact_hash: ea.previous_artifact_hash,
+                storage_bucket: ea.storage_bucket,
+                storage_path: ea.storage_path,
+              },
+            });
+          });
+        }
+      } catch (evErr) {
+        console.warn("Evidence artifacts query notice:", evErr);
+      }
+
+      // 2. Fetch Signed Legal Agreements
       try {
         const { data: agreements } = await supabase
           .from("legal_agreements")
@@ -88,7 +121,7 @@ export const EvidenceStorePanel: React.FC = () => {
               title: `Executed ${agr.agreement_type?.replace(/_/g, " ").toUpperCase() || "CONTRACT"}`,
               source_table: "legal_agreements",
               reference_id: agr.id,
-              sha256_hash: `sha256:${agr.id.replace(/-/g, "").slice(0, 16)}${agr.user_id ? agr.user_id.slice(0, 8) : "00"}`,
+              sha256_hash: agr.signature_hash || `contract:${agr.id.slice(0, 16)}`,
               tamper_status: "verified",
               metadata: {
                 agreement_type: agr.agreement_type,
@@ -104,7 +137,7 @@ export const EvidenceStorePanel: React.FC = () => {
         console.warn("Legal agreements evidence notice:", err);
       }
 
-      // 2. Fetch Inspection Reports / Photos
+      // 3. Fetch Inspection Reports / Photos
       try {
         const { data: inspections } = await supabase
           .from("admin_weekly_reports")
@@ -121,7 +154,7 @@ export const EvidenceStorePanel: React.FC = () => {
               title: `Weekly Vehicle Inspection Bundle (#${insp.vehicle_id?.slice(0, 6) || "VEH"})`,
               source_table: "admin_weekly_reports",
               reference_id: insp.id,
-              sha256_hash: `sha256:insp_${insp.id.replace(/-/g, "").slice(0, 16)}`,
+              sha256_hash: insp.report_hash || `insp:${insp.id.slice(0, 16)}`,
               tamper_status: "verified",
               metadata: {
                 vehicle_id: insp.vehicle_id,
@@ -136,7 +169,7 @@ export const EvidenceStorePanel: React.FC = () => {
         console.warn("Inspection reports evidence notice:", err);
       }
 
-      // 3. Fetch Appeal Submissions
+      // 4. Fetch Appeal Submissions
       try {
         const { data: appeals } = await supabase
           .from("application_recovery_requests")
@@ -153,7 +186,7 @@ export const EvidenceStorePanel: React.FC = () => {
               title: `Appellate Evidence Bundle (#${app.application_id?.slice(0, 6)})`,
               source_table: "application_recovery_requests",
               reference_id: app.id,
-              sha256_hash: `sha256:appeal_${app.id.replace(/-/g, "").slice(0, 16)}`,
+              sha256_hash: app.appeal_hash || `appeal:${app.id.slice(0, 16)}`,
               tamper_status: "verified",
               metadata: {
                 application_id: app.application_id,
@@ -166,21 +199,6 @@ export const EvidenceStorePanel: React.FC = () => {
         }
       } catch (err) {
         console.warn("Appeals evidence notice:", err);
-      }
-
-      // Baseline record if database has no items
-      if (artifacts.length === 0) {
-        artifacts.push({
-          id: "ev-genesis-001",
-          created_at: new Date().toISOString(),
-          category: "telematics_proof",
-          title: "Genesis Telematics Chain-of-Custody Root",
-          source_table: "system_genesis",
-          reference_id: "genesis-001",
-          sha256_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          tamper_status: "verified",
-          metadata: { seal: "RentMaikar Trust Root Authority", mode: "production_resilience" },
-        });
       }
 
       return artifacts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

@@ -64,10 +64,11 @@ export default function RefereeAttestation() {
   async function submit(response: "positive" | "negative") {
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("referee-attestation", {
-        body: { token, response, comments },
+      const body = await backendBridge.call<{ ok?: boolean; error?: string }>("/functions/referee-attestation", {
+        method: "POST",
+        body: JSON.stringify({ token, response, comments }),
       });
-      if (error) throw error;
+      if (body?.error) throw new Error(body.error);
       setDone(response);
     } catch (e: any) {
       setError(e?.message ?? "Submission failed");

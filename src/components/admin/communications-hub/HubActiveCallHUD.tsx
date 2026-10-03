@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, MessageSquare, Shield, Clock } from 'lucide-react';
+import { PhoneOff, Mic, MicOff, Volume2, VolumeX, MessageSquare, Clock, Headphones } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { VoIPCall } from '@/types/voip';
 import { formatPhoneForDisplay } from '@/types/voip';
 import { useCommunicationsHub } from './CommunicationsHubContext';
+import { useVoiceDevice } from '@/hooks/useVoiceDevice';
 
 interface HubActiveCallHUDProps {
   call: VoIPCall;
@@ -13,9 +14,8 @@ interface HubActiveCallHUDProps {
 
 export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndCall }) => {
   const { openWithRecipient } = useCommunicationsHub();
+  const voice = useVoiceDevice();
   const [duration, setDuration] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [isEnding, setIsEnding] = useState(false);
 
   useEffect(() => {
@@ -32,7 +32,8 @@ export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndC
     return `${mins.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
   };
 
-  const recipientParticipant = call.participants?.find((p) => p.participant_type === 'recipient') || call.participants?.[0];
+  const recipientParticipant =
+    call.participants?.find((p) => p.participant_type === 'recipient') || call.participants?.[0];
   const displayName = recipientParticipant?.display_name || recipientParticipant?.phone_number || 'Caller';
   const phoneNumber = recipientParticipant?.phone_number || '';
 
@@ -40,6 +41,7 @@ export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndC
     setIsEnding(true);
     try {
       await onEndCall(call.id);
+      await voice.hangUp();
     } finally {
       setIsEnding(false);
     }
@@ -54,6 +56,9 @@ export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndC
     });
   };
 
+  const isMuted = voice.isMuted;
+  const isSpeakerOn = voice.isSpeakerphone;
+
   return (
     <div className="bg-card border border-border/80 rounded-xl p-3.5 shadow-sm space-y-3">
       {/* Call Header */}
@@ -64,7 +69,10 @@ export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndC
             <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
           </span>
           <span className="text-xs font-semibold text-foreground">Active VoIP Call</span>
-          <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-mono bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-500/30">
+          <Badge
+            variant="outline"
+            className="text-[10px] py-0 px-1.5 font-mono bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-500/30"
+          >
             {call.region || 'USA'}
           </Badge>
         </div>
@@ -86,19 +94,25 @@ export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndC
             </div>
           )}
         </div>
-        <Badge variant="secondary" className="text-[10px] capitalize">
-          {call.status || 'in-progress'}
-        </Badge>
+        <div className="text-right">
+          <Badge variant="secondary" className="text-[10px] capitalize">
+            {call.status || 'in-progress'}
+          </Badge>
+          <div className="text-[10px] text-muted-foreground flex items-center justify-end gap-1 mt-0.5">
+            <Headphones className="h-2.5 w-2.5" />
+            <span className="truncate max-w-[90px]">{voice.outputLabel}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Call Controls */}
+      {/* Call Controls with real audio device integration */}
       <div className="grid grid-cols-4 gap-2 pt-1">
         <Button
           type="button"
           size="sm"
           variant={isMuted ? 'destructive' : 'outline'}
           className="h-8 text-xs gap-1.5 px-2"
-          onClick={() => setIsMuted((prev) => !prev)}
+          onClick={() => voice.toggleMute()}
           title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
         >
           {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
@@ -110,11 +124,11 @@ export const HubActiveCallHUD: React.FC<HubActiveCallHUDProps> = ({ call, onEndC
           size="sm"
           variant={!isSpeakerOn ? 'secondary' : 'outline'}
           className="h-8 text-xs gap-1.5 px-2"
-          onClick={() => setIsSpeakerOn((prev) => !prev)}
-          title={isSpeakerOn ? 'Mute speaker' : 'Enable speaker'}
+          onClick={() => void voice.toggleSpeakerphone()}
+          title={isSpeakerOn ? 'Switch to earpiece / headset' : 'Enable speakerphone'}
         >
           {isSpeakerOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-          <span className="hidden sm:inline">{isSpeakerOn ? 'Audio' : 'Off'}</span>
+          <span className="hidden sm:inline">{isSpeakerOn ? 'Speaker' : 'Earpiece'}</span>
         </Button>
 
         <Button

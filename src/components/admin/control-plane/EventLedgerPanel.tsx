@@ -72,7 +72,37 @@ export const EventLedgerPanel: React.FC = () => {
   const { data: rawEntries, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["control-plane-ledger-entries"],
     queryFn: async (): Promise<LedgerRecord[]> => {
-      // 1. Fetch wallet ledger entries
+      // 1. Authoritative Immutable Event Ledger
+      try {
+        const { data: immData, error: immError } = await supabase
+          .from("immutable_event_ledger" as any)
+          .select("*")
+          .order("sequence_no", { ascending: false })
+          .limit(300);
+
+        if (!immError && immData && immData.length > 0) {
+          return immData.map((row: any) => ({
+            id: row.event_id || `seq-${row.sequence_no}`,
+            created_at: row.occurred_at || row.created_at,
+            user_id: row.account_id || "system",
+            direction: row.direction || "credit",
+            amount: Number(row.amount || 0),
+            currency: row.currency || "USD",
+            entry_type: row.event_type || "financial_event",
+            status: "settled",
+            provider: row.reference_table,
+            provider_reference: row.reference_id,
+            description: `${row.event_type} (${row.reference_table || 'ledger'})`,
+            reference_id: row.reference_id,
+            metadata: typeof row.metadata === "object" ? row.metadata : {},
+            checksum: row.event_hash || `sha256:${row.event_id?.replace(/-/g, "")}`,
+          }));
+        }
+      } catch (immErr) {
+        console.warn("Immutable ledger query notice:", immErr);
+      }
+
+      // 2. Fetch wallet ledger entries
       const { data: ledgerData, error: ledgerError } = await supabase
         .from("wallet_ledger_entries")
         .select("*")
@@ -95,11 +125,11 @@ export const EventLedgerPanel: React.FC = () => {
           reference_id: row.reference_id,
           balance_after: row.balance_after,
           metadata: typeof row.metadata === "object" ? row.metadata : {},
-          checksum: `sha256:${row.id.slice(0, 8)}${Math.abs(Math.sin(Number(row.amount))).toString(16).slice(2, 10)}`,
+          checksum: row.checksum || `ledger:${row.id.replace(/-/g, "").slice(0, 16)}`,
         }));
       }
 
-      // 2. Fallback to payment_transactions if wallet ledger is empty
+      // 3. Fallback to payment_transactions if wallet ledger is empty
       const { data: paymentsData, error: paymentsError } = await supabase
         .from("payment_transactions")
         .select("*")
@@ -125,7 +155,7 @@ export const EventLedgerPanel: React.FC = () => {
         description: `Payment ${p.reference || p.id} via ${p.provider || "gateway"}`,
         reference_id: p.id,
         metadata: typeof p.metadata === "object" ? p.metadata : {},
-        checksum: `sha256:${p.id.slice(0, 12)}`,
+        checksum: p.reference ? `ref:${p.reference}` : `txn:${p.id.slice(0, 16)}`,
       }));
     },
     staleTime: 30000,
@@ -274,7 +304,7 @@ export const EventLedgerPanel: React.FC = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-0">
-            <span className="text-[11px] text-muted-foreground">{stats.totalTransactions} immutable entries</span>
+            <span className="text-[11px] text-muted-foreground">{stats.totalTransactions} recorded entries</span>
           </CardContent>
         </Card>
 
@@ -285,11 +315,11 @@ export const EventLedgerPanel: React.FC = () => {
             </CardDescription>
             <CardTitle className="text-xl font-bold text-emerald-600 flex items-center gap-2">
               <ShieldCheck className="h-5 w-5" />
-              VERIFIED
+              RECORDED
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-0">
-            <span className="text-[11px] text-emerald-600/80">Continuous ledger hash balance check active</span>
+            <span className="text-[11px] text-emerald-600/80">Server ledger transaction sync active</span>
           </CardContent>
         </Card>
       </div>
@@ -489,7 +519,7 @@ export const EventLedgerPanel: React.FC = () => {
               Ledger Entry Proof &amp; Invariant Metadata
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Immutable entry details with cryptographic signature proof and balance snapshot.
+              Authoritative entry details with audit trail reference and balance snapshot.
             </DialogDescription>
           </DialogHeader>
 
@@ -520,11 +550,11 @@ export const EventLedgerPanel: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <span className="text-muted-foreground block text-[10px] uppercase tracking-wider">Cryptographic Seal</span>
+                <span className="text-muted-foreground block text-[10px] uppercase tracking-wider">Audit / Hash Reference</span>
                 <div className="p-2.5 rounded bg-muted/60 font-mono text-[11px] text-foreground border border-border/60 flex items-center justify-between">
-                  <span className="select-all">{selectedEntry.checksum || "sha256:verified"}</span>
-                  <Badge variant="outline" className="border-emerald-500 text-emerald-600 text-[10px]">
-                    Non-Repudiation Valid
+                  <span className="select-all">{selectedEntry.checksum || "recorded"}</span>
+                  <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">
+                    Server Recorded
                   </Badge>
                 </div>
               </div>

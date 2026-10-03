@@ -162,7 +162,15 @@ Deno.serve(async (req) => {
       const { data: row } = await service.from("driver_proxy_billing_accounts")
         .select("*").eq("consent_token", p.token).maybeSingle();
       if (!row) return json(404, { error: "invalid token" });
-      if (row.consent_status !== "signed") return json(409, { error: "consent not signed" });
+      if (row.consent_status !== "signed") {
+        return json(409, { error: "consent not signed" });
+      }
+      if (row.identity_status !== "verified") {
+        return json(409, { error: "proxy identity not verified" });
+      }
+      if (row.consent_token_expires_at && new Date(row.consent_token_expires_at).getTime() <= Date.now()) {
+        return json(410, { error: "consent token expired" });
+      }
       if (["revoked", "expired", "used", "disabled"].includes(row.status)) return json(409, { error: "not active" });
 
       // Masked storage: store fingerprint hash + provider token; NEVER a raw PAN.

@@ -31,6 +31,8 @@ import {
 } from '@/components/ui/select';
 import { ProviderStatusInfo } from '@/server/marketing/types';
 import { useToast } from '@/hooks/use-toast';
+import { CommunicationsSiblingsBar } from '@/components/admin/communications/CommunicationsSiblingsBar';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 
 export const MarketingCommunicationsHub: React.FC = () => {
   const { toast } = useToast();
@@ -63,6 +65,8 @@ export const MarketingCommunicationsHub: React.FC = () => {
   useEffect(() => {
     fetchStatuses();
   }, []);
+
+  const hub = useCommunicationsHubSafe();
 
   const handleQuickSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +141,9 @@ export const MarketingCommunicationsHub: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Coordinated Communications Siblings Navigation & Audio Status */}
+      <CommunicationsSiblingsBar activeSibling="marketing-engine" />
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -323,8 +330,28 @@ export const MarketingCommunicationsHub: React.FC = () => {
                   />
                 </div>
               ) : (
-                <div className="p-3 bg-muted/40 rounded border border-border text-xs text-muted-foreground">
-                  Dispatching a VoIP call will bridge the destination number to the RentMaikar call queue via Twilio's master number (<strong className="text-foreground">+1 (848) 203-5389</strong>).
+                <div className="p-3 bg-muted/40 rounded border border-border text-xs text-muted-foreground space-y-2">
+                  <p>
+                    Dispatching a VoIP call will bridge the destination number to the RentMaikar call queue via Twilio's master number (<strong className="text-foreground">+1 (848) 203-5389</strong>).
+                  </p>
+                  {destination.trim() && hub && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        hub.openWithRecipient({
+                          name: 'Marketing Lead',
+                          phone: destination.trim(),
+                          defaultAction: 'call',
+                        });
+                      }}
+                      className="h-7 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                    >
+                      <Phone className="h-3.5 w-3.5" />
+                      <span>Dial in Softphone / Call Centre with Microphone</span>
+                    </Button>
+                  )}
                 </div>
               )}
 

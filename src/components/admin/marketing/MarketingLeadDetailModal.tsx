@@ -45,6 +45,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { UnifiedLead, LeadStage, LeadActivity, STAGE_ORDER } from '@/server/marketing/types';
 import { useToast } from '@/hooks/use-toast';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 
 interface MarketingLeadDetailModalProps {
   leadId: string | null;
@@ -73,6 +74,7 @@ export const MarketingLeadDetailModal: React.FC<MarketingLeadDetailModalProps> =
   onLeadUpdated,
 }) => {
   const { toast } = useToast();
+  const hub = useCommunicationsHubSafe();
   const [loading, setLoading] = useState(false);
   const [lead, setLead] = useState<UnifiedLead | null>(null);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
@@ -279,17 +281,58 @@ export const MarketingLeadDetailModal: React.FC<MarketingLeadDetailModalProps> =
                 )}
               </p>
             </div>
-            {nextStage && (
-              <Button
-                size="sm"
-                onClick={() => handleAdvanceStage(nextStage)}
-                disabled={isUpdatingStage}
-                className="h-9 font-medium"
-              >
-                Advance to {STAGE_LABELS[nextStage]}
-                <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              {lead.phone && hub && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    hub.openWithRecipient({
+                      name: lead.full_name || 'Marketing Lead',
+                      phone: lead.phone,
+                      defaultAction: 'call',
+                    });
+                    onClose();
+                  }}
+                  className="h-8 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 font-medium"
+                  title="Call lead using Softphone / Call Centre"
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                  <span>Call Softphone</span>
+                </Button>
+              )}
+              {hub && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    hub.openMessageEditor({
+                      name: lead.full_name || 'Marketing Lead',
+                      phone: lead.phone,
+                      email: lead.email,
+                      defaultAction: 'message',
+                    });
+                    onClose();
+                  }}
+                  className="h-8 text-xs gap-1.5 text-indigo-600 border-indigo-500/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-medium"
+                  title="Open lead in Omni-Channel Composer"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span>Omni Composer</span>
+                </Button>
+              )}
+              {nextStage && (
+                <Button
+                  size="sm"
+                  onClick={() => handleAdvanceStage(nextStage)}
+                  disabled={isUpdatingStage}
+                  className="h-8 text-xs font-medium"
+                >
+                  Advance to {STAGE_LABELS[nextStage]}
+                  <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Stepper Bar */}

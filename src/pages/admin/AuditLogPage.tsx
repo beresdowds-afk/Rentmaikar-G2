@@ -43,6 +43,33 @@ const AuditLogPage = () => {
 
   const load = async () => {
     setLoading(true);
+    try {
+      const { data: sysData, error: sysErr } = await supabase
+        .from("system_audit_events" as any)
+        .select("*")
+        .order("occurred_at", { ascending: false })
+        .limit(1000);
+
+      if (!sysErr && sysData && sysData.length > 0) {
+        const mapped = sysData.map((s: any) => ({
+          id: s.id,
+          attempted_at: s.occurred_at,
+          session_role: s.actor_role,
+          user_id: s.actor_id,
+          target_table: `${s.vector?.toUpperCase() || "AUDIT"}: ${s.target_type || "system"}`,
+          target_row_id: s.target_id,
+          attempted_fields: [s.action],
+          attempted_values: s.metadata,
+          reason: `[${s.vector?.toUpperCase() || "LOG"}] ${s.action} (${s.status})`,
+          ip_address: s.ip_address,
+          user_agent: s.user_agent,
+        }));
+        setEntries(mapped as DeniedEntry[]);
+        setLoading(false);
+        return;
+      }
+    } catch {}
+
     const { data, error } = await supabase
       .from("permission_denied_log")
       .select("*")

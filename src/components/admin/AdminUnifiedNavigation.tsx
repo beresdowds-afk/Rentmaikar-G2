@@ -181,6 +181,7 @@ export function AdminUnifiedNavigation({
     { title: 'Mobile Call-In Desk', href: '/m/call-in', icon: <PhoneCall className="h-4 w-4 text-emerald-600" />, category: 'Fleet & Operations', allowed: allowedTools.canComms ?? true },
 
     { title: 'Application Management', href: '/admin?portal=crm&tab=applications', icon: <ClipboardList className="h-4 w-4 text-primary" />, category: 'Identity & Verification', allowed: allowedTools.canUsers ?? true },
+    { title: 'Persona & Background Checks', href: '/admin?portal=crm&tab=persona-settings', icon: <ShieldCheck className="h-4 w-4 text-purple-600" />, category: 'Identity & Verification', allowed: allowedTools.canUsers ?? true },
     { title: 'Persona Templates', href: '/admin/persona-templates', icon: <Fingerprint className="h-4 w-4 text-purple-500" />, category: 'Identity & Verification', allowed: allowedTools.canContent ?? true },
     { title: 'Persona Inquiries', href: '/admin/persona-inquiries', icon: <Users className="h-4 w-4 text-purple-500" />, category: 'Identity & Verification', allowed: allowedTools.canContent ?? true },
     { title: 'Persona Manual Review', href: '/admin/persona-review', icon: <UserCheck className="h-4 w-4 text-purple-600" />, category: 'Identity & Verification', allowed: allowedTools.canContent ?? true },

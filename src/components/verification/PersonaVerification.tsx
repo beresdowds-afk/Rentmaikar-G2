@@ -417,7 +417,7 @@ export default function PersonaVerification({
   }
 
   // Platform switch is off: identity verification is not required right now.
-  if (!personaSwitch.isLoading && !personaSwitch.enabled) {
+  if (!personaSwitch.isLoading && (!personaSwitch.enabled || !personaSwitch.identityEnabled)) {
     return (
       <Alert>
         <CheckCircle2 className="h-4 w-4 text-green-600" />

@@ -13,16 +13,23 @@ export const personaEnabledQueryKey = ['persona-verification-enabled'] as const;
  * verification as bypassed. Admins can enable or disable Persona at any time
  * via the Admin Dashboard switch.
  */
+export interface PersonaVerificationConfig {
+  enabled: boolean;
+  background_check_enabled?: boolean;
+  identity_verification_enabled?: boolean;
+  [key: string]: unknown;
+}
+
 export function usePersonaEnabled() {
   const qc = useQueryClient();
 
   const query = useQuery({
     queryKey: personaEnabledQueryKey,
     staleTime: 60_000,
-    queryFn: async (): Promise<boolean> => {
+    queryFn: async (): Promise<{ enabled: boolean; backgroundChecksEnabled: boolean; identityEnabled: boolean }> => {
       try {
         if (typeof supabase?.from !== 'function') {
-          return false;
+          return { enabled: false, backgroundChecksEnabled: false, identityEnabled: false };
         }
         const { data, error } = await supabase
           .from('platform_kv_settings')
@@ -31,14 +38,25 @@ export function usePersonaEnabled() {
           .maybeSingle();
         if (error) {
           console.warn('[usePersonaEnabled] Failed to fetch setting, defaulting to false:', error);
-          return false;
+          return { enabled: false, backgroundChecksEnabled: false, identityEnabled: false };
         }
-        const v = (data?.value as { enabled?: boolean } | null)?.enabled;
-        // Default to false (disabled) unless explicitly enabled in platform_kv_settings
-        return v === true;
+        const val = data?.value as PersonaVerificationConfig | null;
+        const masterEnabled = val?.enabled === true;
+        const bgEnabled = val?.background_check_enabled !== undefined 
+          ? val.background_check_enabled === true 
+          : masterEnabled;
+        const idEnabled = val?.identity_verification_enabled !== undefined
+          ? val.identity_verification_enabled === true
+          : masterEnabled;
+
+        return {
+          enabled: masterEnabled,
+          backgroundChecksEnabled: bgEnabled,
+          identityEnabled: idEnabled,
+        };
       } catch (err) {
         console.warn('[usePersonaEnabled] Unexpected error fetching setting:', err);
-        return false;
+        return { enabled: false, backgroundChecksEnabled: false, identityEnabled: false };
       }
     },
   });
@@ -61,9 +79,15 @@ export function usePersonaEnabled() {
     };
   }, [qc]);
 
+  const enabled = query.data?.enabled ?? false;
+  const backgroundChecksEnabled = query.data?.backgroundChecksEnabled ?? false;
+  const identityEnabled = query.data?.identityEnabled ?? false;
+
   return {
     isLoading: query.isLoading,
-    enabled: query.data ?? false,
+    enabled,
+    backgroundChecksEnabled,
+    identityEnabled,
     refetch: query.refetch,
   };
 }

@@ -799,6 +799,29 @@ serve(async (req) => {
       console.warn("Unified log insert error:", logErr);
     }
 
+    // ─── Canonical Support Ticket Dispatch ───
+    if (classification.requiresTicket) {
+      try {
+        await supabase.from("support_tickets").insert({
+          requester_id: userId || null,
+          channel: "email",
+          category: finalCategory,
+          priority: finalPriority,
+          subject: emailSubject || "Incoming Email Support Request",
+          description: messageContent,
+          source_reference: messageIdHeader || conversationId,
+          metadata: {
+            from: senderAddress,
+            sender_name: senderName,
+            queue: effectiveQueue.queue,
+            sub_category: classification.subCategory,
+          },
+        });
+      } catch (ticketErr) {
+        console.warn("Support ticket creation notice:", ticketErr);
+      }
+    }
+
     console.log("Email message saved successfully");
 
     // Optional keyword auto-reply

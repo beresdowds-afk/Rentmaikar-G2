@@ -50,6 +50,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCannedReplies } from '@/hooks/useCannedReplies';
 import { renderPlaceholders } from '@/lib/reply-placeholders';
 import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
+import { CommunicationsSiblingsBar } from '@/components/admin/communications/CommunicationsSiblingsBar';
 import { EMAIL_CONFIG, EMAIL_SENDER_NAMES } from '@/lib/email-config';
 import { EMAIL_TEMPLATES_CATALOG, type EmailTemplateDefinition } from '@/lib/email-templates-registry';
 import {
@@ -1127,6 +1128,9 @@ if (
 
   return (
     <div className="space-y-4">
+      {/* Coordinated Communications Siblings Navigation & Audio Status */}
+      <CommunicationsSiblingsBar activeSibling="omnichannel-composer" />
+
       {/* Header & Channel Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b">
         <div>

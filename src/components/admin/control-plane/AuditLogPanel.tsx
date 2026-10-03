@@ -65,13 +65,46 @@ export const AuditLogPanel: React.FC = () => {
     queryFn: async (): Promise<AuditRecord[]> => {
       const records: AuditRecord[] = [];
 
-      // 1. Fetch Security Permission Denied Logs
+      // 1. Authoritative Unified System Audit Events Stream
+      try {
+        const { data: unifiedEvents } = await supabase
+          .from("system_audit_events" as any)
+          .select("*")
+          .order("occurred_at", { ascending: false })
+          .limit(150);
+
+        if (unifiedEvents && unifiedEvents.length > 0) {
+          unifiedEvents.forEach((ev: any) => {
+            records.push({
+              id: ev.id,
+              timestamp: ev.occurred_at,
+              vector: ev.vector || "security",
+              actor: ev.actor_role ? `${ev.actor_role.toUpperCase()}${ev.actor_id ? ` (${ev.actor_id.slice(0, 6)})` : ""}` : "SYSTEM",
+              action: ev.action || ev.event_type,
+              target: `${ev.target_type || "Entity"}: ${ev.target_id || "global"}`,
+              status: ev.status === "executed" || ev.status === "success" || ev.status === "settled" ? "executed" : ev.status === "denied" ? "denied" : "pending",
+              details: `Event: ${ev.event_type}. Hash: ${ev.event_hash?.slice(0, 16) || "sha256"}...`,
+              metadata: {
+                ...ev.metadata,
+                event_hash: ev.event_hash,
+                previous_hash: ev.previous_hash,
+                request_id: ev.request_id,
+                ip_address: ev.ip_address,
+              },
+            });
+          });
+        }
+      } catch (uniErr) {
+        console.warn("Unified audit events query notice:", uniErr);
+      }
+
+      // 2. Fetch Security Permission Denied Logs
       try {
         const { data: deniedLogs } = await supabase
           .from("permission_denied_log")
           .select("*")
           .order("attempted_at", { ascending: false })
-          .limit(100);
+          .limit(50);
 
         if (deniedLogs && deniedLogs.length > 0) {
           deniedLogs.forEach((row: any) => {
@@ -96,13 +129,13 @@ export const AuditLogPanel: React.FC = () => {
         console.warn("Permission denied log notice:", err);
       }
 
-      // 2. Fetch Traccar Command Audit Logs
+      // 3. Fetch Traccar Command Audit Logs
       try {
         const { data: commandLogs } = await supabase
           .from("traccar_command_audit")
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(100);
+          .limit(50);
 
         if (commandLogs && commandLogs.length > 0) {
           commandLogs.forEach((row: any) => {
@@ -123,18 +156,58 @@ export const AuditLogPanel: React.FC = () => {
         console.warn("Traccar command audit notice:", err);
       }
 
-      // 3. Fallback baseline if DB empty
-      if (records.length === 0) {
-        records.push({
-          id: "audit-init-001",
-          timestamp: new Date().toISOString(),
-          vector: "security",
-          actor: "System Sentinel",
-          action: "CONTROL_PLANE_SEALED",
-          target: "Core Governance Substrate",
-          status: "executed",
-          details: "Control & Evidence Plane audit surveillance online with zero-contamination boundary.",
-        });
+      // 4. Fetch Consent Audit Stream
+      try {
+        const { data: consentLogs } = await supabase
+          .from("proxy_billing_audit_log" as any)
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (consentLogs && consentLogs.length > 0) {
+          consentLogs.forEach((row: any) => {
+            records.push({
+              id: row.id,
+              timestamp: row.created_at,
+              vector: "consent",
+              actor: row.actor_role || "proxy",
+              action: (row.action || "CONSENT_ACTION").toUpperCase(),
+              target: `Proxy Account: ${row.proxy_account_id?.slice(0, 8) || "N/A"}`,
+              status: "executed",
+              details: `Proxy billing event: ${row.action}`,
+              metadata: row,
+            });
+          });
+        }
+      } catch (cErr) {
+        console.warn("Consent audit log notice:", cErr);
+      }
+
+      // 5. Fetch Document Audit Stream
+      try {
+        const { data: docLogs } = await supabase
+          .from("user_documents")
+          .select("id, created_at, user_id, document_type, status, file_name, content_sha256")
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (docLogs && docLogs.length > 0) {
+          docLogs.forEach((row: any) => {
+            records.push({
+              id: `doc-${row.id}`,
+              timestamp: row.created_at,
+              vector: "document",
+              actor: `User: ${row.user_id?.slice(0, 8) || "user"}`,
+              action: `DOCUMENT_${row.status?.toUpperCase() || "UPLOAD"}`,
+              target: `${row.document_type} (${row.file_name})`,
+              status: row.status === "verified" ? "executed" : "pending",
+              details: `Document type: ${row.document_type}. Hash: ${row.content_sha256?.slice(0, 16) || "stored"}`,
+              metadata: row,
+            });
+          });
+        }
+      } catch (dErr) {
+        console.warn("Document audit log notice:", dErr);
       }
 
       return records.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());

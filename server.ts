@@ -8,6 +8,18 @@ const filename = fileURLToPath(import.meta.url);
 const dirname = path.dirname(filename);
 
 async function startServer() {
+  // Load local environment file if present (Node.js 20+ native loader)
+  if (typeof (process as any).loadEnvFile === "function") {
+    const envPath = path.resolve(dirname, ".env");
+    if (fs.existsSync(envPath)) {
+      try {
+        (process as any).loadEnvFile(envPath);
+      } catch (e) {
+        console.warn("[server] Could not load .env file:", e);
+      }
+    }
+  }
+
   const app = express();
   const PORT = 3000;
 

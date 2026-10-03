@@ -25,9 +25,12 @@ Deno.serve(async (req) => {
       const token = new URL(req.url).searchParams.get("token") ?? "";
       if (!token) return json(400, { error: "missing token" });
       const { data: r } = await supa.from("referee_verifications")
-        .select("id, full_name, attestation_status, application_id")
+        .select("id, full_name, attestation_status, application_id, attestation_token_expires_at")
         .eq("attestation_token", token).maybeSingle();
       if (!r) return json(404, { error: "invalid or expired link" });
+      if (r.attestation_token_expires_at && new Date(r.attestation_token_expires_at).getTime() <= Date.now()) {
+        return json(410, { error: "attestation link expired" });
+      }
       const { data: app } = await supa.from("applications")
         .select("full_name, first_name, last_name").eq("id", r.application_id).maybeSingle();
       const driver_name = (app as any)?.full_name
@@ -50,6 +53,9 @@ Deno.serve(async (req) => {
     const { data: r } = await supa.from("referee_verifications")
       .select("*").eq("attestation_token", token).maybeSingle();
     if (!r) return json(404, { error: "invalid or expired link" });
+    if (r.attestation_token_expires_at && new Date(r.attestation_token_expires_at).getTime() <= Date.now()) {
+      return json(410, { error: "attestation link expired" });
+    }
     if (r.attestation_status === "attested_positive" || r.attestation_status === "attested_negative") {
       return json(409, { error: "already submitted" });
     }

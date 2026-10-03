@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, Users, ShieldCheck, Search, Loader2, Sparkles, AlertCircle, MessageSquare } from 'lucide-react';
+import {
+  Phone,
+  ShieldCheck,
+  Search,
+  Loader2,
+  MessageSquare,
+  Headphones,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,11 +17,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useVoIPCalls } from '@/hooks/useVoIPCalls';
 import { useRegion } from '@/contexts/RegionContext';
 import { COUNTRY_CODES, validatePhoneNumber, formatPhoneForDisplay } from '@/types/voip';
-import type { CallRegion, CallType } from '@/types/voip';
+import type { CallRegion } from '@/types/voip';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useCommunicationsHub } from './CommunicationsHubContext';
 import { HubActiveCallHUD } from './HubActiveCallHUD';
+import { AudioHardwareTester } from '@/components/admin/voip/AudioHardwareTester';
+import { ensureMediaPermissions } from '@/lib/media-permissions';
 
 interface ContactQuickPick {
   userId: string;
@@ -23,15 +34,18 @@ interface ContactQuickPick {
 
 export const HubCallDialer: React.FC = () => {
   const { country } = useRegion();
-  const { prefillRecipient, clearPrefill, activeCall, setActiveCall, openMessageEditor } = useCommunicationsHub();
+  const { prefillRecipient, clearPrefill, activeCall, setActiveCall, openMessageEditor } =
+    useCommunicationsHub();
   const { initiateCall, endCall, activeCall: hookActiveCall } = useVoIPCalls();
 
   const [region, setRegion] = useState<CallRegion>(
-    country === 'Nigeria' ? 'Nigeria' : 'USA'
+    country === 'Nigeria' ? 'Nigeria' : 'USA',
   );
   const [phoneNumber, setPhoneNumber] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [isCalling, setIsCalling] = useState(false);
+  const [showAudioTester, setShowAudioTester] = useState(false);
+  const [isAudioReady, setIsAudioReady] = useState(false);
 
   // Quick directory lookup
   const [quickQuery, setQuickQuery] = useState('');
@@ -136,6 +150,16 @@ export const HubCallDialer: React.FC = () => {
       return;
     }
 
+    // Proactively verify and unlock microphone & speakers before placing call
+    const micOk = await ensureMediaPermissions();
+    if (!micOk) {
+      toast.error(
+        'Microphone access is required for VoIP calls. Please click "Audio & Mic" below and allow access.',
+      );
+      setShowAudioTester(true);
+      return;
+    }
+
     setIsCalling(true);
     try {
       const result = await initiateCall('individual', region, [
@@ -148,9 +172,10 @@ export const HubCallDialer: React.FC = () => {
         toast.success(`Calling ${displayName || formatPhoneForDisplay(fullNumber)}...`);
         clearPrefill();
       }
-    } catch (err: any) {
-      console.error('Call initiation failed:', err);
-      toast.error(err.message || 'Failed to place call via VoIP gateway');
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error('Call initiation failed:', error);
+      toast.error(error.message || 'Failed to place call via VoIP gateway');
     } finally {
       setIsCalling(false);
     }
@@ -161,22 +186,44 @@ export const HubCallDialer: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* If there is an active call, show the Live Call HUD first */}
-      {currentLiveCall && (
-        <HubActiveCallHUD call={currentLiveCall} onEndCall={endCall} />
-      )}
+      {currentLiveCall && <HubActiveCallHUD call={currentLiveCall} onEndCall={endCall} />}
 
       {/* Dialer Card */}
-      <div className="bg-card border border-border/80 rounded-xl p-4 shadow-sm space-y-3.5">
+      <div className="bg-card border border-border/80 rounded-xl p-4 shadow-xs space-y-3.5">
         <div className="flex items-center justify-between pb-2 border-b border-border/60">
           <div className="flex items-center gap-1.5">
             <Phone className="h-4 w-4 text-emerald-600" />
             <span className="text-xs font-semibold text-foreground">Admin Softphone Dialer</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <ShieldCheck className="h-3 w-3 text-emerald-600" />
-            <span className="text-[10px] text-muted-foreground font-mono">Twilio Voice Encrypted</span>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowAudioTester((prev) => !prev)}
+              className="h-6 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <Headphones className="h-3 w-3 text-primary" />
+              <span>Audio & Mic</span>
+              {showAudioTester ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+            </Button>
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck className="h-3 w-3 text-emerald-600" />
+              <span className="text-[10px] text-muted-foreground font-mono">Twilio Encrypted</span>
+            </div>
           </div>
         </div>
+
+        {/* Collapsible Audio Hardware Tester */}
+        {showAudioTester && (
+          <div className="animate-in fade-in slide-in-from-top-2 duration-150">
+            <AudioHardwareTester compact onReadyChange={setIsAudioReady} />
+          </div>
+        )}
 
         {/* Quick Directory Search */}
         <div className="space-y-1 relative">
@@ -296,7 +343,7 @@ export const HubCallDialer: React.FC = () => {
                 defaultAction: 'message',
               });
             }}
-            className="w-full h-8 text-xs font-medium gap-2 text-indigo-600 border-indigo-500/30 hover:bg-indigo-50"
+            className="w-full h-8 text-xs font-medium gap-2 text-indigo-600 border-indigo-500/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             <span>Switch to Message Editor for this Contact</span>
@@ -306,3 +353,5 @@ export const HubCallDialer: React.FC = () => {
     </div>
   );
 };
+
+export default HubCallDialer;

@@ -55,6 +55,7 @@ import { TelephonyNumbersProvisioning } from './TelephonyNumbersProvisioning';
 import { UnifiedCallHistory } from './UnifiedCallHistory';
 import { useAuth } from '@/contexts/AuthContext';
 import { CallCenterSubPageErrorBoundary } from './CallCenterSubPageErrorBoundary';
+import { CommunicationsSiblingsBar } from '@/components/admin/communications/CommunicationsSiblingsBar';
 
 export type CallCenterSubTab =
   | 'dialer'
@@ -242,6 +243,9 @@ const answerQueuedCall = useCallback(async (call: QueuedCall) => {
 
   return (
     <div className="space-y-6">
+      {/* Coordinated Communications Siblings Navigation & Audio Status */}
+      <CommunicationsSiblingsBar activeSibling="call-centre" />
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>

@@ -127,15 +127,8 @@ serve(async (req: Request): Promise<Response> => {
       ? "whatsapp"
       : "sms") as "sms" | "whatsapp";
     const messageId: string | undefined =
-  payload.message_id ??
-  payload.messageId ??
-  payload.id ??
-  payload.recipients?.[0]?.message_id ??
-  payload.recipients?.[0]?.messageId ??
-  event.message_id ??
-  event.messageId ??
-  event.id;  
-  const eventId: string | undefined = event.id ?? payload.event_id;
+      payload.message_id ?? payload.id ?? event.message_id ?? event.id;
+    const eventId: string | undefined = event.id ?? payload.event_id;
 
     const errorCode =
       payload.error_code ?? payload.errorCode ?? payload.error?.code ?? null;
@@ -171,19 +164,18 @@ serve(async (req: Request): Promise<Response> => {
     let conversationId: string | undefined;
     let templateName: string | undefined;
     if (messageId) {
-  const { data: origin } = await supabase
-    .from("messaging_events")
-    .select("user_id, conversation_id, template_name, recipient, provider_message_id")
-    .eq("provider_message_id", messageId)
-    .eq("direction", "outbound")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  userId = (origin?.user_id as string | null) ?? undefined;
-  conversationId = (origin?.conversation_id as string | null) ?? undefined;
-  templateName = (origin?.template_name as string | null) ?? undefined;
-}
+      const { data: origin } = await supabase
+        .from("messaging_events")
+        .select("user_id, conversation_id, template_name")
+        .eq("provider_message_id", messageId)
+        .eq("direction", "outbound")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      userId = (origin?.user_id as string | null) ?? undefined;
+      conversationId = (origin?.conversation_id as string | null) ?? undefined;
+      templateName = (origin?.template_name as string | null) ?? undefined;
+    }
 
     await logMessagingEvent(supabase, {
       channel,

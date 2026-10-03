@@ -83,6 +83,7 @@ export async function ensureMediaPermissions(options?: { silent?: boolean }): Pr
   const state = await getMicPermissionState();
   if (state === "granted") {
     logAudioEvent("permission", "Microphone already granted");
+    await unlockAudioOutput();
     return true;
   }
   if (state === "denied" && options?.silent) {
@@ -102,6 +103,41 @@ export async function ensureMediaPermissions(options?: { silent?: boolean }): Pr
       detail: { reason: e instanceof Error ? e.name : String(e) },
     });
     return false;
+  }
+}
+
+/** Explicitly prompt the user for microphone and speaker permissions with rich result. */
+export async function requestMicrophoneAccess(): Promise<{
+  success: boolean;
+  state: MicPermissionState;
+  error?: string;
+}> {
+  if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    return { success: false, state: "unsupported", error: "Audio capture is not supported in this browser." };
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    stream.getTracks().forEach((t) => t.stop());
+    await unlockAudioOutput();
+    const liveState = await getMicPermissionState();
+    return { success: true, state: liveState === "unknown" ? "granted" : liveState };
+  } catch (err: unknown) {
+    const e = err as Error;
+    const isDenied = e.name === "NotAllowedError" || e.name === "PermissionDeniedError";
+    const state: MicPermissionState = isDenied ? "denied" : "prompt";
+    return {
+      success: false,
+      state,
+      error: isDenied
+        ? "Microphone access was denied. Please allow microphone access in your browser settings (click the lock/controls icon in your address bar)."
+        : e.message || "Failed to initialize microphone.",
+    };
   }
 }
 

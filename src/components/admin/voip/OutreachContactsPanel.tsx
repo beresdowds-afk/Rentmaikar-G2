@@ -28,9 +28,11 @@ import {
   Square,
   Check,
   ExternalLink,
+  PenSquare,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
 import type { CallRegion, CallType } from '@/types/voip';
 
 interface OutreachContact {
@@ -68,6 +70,7 @@ interface OutreachContactsPanelProps {
 }
 
 export const OutreachContactsPanel = ({ onInitiateCall, isLoading }: OutreachContactsPanelProps) => {
+  const hub = useCommunicationsHubSafe();
   const [contacts, setContacts] = useState<OutreachContact[]>([]);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -569,6 +572,25 @@ export const OutreachContactsPanel = ({ onInitiateCall, isLoading }: OutreachCon
 
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
+                          {hub && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                hub.openMessageEditor({
+                                  name: contact.full_name,
+                                  phone: contact.phone_e164 || contact.raw_phone,
+                                  email: contact.email,
+                                  role: contact.signup_role,
+                                  defaultAction: 'message',
+                                });
+                              }}
+                              className="h-8 w-8 p-0 text-indigo-600 border-indigo-500/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                              title="Open in Omni-Channel Composer"
+                            >
+                              <PenSquare className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"

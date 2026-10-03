@@ -38,6 +38,7 @@ import { AttachmentAccessLogPanel } from '@/components/admin/AttachmentAccessLog
 import { InboxNotificationSettings } from '@/components/admin/InboxNotificationSettings';
 import { InboxReplyAuditPanel } from '@/components/admin/InboxReplyAuditPanel';
 import { AdminUnifiedInboxCore } from '@/components/admin/AdminUnifiedInboxCore';
+import { CommunicationsSiblingsBar } from '@/components/admin/communications/CommunicationsSiblingsBar';
 import type { SavedDraft, MessagingChannel } from './types';
 
 export const CentralMessagingCenter = () => {
@@ -115,6 +116,12 @@ export const CentralMessagingCenter = () => {
 
   return (
     <div className="space-y-6">
+      {/* Coordinated Communications Siblings Navigation & Audio Status */}
+      <CommunicationsSiblingsBar
+        activeSibling="messaging-centre"
+        onComposeClick={() => handleNewDraft()}
+      />
+
       {/* Master Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border bg-card/60 backdrop-blur-sm shadow-sm">
         <div className="space-y-1">

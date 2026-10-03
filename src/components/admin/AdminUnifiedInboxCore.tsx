@@ -74,6 +74,8 @@ import {
 import { InboxSlaBadge, useNowTick } from '@/components/admin/InboxSlaBadge';
 import { getSlaInfo } from '@/lib/inbox-sla';
 import { MarketingInboxContextBadge } from '@/components/admin/marketing/MarketingInboxContextBadge';
+import { useCommunicationsHubSafe } from '@/components/admin/communications-hub';
+import { AiAutoResponderCard } from '@/components/admin/messaging/AiAutoResponderCard';
 
 const channelIcons = {
   email: Mail,
@@ -216,6 +218,7 @@ const MessageThread = ({
   onArchive: () => void;
   onMarkRead: (read: boolean) => void;
 }) => {
+  const hub = useCommunicationsHubSafe();
   const { messages, isLoading, isSendingReply, sendMessage } = useInboxMessages(conversation.id);
   const { replies: cannedReplies } = useCannedReplies();
   const { values: placeholderValues } = useReplyPlaceholderValues(conversation.id);
@@ -302,6 +305,11 @@ const MessageThread = ({
 
   const ChannelIcon = channelIcons[conversation.channel as keyof typeof channelIcons] || Mail;
 
+  const latestInbound =
+    [...messages].reverse().find((m) => m.sender_type !== 'admin')?.content ||
+    conversation.subject ||
+    '';
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -369,6 +377,26 @@ const MessageThread = ({
                 <SelectItem value="closed">Closed</SelectItem>
               </SelectContent>
             </Select>
+
+            {conversation.user_phone && hub && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  hub.openWithRecipient({
+                    name: conversation.user_name || 'Contact',
+                    phone: conversation.user_phone,
+                    defaultAction: 'call',
+                  });
+                }}
+                className="h-8 px-2.5 text-xs gap-1.5 text-emerald-600 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 font-medium"
+                title="Call this contact via Softphone / Call Centre"
+              >
+                <Phone className="h-3.5 w-3.5" />
+                <span>Call Softphone</span>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -436,6 +464,23 @@ const MessageThread = ({
           </div>
         )}
       </ScrollArea>
+
+      {/* AI Auto-Responder with Knowledge Base Citations */}
+      {latestInbound && (
+        <div className="p-3 border-t bg-muted/20">
+          <AiAutoResponderCard
+            conversationId={conversation.id}
+            customerName={conversation.user_name || 'Customer'}
+            channel={conversation.channel === 'whatsapp' ? 'whatsapp' : conversation.channel === 'sms' ? 'sms' : 'email'}
+            latestInboundContent={latestInbound}
+            conversationSubject={conversation.subject || ''}
+            placeholderValues={placeholderValues}
+            onApplyDraft={(draft) => {
+              setNewMessage(draft.body);
+            }}
+          />
+        </div>
+      )}
 
       {/* Reply Input */}
       <div className="p-4 border-t bg-card">

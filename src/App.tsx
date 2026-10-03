@@ -108,6 +108,10 @@ const AdminTreasuryPage = lazy(() => import("./pages/admin/AdminTreasuryPage"));
 
 const AdminDocumentExportAuditPage = lazy(() => import("./pages/admin/AdminDocumentExportAuditPage"));
 const AdminDocumentFailuresPage = lazy(() => import("./pages/admin/AdminDocumentFailuresPage"));
+const DriverAgreementPage = lazy(() => import("./pages/legal/DriverAgreementPage"));
+const ProxyConsentTermsPage = lazy(() => import("./pages/legal/ProxyConsentTermsPage"));
+const DataRightsPage = lazy(() => import("./pages/legal/DataRightsPage"));
+const CookiePolicyPage = lazy(() => import("./pages/legal/CookiePolicyPage"));
 const AuditLogPage = lazy(() => import("./pages/admin/AuditLogPage"));
 const ControlEvidencePlanePage = lazy(() => import("./pages/admin/ControlEvidencePlanePage"));
 const PaymentsViewerPage = lazy(() => import("./pages/admin/PaymentsViewerPage"));
@@ -266,6 +270,10 @@ const App = () => (
                   <Route path="/owner/portal-access" element={<OwnerPortalAccessPage />} />
                   <Route path="/owner/onboarding" element={<OwnerOnboarding />} />
                   <Route path="/onboarding/legal-agreement" element={<OnboardingLegalAgreement />} />
+                  <Route path="/legal/driver-agreement" element={<DriverAgreementPage />} />
+                  <Route path="/legal/proxy-consent" element={<ProxyConsentTermsPage />} />
+                  <Route path="/legal/data-rights" element={<DataRightsPage />} />
+                  <Route path="/legal/cookies" element={<CookiePolicyPage />} />
                   <Route path="/catalogue/:category" element={<Catalogue />} />
                   <Route path="/vehicle/:id" element={<VehicleDetails />} />
                   <Route 

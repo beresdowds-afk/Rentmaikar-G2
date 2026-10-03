@@ -210,7 +210,7 @@ export const AdminCommunicationsHub: React.FC = () => {
               </div>
             </div>
 
-            {/* Window Controls */}
+            {/* Window Controls & Sibling Shortcuts */}
             <div className="flex items-center gap-1">
               <Button
                 type="button"
@@ -220,8 +220,32 @@ export const AdminCommunicationsHub: React.FC = () => {
                 className="h-7 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground hidden sm:flex"
                 title="Open Central Messaging Center"
               >
-                <ExternalLink className="h-3 w-3" />
-                <span>Center</span>
+                <MessageSquare className="h-3 w-3 text-blue-500" />
+                <span>Inbox</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/admin/call-center')}
+                className="h-7 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground hidden sm:flex"
+                title="Open VoIP Call Center"
+              >
+                <Phone className="h-3 w-3 text-emerald-500" />
+                <span>Call Center</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/admin?tab=marketing')}
+                className="h-7 px-1.5 text-[10px] gap-1 text-muted-foreground hover:text-foreground hidden sm:flex"
+                title="Open Marketing Engine"
+              >
+                <ExternalLink className="h-3 w-3 text-amber-500" />
+                <span>Marketing</span>
               </Button>
 
               <Button

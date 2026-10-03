@@ -118,9 +118,9 @@ export function AdminOperationsBar({
             aria-label={isExpanded ? 'Hide system tools and diagnostics' : 'Show system tools and diagnostics'}
           >
             <Wrench className="h-3.5 w-3.5 text-primary" />
-            <span className="hidden xs:inline">Diagnostics & Packs</span>
+            <span className="hidden xs:inline">Diagnostics & Controls</span>
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] ml-0.5">
-              {showDisconnectSwitch ? '4' : '3'}
+              {showDisconnectSwitch ? '5' : '4'}
             </Badge>
             {isExpanded ? (
               <ChevronUp className="h-3.5 w-3.5 ml-0.5" />
@@ -138,6 +138,10 @@ export function AdminOperationsBar({
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <div className="flex items-center justify-between pb-2 border-b border-border/60 mb-4 flex-wrap gap-2">
                 <TabsList className="bg-muted/60 p-0.5 h-8">
+                  <TabsTrigger value="persona" className="text-xs gap-1.5 h-7 px-3">
+                    <ShieldCheck className="h-3.5 w-3.5 text-purple-600" />
+                    Persona &amp; Background Checks
+                  </TabsTrigger>
                   <TabsTrigger value="gateways" className="text-xs gap-1.5 h-7 px-3">
                     <CreditCard className="h-3.5 w-3.5" />
                     Payment Gateways
@@ -158,9 +162,13 @@ export function AdminOperationsBar({
                   </TabsTrigger>
                 </TabsList>
                 <span className="text-[11px] text-muted-foreground">
-                  Advanced developer & administrative tooling
+                  Operational verification &amp; developer controls
                 </span>
               </div>
+
+              <TabsContent value="persona" className="mt-0 focus-visible:outline-none">
+                <PersonaVerificationSettings />
+              </TabsContent>
 
               <TabsContent value="gateways" className="mt-0 focus-visible:outline-none">
                 <PaymentGatewayHealthCard />

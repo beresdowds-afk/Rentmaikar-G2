@@ -19,6 +19,7 @@ import {
   PhoneCall,
   PenSquare,
   ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +31,7 @@ import { toast } from 'sonner';
 import { formatDistanceToNow, format } from 'date-fns';
 import { renderPlaceholders } from '@/lib/reply-placeholders';
 import { useNavigate } from 'react-router-dom';
+import { analyzeInboundMessage } from '@/lib/ai-auto-responder';
 
 interface ConversationItem {
   id: string;
@@ -365,6 +367,19 @@ export const HubMessageConsole: React.FC = () => {
     });
   };
 
+  const latestInbound = useMemo(() => {
+    return (
+      [...messages].reverse().find((m) => m.sender_type !== 'admin')?.content ||
+      activeConversation?.subject ||
+      ''
+    );
+  }, [messages, activeConversation]);
+
+  const autoResponse = useMemo(() => {
+    if (!latestInbound) return null;
+    return analyzeInboundMessage(latestInbound, activeConversation?.subject || '');
+  }, [latestInbound, activeConversation]);
+
   const handleOpenFullConsole = () => {
     navigate('/admin?tab=inbox');
   };
@@ -495,6 +510,40 @@ export const HubMessageConsole: React.FC = () => {
 
           {/* Quick Reply & Controls */}
           <div className="space-y-1.5 pt-1 border-t shrink-0">
+            {/* Auto-Responder Suggestion Banner */}
+            {autoResponse && (
+              <div className="flex items-center justify-between p-1.5 px-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px]">
+                <div className="flex items-center gap-1.5 truncate pr-2">
+                  <Sparkles className="h-3 w-3 text-amber-600 shrink-0" />
+                  <span className="font-semibold text-foreground truncate text-[10px]">
+                    Auto-Responder: {autoResponse.topic.replace('_', ' ').toUpperCase()}
+                  </span>
+                  <Badge variant="outline" className="text-[8px] py-0 px-1 font-mono uppercase bg-background">
+                    {autoResponse.suggestedPriority}
+                  </Badge>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const body =
+                      activeConversation.channel === 'whatsapp'
+                        ? autoResponse.draftBody.whatsapp
+                        : activeConversation.channel === 'sms'
+                        ? autoResponse.draftBody.sms
+                        : autoResponse.draftBody.email;
+                    setReplyText(body);
+                    toast.success('Auto-Responder draft applied with Terms of Use citations!');
+                  }}
+                  className="h-5 text-[10px] px-1.5 gap-1 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/15 font-medium shrink-0"
+                >
+                  <Zap className="h-2.5 w-2.5" />
+                  Apply Auto-Draft
+                </Button>
+              </div>
+            )}
+
             {/* Template Chips */}
             <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px]">
               <Sparkles className="h-3 w-3 text-amber-500 shrink-0" />
