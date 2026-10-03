@@ -15,7 +15,7 @@ type Supa = any;
 import { logOutboundDecision } from "./outbound-audit.ts";
 
 export type OutboundChannel = "call" | "sms" | "whatsapp" | "email";
-export type OutboundRegion = "USA" | "Nigeria";
+export type OutboundRegion = "USA" | "Nigeria" | "Global";
 
 export const OUTBOUND_CONFIG_KEY = "outbound_channel_config";
 
@@ -37,12 +37,24 @@ export function normaliseOutboundRegion(region?: string | null): OutboundRegion 
 }
 
 /** Region inferred from an E.164 phone number. */
-export function outboundRegionFromPhone(...numbers: (string | null | undefined)[]): OutboundRegion {
+export function outboundRegionFromPhone(
+  ...numbers: (string | null | undefined)[]
+): OutboundRegion {
   for (const n of numbers) {
-    const clean = (n || "").replace("whatsapp:", "").replace(/[\s-()]/g, "");
-    if (clean.startsWith("+234") || clean.startsWith("234")) return "Nigeria";
+    const clean = (n || "")
+      .replace("whatsapp:", "")
+      .replace(/[\s-()]/g, "");
+
+    if (clean.startsWith("+234") || clean.startsWith("234")) {
+      return "Nigeria";
+    }
+
+    if (clean.startsWith("+1") || clean.startsWith("1")) {
+      return "USA";
+    }
   }
-  return "USA";
+
+  return "Global";
 }
 
 export const FORWARDING_CONFIG_KEY = "forwarding_config";
