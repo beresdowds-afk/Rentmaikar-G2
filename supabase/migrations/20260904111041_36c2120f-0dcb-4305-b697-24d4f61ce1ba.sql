@@ -78,7 +78,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.voip_set_presence(TEXT, TEXT) TO authenticated;
 
 -- 4. Resolve which caller ID a staff member should dial out with
-CREATE OR REPLACE FUNCTION public.voip_resolve_outbound_number(_user_id UUID, _region TEXT DEFAULT 'USA')
+CREATE OR REPLACE FUNCTION public.voip_resolve_outbound_number(_user_id UUID, _region TEXT DEFAULT NULL)
 RETURNS TEXT
 LANGUAGE sql
 STABLE
@@ -88,7 +88,10 @@ AS $$
   SELECT n.phone_number
   FROM public.voip_outbound_numbers n
   WHERE n.is_active
-    AND (n.region = 'All' OR n.region = COALESCE(_region, 'USA'))
+    AND (
+  n.region = 'All'
+  OR (_region IS NOT NULL AND n.region = _region)
+))
     AND (
       n.role IS NULL
       OR EXISTS (
