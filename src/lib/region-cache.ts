@@ -123,3 +123,25 @@ export function resolveRegion(country: string, availableRegions: RegionOption[])
   );
   return match || null;
 }
+export function resolveRegionFromPhone(
+  phone: string,
+  availableRegions: RegionOption[],
+): RegionOption | null {
+  const normalized = phone
+    .replace(/^whatsapp:/, "")
+    .replace(/[\s()-]/g, "");
+
+  if (!normalized) return null;
+
+  return availableRegions
+    .filter(
+      (region) =>
+        region.phonePrefix &&
+        normalized.startsWith(region.phonePrefix),
+    )
+    .sort(
+      (a, b) =>
+        b.phonePrefix.length -
+        a.phonePrefix.length,
+    )[0] ?? null;
+}
