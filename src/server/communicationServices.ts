@@ -256,7 +256,12 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
   }
 
   const channel = input.channel === "whatsapp" ? "whatsapp" : "sms";
-  const region = to.startsWith("+234") ? "Nigeria" : "USA";
+  const region =
+  to.startsWith("+234")
+    ? "Nigeria"
+    : to.startsWith("+1")
+      ? "USA"
+      : "Global";
   const messageText = formatNotificationMessage(input);
   const providerOverride = input.providerOverride?.toLowerCase();
   
@@ -355,7 +360,11 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
   }
 
   // 2. Try Twilio if configured and not overridden to termii
-  if (twilioSid && providerOverride !== "termii") {
+  if (
+  twilioSid &&
+  region === "USA" &&
+  providerOverride !== "termii"
+) {
     const isWa = channel === "whatsapp";
     const fromNumber = isWa
       ? process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER || "+16083843932"
