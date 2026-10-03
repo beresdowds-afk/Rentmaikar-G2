@@ -40,7 +40,20 @@ export interface SendApplicationMessageResult {
   simulation?: boolean;
 }
 
-export function normalizeE164(phone: string): string {
+export function normalizeE164(phone: string): function resolveMessagingRegion(
+  phone: string
+): "USA" | "Nigeria" | "Global" {
+  if (phone.startsWith("+234")) {
+    return "Nigeria";
+  }
+
+  if (phone.startsWith("+1")) {
+    return "USA";
+  }
+
+  return "Global";
+}
+string {
   const cleaned = phone.replace(/[^\d+]/g, "");
   if (!cleaned) return "";
   if (cleaned.startsWith("+")) return cleaned;
@@ -95,7 +108,7 @@ export async function sendApplicationMessage(
   const rawTo = payload.to || "";
   const to = normalizeE164(rawTo);
   const channel = payload.channel === "whatsapp" ? "whatsapp" : "sms";
-  const region: "USA" | "Nigeria" = to.startsWith("+234") ? "Nigeria" : "USA";
+  region: "USA" | "Nigeria" | "Global";
   const isSandbox = Boolean(payload.sandbox || process.env.SENT_SANDBOX_MODE === "true");
 
   if (!to) {
