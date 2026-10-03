@@ -99,27 +99,38 @@ export class CPaaSRouterService {
   /**
    * Determine the optimal CPaaS provider for this dispatch
    */
-  resolveProvider(destinationPhone: string, channel: SentChannel, override?: CPaaSProvider): CPaaSProvider {
-    if (override && override !== "auto") return override;
+  resolveProvider(
+  destinationPhone: string,
+  channel: SentChannel,
+  override?: CPaaSProvider
+): CPaaSProvider {
+  /*
+   * Normal production routing:
+   *
+   * REGION → CHANNEL → SENT.dm PRIMARY
+   *
+   * Region determines fallback eligibility, not the primary provider.
+   *
+   * Explicit providerOverride remains available for controlled
+   * diagnostics/testing and existing administrative flows.
+   */
 
-    // Check specific channel routing rule first
-    const channelProvider = this.config.channelRouting[channel];
-    if (channelProvider && channelProvider !== "auto") {
-      return channelProvider;
-    }
+  if (override && override !== "auto") {
+    return override;
+  }
 
-    if (this.config.primaryProvider !== "auto") {
-      return this.config.primaryProvider;
-    }
-
-    // Auto geo-routing logic:
-    // Twilio is approved for VoIP voice only — never route messaging to it.
-    // +234 -> Termii, everything else -> Sent (global).
-    if (destinationPhone.startsWith("+234")) {
-      return "termii";
-    }
+  // Existing channel configuration must never silently replace
+  // the universal SENT.dm primary policy.
+  if (channel === "sms" || channel === "whatsapp") {
     return "sent";
   }
+
+  if (this.config.primaryProvider === "sent") {
+    return "sent";
+  }
+
+  return "sent";
+}
 
   /**
    * Universal message dispatcher across Sent, Twilio, and Termii
@@ -147,7 +158,11 @@ export class CPaaSRouterService {
       // Handle Failover if enabled
       if (this.config.enableFailover) {
         const fallback = this.getFallbackProvider(selectedProvider, formattedTo);
-        if (fallback && fallback !== selectedProvider) {
+        if (
+  fallback &&
+  fallback !== "auto" &&
+  fallback !== selectedProvider
+) {
           console.info(`[CPaaSRouter] Triggering automatic failover from ${selectedProvider} to ${fallback}`);
           try {
             let fallbackResult: UnifiedMessageResult;
@@ -181,14 +196,32 @@ export class CPaaSRouterService {
     }
   }
 
-  private getFallbackProvider(current: CPaaSProvider, destinationPhone: string): CPaaSProvider {
-    if (current === "sent") {
-      // Twilio is voice-only; messaging fallback for Nigeria is Termii.
-      return destinationPhone.startsWith("+234") ? "termii" : "sent";
-    }
-    return "sent"; // Sent acts as universal global fallback
+  private getFallbackProvider(
+  current: CPaaSProvider,
+  destinationPhone: string
+): CPaaSProvider {
+  if (current !== "sent") {
+    // SENT.dm is the universal primary, so a provider that was
+    // explicitly selected falls back to SENT.dm.
+    return "sent";
   }
 
+  const normalized = destinationPhone.trim();
+
+  if (normalized.startsWith("+234")) {
+    // Nigerian regional fallback.
+    return "termii";
+  }
+
+  if (normalized.startsWith("+1")) {
+    // USA/Canada numbering-plan fallback.
+    return "twilio";
+  }
+
+  // Unknown region:
+  // do not silently classify it as USA.
+  return "auto";
+}
   private async dispatchViaSent(
     to: string, 
     channel: SentChannel, 
