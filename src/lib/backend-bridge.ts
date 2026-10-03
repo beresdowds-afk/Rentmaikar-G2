@@ -648,17 +648,7 @@ class BackendBridge {
     }
 
     // Attempt primary call first
-    try {
-      const primaryUrl = `${this.primaryBaseUrl}${cleanEndpoint}`;
-      return await this.executeSingleCall<T>(primaryUrl, options, correlationId, false, timeoutMs);
-    } catch (primaryErr: any) {
-      // If error is a permanent 4xx (unauthorized, validation, forbidden), fail immediately
-      if (primaryErr?.isPermanentError || (primaryErr?.status >= 400 && primaryErr?.status < 500 && primaryErr?.status !== 429)) {
-        throw primaryErr;
-      }
-
-      // LOSS OF DIRECT CONTACT DETECTED!
-      this.setConnectionState(
+       this.setConnectionState(
         "STAGING_FALLBACK",
         `Direct call failed: ${primaryErr.message || "Primary gateway unreachable"}`
       );
