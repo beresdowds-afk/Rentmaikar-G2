@@ -5,7 +5,7 @@ import {
   buildCallForwardTwiml,
   getForwardingDestination,
   isForwardingEnabled,
-  regionFromPhone,
+  import { resolveCanonicalRegion } from "../_shared/region-routing.ts";,
 } from "../_shared/forwarding.ts";
 import { publicSenderFor } from "../_shared/comms-endpoints.ts";
 import { logMessagingEvent } from "../_shared/messaging-events.ts";
@@ -47,9 +47,26 @@ serve(async (req: Request): Promise<Response> => {
     );
 
     const from = (form.get("From")?.toString() || "").trim();
-    const to = (form.get("To")?.toString() || "").trim();
-    const callSid = form.get("CallSid")?.toString() || "";
-    const region = regionFromPhone(to, from);
+const to = (form.get("To")?.toString() || "").trim();
+const callSid = form.get("CallSid")?.toString() || "";
+
+// The Twilio "To" number is the inbound line that received the call.
+// Resolve its region through the canonical Region Builder-backed resolver.
+const region = await resolveCanonicalRegion(supabase, to);
+
+if (!region) {
+  console.error(
+    `[incoming-call-forward] Could not resolve canonical region for inbound line ${to}`,
+  );
+
+  return xml(
+    `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">We are unable to route this call because its service region could not be determined.</Say>
+  <Hangup/>
+</Response>`,
+  );
+}
 
     const enabled = await isForwardingEnabled(supabase, "call");
     const destination = enabled
