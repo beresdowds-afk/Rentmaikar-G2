@@ -576,20 +576,268 @@ export default function DriverDashboard() {
               </Card>
 
               {/* Payment Reminder Notification Preview */}
-              <PaymentReminderPreview 
-                driverName={user?.user_metadata?.full_name || 'Driver'}
-                amountDue={isUSA ? totalDue : totalDue}
-                currency={currency}
-                paymentFrequency={rental?.paymentFrequency ?? 'weekly'}
-              />
-              </div>
-              </PortalGate>
-            </TabsContent>
+            <TabsContent value="payments" className="space-y-6">
+              <PortalGate portal="Payments" require="authenticated">
+                <div className="space-y-6">
+                  {rental && (
+                    <RentalPaymentStatusPanel
+                      rentalId={rental.id}
+                      refreshKey={paymentRefreshKey}
+                      onRetry={(p) => {
+                        const method = (
+                          p.payment_method ?? ""
+                        ).toLowerCase();
 
-            {/* Price Negotiation Tab */}
-            <TabsContent value="negotiate" className="space-y-6">
-              <PortalGate portal="Price Negotiation" require="verification">
-                <DriverPriceNegotiation />
+                        if (
+                          method === "paystack" ||
+                          method === "opay" ||
+                          method === "paypal"
+                        ) {
+                          setPreferredPSP(method);
+                        }
+
+                        toast.message(
+                          "Retry the failed payment below",
+                        );
+
+                        setTimeout(
+                          () =>
+                            document
+                              .getElementById(
+                                "payment-picker",
+                              )
+                              ?.scrollIntoView({
+                                behavior: "smooth",
+                              }),
+                          50,
+                        );
+                      }}
+                    />
+                  )}
+
+                  <div
+                    id="payment-picker"
+                    className="flex justify-end"
+                  >
+                    <EnablePushButton />
+                  </div>
+
+                  {rental && (
+                    <PaymentMethodPicker
+                      country={country}
+                      amount={Number(
+                        totalDue.toFixed(2),
+                      )}
+                      rentalId={rental.id}
+                      vehicleId={vehicle?.id}
+                      driverId={user?.id}
+                      paymentFrequency={
+                        rental.paymentFrequency
+                      }
+                      description={`Rental ${rental.id.slice(
+                        0,
+                        8,
+                      )} ${
+                        rental.paymentFrequency
+                      } payment`}
+                      preferredPSP={preferredPSP}
+                      onSuccess={() =>
+                        setPaymentRefreshKey(
+                          (k) => k + 1,
+                        )
+                      }
+                      onError={() =>
+                        setPaymentRefreshKey(
+                          (k) => k + 1,
+                        )
+                      }
+                    />
+                  )}
+
+                  <SubscriptionPlansPanel
+                    title="Add-on payments (Training · Insurance · Roadside)"
+                    planTypes={[
+                      "training",
+                      "insurance",
+                      "roadside_support",
+                    ]}
+                    compact
+                  />
+
+                  <UnifiedBillingPanel
+                    userId={targetId}
+                    role="driver"
+                    country={country}
+                  />
+
+                  <InvoiceStatusPanel
+                    scope="driver"
+                    userId={targetId}
+                  />
+
+                  <ProxyBillingSettings
+                    userId={targetId}
+                  />
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>
+                        Payment History
+                      </CardTitle>
+                      <CardDescription>
+                        Your recent payments and
+                        transactions
+                      </CardDescription>
+                    </CardHeader>
+
+                    <CardContent>
+                      <div className="space-y-4">
+                        {dbPayments.length === 0 ? (
+                          <p className="text-center text-muted-foreground py-8">
+                            No payments yet
+                          </p>
+                        ) : (
+                          dbPayments.map(
+                            (payment) => (
+                              <div
+                                key={payment.id}
+                                className="flex items-center justify-between p-4 border rounded-lg"
+                              >
+                                <div className="flex items-center gap-4">
+                                  <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                                    <CheckCircle className="h-5 w-5 text-green-600" />
+                                  </div>
+
+                                  <div>
+                                    <p className="font-medium capitalize">
+                                      {
+                                        payment.payment_frequency
+                                      }{" "}
+                                      Payment
+                                    </p>
+
+                                    <p className="text-sm text-muted-foreground">
+                                      {new Date(
+                                        payment.created_at,
+                                      ).toLocaleDateString()}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="text-right">
+                                  <p className="font-bold">
+                                    {formatCurrency(
+                                      Number(
+                                        payment.amount,
+                                      ),
+                                      payment.currency as
+                                        | "USD"
+                                        | "NGN"
+                                        | (string & {}),
+                                    )}
+                                  </p>
+
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs capitalize"
+                                  >
+                                    {payment.payment_method ||
+                                      payment.status}
+                                  </Badge>
+                                </div>
+                              </div>
+                            ),
+                          )
+                        )}
+                      </div>
+
+                      <Button
+                        className="w-full mt-6"
+                        onClick={() => {
+                          document
+                            .getElementById(
+                              "payment-picker",
+                            )
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
+                        }}
+                      >
+                        Make New Payment
+                      </Button>
+                    </CardContent>
+                  </Card>
+
+                  {/* Payment Methods Info */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>
+                        Available Payment Methods
+                      </CardTitle>
+                    </CardHeader>
+
+                    <CardContent>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div className="p-4 border rounded-lg">
+                          <div className="flex items-center gap-3 mb-2">
+                            <CreditCard className="h-5 w-5" />
+
+                            <span className="font-medium">
+                              {isUSA
+                                ? "PayPal"
+                                : "Paystack"}
+                            </span>
+
+                            <Badge>
+                              Instant
+                            </Badge>
+                          </div>
+
+                          <p className="text-sm text-muted-foreground">
+                            {isUSA
+                              ? "Pay instantly with your PayPal account or credit card"
+                              : "Pay with card, bank, or USSD via Paystack"}
+                          </p>
+                        </div>
+
+                        <div className="p-4 border rounded-lg">
+                          <div className="flex items-center gap-3 mb-2">
+                            <Landmark className="h-5 w-5" />
+
+                            <span className="font-medium">
+                              Bank Transfer
+                            </span>
+
+                            <Badge variant="secondary">
+                              1-2 days
+                            </Badge>
+                          </div>
+
+                          <p className="text-sm text-muted-foreground">
+                            {isUSA
+                              ? "Transfer directly to our Chase bank account"
+                              : "Transfer to our GTBank account"}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Payment Reminder Notification Preview */}
+                  <PaymentReminderPreview
+                    driverName={
+                      user?.user_metadata?.full_name ||
+                      "Driver"
+                    }
+                    amountDue={totalDue}
+                    currency={currency}
+                    paymentFrequency={
+                      rental?.paymentFrequency ??
+                      "weekly"
+                    }
+                  />
+                </div>
               </PortalGate>
             </TabsContent>
 
