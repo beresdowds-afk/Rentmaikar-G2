@@ -50,21 +50,58 @@ const DEFAULT_CONFIG: ForwardingConfig = {
 };
 
 /** Normalise the many region spellings used across the platform. */
-export function normaliseRegion(region?: string | null): "USA" | "Nigeria" {
-  const r = (region || "").trim().toLowerCase();
-  if (r.startsWith("ng") || r.includes("nigeria")) return "Nigeria";
-  return "USA";
+export function normaliseRegion(
+  region?: string | null,
+): string | null {
+  const value = (region || "").trim();
+
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.toLowerCase();
+
+  if (
+    normalized === "us" ||
+    normalized === "usa" ||
+    normalized === "united states"
+  ) {
+    return "USA";
+  }
+
+  if (
+    normalized === "ng" ||
+    normalized === "nigeria"
+  ) {
+    return "Nigeria";
+  }
+
+  return value;
 }
 
 /** Region inferred from an E.164 phone number. */
-export function regionFromPhone(...numbers: (string | null | undefined)[]): "USA" | "Nigeria" {
+export function regionFromPhone(
+  ...numbers: (string | null | undefined)[]
+): string | null {
   for (const n of numbers) {
-    const clean = (n || "").replace("whatsapp:", "").replace(/\s/g, "");
-    if (clean.startsWith("+234") || clean.startsWith("234")) return "Nigeria";
-  }
-  return "USA";
-}
+    const clean = (n || "")
+      .replace("whatsapp:", "")
+      .replace(/\s/g, "");
 
+    if (
+      clean.startsWith("+234") ||
+      clean.startsWith("234")
+    ) {
+      return "Nigeria";
+    }
+
+    if (clean.startsWith("+1")) {
+      return "USA";
+    }
+  }
+
+  return null;
+}
 export async function getForwardingConfig(supabase: Supa): Promise<ForwardingConfig> {
   try {
     const { data } = await supabase
@@ -105,8 +142,11 @@ export async function getForwardingDestination(
 
   const list = (rows ?? []) as { region: string; contact_value: string }[];
   const match =
-    list.find((r) => normaliseRegion(r.region) === target) ?? list[0] ?? null;
-
+  target
+    ? list.find(
+        (r) => normaliseRegion(r.region) === target,
+      ) ?? null
+    : null;
   let value = match?.contact_value?.trim() || null;
 
   // Fallback to the regional operations forwarding numbers.
