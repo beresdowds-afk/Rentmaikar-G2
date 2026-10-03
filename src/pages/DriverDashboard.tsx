@@ -534,9 +534,8 @@ export default function DriverDashboard() {
 </Button>
                   </CardContent>
                 </Card>
-              )}
-
-              {/* Payment Methods Info */}
+        
+                {/* Payment Methods Info */}
               <Card>
                 <CardHeader>
                   <CardTitle>Available Payment Methods</CardTitle>
