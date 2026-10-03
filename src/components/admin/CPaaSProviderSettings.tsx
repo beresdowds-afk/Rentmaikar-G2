@@ -347,10 +347,10 @@ export function CPaaSProviderSettings() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="sent" className="text-xs">Sent.dm (Global)</SelectItem>
-                    <SelectItem value="twilio" className="text-xs">Twilio (US)</SelectItem>
-                    <SelectItem value="termii" className="text-xs">Termii (NG)</SelectItem>
-                  </SelectContent>
+  <SelectItem value="sent" className="text-xs">
+    Sent.dm — Universal Primary
+  </SelectItem>
+</SelectContent>
                 </Select>
               </div>
 
@@ -368,9 +368,10 @@ export function CPaaSProviderSettings() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="sent" className="text-xs">Sent.dm (v3 API)</SelectItem>
-                    <SelectItem value="twilio" className="text-xs">Twilio WhatsApp</SelectItem>
-                  </SelectContent>
+  <SelectItem value="sent" className="text-xs">
+    Sent.dm — Universal Primary
+  </SelectItem>
+</SelectContent>
                 </Select>
               </div>
 
