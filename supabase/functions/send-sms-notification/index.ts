@@ -8,7 +8,10 @@ import { outboundPausedResponse, outboundRegionFromPhone } from "../_shared/chan
 import { logOutboundDecision } from "../_shared/outbound-audit.ts";
 import { sendViaSent } from "../_shared/sent-client.ts";
 import { twilioFallbackAllowed } from "../_shared/twilio-messaging-guard.ts";
-
+import {
+  resolveCanonicalRegion,
+  resolveConfiguredMessagingFallback,
+} from "../_shared/region-routing.ts";
 
 
 const corsHeaders = {
@@ -294,12 +297,16 @@ const handler = async (req: Request): Promise<Response> => {
 
     // ─── Rate limiting ───
 
-    const region =
-  body.phone.startsWith("+234")
-    ? "NIGERIA"
-    : body.phone.startsWith("+1")
-      ? "USA"
-      : "GLOBAL";
+    const region = await resolveCanonicalRegion(
+  supabase,
+  body.phone,
+);
+    const fallbackProvider =
+  await resolveConfiguredMessagingFallback(
+    supabase,
+    body.phone,
+    body.channel === "whatsapp" ? "whatsapp" : "sms",
+  );
     if (!checkGlobalRateLimit() || !checkRateLimit(region)) {
       return new Response(
         JSON.stringify({ success: false, error: "Rate limited. Try again shortly." }),
@@ -308,7 +315,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     const regionConfig = getRegionConfig(body.phone);
-    const isNigeria = body.phone.startsWith('+234');
+    
     // Admin-managed template first; hardcoded copy stays as the safety net.
     const sym = body.currency ? getCurrencySymbol(body.currency) : '$';
     const message = await resolveMessage({
@@ -371,7 +378,7 @@ const handler = async (req: Request): Promise<Response> => {
         mediaUrls: isWa ? body.mediaUrls : undefined,
         metadata: {
           notification_type: body.notificationType,
-          region: isNigeria ? 'NIGERIA' : 'USA',
+          region: region ?? "Global",
           template_name: isOtp ? 'SENT_VERIFY_CODE_2' : (waTemplateId || body.notificationType),
         },
       });
@@ -386,7 +393,7 @@ const handler = async (req: Request): Promise<Response> => {
           event_type: 'sent',
           direction: 'outbound',
           recipient: body.phone,
-          region: isNigeria ? 'NIGERIA' : 'USA',
+          region: region ?? "Global",
           provider_message_id: sentResult.messageId,
           template_name: waTemplateId || body.notificationType,
           metadata: { notification_type: body.notificationType, sandbox: sentResult.sandbox },
@@ -395,7 +402,7 @@ const handler = async (req: Request): Promise<Response> => {
           channel: body.channel === 'whatsapp' ? 'whatsapp' : 'sms',
           decision: 'sent',
           reason: 'accepted_by_provider',
-          region: isNigeria ? 'Nigeria' : 'USA',
+          region: region ?? "Global",
           provider: 'sent',
           recipient: body.phone,
           notificationType: body.notificationType,
@@ -409,7 +416,7 @@ const handler = async (req: Request): Promise<Response> => {
             messageId: sentResult.messageId,
             channel: body.channel,
             provider: 'sent',
-            region: isNigeria ? 'NIGERIA' : 'USA',
+            region: region ?? "Global",
             sandbox: sentResult.sandbox,
           }),
           { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
