@@ -703,23 +703,106 @@ export const useSendComposedMessage = () => {
           const { data, error } = await supabase.functions.invoke('send-inbox-reply', {
             body: {
               conversationId,
-              messageContent: body,
-              channel: input.channel,
-              recipientPhone: phone,
-              whatsappTemplateId: input.channel === 'whatsapp' ? input.whatsappTemplateId : undefined,
+      // ── Dispatch on the wire ──
+      let dispatchOk = false;
+      let deliveryError: string | null = null;
+      let deliveredMessageId: string | undefined;
+
+      try {
+        if (input.channel === 'email') {
+          // Authoritative operational email path:
+          // MessageComposer -> backendBridge -> Cloud Run -> Resend.
+          const bridgeRes = await backendBridge.invokeEdgeFunction(
+            'send-outbound-email',
+            {
+              action: 'send',
+              to: email,
+              subject:
+                renderedSubject || 'Message from Rentmaikar',
+              body,
+              fromAlias: 'support',
+              replyTo: 'support@backend.rentmaikar.com',
+              data: {
+                conversationId,
+                source: 'message_composer',
+                channel: 'email',
+              },
             },
-          },
-        );
+            {
+              method: 'POST',
+              timeoutMs: 30000,
+              skipRetry: true,
+            },
+          );
 
-          if (!error && (data?.success || data?.ok)) {
+          if (
+            !bridgeRes?.error &&
+            (bridgeRes?.data?.success ||
+              bridgeRes?.data?.ok)
+          ) {
             dispatchOk = true;
-            deliveredMessageId = data?.messageId;
+            deliveredMessageId =
+              bridgeRes.data?.messageId;
           } else {
-            deliveryError = data?.error || error?.message || 'Provider rejected message';
+            deliveryError =
+              bridgeRes?.data?.error ||
+              bridgeRes?.error?.message ||
+              `Email delivery failed with HTTP ${
+                bridgeRes?.status ?? 'unknown'
+              }`;
           }
+        } else if (
+          input.channel === 'sms' ||
+          input.channel === 'whatsapp'
+        ) {
+          // Authoritative SMS/WhatsApp path:
+          // MessageComposer -> backendBridge
+          // -> send-inbox-reply -> SENT.dm/provider.
+          const bridgeRes =
+            await backendBridge.invokeEdgeFunction(
+              'send-inbox-reply',
+              {
+                conversationId,
+                messageContent: body,
+                channel: input.channel,
+                recipientPhone: phone,
+                whatsappTemplateId:
+                  input.channel === 'whatsapp'
+                    ? input.whatsappTemplateId
+                    : undefined,
+              },
+              {
+                method: 'POST',
+                timeoutMs: 30000,
+                skipRetry: true,
+              },
+            );
 
-          // Direct local fallback for SMS/WhatsApp
-          if (!dispatchOk) {
+          if (
+            !bridgeRes?.error &&
+            (bridgeRes?.data?.success ||
+              bridgeRes?.data?.ok)
+          ) {
+            dispatchOk = true;
+            deliveredMessageId =
+              bridgeRes.data?.messageId;
+          } else {
+            deliveryError =
+              bridgeRes?.data?.error ||
+              bridgeRes?.error?.message ||
+              `Message delivery failed with HTTP ${
+                bridgeRes?.status ?? 'unknown'
+              }`;
+          }
+        } else {
+          deliveryError =
+            `Unsupported message channel: ${input.channel}`;
+        }
+      } catch (invokeErr: any) {
+        deliveryError =
+          invokeErr?.message ||
+          'Authoritative message dispatch failed';
+      }
             try {
               const fallbackRes = await fetch('/api/functions/send-inbox-reply', {
                 method: 'POST',
