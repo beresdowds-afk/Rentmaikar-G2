@@ -62,23 +62,86 @@ export function normalizeE164(phone: string): string {
   return `+${cleaned}`;
 }
 
-function resolveMessagingRegion(
-  phone: string
-): "USA" | "Nigeria" | "Global" {
-  if (phone.startsWith("+234")) {
-    return "Nigeria";
+interface CanonicalMessagingRoute {
+  region: string | null;
+  fallbackProvider: "twilio" | "termii" | null;
+}
+
+async function resolveCanonicalMessagingRoute(
+  phone: string,
+  channel: "sms" | "whatsapp",
+): Promise<CanonicalMessagingRoute> {
+  const pool = getDbPool();
+
+  if (!pool) {
+    return {
+      region: null,
+      fallbackProvider: null,
+    };
   }
 
-  if (phone.startsWith("+1")) {
-    return "USA";
+  const normalized = phone.trim().replace(/\s+/g, "");
+
+  const regionsResult = await pool.query(
+    `SELECT value, phone_prefix
+       FROM public.get_allowed_regions()
+      WHERE phone_prefix IS NOT NULL
+        AND btrim(phone_prefix) <> ''`,
+  );
+
+  const matchedRegion = regionsResult.rows
+    .filter((row: { phone_prefix?: string }) => {
+      const prefix = String(row.phone_prefix || "").trim();
+      return prefix && normalized.startsWith(prefix);
+    })
+    .sort(
+      (
+        a: { phone_prefix?: string },
+        b: { phone_prefix?: string },
+      ) =>
+        String(b.phone_prefix || "").length -
+        String(a.phone_prefix || "").length,
+    )[0];
+
+  if (!matchedRegion) {
+    return {
+      region: null,
+      fallbackProvider: null,
+    };
   }
 
-  return "Global";
+  const prefix = String(matchedRegion.phone_prefix).trim();
+
+  const providerResult = await pool.query(
+    `SELECT sms_provider, whatsapp_provider
+       FROM public.communication_providers
+      WHERE country_code_prefix = $1
+        AND is_active = true
+      LIMIT 1`,
+    [prefix],
+  );
+
+  const providerRow = providerResult.rows[0];
+
+  const configured =
+    channel === "whatsapp"
+      ? providerRow?.whatsapp_provider
+      : providerRow?.sms_provider;
+
+  const fallbackProvider =
+    configured === "twilio" || configured === "termii"
+      ? configured
+      : null;
+
+  return {
+    region: String(matchedRegion.value || "").trim() || null,
+    fallbackProvider,
+  };
 }
 
 async function logMessageDispatch(params: {
   phone: string;
-  region: "USA" | "Nigeria" | "Global";
+  region: string | null;
   provider: "sent" | "twilio" | "termii" | "none";
   channel: "sms" | "whatsapp";
   message: string;
@@ -121,7 +184,8 @@ export async function sendApplicationMessage(
   const rawTo = payload.to || "";
   const to = normalizeE164(rawTo);
   const channel = payload.channel === "whatsapp" ? "whatsapp" : "sms";
-  const region = resolveMessagingRegion(to);
+  const route = await resolveCanonicalMessagingRoute(to, channel);
+  const region = route.region;
   const isSandbox = Boolean(payload.sandbox || process.env.SENT_SANDBOX_MODE === "true");
 
   if (!to) {
@@ -137,7 +201,9 @@ export async function sendApplicationMessage(
 
   const messageText = payload.message || "You have an update from RentMaikar.";
   const override = payload.providerOverride;
-
+  const route = await resolveCanonicalMessagingRoute(to, channel);
+  const region = route.region;
+  const configuredFallback = route.fallbackProvider;
   // -----------------------------------------------------------------
   // 1. PRIMARY PROVIDER: SENT.dm
   // -----------------------------------------------------------------
@@ -199,9 +265,9 @@ export async function sendApplicationMessage(
   if (
   twilioAccountSid &&
   twilioAuthToken &&
-  region === "USA" &&
+  configuredFallback === "twilio" &&
   (!override || override === "twilio")
-) {
+) { 
     try {
       const isWa = channel === "whatsapp";
       const fromNumber = isWa
@@ -268,10 +334,9 @@ export async function sendApplicationMessage(
 
 if (
   termiiApiKey &&
-  region === "Nigeria" &&
-  channel === "sms" &&
+  configuredFallback === "termii" &&
   (!override || override === "termii")
-) {
+ ) {
   try {
       const termiiSenderId = process.env.TERMII_SENDER_ID || "Rentmaikar";
       const cleanPhone = to.replace(/^\+/, "");
