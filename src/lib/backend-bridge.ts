@@ -648,16 +648,50 @@ class BackendBridge {
       );
     }
 
-    // Attempt primary call first
-       this.setConnectionState(
-        "STAGING_FALLBACK",
-        `Direct call failed: ${primaryErr.message || "Primary gateway unreachable"}`
-      );
+// Attempt primary call first
+try {
+  const primaryUrl = `${this.primaryBaseUrl}${cleanEndpoint}`;
+  return await this.executeSingleCall<T>(
+    primaryUrl,
+    options,
+    correlationId,
+    false,
+    timeoutMs
+  );
+} catch (primaryErr: any) {
+  // If error is a permanent 4xx (unauthorized, validation, forbidden),
+  // fail immediately without staging failover.
+  if (
+    primaryErr?.isPermanentError ||
+    (
+      primaryErr?.status >= 400 &&
+      primaryErr?.status < 500 &&
+      primaryErr?.status !== 429
+    )
+  ) {
+    throw primaryErr;
+  }
 
-      console.info(
-        `[BackendBridge] Redirecting call (${cleanEndpoint}) through backend URL: ${this.stagingBackendUrl}`
-      );
+  // LOSS OF DIRECT CONTACT DETECTED!
+  this.setConnectionState(
+    "STAGING_FALLBACK",
+    `Direct call failed: ${primaryErr.message || "Primary gateway unreachable"}`
+  );
 
+  console.info(
+    `[BackendBridge] Redirecting call (${cleanEndpoint}) through backend URL: ${this.stagingBackendUrl}`
+  );
+
+  // Immediately failover and execute via staging.rentmaikar.com
+  const stagingUrl = `${this.stagingBackendUrl}${cleanEndpoint}`;
+  return this.executeCallWithRetry<T>(
+    stagingUrl,
+    options,
+    correlationId,
+    true,
+    maxRetries
+  );
+}
       // Immediately failover and execute via staging.rentmaikar.com
       const stagingUrl = `${this.stagingBackendUrl}${cleanEndpoint}`;
       return this.executeCallWithRetry<T>(stagingUrl, options, correlationId, true, maxRetries);
