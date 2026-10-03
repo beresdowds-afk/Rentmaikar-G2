@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 export type QueueSource = 'live_inbound' | 'voice_app' | 'callback';
-export type QueueRegion = 'USA' | 'Nigeria';
-
+export type QueueRegion = string;
 export interface QueuedCall {
   id: string;
   /** Underlying row id used by accept/reject actions. */
@@ -23,7 +22,7 @@ const POLL_INTERVAL_MS = 15_000;
 const URGENT_AFTER_MS = 3 * 60 * 1000;
 
 const normalizeRegion = (value: string | null | undefined): QueueRegion =>
-  (value || '').toLowerCase().startsWith('nig') || value === 'NG' ? 'Nigeria' : 'USA';
+  (value || '').toLowerCase().startsWith('nig') || value === 'NG' ? 'Nigeria' : country;
 
 /** Dual-tone (440Hz + 480Hz) PBX-style ring chime rendered with the Web Audio API. */
 const playChime = () => {
