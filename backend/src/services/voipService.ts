@@ -239,43 +239,27 @@ export async function mintVoiceAccessToken(
 // 2. Caller-ID Resolution (DB or fallback)
 // -----------------------------------------------------------------
 
-export async function resolveCallerId(callerUserId?: string | null, region: string = "USA"): Promise<string> {
+export async function resolveCallerId(
+  callerUserId: string | null | undefined,
+  region: string,
+): Promise<string | null> {
   const pool = getDbPool();
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(callerUserId || "");
 
-  if (callerUserId && isUuid && pool) {
-    try {
-      const res = await pool.query("SELECT public.voip_resolve_outbound_number($1, $2) as num", [
-        callerUserId,
-        region,
-      ]);
-      if (res.rows?.[0]?.num) {
-        return res.rows[0].num;
-      }
-    } catch (e: any) {
-      console.warn("[VoIP Service] voip_resolve_outbound_number error:", e.message);
-    }
+  if (!pool || !callerUserId || !isUuid(callerUserId)) {
+    return null;
   }
 
-  if (pool) {
-    try {
-      const res = await pool.query(
-        "SELECT phone_number FROM public.voip_outbound_numbers WHERE is_active = true ORDER BY is_default DESC, priority ASC LIMIT 1"
-      );
-      if (res.rows?.[0]?.phone_number) {
-        return res.rows[0].phone_number;
-      }
-    } catch (e: any) {
-      console.warn("[VoIP Service] voip_outbound_numbers query error:", e.message);
-    }
-  }
+  try {
+    const result = await pool.query(
+      "SELECT public.voip_resolve_outbound_number($1, $2) AS num",
+      [callerUserId, region],
+    );
 
-  return (
-    process.env.TWILIO_VOICE_FROM ||
-    process.env.TWILIO_OUTBOUND_NUMBER ||
-    process.env.TWILIO_PHONE_NUMBER ||
-    "+13806003018"
-  );
+    return result.rows?.[0]?.num || null;
+  } catch (error) {
+    console.warn("[VoIP Service] outbound line resolution failed:", error);
+    return null;
+  }
 }
 
 // -----------------------------------------------------------------
