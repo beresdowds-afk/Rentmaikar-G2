@@ -157,7 +157,11 @@ export class CPaaSRouterService {
 
       // Handle Failover if enabled
       if (this.config.enableFailover) {
-        const fallback = this.getFallbackProvider(selectedProvider, formattedTo);
+        const fallback = await this.getFallbackProvider(
+  selectedProvider,
+  formattedTo,
+  channel
+);
         if (fallback && fallback !== selectedProvider) {
           console.info(`[CPaaSRouter] Triggering automatic failover from ${selectedProvider} to ${fallback}`);
           try {
@@ -192,33 +196,102 @@ export class CPaaSRouterService {
     }
   }
 
-  private getFallbackProvider(
+  private async getFallbackProvider(
   current: CPaaSProvider,
-  destinationPhone: string
-): CPaaSProvider | null {
+  destinationPhone: string,
+  channel: SentChannel,
+): Promise<CPaaSProvider | null> {
+  // SENT.dm is the universal primary for SMS/WhatsApp.
+  // If an explicitly selected secondary provider fails, return to SENT.dm.
   if (current !== "sent") {
-    // SENT.dm is the universal primary provider.
-    // Explicitly selected providers may fall back to SENT.dm.
     return "sent";
   }
 
-  const normalized = destinationPhone.trim();
-
-  if (normalized.startsWith("+234")) {
-    // Nigeria regional fallback.
-    return "termii";
+  if (channel !== "sms" && channel !== "whatsapp") {
+    return null;
   }
 
-  if (normalized.startsWith("+1")) {
-    // USA regional fallback.
-    return "twilio";
+  const normalized = destinationPhone.trim().replace(/\s+/g, "");
+
+  /*
+   * Canonical region resolution:
+   *
+   * get_allowed_regions() is the existing Region Builder-backed authority.
+   * This code only consumes its phone_prefix values; it does not maintain
+   * a communications-specific country list.
+   */
+  const { data: regions, error: regionError } =
+    await supabase.rpc("get_allowed_regions");
+
+  if (regionError || !Array.isArray(regions)) {
+    console.warn(
+      "[CPaaSRouter] Canonical region resolution failed:",
+      regionError,
+    );
+    return null;
   }
 
-  // Unknown/unresolved region:
-  // SENT.dm remains the only automatic provider.
-  // Never silently classify the destination as USA.
+  const matchedRegion = regions
+    .filter((region: any) => {
+      const prefix = String(region?.phone_prefix || "").trim();
+      return prefix.length > 0 && normalized.startsWith(prefix);
+    })
+    .sort(
+      (a: any, b: any) =>
+        String(b?.phone_prefix || "").length -
+        String(a?.phone_prefix || "").length,
+    )[0];
+
+  /*
+   * Unresolved destination remains unresolved.
+   * NEVER convert it to USA.
+   */
+  if (!matchedRegion) {
+    return null;
+  }
+
+  const prefix = String(matchedRegion.phone_prefix || "").trim();
+
+  /*
+   * communication_providers is the existing canonical provider registry.
+   * It determines the configured regional fallback.
+   */
+  const { data: configuredProvider, error: providerError } =
+    await supabase
+      .from("communication_providers")
+      .select("sms_provider, whatsapp_provider, is_active")
+      .eq("country_code_prefix", prefix)
+      .eq("is_active", true)
+      .maybeSingle();
+
+  if (providerError || !configuredProvider) {
+    if (providerError) {
+      console.warn(
+        "[CPaaSRouter] Provider configuration lookup failed:",
+        providerError,
+      );
+    }
+
+    return null;
+  }
+
+  const configured =
+    channel === "whatsapp"
+      ? configuredProvider.whatsapp_provider
+      : configuredProvider.sms_provider;
+
+  if (
+    configured === "twilio" ||
+    configured === "termii"
+  ) {
+    return configured;
+  }
+
+  /*
+   * If configuration points to SENT.dm, there is no distinct fallback.
+   * Never invent another provider.
+   */
   return null;
-}
 }
   private async dispatchViaSent(
     to: string, 
