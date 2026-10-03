@@ -671,8 +671,6 @@ export const useSendComposedMessage = () => {
     deliveryError =
       bridgeErr?.message ||
       'Authoritative backend email dispatch failed';
-  }
-}
 
           // Attempt 2: Resilient direct local API gateway fallback
           if (!dispatchOk) {
@@ -701,6 +699,7 @@ export const useSendComposedMessage = () => {
           }
         } else {
           // SMS or WhatsApp channel dispatch
+        }
           const { data, error } = await supabase.functions.invoke('send-inbox-reply', {
             body: {
               conversationId,
