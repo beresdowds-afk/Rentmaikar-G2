@@ -682,16 +682,6 @@ try {
     `[BackendBridge] Redirecting call (${cleanEndpoint}) through backend URL: ${this.stagingBackendUrl}`
   );
 
-  // Immediately failover and execute via staging.rentmaikar.com
-  const stagingUrl = `${this.stagingBackendUrl}${cleanEndpoint}`;
-  return this.executeCallWithRetry<T>(
-    stagingUrl,
-    options,
-    correlationId,
-    true,
-    maxRetries
-  );
-}
       // Immediately failover and execute via staging.rentmaikar.com
       const stagingUrl = `${this.stagingBackendUrl}${cleanEndpoint}`;
       return this.executeCallWithRetry<T>(stagingUrl, options, correlationId, true, maxRetries);
