@@ -649,9 +649,9 @@ class BackendBridge {
     }
 
 // Attempt primary call first
-try {
-  const primaryUrl = `${this.primaryBaseUrl}${cleanEndpoint}`;
-  return await this.executeSingleCall<T>(
+   try {
+   const primaryUrl = `${this.primaryBaseUrl}${cleanEndpoint}`;
+   return await this.executeSingleCall<T>(
     primaryUrl,
     options,
     correlationId,
@@ -682,7 +682,7 @@ try {
     `[BackendBridge] Redirecting call (${cleanEndpoint}) through backend URL: ${this.stagingBackendUrl}`
   );
 
-        // Immediately failover and execute via staging.rentmaikar.com
+ // Immediately failover and execute via staging.rentmaikar.com
   const stagingUrl = `${this.stagingBackendUrl}${cleanEndpoint}`;
   return this.executeCallWithRetry<T>(
     stagingUrl,
