@@ -262,6 +262,19 @@ export function CPaaSProviderSettings() {
     });
   }}
   className="grid grid-cols-1 gap-3"
+<RadioGroup
+  value="sent"
+  onValueChange={() => {
+    updateConfig({
+      primaryProvider: "sent",
+      channelRouting: {
+        ...config.channelRouting,
+        sms: "sent",
+        whatsapp: "sent",
+      },
+    });
+  }}
+  className="grid grid-cols-1 gap-3"
 >
   <label
     htmlFor="sent-global"
