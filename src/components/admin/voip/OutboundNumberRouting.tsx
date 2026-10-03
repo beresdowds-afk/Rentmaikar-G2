@@ -22,7 +22,7 @@ const ROLES = [
   'insurance_support',
 ] as const;
 
-const REGIONS = ['All', 'USA', 'Nigeria'] as const;
+const { availableRegions } = useRegion();
 
 type StaffRole = (typeof ROLES)[number];
 
