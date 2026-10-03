@@ -228,7 +228,9 @@ export function CPaaSProviderSettings() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <RadioGroupItem value="auto" id="split-regional" />
-                    <strong className="text-sm font-bold text-foreground">Split Regional Routing</strong>
+                    <strong className="text-sm font-bold text-foreground">
+  Split Regional Routing
+</strong>
                   </div>
                   <p className="text-xs text-muted-foreground pl-6">
                     Routes US numbers (+1) to Twilio and Nigerian numbers (+234) to Termii automatically.
