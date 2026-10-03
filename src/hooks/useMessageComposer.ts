@@ -671,8 +671,8 @@ export const useSendComposedMessage = () => {
     deliveryError =
       bridgeErr?.message ||
       'Authoritative backend email dispatch failed';
-
-          // Attempt 2: Resilient direct local API gateway fallback
+  }
+    // Attempt 2: Resilient direct local API gateway fallback
           if (!dispatchOk) {
             try {
               const fallbackRes = await fetch('/api/functions/send-email-reply', {
@@ -708,7 +708,8 @@ export const useSendComposedMessage = () => {
               recipientPhone: phone,
               whatsappTemplateId: input.channel === 'whatsapp' ? input.whatsappTemplateId : undefined,
             },
-          });
+          },
+        );
 
           if (!error && (data?.success || data?.ok)) {
             dispatchOk = true;
