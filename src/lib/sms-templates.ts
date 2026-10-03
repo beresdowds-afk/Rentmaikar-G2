@@ -245,42 +245,74 @@ export interface SmsProviderRouting {
 /**
  * Determines designated service provider and sender ID/phone number based on platform rules.
  */
-export function getSmsProviderAndSender(phone?: string | null, regionCode?: string | null): SmsProviderRouting {
-  const cleanPhone = (phone || '').trim().replace(/\s+/g, '');
-  const isNigeria = cleanPhone.startsWith('+234') || regionCode?.toUpperCase() === 'NG' || regionCode?.toUpperCase() === 'NIGERIA';
-  const isNorthAmerica = cleanPhone.startsWith('+1') || regionCode?.toUpperCase() === 'US' || regionCode?.toUpperCase() === 'USA' || regionCode?.toUpperCase() === 'CA';
+export function getSmsProviderAndSender(
+  phone?: string | null,
+  regionCode?: string | null
+): SmsProviderRouting {
+  const cleanPhone = (phone || "").trim().replace(/\s+/g, "");
 
+  const normalizedRegion = (regionCode || "").trim().toUpperCase();
+
+  const isNigeria =
+    cleanPhone.startsWith("+234") ||
+    cleanPhone.startsWith("234") ||
+    normalizedRegion === "NG" ||
+    normalizedRegion === "NIGERIA";
+
+  const isUSA =
+    cleanPhone.startsWith("+1") ||
+    normalizedRegion === "US" ||
+    normalizedRegion === "USA" ||
+    normalizedRegion === "CA";
+
+  /*
+   * Platform messaging hierarchy:
+   *
+   * REGION
+   *   ↓
+   * CHANNEL
+   *   ↓
+   * SENT.dm PRIMARY
+   *   ↓
+   * CONFIGURED REGIONAL FALLBACK
+   *
+   * SENT.dm is NOT a regional fallback.
+   * Termii/Twilio are fallback providers only.
+   */
   if (isNigeria) {
     return {
-      provider: 'termii',
-      providerName: 'Termii (Nigeria)',
-      senderId: 'Rentmaikar',
-      fallbackProvider: 'Sent.dm',
-      region: 'Nigeria',
-      description: 'Routed through Termii direct telecom route for Nigerian local networks (MTN, Airtel, Glo, 9mobile) with registered sender ID "Rentmaikar".',
-      inboundWebhook: '/functions/v1/termii-webhook',
+      provider: "sent",
+      providerName: "Sent.dm (Universal Primary)",
+      senderId: "Rentmaikar",
+      fallbackProvider: "Termii",
+      region: "Nigeria",
+      description:
+        "SMS and WhatsApp are dispatched through Sent.dm first. Termii is the configured Nigerian fallback when Sent.dm fails.",
+      inboundWebhook: "/functions/v1/termii-webhook",
     };
   }
 
-  if (isNorthAmerica) {
+  if (isUSA) {
     return {
-      provider: 'sent',
-      providerName: 'Sent.dm / Twilio (USA)',
-      senderId: '+1 (608) 384-3932',
-      fallbackProvider: 'Twilio A2P 10DLC',
-      region: 'USA',
-      description: 'Routed through Sent.dm enterprise CPaaS with automated fallback to Twilio 10DLC verified number +1 (608) 384-3932.',
-      inboundWebhook: '/functions/v1/twilio-webhook',
+      provider: "sent",
+      providerName: "Sent.dm (Universal Primary)",
+      senderId: "Rentmaikar",
+      fallbackProvider: "Twilio",
+      region: "USA",
+      description:
+        "SMS and WhatsApp are dispatched through Sent.dm first. Twilio is the configured USA fallback when Sent.dm fails.",
+      inboundWebhook: "/functions/v1/twilio-webhook",
     };
   }
 
   return {
-    provider: 'sent',
-    providerName: 'Sent.dm (Global)',
-    senderId: 'Rentmaikar',
-    fallbackProvider: 'Twilio Global',
-    region: 'Global',
-    description: 'Routed via Sent.dm international gateway with local route optimization.',
-    inboundWebhook: '/functions/v1/sent-inbound',
+    provider: "sent",
+    providerName: "Sent.dm (Universal Primary)",
+    senderId: "Rentmaikar",
+    fallbackProvider: undefined,
+    region: "Global",
+    description:
+      "Destination region is unresolved. Sent.dm remains the universal provider, but no regional fallback is selected automatically.",
+    inboundWebhook: "/functions/v1/sent-inbound",
   };
 }
