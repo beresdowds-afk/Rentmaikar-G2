@@ -1,0 +1,1008 @@
+AGENTS.md
+
+Rentmaikar-G2 — AI Engineering and Architecture Guardrails
+
+«Repository: "beresdowds-afk/Rentmaikar-G2"
+Branch: "main"
+Platform: Rentmaikar — Smart Platform for Rideshare Vehicle Rentals and Management»
+
+This file contains mandatory instructions for AI coding agents, AI Studio, automated coding systems, and human developers making changes to this repository.
+
+The rules below protect the existing Rentmaikar architecture from accidental simplification, deletion, replacement, or architectural drift.
+
+---
+
+1. PRIMARY RULE
+
+DO NOT redesign, simplify, remove, replace, consolidate, or disable an existing integration, provider, communication channel, routing mechanism, adapter, bridge, webhook, callback, authentication mechanism, payment path, IoT/tracking path, or deployment path merely because another implementation appears to perform the same function.
+
+The existence of apparently duplicated functionality is not sufficient evidence that an integration is redundant.
+
+Before removing or replacing anything:
+
+1. Inspect the current implementation.
+2. Inspect its callers.
+3. Inspect its adapters/interceptors.
+4. Inspect its backend routes.
+5. Inspect its webhooks and callbacks.
+6. Inspect environment configuration.
+7. Inspect regional/capability routing.
+8. Inspect fallback/failover relationships.
+9. Inspect database dependencies.
+10. Inspect CI/CD and deployment dependencies.
+11. Check the authoritative architecture documents.
+12. Obtain explicit authorization before destructive architectural changes.
+
+Preserve first. Change second. Remove last.
+
+---
+
+2. AUTHORITATIVE ARCHITECTURE DOCUMENTS
+
+Before making architectural changes, inspect the relevant documents.
+
+docs/
+├── architecture/
+│   ├── PLATFORM_PROVIDER_PRESERVATION.md
+│   ├── INTEGRATION_INVENTORY.md
+│   ├── COMMUNICATION_ARCHITECTURE.md
+│   ├── PAYMENT_ARCHITECTURE.md
+│   ├── IOT_TRACKING_ARCHITECTURE.md
+│   └── PROVIDER_ROUTING_AND_FAILOVER.md
+│
+└── governance/
+    ├── AI_CHANGE_GUARDRAILS.md
+    ├── INTEGRATION_REMOVAL_POLICY.md
+    └── ARCHITECTURE_CHANGE_CONTROL.md
+
+If one of these files exists, its documented architecture must be treated as an existing design constraint unless explicitly superseded.
+
+If a document is missing, do not assume the corresponding architecture does not exist.
+
+Inspect the codebase before drawing conclusions.
+
+---
+
+3. PRESERVE MULTI-PROVIDER ARCHITECTURE
+
+Rentmaikar intentionally supports multiple providers.
+
+This includes, but is not limited to:
+
+- Communication providers
+- SMS providers
+- WhatsApp providers
+- Email providers
+- Voice/telephony providers
+- CPaaS providers
+- Payment service providers
+- Payment collection providers
+- Owner payout providers
+- IoT providers
+- GPS/tracking providers
+- Vehicle telemetry providers
+- Identity/verification providers
+- Maps/location providers
+- Notification providers
+- Marketing providers
+- Infrastructure/service providers
+
+Multiple providers may exist because of:
+
+- regional availability
+- pricing
+- reliability
+- coverage
+- regulatory requirements
+- capability differences
+- API differences
+- hardware compatibility
+- customer requirements
+- fallback/failover
+- migration
+- legacy support
+- specialized functionality
+- future readiness
+- provider-specific contracts
+- provider outages
+
+Do not classify multiple providers as duplication without architectural evidence.
+
+---
+
+4. PRESERVE MULTI-CHANNEL COMMUNICATION
+
+Communication channels are independently significant.
+
+Do not remove a communication channel because another channel exists.
+
+Potential channels include:
+
+- SMS
+- WhatsApp
+- Email
+- Voice
+- WebRTC
+- Softphone
+- In-app messaging
+- Push notifications
+- Marketing messages
+- Transactional messages
+- Support messages
+- Operational messages
+- Emergency communications
+
+Inbound and outbound communication are separate concerns.
+
+Do not collapse them without first verifying the architecture.
+
+---
+
+5. PRESERVE INBOUND AND OUTBOUND FLOWS
+
+Inbound communication is not equivalent to outbound communication.
+
+Examples include:
+
+Inbound:
+Provider → Rentmaikar backend → message/thread/event
+
+Outbound:
+Rentmaikar → backend bridge → provider → recipient
+
+Do not remove inbound webhook infrastructure because outbound API delivery works.
+
+Do not remove outbound delivery because inbound webhooks exist.
+
+Both directions must be inspected independently.
+
+---
+
+6. CRITICAL SUPABASE RULE
+
+Whenever this pattern is encountered:
+
+supabase.functions.invoke(...)
+
+DO NOT automatically classify it as a direct frontend Supabase dependency.
+
+First determine whether the call is handled by:
+
+- a catch-all interceptor
+- an adapter
+- a backend bridge
+- a local gateway
+- a routing layer
+- an HTTP proxy
+- an edge-function adapter
+- a backend function registry
+- another abstraction layer
+
+The required investigation order is:
+
+supabase.functions.invoke(...)
+        ↓
+Is there an interceptor?
+        ↓
+Is there an adapter?
+        ↓
+Is there a backend bridge?
+        ↓
+Is there a local gateway?
+        ↓
+Is there a routing layer?
+        ↓
+What production endpoint actually receives the request?
+
+Only after this investigation may the call be classified as direct or indirect.
+
+Mandatory rule
+
+«Every "supabase.functions.invoke(...)" encountered during an audit or refactor MUST first be checked against the catch-all interceptor/adapter architecture.»
+
+Do not replace or remove the call merely because the literal string "supabase.functions.invoke" appears in frontend code.
+
+---
+
+7. PRESERVE BACKEND BRIDGES AND GATEWAYS
+
+Backend bridges and gateways are architectural boundaries.
+
+Do not bypass them simply because a direct API call appears easier.
+
+Inspect:
+
+- "src/lib/backend-bridge.ts"
+- backend routes
+- gateway adapters
+- function registries
+- local gateway functions
+- Cloud Run services
+- production routing
+- staging/admin routing
+- provider adapters
+
+Where an existing bridge is intentionally responsible for routing a request, maintain that boundary.
+
+---
+
+8. RENTMAIKAR PRODUCTION ROUTING
+
+Do not casually alter the established production topology.
+
+The intended operational architecture includes:
+
+rentmaikar.com
+      ↓
+GitHub Pages frontend
+      ↓
+Rentmaikar frontend application
+      ↓
+rentmaikar-g2 operational gateway
+      ↓
+BACKEND_URL
+      ↓
+rentmaikar-backend
+      ↓
+provider/service integrations
+
+The staging/admin architecture is distinct.
+
+staging.rentmaikar.com
+      ↓
+admin/staging access
+
+Do not redirect production traffic to staging merely to make a feature work.
+
+Do not change DNS, Cloud Run routing, GitHub Pages routing, or backend routing without first inspecting the current deployment architecture.
+
+---
+
+9. ROLE, STATUS, ROUTING, AND CRITICALITY ARE DIFFERENT
+
+Never merge these concepts into one field.
+
+Role
+
+Architectural purpose:
+
+primary
+secondary
+specialized
+regional
+unknown
+
+Status
+
+Current lifecycle/operational state:
+
+active
+dormant
+reserved
+migration
+legacy
+disabled
+unknown
+
+Routing
+
+Relationship between providers:
+
+direct
+load_balance
+failover
+regional
+capability_based
+manual
+
+Criticality
+
+Impact of failure:
+
+critical
+high
+medium
+low
+
+Important
+
+These terms must not be mixed.
+
+For example:
+
+role: secondary
+status: active
+routing: failover
+criticality: high
+
+is valid.
+
+Likewise:
+
+role: regional
+status: dormant
+routing: regional
+criticality: medium
+
+is valid.
+
+"fallback" is a routing relationship, not a provider role or status.
+
+"regional" is a role/routing concept, not a lifecycle status.
+
+"specialized" is a role, not a status.
+
+"primary" and "secondary" are roles, not statuses.
+
+Unknown values must be preserved, not normalized away.
+
+---
+
+10. PAYMENT ARCHITECTURE
+
+Do not assume that all payment flows are interchangeable.
+
+At minimum, distinguish:
+
+- customer payment collection
+- security deposits
+- rental payments
+- late fees
+- subscriptions
+- training
+- insurance
+- roadside services
+- IoT/device charges
+- refunds
+- owner payouts
+- regional payment methods
+- wallets
+- cards
+- bank transfers
+- mobile money
+
+Important distinction
+
+Customer payment collection
+        ≠
+Owner payout
+
+Do not route owner payouts through a customer-payment path merely because both involve payments.
+
+Provider-specific adapters and backend processing must be preserved.
+
+---
+
+11. IOT AND VEHICLE TRACKING
+
+Do not remove an IoT/tracking provider merely because another provider supports GPS.
+
+Different providers may support:
+
+- different hardware
+- different vehicle devices
+- different protocols
+- different countries
+- different networks
+- different telemetry
+- different commands
+- different device generations
+- different data structures
+- different pricing
+- different reliability
+- different coverage
+
+Inspect the complete device → provider → adapter → backend → vehicle workflow before making changes.
+
+---
+
+12. WEBHOOKS AND CALLBACKS ARE FIRST-CLASS DEPENDENCIES
+
+Do not remove webhook or callback handlers because the corresponding outbound API call appears unused.
+
+Always inspect both directions:
+
+Application → Provider
+Provider → Application
+
+This includes:
+
+- webhooks
+- callbacks
+- delivery receipts
+- payment confirmations
+- voice callbacks
+- SMS callbacks
+- WhatsApp events
+- email events
+- IoT telemetry
+- authentication callbacks
+- verification callbacks
+- provider status events
+
+A provider may be operationally dependent on inbound callbacks even when outbound calls appear straightforward.
+
+---
+
+13. ENVIRONMENT VARIABLES ARE ARCHITECTURAL EVIDENCE
+
+Before removing a provider, inspect:
+
+.env
+.env.example
+GitHub Actions secrets
+Cloud Run configuration
+Supabase secrets
+deployment configuration
+provider-specific environment variables
+
+Never delete an environment variable merely because its usage is not obvious from a single source file.
+
+Search the complete repository and deployment configuration first.
+
+Never place real credentials, API keys, tokens, passwords, or secrets into documentation.
+
+Documentation may identify:
+
+RESEND_API_KEY
+TWILIO_ACCOUNT_SID
+PAYPAL_CLIENT_ID
+
+but must never contain their secret values.
+
+---
+
+14. DATABASE STRUCTURES MUST BE PRESERVED
+
+Do not delete or rename database fields, tables, enums, policies, functions, or relationships simply because they appear unused.
+
+First inspect:
+
+- application code
+- backend code
+- Edge Functions
+- RLS policies
+- triggers
+- scheduled jobs
+- webhooks
+- reporting
+- migrations
+- historical data
+- administrative tools
+- integrations
+- external consumers
+
+A database object may be used indirectly.
+
+---
+
+15. AUTHENTICATION AND VERIFICATION
+
+Do not weaken authentication or verification to resolve implementation problems.
+
+Do not remove:
+
+- verification steps
+- authorization checks
+- RLS
+- role checks
+- backend authorization
+- cryptographic validation
+- OTP validation
+- identity verification
+- session controls
+- administrative restrictions
+
+A failed authentication flow must be debugged at its routing and implementation layers rather than “fixed” by weakening security.
+
+---
+
+16. DO NOT HARD-CODE PROVIDER DETAILS
+
+Do not hard-code:
+
+- provider phone numbers
+- customer phone numbers
+- email addresses
+- API keys
+- tokens
+- credentials
+- regional provider identifiers
+- production secrets
+- callback URLs
+
+unless the existing architecture explicitly requires a non-secret constant.
+
+Prefer the existing configuration/routing system.
+
+---
+
+17. DO NOT REMOVE "UNUSED-LOOKING" CODE WITHOUT PROOF
+
+Static search alone is insufficient evidence.
+
+Before deleting an apparently unused function, component, provider, route, environment variable, database object, or adapter, check:
+
+1. Direct imports
+2. Dynamic imports
+3. String-based routing
+4. Configuration references
+5. Environment variables
+6. Backend invocation
+7. Webhooks
+8. Callbacks
+9. Database triggers
+10. Scheduled jobs
+11. CI/CD
+12. External provider configuration
+13. Admin interfaces
+14. Regional routing
+15. Fallback routing
+16. Feature flags
+
+If usage remains uncertain:
+
+«Preserve it.»
+
+---
+
+18. DO NOT CONSOLIDATE PROVIDERS WITHOUT AUTHORIZATION
+
+The following reasoning is prohibited:
+
+«"Provider A and Provider B both send SMS, therefore Provider B is unnecessary."»
+
+Instead determine:
+
+Why does Provider B exist?
+Which regions use it?
+Which workflows use it?
+Is it fallback?
+Is it dormant?
+Is it reserved?
+Does it support a unique capability?
+Does it have different pricing?
+Does it support different hardware?
+Does it have different regulatory coverage?
+Does it receive callbacks?
+Is it part of a migration?
+
+Only after answering these questions may a removal proposal be made.
+
+---
+
+19. REMOVAL AUTHORIZATION
+
+Provider or integration removal requires explicit authorization.
+
+The inventory should distinguish:
+
+removal_authorized: true
+
+from:
+
+removal_authorized: false
+
+Absence of authorization means:
+
+DO NOT REMOVE
+
+Do not interpret:
+
+- dormant
+- legacy
+- disabled
+- secondary
+- regional
+- specialized
+- reserved
+
+as permission to delete.
+
+These describe architecture or lifecycle.
+
+They do not constitute removal authorization.
+
+---
+
+20. REQUIRED PRE-CHANGE INSPECTION
+
+Before significant architectural changes, inspect the current repository state.
+
+Minimum checks:
+
+git status
+git branch
+git log --oneline -n 10
+package.json
+package-lock.json
+relevant source files
+relevant backend routes
+relevant migrations
+relevant workflows
+relevant environment configuration
+
+Do not assume that an earlier analysis represents the current GitHub state.
+
+Current repository state takes precedence over previous assumptions.
+
+---
+
+21. NEVER INVENT FILES OR CODE ANCHORS
+
+When giving implementation instructions:
+
+- inspect the actual repository first
+- identify the actual file
+- identify the actual surrounding code
+- use exact existing symbols
+- do not invent line numbers
+- do not invent function names
+- do not assume an old version still exists
+
+If an exact anchor cannot be verified:
+
+«State that it must be located by repository inspection.»
+
+---
+
+22. CI/CD MUST BE TREATED AS PART OF THE APPLICATION
+
+Do not treat CI/CD as unrelated infrastructure.
+
+Inspect:
+
+.github/workflows/
+
+before modifying:
+
+- build commands
+- deployment commands
+- secrets
+- Cloud Run configuration
+- GitHub Pages deployment
+- Node versions
+- package installation
+- environment variables
+- frontend build configuration
+- backend build configuration
+
+The intended validation sequence is:
+
+Lint
+  ↓
+Typecheck
+  ↓
+Vitest
+  ↓
+Production build
+  ↓
+Cloud Run deployment
+  ↓
+GitHub Pages deployment
+
+A successful commit does not automatically mean a successful production deployment.
+
+A successful workflow does not automatically prove the intended production endpoint is serving the new commit.
+
+---
+
+23. DEPLOYMENT INTEGRITY
+
+When investigating production behavior, distinguish:
+
+Git commit
+↓
+GitHub repository
+↓
+GitHub Actions workflow
+↓
+Build artifact
+↓
+Deployment
+↓
+Cloud Run revision / Pages artifact
+↓
+DNS
+↓
+Production endpoint
+↓
+Runtime behavior
+
+Do not claim that a change is live solely because it was committed.
+
+Verify the deployment path.
+
+---
+
+24. FRONTEND/BACKEND BOUNDARY
+
+Do not move sensitive provider credentials into frontend code.
+
+Provider integrations requiring secrets must remain behind the appropriate backend boundary.
+
+Frontend code should use the established:
+
+backend bridge
+gateway
+adapter
+authenticated API
+
+architecture.
+
+Do not introduce direct provider-secret usage into browser code as a shortcut.
+
+---
+
+25. REGIONAL ARCHITECTURE
+
+Rentmaikar operates across multiple regions.
+
+Do not assume that an integration used in one region is unnecessary because another provider works elsewhere.
+
+Regional differences may include:
+
+- payment methods
+- communication providers
+- phone numbers
+- regulatory requirements
+- identity verification
+- IoT coverage
+- vehicle hardware
+- currencies
+- network availability
+- provider availability
+
+Regional logic must be preserved unless explicitly redesigned.
+
+---
+
+26. FAILURE AND FALLBACK ARE FEATURES
+
+Redundancy is not automatically technical debt.
+
+Fallback and failover may be intentional.
+
+Examples:
+
+Primary provider
+      ↓ failure
+Secondary provider
+      ↓ failure
+Regional/specialized provider
+
+Do not remove a secondary provider merely because the primary provider currently works.
+
+---
+
+27. SECURITY FIXES MUST NOT BECOME ARCHITECTURE DELETION
+
+If an integration creates a security problem:
+
+Preferred approach:
+
+Identify vulnerability
+        ↓
+Harden boundary
+        ↓
+Move credentials server-side
+        ↓
+Improve validation
+        ↓
+Improve authorization
+        ↓
+Preserve integration
+
+Do not use:
+
+Security concern
+        ↓
+Delete provider
+
+unless provider removal is explicitly authorized.
+
+---
+
+28. CHANGE CLASSIFICATION
+
+Before making a change, classify it as one of:
+
+BUG_FIX
+SECURITY_FIX
+PERFORMANCE
+REFACTOR
+ARCHITECTURE_CHANGE
+PROVIDER_CHANGE
+PROVIDER_REMOVAL
+CHANNEL_CHANGE
+DATABASE_CHANGE
+DEPLOYMENT_CHANGE
+CONFIGURATION_CHANGE
+
+Changes classified as:
+
+ARCHITECTURE_CHANGE
+PROVIDER_CHANGE
+PROVIDER_REMOVAL
+CHANNEL_CHANGE
+DATABASE_CHANGE
+DEPLOYMENT_CHANGE
+
+require additional inspection before implementation.
+
+---
+
+29. PROVIDER REMOVAL CHECKLIST
+
+A provider must not be removed unless all applicable questions have been answered:
+
+[ ] Is the provider documented?
+[ ] Is it in the integration inventory?
+[ ] Is it referenced by configuration?
+[ ] Is it referenced by backend code?
+[ ] Is it referenced by frontend code?
+[ ] Is it referenced by webhooks?
+[ ] Is it referenced by callbacks?
+[ ] Is it used regionally?
+[ ] Is it used as fallback?
+[ ] Is it dormant?
+[ ] Is it reserved?
+[ ] Is it part of migration?
+[ ] Does it provide unique capability?
+[ ] Does it support unique hardware?
+[ ] Does it support unique payment methods?
+[ ] Does it have unique regulatory coverage?
+[ ] Are database dependencies understood?
+[ ] Are CI/CD dependencies understood?
+[ ] Is a replacement confirmed?
+[ ] Is migration planned?
+[ ] Is rollback possible?
+[ ] Is explicit removal authorization recorded?
+
+If any important answer is unknown:
+
+«Do not remove the provider.»
+
+---
+
+30. INTEGRATION INVENTORY REQUIREMENT
+
+When adding or changing an integration, update:
+
+docs/architecture/INTEGRATION_INVENTORY.md
+
+At minimum record:
+
+Provider
+Category
+Capability
+Role
+Status
+Routing
+Criticality
+Region
+Inbound/Outbound
+Adapter
+Backend Route
+Webhook/Callback
+Environment Configuration
+Dependencies
+Removal Authorization
+Notes
+
+Do not place actual credentials in the inventory.
+
+---
+
+31. AI AGENT DECISION RULE
+
+When uncertain between:
+
+A. Delete it
+B. Preserve it and investigate
+
+choose:
+
+B. Preserve it and investigate.
+
+When uncertain between:
+
+A. Replace existing architecture
+B. Extend existing architecture
+
+choose:
+
+B. Extend existing architecture
+
+unless the user explicitly requests redesign.
+
+---
+
+32. NO SILENT ARCHITECTURAL CHANGES
+
+An AI agent must not silently:
+
+- remove providers
+- remove communication channels
+- remove fallback logic
+- bypass bridges
+- bypass adapters
+- bypass routing
+- remove webhooks
+- remove callbacks
+- remove authentication
+- weaken RLS
+- change production DNS
+- change deployment targets
+- change regional routing
+- replace payment providers
+- replace communication providers
+- replace IoT providers
+- remove database structures
+- remove environment variables
+
+Such changes must be explicitly identified.
+
+---
+
+33. REQUIRED REPORTING FOR ARCHITECTURAL CHANGES
+
+When an architectural change is necessary, report:
+
+1. What exists now
+2. What was discovered
+3. Why the change is necessary
+4. Which files are affected
+5. Which providers/integrations are affected
+6. Which routes are affected
+7. Which webhooks/callbacks are affected
+8. Which environment variables are affected
+9. Which database structures are affected
+10. Whether regional behavior changes
+11. Whether fallback behavior changes
+12. Security implications
+13. Deployment implications
+14. Rollback plan
+15. Tests performed
+
+---
+
+34. FINAL PRESERVATION DIRECTIVE
+
+Rentmaikar is an integration-rich platform.
+
+Its complexity is intentional.
+
+Do not optimize the architecture by making it smaller unless the platform owner explicitly authorizes that architectural reduction.
+
+A provider that appears redundant may be:
+
+- a fallback
+- regional
+- specialized
+- dormant
+- reserved
+- part of migration
+- required for a specific capability
+- required for a specific customer
+- required for a specific vehicle/device
+- required for inbound communication
+- required for outbound communication
+- required for regulatory coverage
+- required for future expansion
+
+Therefore:
+
+«Do not delete what you do not yet understand.»
+
+«Do not replace what you have not mapped.»
+
+«Do not bypass what you have not traced.»
+
+«Do not consolidate what you have not classified.»
+
+«Do not weaken what you have not audited.»
+
+«Inspect → classify → trace → document → obtain authorization → change → test → verify deployment.»
+
+This is the governing principle for AI-assisted development of Rentmaikar-G2.
