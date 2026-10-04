@@ -15,7 +15,7 @@ export interface AdminReceiver {
   totalCallsHandled: number;
   currentCallId?: string | null;
   assignedQueuedCallId?: string | null;
-  regionSpecialty: 'All' | 'USA' | 'Nigeria';
+  regionSpecialty: string;
   isCurrentUser: boolean;
   notes?: string;
 }
