@@ -65,7 +65,7 @@ export class TwiMLAdapter implements ITelephonyAdapter {
               ? "group"
               : "individual"
           ),
-        region: params.region || "USA",
+        region: params.region,
         callerUserId: params.adminUserId,
         metadata: params.metadata || {},
       });
@@ -104,7 +104,7 @@ export class TwiMLAdapter implements ITelephonyAdapter {
           : "failed",
       direction: "outbound",
       region:
-        params.region || "USA",
+        params.region,
       created_at: now,
       started_at: now,
       metadata: {
