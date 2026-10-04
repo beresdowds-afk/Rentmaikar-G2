@@ -99,10 +99,10 @@ export function useTelephonyControl() {
     async (params: ControlledCallInitiateParams): Promise<boolean> => {
       const engineToUse: TelephonyEngine = params.overrideEngine || preferences.preferred_engine || "SOFTPHONE";
       const region =
-        params.region ||
-        preferences.region ||
-        (defaultRegion as CallRegion) ||
-        "Global";
+  params.region ||
+  (defaultRegion as CallRegion) ||
+  preferences.region ||
+  "Global";
       const phoneNumber = params.phoneNumber.trim();
 
       if (!phoneNumber && (!params.recipients || params.recipients.length === 0)) {
