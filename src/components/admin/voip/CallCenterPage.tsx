@@ -203,12 +203,21 @@ const answerQueuedCall = useCallback(async (call: QueuedCall) => {
       return;
     }
     await acceptCallRequest(call.recordId);
-    if (call.phoneNumber) {
-      await initiateCall('individual', call.region === 'Nigeria' ? 'Nigeria' : 'USA', [
-        { phoneNumber: call.phoneNumber, displayName: call.displayName },
-      ]);
-    }
-    await queueState.refresh();
+
+if (call.phoneNumber) {
+  await initiateCall(
+    'individual',
+    call.region,
+    [
+      {
+        phoneNumber: call.phoneNumber,
+        displayName: call.displayName,
+      },
+    ],
+  );
+}
+
+await queueState.refresh();
   }, [acceptCallRequest, handleTabChange, initiateCall, queueState, refreshCalls]);
 
   const escalateQueuedCall = useCallback(async (call: QueuedCall) => {
