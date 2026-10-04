@@ -5,8 +5,8 @@ import {
   buildCallForwardTwiml,
   getForwardingDestination,
   isForwardingEnabled,
-  import { resolveCanonicalRegion } from "../_shared/region-routing.ts";,
 } from "../_shared/forwarding.ts";
+import { resolveCanonicalRegion } from "../_shared/region-routing.ts";
 import { publicSenderFor } from "../_shared/comms-endpoints.ts";
 import { logMessagingEvent } from "../_shared/messaging-events.ts";
 
