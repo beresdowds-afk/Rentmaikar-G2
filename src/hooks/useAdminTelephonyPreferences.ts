@@ -15,7 +15,7 @@ export function useAdminTelephonyPreferences() {
     preferred_engine: "SOFTPHONE",
     caller_id: "",
     auto_record: true,
-    region: "USA",
+    region: "Global",
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -46,7 +46,7 @@ export function useAdminTelephonyPreferences() {
           auto_record: (data as any).auto_record ?? true,
           webrtc_audio_input_device_id: (data as any).webrtc_audio_input_device_id,
           webrtc_audio_output_device_id: (data as any).webrtc_audio_output_device_id,
-          region: ((data as any).region as CallRegion) || "USA",
+          region: ((data as any).region as CallRegion) || "Global",
           created_at: (data as any).created_at,
           updated_at: (data as any).updated_at,
         };
