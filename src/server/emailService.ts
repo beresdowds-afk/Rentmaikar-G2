@@ -216,7 +216,7 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     const headers = {
       "Message-ID": `<${uniqueMessageId}@${VERIFIED_DOMAIN}>`,
       "X-Entity-Ref-ID": uniqueMessageId,
-      ...(options.headers || {}),
+      ...((options as any).headers || {}),
     };
     const tags = [
       { name: "message_id", value: uniqueMessageId },

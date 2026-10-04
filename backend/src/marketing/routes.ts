@@ -66,13 +66,12 @@ marketingApiRouter.post('/events', async (req: Request, res: Response) => {
       await marketingEngineServer.dispatchConversionEvent({
         eventName: event_name,
         eventId: canonicalEventId,
-        timestamp: Date.now(),
         userId: user_data?.user_id,
         email: user_data?.email,
         phone: user_data?.phone,
         value: properties?.value || properties?.amount,
         currency: properties?.currency || 'USD',
-      });
+      } as any);
     }
 
     return res.status(200).json({
@@ -309,7 +308,7 @@ marketingApiRouter.get('/oauth/:platform/callback', async (req: Request, res: Re
           accountId: process.env.LINKEDIN_ACCOUNT_ID || 'pending_linkedin_account_id',
           accountName: 'LinkedIn Campaign Manager',
           accessToken: tokenRes.accessToken,
-          refreshToken: tokenRes.refreshToken,
+          refreshToken: (tokenRes as any).refreshToken,
           scope: 'r_ads,r_ads_reporting,rw_ads',
         });
       }
@@ -463,10 +462,11 @@ marketingApiRouter.post('/webhooks/:platform', async (req: Request, res: Respons
     if (platform === 'resend') {
       const result = await marketingEngineServer.resend.handleWebhook(req.body, headers);
 
-      if ((result.isBounce || result.isComplaint || result.isUnsubscribe) && result.recipient) {
+      const isUnsub = Boolean((result as any).isUnsubscribe);
+      if ((result.isBounce || result.isComplaint || isUnsub) && result.recipient) {
         await marketingEngineServer.leads.handleOptOut(
           { email: result.recipient },
-          `Resend event: ${result.isUnsubscribe ? 'Unsubscribe Link Clicked' : result.isBounce ? 'Bounced Email' : 'Spam Complaint'}`
+          `Resend event: ${isUnsub ? 'Unsubscribe Link Clicked' : result.isBounce ? 'Bounced Email' : 'Spam Complaint'}`
         );
       }
 

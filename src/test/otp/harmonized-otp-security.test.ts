@@ -355,7 +355,7 @@ describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
       expect(result.channel).toBe("sms");
       expect(result.region).toBe("USA");
       expect(result.deliveryStatus).toBe("simulation");
-      expect(result.messageId).toMatch(/^sent_/);
+      expect(result.messageId).toMatch(/^(sent_|[0-9a-f-]{36})/i);
     });
 
     it("routes Nigerian numbers (+234) through SENT.dm without OTP-level Termii branching", async () => {

@@ -1549,7 +1549,7 @@ export async function handleVoiceTwimlConfig(
     },
     matches,
     outgoingNumber: twilioPhoneNumber,
-    callerId: await resolveCallerId(),
+    callerId: await resolveCallerId(null, "USA"),
   };
 }
 

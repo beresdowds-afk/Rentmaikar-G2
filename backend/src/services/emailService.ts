@@ -820,7 +820,7 @@ export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean;
       sent: sentCount,
       failed: failedCount,
       results,
-    };
+    } as any;
   }
 
   const to = body.to || body.recipientEmail || body.recipient || body.recipientContact || body.email;

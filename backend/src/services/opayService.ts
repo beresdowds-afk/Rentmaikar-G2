@@ -33,6 +33,10 @@ const RETRYABLE_CODES = new Set([
   "11005",
 ]);
 
+function opaySignature(payload: string, secretKey: string): string {
+  return crypto.createHmac("sha512", secretKey).update(payload).digest("hex");
+}
+
 function getOpayConfig(): OpayConfig {
   const merchantId = (process.env.OPAY_MERCHANT_ID || "").trim();
   const publicKey = (process.env.OPAY_PUBLIC_KEY || "").trim();

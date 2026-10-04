@@ -41,6 +41,10 @@ export class ManyChatAdapter {
     return !!this.apiKey && this.apiKey.trim().length > 0;
   }
 
+  isConfigured(): boolean {
+    return this.isConnected();
+  }
+
   async getStatus(): Promise<ProviderStatusInfo> {
     if (!this.isConnected()) {
       return {
@@ -295,3 +299,5 @@ export class ManyChatAdapter {
     }
   }
 }
+
+export const manychat = new ManyChatAdapter();

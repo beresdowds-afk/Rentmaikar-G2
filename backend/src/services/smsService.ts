@@ -63,7 +63,7 @@ export function normalizeE164(phone: string): string {
 }
 
 interface CanonicalMessagingRoute {
-  region: string | null;
+  region: "USA" | "Nigeria" | "Global";
   fallbackProvider: "twilio" | "termii" | null;
 }
 
@@ -75,7 +75,7 @@ async function resolveCanonicalMessagingRoute(
 
   if (!pool) {
     return {
-      region: null,
+      region: "Global",
       fallbackProvider: null,
     };
   }
@@ -105,7 +105,7 @@ async function resolveCanonicalMessagingRoute(
 
   if (!matchedRegion) {
     return {
-      region: null,
+      region: "Global",
       fallbackProvider: null,
     };
   }
@@ -133,8 +133,16 @@ async function resolveCanonicalMessagingRoute(
       ? configured
       : null;
 
+  const rawRegion = String(matchedRegion.value || "").trim().toLowerCase();
+  const canonicalRegion: "USA" | "Nigeria" | "Global" =
+    rawRegion.startsWith("nig") || rawRegion === "ng"
+      ? "Nigeria"
+      : rawRegion === "us" || rawRegion === "usa" || rawRegion.includes("united states")
+      ? "USA"
+      : "Global";
+
   return {
-    region: String(matchedRegion.value || "").trim() || null,
+    region: canonicalRegion,
     fallbackProvider,
   };
 }
@@ -201,8 +209,6 @@ export async function sendApplicationMessage(
 
   const messageText = payload.message || "You have an update from RentMaikar.";
   const override = payload.providerOverride;
-  const route = await resolveCanonicalMessagingRoute(to, channel);
-  const region = route.region;
   const configuredFallback = route.fallbackProvider;
   // -----------------------------------------------------------------
   // 1. PRIMARY PROVIDER: SENT.dm

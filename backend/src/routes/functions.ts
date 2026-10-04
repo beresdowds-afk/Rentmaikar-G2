@@ -247,10 +247,10 @@ functionsRouter.post(
   (req, res, next) => {
     const contentType = req.headers["content-type"] || "";
     if (contentType.includes("multipart/form-data")) {
-      return storageUpload.fields([
+      return (storageUpload.fields([
         { name: "file", maxCount: 1 },
         { name: "thumbnail", maxCount: 1 },
-      ])(req, res, (err) => {
+      ]) as any)(req, res, (err: any) => {
         if (err) {
           return res.status(400).json({
             ok: false,
@@ -1703,7 +1703,6 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 }
 
       case "opay-webhook": {
-        case "opay-webhook": {
   try {
     const {
       handleOpayWebhook,
@@ -1749,8 +1748,8 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   }
       }
       case "process-owner-payouts":
-      case "initiate-paystack-transfer": {
-        case "initiate-paypal-payout": {
+      case "initiate-paystack-transfer":
+      case "initiate-paypal-payout": {
   const ownerId =
     body.owner_id || body.user_id;
 
@@ -1952,8 +1951,6 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     });
   }
 }
-        return res.status(200).json(result);
-      }
 
       case "submit-vehicle-for-review": {
         const vehicleId = body.vehicleId || body.vehicle_id;

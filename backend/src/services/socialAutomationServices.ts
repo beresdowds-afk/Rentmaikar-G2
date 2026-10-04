@@ -45,4 +45,8 @@ export async function processSocialAutomation(
   // 4. Dispatch through the appropriate social provider.
   // 5. Record the automation event.
   // 6. If configured, hand the conversation to Platform Inbox.
+  return {
+    matched: false,
+    automated: false,
+  };
 }
