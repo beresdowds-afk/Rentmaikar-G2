@@ -118,19 +118,35 @@ function xmlEscape(v: string): string {
 }
 
 export function getBaseCallbackUrl(req?: Request): string {
-  if (process.env.PUBLIC_BACKEND_URL) {
-    return process.env.PUBLIC_BACKEND_URL.replace(/\/+$/, "");
+  export function getBaseCallbackUrl(req?: Request): string {
+  const configured = String(
+    process.env.PUBLIC_BACKEND_URL || "",
+  ).trim();
+
+  if (configured) {
+    return configured.replace(/\/+$/, "");
   }
-  if (process.env.VOICE_SUPABASE_URL) {
-    // If explicit voice base URL configured
-    return process.env.VOICE_SUPABASE_URL.replace(/\/+$/, "");
-  }
+
+  // A request-derived host is acceptable for an explicitly addressed
+  // callback request, but there must be NO hard-coded staging fallback.
   if (req) {
-    const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
-    const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || "staging.rentmaikar.com";
-    return `${proto}://${host}`;
+    const proto =
+      (req.headers["x-forwarded-proto"] as string) ||
+      req.protocol ||
+      "https";
+
+    const host =
+      (req.headers["x-forwarded-host"] as string) ||
+      req.get("host");
+
+    if (host) {
+      return `${proto}://${host}`.replace(/\/+$/, "");
+    }
   }
-  return "https://staging.rentmaikar.com";
+
+  throw new Error(
+    "PUBLIC_BACKEND_URL is not configured and no request host is available",
+  );
 }
 
 // -----------------------------------------------------------------
@@ -1561,7 +1577,7 @@ export async function handleVoiceTwimlConfig(
   const action = body.action || "verify";
   const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_NUMBER_USA || "+13806003018";
+  const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_NUMBER_USA || "";
 
   const expected = {
     voiceUrl: `${baseUrl}/api/functions/voice-twiml-dial`,
@@ -1675,11 +1691,61 @@ export async function handleIncomingCallForward(params: {
 }): Promise<string> {
   const { form, query, baseUrl } = params;
   const from = String(form.From || form.from || "").trim();
-  const to = String(form.To || form.to || "").trim();
-  const callSid = String(form.CallSid || form.callSid || "");
-  const region = String(form.Region || form.region || "USA");
+const to = String(form.To || form.to || "").trim();
+const callSid = String(form.CallSid || form.callSid || "");
 
-  const pool = getDbPool();
+const pool = getDbPool();
+
+// Resolve inbound region from the canonical Region Builder.
+// Never silently default an inbound call to USA.
+let region = await resolveCanonicalVoiceRegion(
+  String(form.Region || form.region || "").trim(),
+  to,
+);
+
+// If this is a callback for an already-created call, recover its
+// canonical region from the authoritative local call record.
+if (!region && pool && callSid) {
+  try {
+    const callRes = await pool.query(
+      `SELECT region
+         FROM public.voip_calls
+        WHERE call_sid = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [callSid],
+    );
+
+    const storedRegion = String(
+      callRes.rows?.[0]?.region || "",
+    ).trim();
+
+    region = await resolveCanonicalVoiceRegion(
+      storedRegion,
+    );
+  } catch (error) {
+    console.warn(
+      "[Incoming Call] Stored region lookup warning:",
+      error,
+    );
+  }
+}
+
+if (!region) {
+  console.error(
+    `[Incoming Call] Could not resolve canonical region for inbound line ${
+      to || "(unknown)"
+    }`,
+  );
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">
+    We are unable to route this call because its service region could not be determined.
+  </Say>
+  <Hangup/>
+</Response>`;
+}
 
   // Stage 2: In-app softphone agents did not answer
   if (query.stage === "agents") {
@@ -1714,11 +1780,14 @@ export async function handleIncomingCallForward(params: {
   if (pool) {
     try {
       const presenceRes = await pool.query(
-        `SELECT user_id, identity FROM public.voip_agent_presence
-         WHERE status = 'available'
-           AND last_seen_at >= NOW() - INTERVAL '90 seconds'
-         LIMIT 5`
-      );
+  `SELECT user_id, identity
+     FROM public.voip_agent_presence
+    WHERE status = 'available'
+      AND last_seen_at >= NOW() - INTERVAL '90 seconds'
+      AND (region = $1 OR region = 'All')
+    LIMIT 5`,
+  [region],
+);
       onlineAgents = presenceRes.rows.map((r) => r.identity || `user_${r.user_id}`);
     } catch (e: any) {
       console.warn("[Incoming Call] Presence query warning:", e.message);
@@ -1735,17 +1804,74 @@ export async function handleIncomingCallForward(params: {
 </Response>`;
   }
 
-  // No agents online: default voicemail / greeting
+// No agents online.
+//
+// Use the active support number configured for the canonical region.
+// Never fall back to a USA DID.
+let regionalSupportNumber = "";
+
+if (pool) {
+  try {
+    const supportRes = await pool.query(
+      `SELECT phone_raw, phone
+         FROM public.platform_company_info
+        WHERE region = $1
+          AND is_active = true
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1`,
+      [region],
+    );
+
+    regionalSupportNumber = String(
+      supportRes.rows?.[0]?.phone_raw ||
+        supportRes.rows?.[0]?.phone ||
+        "",
+    ).replace(/[^\d+]/g, "");
+  } catch (error) {
+    console.warn(
+      "[Incoming Call] Regional support lookup warning:",
+      error,
+    );
+  }
+}
+
+if (regionalSupportNumber) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="alice">Thank you for calling RentMaikar verified support. Please hold while we connect your call.</Say>
-  <Dial timeout="30"><Number>+13806003018</Number></Dial>
-  <Say voice="alice">No agent is available right now. Please leave a voicemail after the tone.</Say>
-  <Record timeout="10" maxLength="120"/>
+  <Say voice="alice">
+    Thank you for calling RentMaikar verified support.
+    Please hold while we connect your call.
+  </Say>
+  <Dial timeout="30">
+    <Number>${xmlEscape(regionalSupportNumber)}</Number>
+  </Dial>
+  <Say voice="alice">
+    No agent is available right now. Please leave a voicemail after the tone.
+  </Say>
+  <Record
+    timeout="10"
+    maxLength="120"
+    action="${xmlEscape(baseUrl)}/api/functions/voip-status-callback"
+    method="POST"
+  />
   <Hangup/>
 </Response>`;
 }
 
+return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">
+    Thank you for calling RentMaikar verified support.
+    No agent is available for your region right now.
+  </Say>
+  <Record
+    timeout="10"
+    maxLength="120"
+    action="${xmlEscape(baseUrl)}/api/functions/voip-status-callback"
+    method="POST"
+  />
+  <Hangup/>
+</Response>`;
 // -----------------------------------------------------------------
 // 12. Voice Call Requests (/api/functions/voice-call-request)
 // -----------------------------------------------------------------
@@ -1772,7 +1898,28 @@ export async function handleVoiceCallRequest(
     const reqRole = body.callerRole || body.userRole || "driver";
     const targetRole = body.targetRole || "admin";
     const reason = body.reason || "General support inquiry";
-    const region = body.region || "USA";
+    const requestedRegion = String(
+  body.region || "",
+).trim();
+
+const requestPhone = String(
+  body.phoneNumber ||
+    body.phone ||
+    "",
+).trim();
+
+const region = await resolveCanonicalVoiceRegion(
+  requestedRegion,
+  requestPhone,
+);
+
+if (!region) {
+  return {
+    success: false,
+    error:
+      "Unable to determine a canonical service region for this call request",
+  };
+}
 
     try {
       const res = await pool.query(
