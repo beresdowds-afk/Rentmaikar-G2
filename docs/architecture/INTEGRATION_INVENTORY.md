@@ -1,1207 +1,807 @@
-RENTMAIKAR PLATFORM — PROVIDER, CHANNEL & INTEGRATION PRESERVATION RULES
+Rentmaikar Integration Inventory
 
-File: "PLATFORM_PROVIDER_PRESERVATION.md"
 Repository: "beresdowds-afk/Rentmaikar-G2"
-Status: AUTHORITATIVE ARCHITECTURAL PRESERVATION RULE
-Audience: AI Studio, coding agents, developers, reviewers, maintainers, and automated refactoring systems
+Branch: "main"
+Document role: Authoritative inventory of platform integrations
+Status: Active
+Last reviewed: 2026-10-04
 
 ---
 
-1. PURPOSE
+1. Purpose
 
-This document establishes a mandatory architectural preservation rule for the Rentmaikar platform.
+This document is the authoritative inventory of external providers, services, adapters, gateways, communication channels, IoT/tracking systems, payment services, identity/verification services, and other material integrations used or reserved by the Rentmaikar platform.
 
-Rentmaikar intentionally supports:
+It answers:
 
-- multiple communication providers;
-- multiple communication channels;
-- multiple IoT providers;
-- multiple GPS, tracking, telematics, and vehicle-data providers;
-- multiple payment service providers;
-- multiple payment rails and payment methods;
-- multiple authentication and verification mechanisms;
-- multiple routing and delivery adapters;
-- multiple regional providers;
-- provider-specific integrations;
-- provider failover and fallback mechanisms;
-- provider-specific webhooks and callbacks;
-- backend bridges and gateway adapters;
-- communication-specific subsystems;
-- dormant, reserved, backup, regional, or future integrations.
+«What integrations exist, what role does each integration serve, how is it routed, what is its operational status, and is its removal authorized?»
 
-These integrations are not accidental duplication.
+It does not define the general architectural principles for preserving integrations.
 
-They are part of the intended Rentmaikar architecture.
+Those rules are defined in:
 
-PRIMARY RULE
+"docs/architecture/PLATFORM_PROVIDER_PRESERVATION.md"
 
-«AI Studio, AI coding agents, automated refactoring systems, and developers MUST NOT remove, consolidate, replace, bypass, disable, simplify, or reinterpret any provider, channel, adapter, router, webhook, integration, fallback, or communication mechanism merely because another provider or mechanism appears to perform a similar function.»
+The overall system architecture is defined in:
 
-Functional overlap is intentional.
-
-Architectural redundancy is intentional.
-
-Provider diversity is intentional.
-
-Regional specialization is intentional.
-
-Fallback capability is intentional.
-
-No component may be classified as redundant without explicit architectural authorization.
+"docs/architecture/architectureRule.md"
 
 ---
 
-2. NON-NEGOTIABLE PRESERVATION DIRECTIVE
+2. Non-Negotiable Inventory Rule
 
-«PRESERVE ALL EXISTING PROVIDERS, CHANNELS, ADAPTERS, ROUTERS, FALLBACKS, WEBHOOKS, BRIDGES, INTEGRATIONS, AND PROVIDER-SPECIFIC LOGIC UNLESS THE OWNER OF THE PLATFORM EXPLICITLY AUTHORIZES THEIR REMOVAL OR REPLACEMENT.»
+An integration appearing in this inventory must be treated as an intentional platform capability unless the current implementation and authoritative architecture documentation establish otherwise.
 
-An AI agent MUST NOT infer that an integration is obsolete merely because:
+An AI agent, developer, refactoring process, dependency-cleanup process, or automated tool MUST NOT remove, replace, merge, disable, or bypass an integration merely because:
 
-- another provider currently handles the same function;
-- the provider is not currently receiving traffic;
-- the provider appears to duplicate another integration;
-- the provider is configured for only one country or region;
-- the provider appears unused during a static code scan;
-- the provider is implemented behind an adapter;
-- the provider is invoked dynamically;
-- the provider is used by a webhook;
-- the provider is used only during failover;
-- the provider is reserved for future deployment;
-- the provider is used by administrators/support staff;
-- the provider is used by marketing;
-- the provider is used by authentication;
-- the provider is not currently enabled in production;
-- the provider is temporarily dormant.
+- another provider appears to perform a similar function;
+- another provider appears to be the current provider;
+- the integration appears unused from one code path;
+- the integration is not currently active;
+- the integration appears redundant;
+- the integration is regional;
+- the integration is specialized;
+- the integration is configured but not currently exercised;
+- the integration has a fallback relationship with another provider;
+- the integration is implemented through a different adapter or gateway.
 
-Absence of an obvious call site is NOT evidence that an integration is unnecessary.
+Before any removal or architectural change, consult:
 
----
+"docs/architecture/PLATFORM_PROVIDER_PRESERVATION.md"
 
-3. WHY RENTMAIKAR USES MULTIPLE PROVIDERS
-
-Rentmaikar is a multi-region rideshare vehicle rental and management platform.
-
-Its operational environment includes:
-
-- vehicle owners;
-- drivers;
-- administrators;
-- support personnel;
-- marketing personnel;
-- operations personnel;
-- payment operations;
-- vehicle tracking;
-- IoT/telematics;
-- identity and verification;
-- customer communication;
-- emergency and operational communication.
-
-A single provider cannot necessarily provide the required:
-
-- geographical coverage;
-- regulatory compatibility;
-- pricing;
-- reliability;
-- channel availability;
-- API capability;
-- payment rails;
-- IoT hardware compatibility;
-- vehicle compatibility;
-- tracking coverage;
-- messaging capabilities;
-- voice capabilities;
-- webhook behavior;
-- SLA;
-- redundancy.
-
-Therefore, provider diversity is an architectural requirement.
+and verify the current implementation.
 
 ---
 
-4. MULTIPLE COMMUNICATION PROVIDERS ARE INTENTIONAL
+3. Classification Model
 
-Rentmaikar may use more than one provider for:
+The following fields are intentionally independent.
 
-- SMS;
-- WhatsApp;
-- voice;
-- email;
-- transactional messaging;
-- OTP delivery;
-- customer notifications;
-- driver notifications;
-- owner notifications;
-- administrator notifications;
-- support communications;
-- marketing communications;
-- inbound messaging;
-- outbound messaging;
-- automated responses;
-- campaign messaging;
-- call-center operations;
-- WebRTC/softphone operations.
+Do not use one field as a substitute for another.
 
-Two communication providers may perform apparently similar functions while serving completely different architectural purposes.
+3.1 Role
 
-They MUST NOT be automatically consolidated.
+"role" describes what position or function the integration has within the platform.
 
----
+Allowed values:
 
-5. COMMUNICATION CHANNELS ARE DISTINCT FROM COMMUNICATION PROVIDERS
+Role| Meaning
+"primary"| Principal provider currently intended for the capability
+"secondary"| Additional provider retained alongside the primary provider
+"specialized"| Provider retained for a particular capability that is not necessarily the general-purpose provider
+"regional"| Provider retained for a particular geographic market or jurisdiction
+"unknown"| Role has not yet been conclusively established
 
-AI systems MUST distinguish between:
+"primary" does not mean that other providers are removable.
 
-CHANNEL
+"secondary" does not mean obsolete.
 
-and:
+"specialized" does not mean temporary.
 
-PROVIDER
-
-A channel is the communication medium.
-
-A provider is the service responsible for delivering or receiving communication through that medium.
-
-Examples of channels include:
-
-SMS
-WhatsApp
-Email
-Voice
-WebRTC
-In-App Messaging
-Push Notification
-
-A provider may implement one or more of these channels.
-
-Therefore:
-
-«Do not remove a communication channel merely because one provider already supports another channel.»
-
-Similarly:
-
-«Do not remove a provider merely because another provider supports the same channel.»
+"regional" does not mean inactive.
 
 ---
 
-6. MULTIPLE IOT AND TRACKING PROVIDERS ARE INTENTIONAL
+3.2 Status
 
-Rentmaikar may support multiple:
+"status" describes the current lifecycle/operational state of the integration.
 
-- GPS providers;
-- IoT providers;
-- telematics providers;
-- tracking APIs;
-- vehicle-device providers;
-- fleet-management systems;
-- MQTT/device systems;
-- immobilization systems;
-- diagnostic systems.
+Allowed values:
 
-Different providers may support different:
+Status| Meaning
+"active"| Currently operational or actively used
+"dormant"| Retained but not currently exercised in normal operation
+"reserved"| Intentionally retained for future, contingency, regional, or capability use
+"migration"| Currently involved in an approved migration
+"legacy"| Historical integration retained for compatibility, transition, or controlled reasons
+"disabled"| Intentionally disabled but not authorized for deletion
+"unknown"| Current status has not yet been conclusively established
 
-- hardware;
-- vehicles;
-- countries;
-- networks;
-- protocols;
-- device generations;
-- tracking frequencies;
-- data fields;
-- pricing models;
-- geographic coverage;
-- operational use cases.
-
-Therefore:
-
-«An IoT or tracking provider MUST NOT be removed merely because another tracking provider exists.»
+Important: "fallback", "regional", "primary", "secondary", and "specialized" are not status values.
 
 ---
 
-7. MULTIPLE PAYMENT SERVICE PROVIDERS ARE INTENTIONAL
+3.3 Routing
 
-Rentmaikar may integrate multiple payment service providers supporting:
+"routing" describes how the platform reaches or selects the integration.
 
-- rental payments;
-- security deposits;
-- late fees;
-- subscriptions;
-- training;
-- insurance;
-- roadside assistance;
-- IoT/device charges;
-- owner payouts;
-- refunds;
-- regional payment methods;
-- card payments;
-- bank transfers;
-- mobile money;
-- wallets;
-- other payment rails.
+Allowed values:
 
-«No payment provider may be removed merely because another payment provider can process payments.»
+Routing| Meaning
+"direct"| Selected directly by an authoritative backend/service
+"load_balance"| Multiple providers are selected according to load-balancing logic
+"failover"| Provider is selected when another provider/path fails
+"regional"| Provider is selected according to geographic or jurisdictional rules
+"capability_based"| Provider is selected according to capability
+"manual"| Provider selection is controlled manually or operationally
+
+Fallback
+
+"fallback" is not a role and not a status.
+
+Fallback is a relationship between integrations or routes.
+
+For example:
+
+Provider A
+    ↓ primary route
+Provider B
+    ↓ fallback route
+
+The inventory should record this relationship in the "fallback" field where applicable.
 
 ---
 
-8. PROVIDER ADAPTERS, ROUTERS, BRIDGES AND INTERCEPTORS
+3.4 Criticality
 
-Provider abstractions are architectural assets.
+"criticality" describes the operational importance of the integration.
 
-Examples include:
+Allowed values:
 
-CommunicationAdapter
-PaymentAdapter
-IoTAdapter
-TrackingAdapter
-EmailAdapter
-SMSAdapter
-WhatsAppAdapter
-VoiceAdapter
+Criticality| Meaning
+"critical"| Failure materially compromises a core platform operation
+"high"| Failure significantly affects an important platform capability
+"medium"| Failure affects a meaningful but non-core capability
+"low"| Failure has limited operational impact
 
-Where an adapter, router, gateway, backend bridge, or catch-all interceptor exists, it MUST be inspected before modifying direct service calls.
+---
 
-In particular, whenever the following appears:
+3.5 Removal Authorization
+
+"removal_authorized" determines whether an integration may be removed as part of ordinary engineering work.
+
+Allowed values:
+
+true
+false
+
+Default:
+
+false
+
+If the value is "false", removal requires explicit platform-owner authorization.
+
+An integration marked:
+
+status: dormant
+
+does not imply:
+
+removal_authorized: true
+
+Likewise:
+
+status: legacy
+
+does not imply that the integration may be deleted.
+
+---
+
+4. Inventory Record Structure
+
+Each integration should be recorded using the following structure:
+
+name:
+category:
+provider:
+role:
+status:
+routing:
+criticality:
+fallback:
+regions:
+capabilities:
+authoritative_entrypoint:
+implementation_locations:
+configuration_locations:
+dependencies:
+notes:
+removal_authorized:
+
+Field definitions
+
+Field| Purpose
+"name"| Human-readable integration name
+"category"| Integration category
+"provider"| External provider or internal service
+"role"| Primary/secondary/specialized/regional/unknown
+"status"| Active/dormant/reserved/migration/legacy/disabled/unknown
+"routing"| Direct/load balance/failover/regional/capability based/manual
+"criticality"| Operational importance
+"fallback"| Related provider or route used as fallback
+"regions"| Geographic scope
+"capabilities"| Functions supplied by the integration
+"authoritative_entrypoint"| Backend/service through which the integration is intended to be reached
+"implementation_locations"| Relevant repository files/directories
+"configuration_locations"| Relevant environment/configuration locations
+"dependencies"| Other platform components required
+"notes"| Important implementation or architectural notes
+"removal_authorized"| Whether removal is explicitly permitted
+
+---
+
+5. Integration Categories
+
+The inventory may contain multiple providers in the same category.
+
+The existence of one provider in a category does not make another provider redundant.
+
+Supported categories include, but are not limited to:
+
+- "communication"
+- "email"
+- "sms"
+- "whatsapp"
+- "voice"
+- "telephony"
+- "identity_verification"
+- "payment"
+- "payment_payout"
+- "iot"
+- "vehicle_tracking"
+- "mqtt"
+- "mapping"
+- "storage"
+- "authentication"
+- "analytics"
+- "notification"
+- "marketing"
+- "other"
+
+Additional categories may be introduced when the platform requires them.
+
+---
+
+6. Provider Inventory
+
+«Important: This section is the current inventory of known integrations. It should be updated when integrations are added, changed, migrated, reserved, disabled, or removed.»
+
+6.1 Communication and Messaging
+
+Integration| Provider| Role| Status| Routing| Criticality| Fallback| Regions| Removal Authorized
+Email communications| Resend| primary/specialized*| active*| capability_based*| high*| —| platform regions| false
+SMS / WhatsApp communications| SENT.dm| primary/specialized*| active*| capability_based*| high*| —| platform regions| false
+Voice / telephony| Twilio| primary/specialized*| active*| capability_based*| high*| —| USA/Nigeria*| false
+
+"*" Values must be verified against the current implementation/configuration before being changed from their documented state.
+
+Communication providers must remain independently represented even when they support overlapping capabilities.
+
+---
+
+6.2 Identity and Verification
+
+Integration| Provider| Role| Status| Routing| Criticality| Fallback| Regions| Removal Authorized
+Identity verification| Persona| specialized| active*| capability_based| high| —| platform regions| false
+
+The identity-verification provider boundary is documented separately in:
+
+"docs/architecture/PersonaResponsibilities.md"
+
+The platform verification-state model is documented in:
+
+"docs/architecture/IdentityVerificationArchitecture.md"
+
+These documents describe different concerns and must not be collapsed into this inventory.
+
+---
+
+6.3 IoT / Vehicle Tracking
+
+The platform may contain multiple IoT, telemetry, tracking, messaging, or device-management providers.
+
+Each provider must be independently inventoried.
+
+Integration| Provider| Role| Status| Routing| Criticality| Fallback| Regions| Removal Authorized
+Vehicle tracking| Traccar| specialized| active*| capability_based| critical*| —| platform regions| false
+IoT/device messaging| EMQX| specialized| active*| capability_based| critical*| —| platform regions| false
+Cellular/device connectivity| Hologram| specialized| active*| capability_based| high*| —| platform regions| false
+
+Responsibility documents:
+
+- "docs/architecture/HologramResponsibilities.md"
+- "docs/architecture/TraccarResponsibilities.md"
+- "docs/architecture/EmqxResponsibilities.md"
+
+These documents define provider responsibilities. This inventory defines their existence and classification.
+
+---
+
+6.4 Payment Services
+
+The platform may support multiple payment service providers and payment routes.
+
+A payment provider must not be removed simply because another payment provider is currently operational.
+
+Integration| Provider| Role| Status| Routing| Criticality| Fallback| Regions| Removal Authorized
+Payment service| OPay| regional/specialized*| active*| regional/capability_based*| high*| —| Nigeria*| false
+Payment service| PayPal| regional/specialized*| active*| regional/capability_based*| high*| —| USA/Nigeria*| false
+
+Provider-specific implementation documentation:
+
+"docs/architecture/OPay-Integration-Specification.md"
+
+Payment architecture and routing must be established from the current implementation rather than inferred from provider names.
+
+---
+
+7. Internal Integration Gateways and Adapters
+
+External providers may not be called directly from every part of the application.
+
+The platform may contain:
+
+- backend gateways;
+- service adapters;
+- communication adapters;
+- provider adapters;
+- bridge services;
+- interceptors;
+- Cloud Run services;
+- Supabase Edge Functions;
+- server-side routing layers;
+- other authoritative integration boundaries.
+
+Therefore, when inspecting an integration, engineers and AI agents must determine:
+
+User/client
+    ↓
+Rentmaikar application
+    ↓
+authoritative gateway/backend
+    ↓
+adapter/interceptor/service
+    ↓
+external provider
+
+The exact implementation may differ by capability.
+
+The presence of a provider SDK or provider reference in frontend source code does not, by itself, prove that the frontend directly calls that provider.
+
+---
+
+8. Supabase Function Invocation Inventory Rule
+
+Whenever the repository contains:
 
 supabase.functions.invoke(...)
 
-AI Studio MUST first determine whether the invocation is covered by:
+the invocation must be investigated before being classified as a direct frontend-to-provider call.
 
-- a catch-all interceptor;
-- adapter;
-- backend bridge;
-- local gateway;
-- request router;
-- backend function proxy;
-- provider adapter.
+The authoritative rule is:
 
-A call that appears to be a direct Supabase invocation may already be translated or intercepted.
+"docs/architecture/supabase-functions-invoke-interceptor-rule.md"
 
----
+The investigation must determine whether the invocation is:
 
-9. WEBHOOKS AND CALLBACKS
+1. handled by an interceptor;
+2. handled by an adapter;
+3. routed through the backend bridge;
+4. routed through a server-side function;
+5. intentionally direct;
+6. legacy;
+7. otherwise covered by an existing authoritative routing mechanism.
 
-Provider integrations may depend on:
+Do not replace or remove a "supabase.functions.invoke(...)" call merely because it appears to be a direct call.
 
-- payment webhooks;
-- email webhooks;
-- SMS delivery webhooks;
-- WhatsApp webhooks;
-- voice callbacks;
-- IoT event webhooks;
-- tracking event webhooks;
-- verification webhooks;
-- authentication webhooks.
-
-An outbound API call and its inbound webhook are separate components.
-
-Neither may be removed without tracing the complete integration.
+First determine whether the catch-all interceptor/adapter already covers it.
 
 ---
 
-10. PROVIDER-SPECIFIC DATA AND IDENTIFIERS
+9. Backend and Gateway Inventory
 
-Preserve provider-specific:
+The current platform architecture includes authoritative backend/gateway layers.
 
-provider_id
-external_id
-transaction_id
-message_id
-delivery_id
-call_id
-device_id
-tracking_id
-webhook_id
-customer_reference
-merchant_reference
-provider_reference
-provider_status
-provider_metadata
+Where applicable, integrations should identify the actual entrypoint rather than merely naming the external provider.
 
-These may be necessary for reconciliation, support, debugging, retries, refunds, disputes, webhook matching, and audit trails.
+For example:
 
----
+Rentmaikar client
+      ↓
+authoritative Rentmaikar gateway/backend
+      ↓
+provider adapter/service
+      ↓
+external provider
 
-11. INTEGRATION INVENTORY
+The architectural boundary must not be inferred solely from an implementation technology.
 
-The following inventory is an authoritative architectural register template.
-
-It should be maintained as the platform evolves.
-
-AI Studio MUST consult this inventory before removing, replacing, merging, bypassing, or substantially modifying an integration.
-
-If an integration is not yet fully documented, its absence from the inventory MUST NOT be interpreted as authorization to remove it.
-
-Instead, mark it:
-
-Inventory Status: UNKNOWN / NEEDS DISCOVERY
-
-and preserve it until verified.
+For example, Supabase Edge Functions may be an implementation mechanism without being the only valid architectural boundary.
 
 ---
 
-12. INTEGRATION INVENTORY — MASTER TEMPLATE
+10. Regional Integrations
 
-Copy the following table and populate one row for every significant external integration.
+A provider serving one region must not be classified as redundant solely because another provider serves another region.
 
-ID| Category| Provider / Service| Integration / Adapter| Purpose| Channels / Functions| Region(s)| Environment(s)| Status| Primary / Fallback / Regional| Inbound / Outbound / Both| Backend Route| Frontend Usage| Webhooks / Callbacks| Env Vars / Secrets| Database Dependencies| External IDs| Replacement Candidate?| Preservation Criticality| Notes
-INT-001| Communication| "<provider>"| "<adapter>"| "<purpose>"| "<SMS/WhatsApp/etc.>"| "<regions>"| "<dev/staging/prod>"| "<active/dormant>"| "<primary/fallback/regional>"| "<inbound/outbound/both>"| "<route>"| "<components>"| "<URLs/events>"| "<names only; never values>"| "<tables/columns>"| "<IDs>"| "<yes/no>"| "<critical/high/medium/low>"| "<notes>"
-INT-002| IoT| "<provider>"| "<adapter>"| "<purpose>"| "<GPS/telemetry/etc.>"| "<regions>"| "<envs>"| "<status>"| "<role>"| "<direction>"| "<route>"| "<usage>"| "<callbacks>"| "<secret names>"| "<dependencies>"| "<IDs>"| "<yes/no>"| "<criticality>"| "<notes>"
-INT-003| Tracking| "<provider>"| "<adapter>"| "<purpose>"| "<tracking functions>"| "<regions>"| "<envs>"| "<status>"| "<role>"| "<direction>"| "<route>"| "<usage>"| "<callbacks>"| "<secret names>"| "<dependencies>"| "<IDs>"| "<yes/no>"| "<criticality>"| "<notes>"
-INT-004| Payment| "<provider>"| "<adapter>"| "<purpose>"| "<payment methods>"| "<regions>"| "<envs>"| "<status>"| "<role>"| "<direction>"| "<route>"| "<usage>"| "<webhooks>"| "<secret names>"| "<dependencies>"| "<IDs>"| "<yes/no>"| "<criticality>"| "<notes>"
+Regional routing may legitimately coexist with:
 
-INVENTORY RULE
+- primary routing;
+- secondary routing;
+- specialized routing;
+- failover;
+- capability-based routing.
 
-Never put actual credentials, API keys, tokens, passwords, private keys, or secrets in this inventory.
+Example:
 
-Record only the name/location of the secret, for example:
+Nigeria
+   ↓
+Nigeria-capable provider
 
-STRIPE_SECRET_KEY
-TWILIO_AUTH_TOKEN
-PAYSTACK_SECRET_KEY
+USA
+   ↓
+USA-capable provider
 
-Never record the actual secret value.
+This does not imply that either provider is unnecessary.
 
----
-
-13. PROVIDER INVENTORY TEMPLATE
-
-Use this section when documenting each provider individually.
-
-provider_id: "PROVIDER-XXX"
-
-provider_name: "<provider name>"
-
-category:
-  - communication
-  - payment
-  - iot
-  - tracking
-  - authentication
-  - email
-  - sms
-  - whatsapp
-  - voice
-  - other
-
-services:
-  - "<service>"
-
-purpose: |
-  <Explain why this provider exists.>
-
-channels:
-  - "<channel>"
-
-functions:
-  - "<function>"
-
-regions:
-  - "<country / region>"
-
-environments:
-  - development
-  - staging
-  - production
-
-status:
-  - active
-  - dormant
-  - fallback
-  - regional
-  - reserved
-  - migration
-  - unknown
-
-routing_role:
-  - primary
-  - secondary
-  - fallback
-  - regional
-  - specialized
-
-traffic_direction:
-  - inbound
-  - outbound
-  - bidirectional
-
-frontend_dependencies:
-  - "<component/path>"
-
-backend_dependencies:
-  - "<service/path>"
-
-adapter:
-  name: "<adapter name>"
-  path: "<path>"
-
-gateway:
-  name: "<gateway/bridge name>"
-  path: "<path>"
-
-webhooks:
-  - name: "<webhook>"
-    route: "<route>"
-    purpose: "<purpose>"
-
-callbacks:
-  - name: "<callback>"
-    route: "<route>"
-    purpose: "<purpose>"
-
-environment_variables:
-  - "<SECRET_NAME>"
-  - "<CONFIG_NAME>"
-
-database_dependencies:
-  - "<table>"
-  - "<column>"
-
-provider_identifiers:
-  - "<identifier type>"
-
-fallback_relationships:
-  primary_provider: "<provider>"
-  fallback_providers:
-    - "<provider>"
-
-regional_relationships:
-  regions:
-    - "<region>"
-  regional_provider: true
-
-replacement:
-  replacement_authorized: false
-  replacement_provider: null
-  migration_plan: null
-
-preservation:
-  criticality: critical
-  removable_without_authorization: false
-  mergeable_without_authorization: false
-  bypassable_without_authorization: false
-
-notes: |
-  <Additional architectural information.>
+Regional providers must therefore be represented individually.
 
 ---
 
-14. COMMUNICATION INVENTORY TEMPLATE
+11. Specialized Integrations
 
-Every communication provider/channel should be documented using:
+A specialized provider may perform only one part of a broader capability.
 
-communication_integration_id: "COMM-XXX"
+For example:
 
-provider: "<provider>"
+Communication
+├── Email
+├── SMS
+├── WhatsApp
+├── Voice
+└── In-app messaging
 
-provider_role:
-  - primary
-  - fallback
-  - regional
-  - specialized
-  - legacy
-  - reserved
+Similarly:
 
-channels:
-  - sms
-  - whatsapp
-  - email
-  - voice
-  - webrtc
-  - in_app
-  - push
-  - other
+Vehicle operations
+├── Cellular connectivity
+├── GPS tracking
+├── MQTT/device messaging
+└── Fleet/vehicle management
 
-direction:
-  - inbound
-  - outbound
-  - bidirectional
-
-use_cases:
-  - authentication
-  - otp
-  - transactional
-  - support
-  - marketing
-  - operational
-  - emergency
-
-users:
-  - customer
-  - driver
-  - owner
-  - admin
-  - support
-  - operations
-
-regions:
-  - "<region>"
-
-adapter: "<adapter>"
-
-backend_route: "<route>"
-
-webhook_routes:
-  - "<route>"
-
-callback_routes:
-  - "<route>"
-
-environment_variables:
-  - "<SECRET_NAME>"
-
-fallback_provider: "<provider or null>"
-
-notes: |
-  <Why this integration exists and what must not be changed.>
+Providers supporting different branches of the capability tree must not be merged simply because their broad category is the same.
 
 ---
 
-15. PAYMENT INVENTORY TEMPLATE
+12. Multiple Providers
 
-payment_integration_id: "PAY-XXX"
+Multiple providers within the same category are permitted and may be intentional.
 
-provider: "<provider>"
+Examples include:
 
-role:
-  - collection
-  - payout
-  - refund
-  - regional
-  - fallback
-  - specialized
+Communication
+├── Provider A
+├── Provider B
+└── Provider C
 
-payment_purposes:
-  - rental
-  - security_deposit
-  - late_fee
-  - subscription_training
-  - subscription_insurance
-  - subscription_roadside
-  - iot_device
-  - other
+Payments
+├── Provider A
+├── Provider B
+└── Provider C
 
-payment_methods:
-  - card
-  - bank_transfer
-  - mobile_money
-  - wallet
-  - other
+IoT / Tracking
+├── Provider A
+├── Provider B
+└── Provider C
 
-currencies:
-  - "<currency>"
+Possible reasons include:
 
-regions:
-  - "<region>"
-
-adapter: "<adapter>"
-
-backend_route: "<route>"
-
-webhooks:
-  - "<webhook>"
-
-environment_variables:
-  - "<SECRET_NAME>"
-
-database_dependencies:
-  - "<table>"
-
-provider_identifiers:
-  - transaction_reference
-  - customer_reference
-  - payment_reference
-
-fallback_provider: "<provider or null>"
-
-reconciliation_required: true
-
-refund_support: true
-
-payout_support: false
-
-preservation_criticality: critical
-
-notes: |
-  <Payment-specific architectural notes.>
-
----
-
-16. IOT / TRACKING INVENTORY TEMPLATE
-
-iot_tracking_integration_id: "IOT-XXX"
-
-provider: "<provider>"
-
-category:
-  - gps
-  - tracking
-  - telematics
-  - iot
-  - immobilization
-  - diagnostics
-  - device_management
-
-hardware:
-  - "<device model>"
-  - "<device family>"
-
-vehicle_types:
-  - "<vehicle type>"
-
-data:
-  - location
-  - speed
-  - ignition
-  - mileage
-  - battery
-  - diagnostics
-  - geofence
-  - movement
-  - tamper
-  - immobilization
-  - other
-
-regions:
-  - "<region>"
-
-adapter: "<adapter>"
-
-backend_route: "<route>"
-
-webhooks:
-  - "<webhook>"
-
-environment_variables:
-  - "<SECRET_NAME>"
-
-database_dependencies:
-  - "<table>"
-
-device_identifiers:
-  - device_id
-  - tracker_id
-  - vehicle_id
-  - provider_vehicle_id
-
-polling:
-  enabled: true
-  interval: "<interval>"
-
-event_driven:
-  enabled: true
-
-fallback_provider: "<provider or null>"
-
-preservation_criticality: critical
-
-notes: |
-  <IoT/tracking-specific notes.>
-
----
-
-17. WEBHOOK INVENTORY
-
-Every provider webhook should be independently recorded.
-
-ID| Provider| Webhook| Route| Direction| Event Types| Authentication| Signature Verification| Consumer| Retry Behavior| Criticality| Status
-WH-001| "<provider>"| "<name>"| "<route>"| Inbound| "<events>"| "<method>"| "<yes/no>"| "<service>"| "<strategy>"| Critical| Active
-WH-002| "<provider>"| "<name>"| "<route>"| Inbound| "<events>"| "<method>"| "<yes/no>"| "<service>"| "<strategy>"| High| Active
-
-WEBHOOK PRESERVATION RULE
-
-«A webhook must be treated as an independent production dependency even if no obvious frontend code references it.»
-
----
-
-18. CALLBACK INVENTORY
-
-ID| Provider| Callback| Route / URL| Trigger| Consumer| Criticality| Status| Notes
-CB-001| "<provider>"| "<callback>"| "<route>"| "<event>"| "<service>"| Critical| Active| "<notes>"
-CB-002| "<provider>"| "<callback>"| "<route>"| "<event>"| "<service>"| High| Active| "<notes>"
-
----
-
-19. ENVIRONMENT CONFIGURATION INVENTORY
-
-Do not record secret values.
-
-Record only configuration names and ownership.
-
-Variable| Provider| Purpose| Used By| Environment| Secret?| Required?| Status
-"<VARIABLE>"| "<provider>"| "<purpose>"| "<service>"| Production| Yes| Yes| Active
-"<VARIABLE>"| "<provider>"| "<purpose>"| "<service>"| Staging| Yes| Yes| Active
-"<VARIABLE>"| "<provider>"| "<purpose>"| "<service>"| Development| No| Optional| Active
-
-RULE
-
-An environment variable MUST NOT be deleted merely because a frontend search does not find it.
-
----
-
-20. ROUTING INVENTORY
-
-Document how provider traffic flows through the platform.
-
-Route ID| Entry Point| Gateway / Bridge| Adapter| Provider| Channel| Region| Direction| Fallback| Status
-ROUTE-001| "<entry>"| "<gateway>"| "<adapter>"| "<provider>"| SMS| "<region>"| Outbound| "<provider>"| Active
-ROUTE-002| "<entry>"| "<gateway>"| "<adapter>"| "<provider>"| Payment| "<region>"| Outbound| "<provider>"| Active
-
----
-
-21. DEPENDENCY MAP TEMPLATE
-
-For each integration, document the dependency chain:
-
-USER / SYSTEM EVENT
-        │
-        ▼
-FRONTEND / BACKEND ENTRY POINT
-        │
-        ▼
-SERVICE / DOMAIN LOGIC
-        │
-        ▼
-GATEWAY / BRIDGE
-        │
-        ▼
-ADAPTER
-        │
-        ▼
-ROUTER
-        │
-        ├───────────────┐
-        ▼               ▼
-PRIMARY PROVIDER     FALLBACK PROVIDER
-        │               │
-        └───────┬───────┘
-                ▼
-        EXTERNAL SERVICE
-                │
-                ▼
-        WEBHOOK / CALLBACK
-                │
-                ▼
-        RENTMAIKAR BACKEND
-
-The actual implementation may differ.
-
-The purpose of this diagram is to prevent an AI agent from interpreting one layer as the entire integration.
-
----
-
-22. PROVIDER RELATIONSHIP MATRIX
-
-Use this matrix to document intentional overlap.
-
-Capability| Provider A| Provider B| Provider C| Provider D| Reason for Multiple Providers
-SMS| ✓| ✓| | | Regional coverage / failover
-WhatsApp| ✓| | ✓| | Channel specialization
-Email| | ✓| | ✓| Transactional / marketing separation
-Voice| ✓| | ✓| | Telephony / redundancy
-GPS| ✓| ✓| | | Hardware / regional coverage
-Tracking| ✓| ✓| ✓| | Device compatibility
-Card payments| ✓| ✓| | | Regional / fallback
-Bank transfer| | ✓| ✓| | Local payment rails
-Mobile money| | ✓| ✓| | Regional payment requirements
-
-IMPORTANT
-
-A checkmark in the same capability column does not indicate duplication that should be removed.
-
-It indicates intentional provider overlap.
-
----
-
-23. REGIONAL PROVIDER MATRIX
-
-Region| Communication| Payment| IoT| Tracking| Voice| Email| Fallback Strategy
-Nigeria| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<strategy>"
-United States| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<strategy>"
-Other| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<providers>"| "<strategy>"
-
-This matrix exists specifically to prevent an AI system from assuming that the globally preferred provider is appropriate for every region.
-
----
-
-24. FALLBACK MATRIX
-
-Function| Primary| Secondary| Tertiary| Trigger| Automatic?| Manual Override?
-SMS| "<provider>"| "<provider>"| "<provider>"| "<failure>"| Yes| Yes
-Payment| "<provider>"| "<provider>"| "<provider>"| "<failure>"| Yes| Yes
-GPS| "<provider>"| "<provider>"| "<provider>"| "<failure>"| Yes| Yes
-Voice| "<provider>"| "<provider>"| "<provider>"| "<failure>"| Yes| Yes
-
----
-
-25. INTEGRATION STATUS DEFINITIONS
-
-Use the following controlled vocabulary.
-
-ACTIVE
-
-Currently expected to process production traffic.
-
-DORMANT
-
-Implemented but not currently processing normal traffic.
-
-FALLBACK
-
-Used when another provider fails or becomes unavailable.
-
-REGIONAL
-
-Used for a specific geographic market.
-
-SPECIALIZED
-
-Used for a specific function, hardware type, channel, or workflow.
-
-RESERVED
-
-Maintained for future activation or planned operational use.
-
-MIGRATION
-
-Participating in an ongoing provider migration.
-
-LEGACY
-
-Still required for existing functionality or historical compatibility.
-
-UNKNOWN
-
-Integration status has not yet been sufficiently established.
-
-UNKNOWN integrations MUST be preserved.
-
----
-
-26. INTEGRATION CRITICALITY
-
-Use:
-
-CRITICAL
-
-Removing it can cause production outage, loss of money, loss of tracking, loss of communication, or loss of core platform capability.
-
-HIGH
-
-Removing it can significantly degrade a major workflow.
-
-MEDIUM
-
-Removal affects a secondary workflow.
-
-LOW
-
-Removal affects a non-critical or optional workflow.
-
-Criticality MUST NOT be used to authorize removal.
-
-It only indicates impact.
-
----
-
-27. INVENTORY CHANGE LOG
-
-Every inventory change should be recorded.
-
-Date| Integration ID| Change| Previous State| New State| Reason| Authorized By| Code Change| Migration Required
-"<date>"| "<ID>"| "<change>"| "<state>"| "<state>"| "<reason>"| "<owner>"| "<commit/PR>"| Yes/No
-
----
-
-28. PROVIDER REMOVAL RECORD
-
-If a provider is ever legitimately removed, retain a historical record.
-
-removal_record:
-  integration_id: "<ID>"
-  provider: "<provider>"
-  category: "<category>"
-
-  removal_authorized: true
-
-  authorized_by: "<platform owner>"
-
-  authorization_date: "<date>"
-
-  reason: |
-    <explicit reason>
-
-  replacement_provider: "<provider>"
-
-  affected_regions:
-    - "<region>"
-
-  affected_channels:
-    - "<channel>"
-
-  affected_workflows:
-    - "<workflow>"
-
-  migration_completed: true
-
-  rollback_available: true
-
-  rollback_plan: |
-    <rollback>
-
-  final_commit: "<commit or PR>"
-
-  final_status: removed
-
-This record ensures that future AI agents understand that a provider was deliberately removed rather than accidentally omitted.
-
----
-
-29. AI INVENTORY DISCOVERY PROCEDURE
-
-When asked to modify or remove a provider-related integration, AI Studio should perform the following discovery sequence.
-
-STEP 1 — Search the inventory
-
-Search this document for:
-
-provider name
-service name
-adapter name
-route
-webhook
-environment variable
-database table
-
-STEP 2 — Search the repository
-
-Search for:
-
-provider name
-SDK/package name
-API hostname
-adapter name
-service name
-webhook route
-callback route
-environment variable
-provider-specific identifier
-
-STEP 3 — Inspect architecture
-
-Trace:
-
-frontend
-→ backend
-→ gateway
-→ bridge
-→ adapter
-→ router
-→ provider
-→ webhook/callback
-
-STEP 4 — Inspect configuration
-
-Check:
-
-.env.example
-deployment configuration
-CI/CD
-Cloud Run
-Supabase
-backend configuration
-feature flags
-
-STEP 5 — Determine provider role
-
-Classify it as:
-
-primary
-fallback
-regional
-specialized
-dormant
-reserved
-legacy
-unknown
-
-STEP 6 — Only then evaluate the requested modification.
-
----
-
-30. AI REMOVAL SAFETY CHECK
-
-Before removing an integration, AI Studio MUST be able to answer all of the following:
-
-[ ] What provider is being removed?
-[ ] What exact functionality does it provide?
-[ ] What channels does it provide?
-[ ] What regions depend on it?
-[ ] What users depend on it?
-[ ] Is it primary?
-[ ] Is it fallback?
-[ ] Is it regional?
-[ ] Is it specialized?
-[ ] Is it dormant?
-[ ] Is it reserved?
-[ ] What adapter represents it?
-[ ] What backend routes reference it?
-[ ] What frontend routes reference it?
-[ ] What webhooks reference it?
-[ ] What callbacks reference it?
-[ ] What environment variables configure it?
-[ ] What database structures reference it?
-[ ] What external identifiers depend on it?
-[ ] Does a catch-all interceptor cover it?
-[ ] Does a backend bridge cover it?
-[ ] Does another provider actually replace every capability?
-[ ] Has removal been explicitly authorized?
-[ ] Is there a migration plan?
-[ ] Is there a rollback plan?
-
-If any critical answer is unknown:
-
-«DO NOT REMOVE THE INTEGRATION.»
-
----
-
-31. FINAL PRESERVATION DIRECTIVE
-
-The integration inventory exists to make architectural intent machine-readable.
-
-It is not merely documentation.
-
-It is a change-control boundary.
-
-The following principle applies:
-
-«If an integration exists but its purpose is not yet fully understood, preserve it and document the uncertainty. Do not delete it to make the codebase appear cleaner.»
-
-The correct response to uncertainty is:
-
-DISCOVER → DOCUMENT → VERIFY
-
-not:
-
-ASSUME → DELETE
-
----
-
-32. FINAL AI STUDIO RULE
-
-When an AI agent sees multiple providers performing similar functions, it MUST interpret the situation as:
-
-POSSIBLE INTENTIONAL REDUNDANCY
-
-rather than:
-
-DUPLICATE CODE
-
-until proven otherwise.
-
-ABSOLUTE RULE
-
-«NONE OF THE FOLLOWING MAY BE REMOVED, MERGED, BYPASSED, REPLACED, OR DISABLED WITHOUT EXPLICIT PLATFORM-OWNER AUTHORIZATION:»
-
-- communication providers;
-- communication channels;
-- payment providers;
-- payment rails;
-- IoT providers;
-- GPS providers;
-- tracking providers;
-- telematics providers;
-- authentication providers;
-- provider adapters;
-- provider routers;
-- backend bridges;
-- gateways;
-- catch-all interceptors;
-- fallbacks;
-- webhooks;
-- callbacks;
-- provider-specific configuration;
-- provider-specific identifiers;
-- provider-related database structures;
-- regional provider integrations;
-- dormant or reserved integrations.
-
-«PRESERVE FIRST. SIMPLIFY ONLY WITH EXPLICIT AUTHORIZATION.»
-
----
-
-33. INVENTORY MAINTENANCE PRINCIPLE
-
-Whenever a new provider or integration is added, the inventory should be updated as part of the same change.
-
-Whenever an integration changes role, its inventory record should be updated.
-
-Whenever an integration is deliberately removed, a removal record should be retained.
-
-The inventory should therefore remain a living architectural register.
-
----
-
-34. INVENTORY OWNERSHIP
-
-Inventory owner: "<Platform Owner / Architecture Owner>"
-
-Technical owner: "<Technical Lead>"
-
-Last reviewed: "<YYYY-MM-DD>"
-
-Next review: "<YYYY-MM-DD>"
-
-Inventory version: "1.0"
-
-Repository: "beresdowds-afk/Rentmaikar-G2"
-
----
-
-35. MASTER INVENTORY — START HERE
-
-Populate this section as the authoritative high-level register.
-
-ID| Category| Provider| Purpose| Region| Role| Status| Adapter| Backend| Webhook| Fallback| Criticality| Authorized Removal?
-INT-001| Communication| "<provider>"| "<purpose>"| "<region>"| Primary| Active| "<adapter>"| "<service>"| "<webhook>"| "<provider>"| Critical| No
-INT-002| Communication| "<provider>"| "<purpose>"| "<region>"| Fallback| Active| "<adapter>"| "<service>"| "<webhook>"| "<provider>"| High| No
-INT-003| IoT| "<provider>"| "<purpose>"| "<region>"| Primary| Active| "<adapter>"| "<service>"| "<webhook>"| "<provider>"| Critical| No
-INT-004| Tracking| "<provider>"| "<purpose>"| "<region>"| Regional| Active| "<adapter>"| "<service>"| "<webhook>"| "<provider>"| Critical| No
-INT-005| Payment| "<provider>"| "<purpose>"| "<region>"| Primary| Active| "<adapter>"| "<service>"| "<webhook>"| "<provider>"| Critical| No
-INT-006| Payment| "<provider>"| "<purpose>"| "<region>"| Fallback| Active| "<adapter>"| "<service>"| "<webhook>"| "<provider>"| Critical| No
-
----
-
-36. FINAL STATEMENT
-
-Rentmaikar's provider ecosystem is intentionally multi-provider and multi-channel.
-
-The existence of multiple providers is an architectural capability that enables:
-
-- resilience;
+- regional coverage;
+- regulatory requirements;
+- provider-specific capabilities;
 - redundancy;
 - failover;
-- regional operation;
-- provider independence;
-- channel diversity;
-- hardware compatibility;
-- payment flexibility;
-- communication flexibility;
+- pricing;
 - operational continuity;
-- future migration;
-- disaster recovery;
-- scalability.
+- customer requirements;
+- different API capabilities;
+- specialized services;
+- migration;
+- future expansion.
 
-Therefore:
+The inventory records these distinctions.
 
-DO NOT "CLEAN UP" THE PROVIDER ARCHITECTURE BY REMOVING THINGS THAT LOOK DUPLICATIVE.
-
-DO NOT ASSUME ONE PROVIDER REPLACES ANOTHER.
-
-DO NOT ASSUME AN UNUSED-LOOKING INTEGRATION IS OBSOLETE.
-
-DO NOT REMOVE ANY INTEGRATION WITHOUT EXPLICIT AUTHORIZATION.
-
-WHEN IN DOUBT, PRESERVE IT AND ADD IT TO THE INVENTORY.
+The preservation policy determines when they may be removed.
 
 ---
 
-END OF "PLATFORM_PROVIDER_PRESERVATION.md"
+13. Integration Relationship Model
+
+Relationships between providers should be represented explicitly.
+
+Example:
+
+provider_a:
+  role: primary
+  status: active
+  routing: direct
+  fallback: provider_b
+
+provider_b:
+  role: secondary
+  status: active
+  routing: failover
+  fallback: null
+
+Another valid configuration:
+
+provider_a:
+  role: regional
+  status: active
+  routing: regional
+  regions:
+    - Nigeria
+
+provider_b:
+  role: regional
+  status: active
+  routing: regional
+  regions:
+    - United States
+
+Another:
+
+provider_a:
+  role: specialized
+  status: active
+  routing: capability_based
+
+provider_b:
+  role: specialized
+  status: active
+  routing: capability_based
+
+These configurations are not contradictory.
+
+---
+
+14. Unknown Does Not Mean Removable
+
+If the repository does not currently provide enough evidence to determine:
+
+- provider role;
+- operational status;
+- routing;
+- criticality;
+- fallback relationship;
+
+the correct value is:
+
+unknown
+
+Do not infer:
+
+unknown → unused
+unknown → obsolete
+unknown → duplicate
+unknown → removable
+
+Instead:
+
+unknown → investigate
+
+---
+
+15. Inventory Maintenance Rules
+
+Whenever an integration is:
+
+- added;
+- removed;
+- replaced;
+- migrated;
+- disabled;
+- activated;
+- reserved;
+- re-routed;
+- assigned a new region;
+- given a new capability;
+- moved behind an adapter;
+- moved behind a backend gateway;
+
+the inventory must be reviewed and updated.
+
+The implementation and inventory should remain consistent.
+
+---
+
+16. Removal Procedure
+
+Before removing an integration:
+
+Step 1 — Inspect the current implementation
+
+Search the repository for:
+
+- provider name;
+- SDK/package;
+- environment variables;
+- configuration;
+- routes;
+- adapters;
+- interceptors;
+- backend functions;
+- frontend calls;
+- webhook handlers;
+- database references;
+- scheduled jobs;
+- documentation references.
+
+Step 2 — Check the architecture documents
+
+At minimum inspect the relevant authoritative documents.
+
+Step 3 — Check this inventory
+
+Determine:
+
+role
+status
+routing
+criticality
+fallback
+regions
+removal_authorized
+
+Step 4 — Check preservation policy
+
+Read:
+
+"docs/architecture/PLATFORM_PROVIDER_PRESERVATION.md"
+
+Step 5 — Establish explicit authorization
+
+If:
+
+removal_authorized: false
+
+the integration must not be removed without explicit platform-owner authorization.
+
+Step 6 — Update the inventory
+
+Only after an authorized architectural change has been completed should the inventory be changed to reflect the new state.
+
+---
+
+17. Evidence Standard
+
+Inventory values should be based on evidence from:
+
+1. current source code;
+2. current configuration;
+3. current deployment configuration;
+4. current architecture documentation;
+5. current provider configuration;
+6. explicit platform-owner decisions.
+
+Do not infer integration status solely from:
+
+- package installation;
+- an unused import;
+- a single frontend reference;
+- an environment variable;
+- an old document;
+- a provider appearing elsewhere;
+- an AI-generated code comment.
+
+---
+
+18. Document Ownership
+
+This document owns:
+
+«WHAT integrations exist and HOW they are classified.»
+
+It does not own:
+
+Overall architecture
+
+"docs/architecture/architectureRule.md"
+
+Communication architecture
+
+"docs/architecture/CommunicationArchitecture.md"
+
+Provider-preservation policy
+
+"docs/architecture/PLATFORM_PROVIDER_PRESERVATION.md"
+
+Core responsibilities
+
+"docs/architecture/RentMaikarCoreResponsibilities.md"
+
+Hologram responsibilities
+
+"docs/architecture/HologramResponsibilities.md"
+
+Traccar responsibilities
+
+"docs/architecture/TraccarResponsibilities.md"
+
+EMQX responsibilities
+
+"docs/architecture/EmqxResponsibilities.md"
+
+Persona responsibilities
+
+"docs/architecture/PersonaResponsibilities.md"
+
+Identity-verification architecture
+
+"docs/architecture/IdentityVerificationArchitecture.md"
+
+Supabase invocation/interceptor rule
+
+"docs/architecture/supabase-functions-invoke-interceptor-rule.md"
+
+OPay implementation
+
+"docs/architecture/OPay-Integration-Specification.md"
+
+---
+
+19. Conflict Resolution
+
+If this inventory conflicts with the current implementation:
+
+1. do not silently change the implementation;
+2. inspect the implementation;
+3. inspect the relevant authoritative architecture document;
+4. identify which document owns the disputed decision;
+5. determine whether the inventory is stale;
+6. update the inventory if appropriate;
+7. if the architecture itself has changed, update the authoritative architecture document through an explicit architectural change.
+
+An inventory discrepancy is not permission to remove an integration.
+
+---
+
+20. AI Agent Instruction
+
+AI coding agents operating on Rentmaikar MUST treat this inventory as an architectural discovery document.
+
+Before modifying an integration, the agent should establish:
+
+What is this integration?
+        ↓
+What capability does it provide?
+        ↓
+What is its role?
+        ↓
+What is its status?
+        ↓
+How is it routed?
+        ↓
+Does it have a fallback relationship?
+        ↓
+What regions/capabilities does it serve?
+        ↓
+What is its criticality?
+        ↓
+Is removal explicitly authorized?
+
+If any of these are unclear:
+
+«Investigate before modifying.»
+
+Do not simplify the architecture merely to make the code appear cleaner.
+
+---
+
+21. Final Principle
+
+The integration inventory exists to make the platform's integration topology visible.
+
+It is not a list of dependencies to clean up.
+
+It is not a list of providers to consolidate.
+
+It is not a list of currently preferred vendors only.
+
+It is the record of the integrations that form, support, reserve, extend, or protect the Rentmaikar platform's operational capabilities.
+
+Presence in this inventory means preserve and investigate first.
+
+Absence from this inventory does not automatically mean removable.
+
+Removal requires evidence, architectural review, and authorization.
