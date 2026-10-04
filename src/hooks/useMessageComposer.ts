@@ -626,90 +626,6 @@ export const useSendComposedMessage = () => {
 
       try {
         if (input.channel === 'email') {
-  // AUTHORITATIVE PLATFORM EMAIL PATH:
-  // MessageComposer -> backendBridge -> staging.rentmaikar.com
-  // -> /api/functions/send-outbound-email -> Cloud Run emailService -> Resend.
-  // General platform email must not use the legacy Supabase
-  // send-email-reply Edge Function transport.
-
-  try {
-    const bridgeRes = await backendBridge.invokeEdgeFunction(
-      'send-outbound-email',
-      {
-        action: 'send',
-        to: email,
-        subject: renderedSubject || 'Message from Rentmaikar',
-        body,
-        fromAlias: 'support',
-        replyTo: 'support@backend.rentmaikar.com',
-        data: {
-          conversationId,
-          source: 'message_composer',
-          channel: 'email',
-        },
-      },
-      {
-        method: 'POST',
-        timeoutMs: 30000,
-        skipRetry: true,
-      },
-    );
-
-    if (
-      !bridgeRes.error &&
-      (bridgeRes.data?.success || bridgeRes.data?.ok)
-    ) {
-      dispatchOk = true;
-      deliveredMessageId = bridgeRes.data?.messageId;
-    } else {
-      deliveryError =
-        bridgeRes.data?.error ||
-        bridgeRes.error?.message ||
-        `Email delivery failed with HTTP ${bridgeRes.status}`;
-    }
-  } catch (bridgeErr: any) {
-    deliveryError =
-      bridgeErr?.message ||
-      'Authoritative backend email dispatch failed';
-  }
-    // Attempt 2: Resilient direct local API gateway fallback
-          if (!dispatchOk) {
-            try {
-              const fallbackRes = await fetch('/api/functions/send-email-reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  conversationId,
-                  recipientEmail: email,
-                  subject: renderedSubject || undefined,
-                  messageContent: body,
-                }),
-              });
-              const fallbackJson = await fallbackRes.json().catch(() => null);
-              if (fallbackRes.ok && (fallbackJson?.success || fallbackJson?.ok)) {
-                dispatchOk = true;
-                deliveredMessageId = fallbackJson?.messageId;
-                deliveryError = null;
-              } else {
-                deliveryError = fallbackJson?.error || `Email delivery failed with HTTP ${fallbackRes.status}`;
-              }
-            } catch (fbErr: any) {
-              deliveryError = fbErr.message || deliveryError || 'Email delivery failed';
-            }
-          }
-        } else {
-          // SMS or WhatsApp channel dispatch
-        }
-          const { data, error } = await supabase.functions.invoke('send-inbox-reply', {
-            body: {
-              conversationId,
-      // ── Dispatch on the wire ──
-      let dispatchOk = false;
-      let deliveryError: string | null = null;
-      let deliveredMessageId: string | undefined;
-
-      try {
-        if (input.channel === 'email') {
           // Authoritative operational email path:
           // MessageComposer -> backendBridge -> Cloud Run -> Resend.
           const bridgeRes = await backendBridge.invokeEdgeFunction(
@@ -717,8 +633,7 @@ export const useSendComposedMessage = () => {
             {
               action: 'send',
               to: email,
-              subject:
-                renderedSubject || 'Message from Rentmaikar',
+              subject: renderedSubject || 'Message from Rentmaikar',
               body,
               fromAlias: 'support',
               replyTo: 'support@backend.rentmaikar.com',
@@ -737,72 +652,79 @@ export const useSendComposedMessage = () => {
 
           if (
             !bridgeRes?.error &&
-            (bridgeRes?.data?.success ||
-              bridgeRes?.data?.ok)
+            (bridgeRes?.data?.success || bridgeRes?.data?.ok)
           ) {
             dispatchOk = true;
-            deliveredMessageId =
-              bridgeRes.data?.messageId;
+            deliveredMessageId = bridgeRes.data?.messageId;
           } else {
             deliveryError =
               bridgeRes?.data?.error ||
               bridgeRes?.error?.message ||
-              `Email delivery failed with HTTP ${
-                bridgeRes?.status ?? 'unknown'
-              }`;
+              `Email delivery failed with HTTP ${bridgeRes?.status ?? 'unknown'}`;
           }
-        } else if (
-          input.channel === 'sms' ||
-          input.channel === 'whatsapp'
-        ) {
-          // Authoritative SMS/WhatsApp path:
-          // MessageComposer -> backendBridge
-          // -> send-inbox-reply -> SENT.dm/provider.
-          const bridgeRes =
-            await backendBridge.invokeEdgeFunction(
-              'send-inbox-reply',
-              {
-                conversationId,
-                messageContent: body,
-                channel: input.channel,
-                recipientPhone: phone,
-                whatsappTemplateId:
-                  input.channel === 'whatsapp'
-                    ? input.whatsappTemplateId
-                    : undefined,
-              },
-              {
+
+          // Fallback: direct local API gateway if needed
+          if (!dispatchOk) {
+            try {
+              const fallbackRes = await fetch('/api/functions/send-email-reply', {
                 method: 'POST',
-                timeoutMs: 30000,
-                skipRetry: true,
-              },
-            );
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  conversationId,
+                  recipientEmail: email,
+                  subject: renderedSubject || undefined,
+                  messageContent: body,
+                }),
+              });
+              const fallbackJson = await fallbackRes.json().catch(() => null);
+              if (fallbackRes.ok && (fallbackJson?.success || fallbackJson?.ok)) {
+                dispatchOk = true;
+                deliveredMessageId = fallbackJson?.messageId;
+                deliveryError = null;
+              } else if (fallbackJson?.error) {
+                deliveryError = fallbackJson.error;
+              }
+            } catch (fbErr: any) {
+              deliveryError = fbErr.message || deliveryError || 'Email delivery failed';
+            }
+          }
+        } else if (input.channel === 'sms' || input.channel === 'whatsapp') {
+          // Authoritative SMS/WhatsApp path:
+          // MessageComposer -> backendBridge -> send-inbox-reply -> SENT.dm/provider.
+          const bridgeRes = await backendBridge.invokeEdgeFunction(
+            'send-inbox-reply',
+            {
+              conversationId,
+              messageContent: body,
+              channel: input.channel,
+              recipientPhone: phone,
+              whatsappTemplateId:
+                input.channel === 'whatsapp'
+                  ? input.whatsappTemplateId
+                  : undefined,
+            },
+            {
+              method: 'POST',
+              timeoutMs: 30000,
+              skipRetry: true,
+            },
+          );
 
           if (
             !bridgeRes?.error &&
-            (bridgeRes?.data?.success ||
-              bridgeRes?.data?.ok)
+            (bridgeRes?.data?.success || bridgeRes?.data?.ok)
           ) {
             dispatchOk = true;
-            deliveredMessageId =
-              bridgeRes.data?.messageId;
+            deliveredMessageId = bridgeRes.data?.messageId;
           } else {
             deliveryError =
               bridgeRes?.data?.error ||
               bridgeRes?.error?.message ||
-              `Message delivery failed with HTTP ${
-                bridgeRes?.status ?? 'unknown'
-              }`;
+              `Message delivery failed with HTTP ${bridgeRes?.status ?? 'unknown'}`;
           }
-        } else {
-          deliveryError =
-            `Unsupported message channel: ${input.channel}`;
-        }
-      } catch (invokeErr: any) {
-        deliveryError =
-          invokeErr?.message ||
-          'Authoritative message dispatch failed';
-      }
+
+          // Fallback: direct local API gateway if needed
+          if (!dispatchOk) {
             try {
               const fallbackRes = await fetch('/api/functions/send-inbox-reply', {
                 method: 'POST',
@@ -820,13 +742,15 @@ export const useSendComposedMessage = () => {
                 dispatchOk = true;
                 deliveredMessageId = fallbackJson?.messageId;
                 deliveryError = null;
-              } else {
-                deliveryError = fallbackJson?.error || `Dispatch failed with HTTP ${fallbackRes.status}`;
+              } else if (fallbackJson?.error) {
+                deliveryError = fallbackJson.error;
               }
             } catch (fbErr: any) {
               deliveryError = fbErr.message || deliveryError || 'Message delivery failed';
             }
           }
+        } else {
+          deliveryError = `Unsupported message channel: ${input.channel}`;
         }
       } catch (invokeErr: any) {
         deliveryError = invokeErr?.message || 'Wire dispatch exception';

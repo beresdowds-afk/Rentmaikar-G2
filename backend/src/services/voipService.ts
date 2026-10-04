@@ -239,6 +239,9 @@ export async function mintVoiceAccessToken(
 // 2. Caller-ID Resolution (DB or fallback)
 // -----------------------------------------------------------------
 
+const isUuid = (val?: string | null): boolean =>
+  Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
 export async function resolveCallerId(
   callerUserId: string | null | undefined,
   region: string,

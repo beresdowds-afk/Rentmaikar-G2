@@ -1,5 +1,10 @@
-import { supabase } from '@/integrations/supabase/client';
-import { renderPlaceholders, type PlaceholderValues } from '@/lib/reply-placeholders';
+import { renderPlaceholders, type PlaceholderValues } from './reply-placeholders';
+
+// Lazy-resolve Supabase client on browser/runtime to prevent Node/SSR/bundler import resolution issues
+async function getSupabase() {
+  const mod = await import('../integrations/supabase/client');
+  return mod.supabase;
+}
 
 export type InboundTopic =
   | 'terms_compliance'
@@ -518,6 +523,7 @@ Status: Pending admin review and one-click dispatch from Message Console.`;
   };
 
   try {
+    const supabase = await getSupabase();
     const { data, error } = await supabase
       .from('admin_daily_tasks')
       .insert([taskPayload])
@@ -584,6 +590,7 @@ export async function saveToTemplateArchives({
       is_active: true,
     };
 
+    const supabase = await getSupabase();
     const { error } = await supabase.from('canned_replies').insert([payload]);
 
     if (error) {

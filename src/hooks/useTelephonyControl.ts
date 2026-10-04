@@ -3,6 +3,7 @@ import { useVoiceDevice } from "@/hooks/useVoiceDevice";
 import { useAdminTelephonyPreferences } from "@/hooks/useAdminTelephonyPreferences";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { useRegion } from "@/contexts/RegionContext";
 import { TelephonyEngine, VoIPCall, CallRegion } from "@/types/voip";
 import { CallingMethod, RentmaikarCallSession } from "@/types/telephony";
 import { telephonyController } from "@/lib/telephony";
@@ -38,6 +39,8 @@ export interface ControlledCallState {
 export function useTelephonyControl() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { currentRegion } = useRegion();
+  const defaultRegion = currentRegion?.name || currentRegion?.code || "Global";
   const { preferences, setPreferredEngine, updatePreferences, loading: prefsLoading } = useAdminTelephonyPreferences();
 
   // Engine A: Browser WebRTC Softphone
@@ -96,9 +99,10 @@ export function useTelephonyControl() {
     async (params: ControlledCallInitiateParams): Promise<boolean> => {
       const engineToUse: TelephonyEngine = params.overrideEngine || preferences.preferred_engine || "SOFTPHONE";
       const region =
-  params.region ||
-  preferences.region ||
-  country;
+        params.region ||
+        preferences.region ||
+        (defaultRegion as CallRegion) ||
+        "Global";
       const phoneNumber = params.phoneNumber.trim();
 
       if (!phoneNumber && (!params.recipients || params.recipients.length === 0)) {

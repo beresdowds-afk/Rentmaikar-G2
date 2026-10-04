@@ -201,20 +201,22 @@ describe("Rentmaikar CPaaS Region → Channel → Provider routing", () => {
       ).toBe("sent");
     });
   });
-});
-it("does not silently convert an unresolved destination into USA", () => {
-  expect(resolveRegion("+447700900123")).toBe("Global");
-});
 
-it("does not select a regional provider as primary", () => {
-  expect(
-    resolvePrimaryProvider("Nigeria", "sms")
-  ).toBe("sent");
+  it("does not silently convert an unresolved destination into USA", () => {
+    expect(resolveRegion("+447700900123")).toBe("Global");
+  });
 
-  expect(
-    resolvePrimaryProvider("USA", "whatsapp")
-  ).toBe("sent");
+  it("does not select a regional provider as primary", () => {
+    expect(resolvePrimaryProvider("Nigeria", "sms")).toBe("sent");
+    expect(resolvePrimaryProvider("USA", "whatsapp")).toBe("sent");
+  });
+
+  it("returns no fallback when the canonical region has no configured fallback", () => {
+    expect(resolveFallbackProvider("Global", "sent")).toBeNull();
+  });
+
+  it("uses the configured regional fallback rather than a hard-coded country mapping", () => {
+    expect(resolveFallbackProvider("Nigeria", "sent")).toBe("termii");
+    expect(resolveFallbackProvider("USA", "sent")).toBe("twilio");
+  });
 });
-it("returns no fallback when the canonical region has no configured fallback", ...);
-
-it("uses the configured regional fallback rather than a hard-coded country mapping", ...);

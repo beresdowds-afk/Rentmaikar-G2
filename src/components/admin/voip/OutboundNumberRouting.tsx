@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, PhoneOutgoing, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useRegion } from '@/contexts/RegionContext';
 
 const ANY_ROLE = '__any__';
 
@@ -21,8 +22,6 @@ const ROLES = [
   'vehicle_support',
   'insurance_support',
 ] as const;
-
-const { availableRegions } = useRegion();
 
 type StaffRole = (typeof ROLES)[number];
 
@@ -50,6 +49,11 @@ const emptyDraft = {
  * by role first, then region, then the default flag and priority.
  */
 export const OutboundNumberRouting = () => {
+  const { availableRegions } = useRegion();
+  const regions = useMemo(
+    () => ['All', ...(availableRegions || []).map((r) => r.name || r.code || String(r))],
+    [availableRegions]
+  );
   const [rows, setRows] = useState<OutboundNumber[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -168,7 +172,7 @@ export const OutboundNumberRouting = () => {
             <Select value={draft.region} onValueChange={(v) => setDraft({ ...draft, region: v })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                {regions.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

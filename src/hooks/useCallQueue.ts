@@ -21,8 +21,14 @@ export interface QueuedCall {
 const POLL_INTERVAL_MS = 15_000;
 const URGENT_AFTER_MS = 3 * 60 * 1000;
 
-const normalizeRegion = (value: string | null | undefined): QueueRegion =>
-  (value || '').toLowerCase().startsWith('nig') || value === 'NG' ? 'Nigeria' : country;
+const normalizeRegion = (value: string | null | undefined): QueueRegion => {
+  const v = (value || '').trim();
+  if (!v) return 'Global';
+  const lower = v.toLowerCase();
+  if (lower.startsWith('nig') || lower === 'ng') return 'Nigeria';
+  if (lower === 'us' || lower === 'usa' || lower === 'united states') return 'USA';
+  return v;
+};
 
 /** Dual-tone (440Hz + 480Hz) PBX-style ring chime rendered with the Web Audio API. */
 const playChime = () => {

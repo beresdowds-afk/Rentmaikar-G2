@@ -185,148 +185,63 @@ export function CPaaSProviderSettings() {
           </Label>
 
           <RadioGroup
-            value={config.primaryProvider}
-            onValueChange={(val) => updateConfig({ primaryProvider: val as CPaaSProvider })}
-            className="grid grid-cols-1 md:grid-cols-3 gap-3"
+            value="sent"
+            onValueChange={() => {
+              updateConfig({
+                primaryProvider: "sent",
+                channelRouting: {
+                  ...config.channelRouting,
+                  sms: "sent",
+                  whatsapp: "sent",
+                },
+              });
+            }}
+            className="grid grid-cols-1 gap-3"
           >
-            {/* Option 1: Sent.dm Global Default */}
             <label
               htmlFor="sent-global"
-              className={`p-4 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-3 ${
-                config.primaryProvider === "sent"
-                  ? "border-primary bg-primary/5 ring-1 ring-primary"
-                  : "border-border hover:bg-muted/30"
-              }`}
+              className="p-4 rounded-xl border border-primary bg-primary/5 ring-1 ring-primary cursor-default transition flex flex-col justify-between gap-3"
             >
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <RadioGroupItem value="sent" id="sent-global" />
-                    <strong className="text-sm font-bold text-foreground">Sent.dm (Global Default)</strong>
+                    <RadioGroupItem
+                      value="sent"
+                      id="sent-global"
+                      checked
+                      disabled
+                    />
+                    <strong className="text-sm font-bold text-foreground">
+                      Sent.dm — Universal Primary
+                    </strong>
                   </div>
                   <p className="text-xs text-muted-foreground pl-6">
-                    Route all SMS, WhatsApp, and RCS through Sent.dm v3 with automatic country detection.
+                    Sent.dm is the primary provider for SMS and WhatsApp across
+                    supported regions. Regional providers are used only as configured
+                    fallbacks when Sent.dm dispatch fails.
                   </p>
                 </div>
-                <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary">
-                  RECOMMENDED
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] bg-primary/10 text-primary"
+                >
+                  PRIMARY
                 </Badge>
               </div>
-              <div className="pl-6 text-[11px] text-primary flex items-center gap-1 font-medium">
-                <Sparkles className="w-3 h-3" /> Unified single API contract
-              </div>
-            </label>
 
-            {/* Option 2: Split Regional (Twilio + Termii) */}
-            <label
-              htmlFor="split-regional"
-              className={`p-4 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-3 ${
-                config.primaryProvider === "auto"
-                  ? "border-primary bg-primary/5 ring-1 ring-primary"
-                  : "border-border hover:bg-muted/30"
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem value="auto" id="split-regional" />
-                    <strong className="text-sm font-bold text-foreground">
-  Split Regional Routing
-</strong>
-                  </div>
-                  <p className="text-xs text-muted-foreground pl-6">
-                    Routes US numbers (+1) to Twilio and Nigerian numbers (+234) to Termii automatically.
-                  </p>
+              <div className="pl-6 space-y-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-3 h-3 text-primary" />
+                  <span>Nigeria fallback: Termii when configured</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-3 h-3 text-primary" />
+                  <span>USA fallback: Twilio when configured</span>
                 </div>
               </div>
-              <div className="pl-6 text-[11px] text-muted-foreground">
-                Classic dual-vendor topology
-              </div>
             </label>
-
-            {/* Option 3: Twilio Direct */}
-            <label
-              htmlFor="twilio-direct"
-              className={`p-4 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-3 ${
-                config.primaryProvider === "twilio"
-<RadioGroup
-  value="sent"
-  onValueChange={() => {
-    updateConfig({
-      primaryProvider: "sent",
-      channelRouting: {
-        ...config.channelRouting,
-        sms: "sent",
-        whatsapp: "sent",
-      },
-    });
-  }}
-  className="grid grid-cols-1 gap-3"
-<RadioGroup
-  value="sent"
-  onValueChange={() => {
-    updateConfig({
-      primaryProvider: "sent",
-      channelRouting: {
-        ...config.channelRouting,
-        sms: "sent",
-        whatsapp: "sent",
-      },
-    });
-  }}
-  className="grid grid-cols-1 gap-3"
->
-  <label
-    htmlFor="sent-global"
-    className="p-4 rounded-xl border border-primary bg-primary/5 ring-1 ring-primary cursor-default transition flex flex-col justify-between gap-3"
-  >
-    <div className="flex items-start justify-between">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <RadioGroupItem
-            value="sent"
-            id="sent-global"
-            checked
-            disabled
-          />
-
-          <strong className="text-sm font-bold text-foreground">
-            Sent.dm — Universal Primary
-          </strong>
+          </RadioGroup>
         </div>
-
-        <p className="text-xs text-muted-foreground pl-6">
-          Sent.dm is the primary provider for SMS and WhatsApp across
-          supported regions. Regional providers are used only as configured
-          fallbacks when Sent.dm dispatch fails.
-        </p>
-      </div>
-
-      <Badge
-        variant="secondary"
-        className="text-[10px] bg-primary/10 text-primary"
-      >
-        PRIMARY
-      </Badge>
-    </div>
-
-    <div className="pl-6 space-y-1 text-[11px] text-muted-foreground">
-      <div className="flex items-center gap-2">
-        <Sparkles className="w-3 h-3 text-primary" />
-        <span>
-          Nigeria fallback: Termii when configured
-        </span>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Sparkles className="w-3 h-3 text-primary" />
-        <span>
-          USA fallback: Twilio when configured
-        </span>
-      </div>
-    </div>
-  </label>
-</RadioGroup>
 
         {/* Delivery Mode & Live / Sandbox Toggle */}
         <div className="p-4 rounded-xl border bg-muted/20 space-y-3">
