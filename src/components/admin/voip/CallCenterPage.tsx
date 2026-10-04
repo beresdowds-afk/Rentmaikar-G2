@@ -300,13 +300,9 @@ await queueState.refresh();
             </>
           )}
           <Badge variant="outline" className="flex items-center gap-1 text-xs">
-            <span className="h-2 w-2 rounded-full bg-blue-500" />
-            USA DID: +1 (608) 548-9220
-          </Badge>
-          <Badge variant="outline" className="flex items-center gap-1 text-xs">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            Nigeria DID: +234 916 307 2576
-          </Badge>
+  <span className="h-2 w-2 rounded-full bg-blue-500" />
+  Regional outbound lines configured
+</Badge>
         </div>
       </div>
 
