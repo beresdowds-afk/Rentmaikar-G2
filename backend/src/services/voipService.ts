@@ -48,7 +48,64 @@ function getDbPool(): pg.Pool | null {
 // -----------------------------------------------------------------
 
 function normalizeE164(phone: string): string {
-  const cleaned = (phone || "").trim().replace(/[^\d+]/g, "");
+ async function resolveCanonicalVoiceRegion(
+  requestedRegion?: string,
+  phone?: string,
+): Promise<string | null> {
+  const pool = getDbPool();
+  if (!pool) return null;
+
+  try {
+    const result = await pool.query(
+      `SELECT value, phone_prefix
+         FROM public.get_allowed_regions()
+        WHERE btrim(value) <> ''
+        ORDER BY length(COALESCE(phone_prefix, '')) DESC`,
+    );
+
+    const regions = result.rows ?? [];
+
+    // An explicitly supplied region must itself be a currently
+    // allowed Region Builder region.
+    const requested = String(requestedRegion || "").trim();
+
+    if (requested) {
+      const exact = regions.find(
+        (row: { value?: string }) =>
+          String(row.value || "").trim().toLowerCase() === requested.toLowerCase(),
+      );
+
+      if (exact?.value) {
+        return String(exact.value).trim();
+      }
+    }
+
+    // If no valid explicit region was supplied, derive it from the
+    // destination phone prefix using the canonical Region Builder list.
+    const normalized = normalizeE164(phone || "");
+
+    if (normalized) {
+      const matched = regions.find(
+        (row: { phone_prefix?: string }) => {
+          const prefix = String(row.phone_prefix || "").trim();
+          return prefix && normalized.startsWith(prefix);
+        },
+      );
+
+      if (matched?.value) {
+        return String(matched.value).trim();
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.warn(
+      "[VoIP Service] canonical region resolution failed:",
+      error,
+    );
+    return null;
+  }
+ } const cleaned = (phone || "").trim().replace(/[^\d+]/g, "");
   if (!cleaned) return "";
   if (cleaned.startsWith("+")) return cleaned;
   if (cleaned.length === 10) return `+1${cleaned}`;
@@ -281,12 +338,46 @@ export async function handleVoiceTwimlDial(params: {
   const from = String(params.From || "").trim();
   const callSid = String(params.CallSid || "");
   const sessionId = String(params.SessionId || "");
-  const region = String(params.Region || "USA");
+  let region = String(params.Region || "").trim();
   const baseUrl = params.baseUrl.replace(/\/+$/, "");
 
-  if (!to) {
-    return `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="alice">No destination was provided for this call.</Say><Hangup/></Response>`;
+  if (!to) if (!region) {
+  region =
+    (await resolveCanonicalVoiceRegion("", to)) || "";
+}
+
+if (!region && sessionId) {
+  const pool = getDbPool();
+
+  if (pool) {
+    try {
+      const existing = await pool.query(
+        `SELECT region
+           FROM public.voip_calls
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [sessionId],
+      );
+
+      region =
+        String(existing.rows?.[0]?.region || "").trim();
+    } catch (error) {
+      console.warn(
+        "[Voice Dial] Failed to recover session region:",
+        error,
+      );
+    }
   }
+}
+
+if (!region) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">We could not determine the service region for this call.</Say>
+  <Hangup/>
+</Response>`;
+}
+  
 
   // Caller identity user_<uuid>
   const rawCaller = from.startsWith("client:user_")
@@ -755,7 +846,26 @@ export async function handleInitiateVoipCall(
       ? "group"
       : "individual";
 
-  const region = body.region || "USA";
+  const requestedRegion =
+  typeof body.region === "string"
+    ? body.region.trim()
+    : "";
+
+const firstRecipientPhone =
+  recipients[0]?.phoneNumber ||
+  recipients[0]?.phone ||
+  "";
+
+const region = await resolveCanonicalVoiceRegion(
+  requestedRegion,
+  firstRecipientPhone,
+);
+
+if (!region) {
+  throw new Error(
+    "Unable to determine a valid canonical service region for this call",
+  );
+}
   const isConference = callType === "group";
 
   const engine = String(
