@@ -75,7 +75,7 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
           },
         ],
         callType: params.callType || "individual",
-        region: params.region || "USA",
+        region: params.region,
         callerUserId: params.adminUserId,
         metadata: params.metadata || {},
       });
@@ -104,7 +104,7 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
       recipient_name: params.recipientName,
       status: "initiated",
       direction: "outbound",
-      region: params.region || "USA",
+      region: params.region,
       created_at: now,
       started_at: now,
       metadata: params.metadata || {},
@@ -119,7 +119,7 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
       error?: string;
     }>("voice-access-token", {
       identity: params.adminUserId || "rentmaikar-admin",
-      region: params.region || "USA",
+      region: params.region,
     });
 
     if (tokenResult.error || !tokenResult.data?.token) {
@@ -141,7 +141,9 @@ export class SoftphoneAdapter implements ITelephonyAdapter {
             adminUserId: params.adminUserId,
             sessionId,
             SessionId: sessionId,
-            region: params.region || "USA",
+            ...(params.region
+           ? { region: params.region }
+            : {}),
             ...(params.recipientName
               ? { recipientName: params.recipientName }
               : {}),
