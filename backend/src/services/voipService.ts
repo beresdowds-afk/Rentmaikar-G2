@@ -48,7 +48,14 @@ function getDbPool(): pg.Pool | null {
 // -----------------------------------------------------------------
 
 function normalizeE164(phone: string): string {
- async function resolveCanonicalVoiceRegion(
+  const cleaned = (phone || "").trim().replace(/[^\d+]/g, "");
+  if (!cleaned) return "";
+  if (cleaned.startsWith("+")) return cleaned;
+  if (cleaned.length === 10) return `+1${cleaned}`;
+  return `+${cleaned}`;
+}
+
+async function resolveCanonicalVoiceRegion(
   requestedRegion?: string,
   phone?: string,
 ): Promise<string | null> {
@@ -64,9 +71,6 @@ function normalizeE164(phone: string): string {
     );
 
     const regions = result.rows ?? [];
-
-    // An explicitly supplied region must itself be a currently
-    // allowed Region Builder region.
     const requested = String(requestedRegion || "").trim();
 
     if (requested) {
@@ -80,8 +84,6 @@ function normalizeE164(phone: string): string {
       }
     }
 
-    // If no valid explicit region was supplied, derive it from the
-    // destination phone prefix using the canonical Region Builder list.
     const normalized = normalizeE164(phone || "");
 
     if (normalized) {
@@ -105,13 +107,7 @@ function normalizeE164(phone: string): string {
     );
     return null;
   }
- } const cleaned = (phone || "").trim().replace(/[^\d+]/g, "");
-  if (!cleaned) return "";
-  if (cleaned.startsWith("+")) return cleaned;
-  if (cleaned.length === 10) return `+1${cleaned}`;
-  return `+${cleaned}`;
 }
-
 function xmlEscape(v: string): string {
   return (v || "")
     .replace(/&/g, "&amp;")
@@ -335,15 +331,22 @@ export async function handleVoiceTwimlDial(params: {
   baseUrl: string;
 }): Promise<string> {
   const to = String(params.To || "").trim();
-  const from = String(params.From || "").trim();
-  const callSid = String(params.CallSid || "");
-  const sessionId = String(params.SessionId || "");
-  let region = String(params.Region || "").trim();
-  const baseUrl = params.baseUrl.replace(/\/+$/, "");
+const from = String(params.From || "").trim();
+const callSid = String(params.CallSid || "");
+const sessionId = String(params.SessionId || "");
+let region = String(params.Region || "").trim();
+const baseUrl = params.baseUrl.replace(/\/+$/, "");
 
-  if (!to) if (!region) {
-  region =
-    (await resolveCanonicalVoiceRegion("", to)) || "";
+if (!to) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">No destination was supplied for this call.</Say>
+  <Hangup/>
+</Response>`;
+}
+
+if (!region) {
+  region = await resolveCanonicalVoiceRegion("", to) || "";
 }
 
 if (!region && sessionId) {
@@ -359,8 +362,7 @@ if (!region && sessionId) {
         [sessionId],
       );
 
-      region =
-        String(existing.rows?.[0]?.region || "").trim();
+      region = String(existing.rows?.[0]?.region || "").trim();
     } catch (error) {
       console.warn(
         "[Voice Dial] Failed to recover session region:",
@@ -377,7 +379,6 @@ if (!region) {
   <Hangup/>
 </Response>`;
 }
-  
 
   // Caller identity user_<uuid>
   const rawCaller = from.startsWith("client:user_")
