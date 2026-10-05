@@ -281,7 +281,11 @@ async function callLocalGateway(functionName: string, options?: any) {
       : undefined;
 
   try {
-    const res = await fetch(`/api/functions/${functionName}`, {
+    const fetchUrl =
+      typeof window !== "undefined"
+        ? `/api/functions/${functionName}`
+        : `${process.env.VITE_BACKEND_URL || "http://localhost:3000"}/api/functions/${functionName}`;
+    const res = await fetch(fetchUrl, {
       method: options?.method || "POST",
       headers,
       body,

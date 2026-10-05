@@ -276,15 +276,11 @@ export const TwoFactorSetup = () => {
         channel: verifyChannel,
       };
 
-      const bridgeRes = await backendBridge.invokeEdgeFunction(
-        'verify-phone',
-        payload,
-        {
-          method: 'POST',
-          timeoutMs: 30000,
-          skipRetry: true,
-        },
-      );
+      const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload, {
+        method: 'POST',
+        timeoutMs: 30000,
+        skipRetry: true,
+      });
 
       if (bridgeRes?.error) {
         throw bridgeRes.error;
@@ -329,15 +325,11 @@ export const TwoFactorSetup = () => {
         code: phoneOtp,
       };
 
-      const bridgeRes = await backendBridge.invokeEdgeFunction(
-        'verify-phone',
-        payload,
-        {
-          method: 'POST',
-          timeoutMs: 30000,
-          skipRetry: true,
-        },
-      );
+      const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload, {
+        method: 'POST',
+        timeoutMs: 30000,
+        skipRetry: true,
+      });
 
       if (bridgeRes?.error) {
         throw bridgeRes.error;
@@ -394,15 +386,11 @@ export const TwoFactorSetup = () => {
         channel: setupChannel,
       };
 
-      const bridgeRes = await backendBridge.invokeEdgeFunction(
-        'send-2fa-code',
-        payload,
-        {
-          method: 'POST',
-          timeoutMs: 30000,
-          skipRetry: true,
-        },
-      );
+      const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload, {
+        method: 'POST',
+        timeoutMs: 30000,
+        skipRetry: true,
+      });
 
       if (bridgeRes?.error) {
         throw bridgeRes.error;

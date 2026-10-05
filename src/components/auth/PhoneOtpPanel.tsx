@@ -125,15 +125,11 @@ export function PhoneOtpPanel({ mode = 'signin', defaultRole = 'driver', initial
   //
   // Do not fall back to the legacy Supabase Edge Function.
 
-  const bridgeRes = await backendBridge.invokeEdgeFunction(
-    'phone-otp-custom',
-    body,
-    {
-      method: 'POST',
-      timeoutMs: 30000,
-      skipRetry: true,
-    },
-  );
+  const bridgeRes = await backendBridge.invokeEdgeFunction('phone-otp-custom', body, {
+    method: 'POST',
+    timeoutMs: 30000,
+    skipRetry: true,
+  });
 
   if (bridgeRes?.error) {
     throw new Error(

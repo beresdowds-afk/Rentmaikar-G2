@@ -124,12 +124,9 @@ export const PhoneVerification = ({ onVerified, showAsCard = true }: PhoneVerifi
         channel,
       };
 
-      const bridgeRes = await backendBridge.invokeEdgeFunction(
-  'verify-phone',
-  payload,
-);
+      const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
 
-if (bridgeRes?.error) {
+      if (bridgeRes?.error) {
   throw new Error(
     bridgeRes.error.message || 'Failed to send verification code',
   );
@@ -170,12 +167,9 @@ if (!resultData) {
         code: otpValue,
       };
 
-      const bridgeRes = await backendBridge.invokeEdgeFunction(
-  'verify-phone',
-  payload,
-);
+      const bridgeRes = await backendBridge.invokeEdgeFunction('verify-phone', payload);
 
-if (bridgeRes?.error) {
+      if (bridgeRes?.error) {
   throw new Error(
     bridgeRes.error.message || 'Phone verification failed',
   );

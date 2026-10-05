@@ -210,14 +210,14 @@ describe('Auth End-to-End Integration Suite', () => {
     it('dispatches OTP code request to custom phone OTP edge function', async () => {
       const e164 = '+2348139051772';
 
-      const invokeSpy = vi.spyOn(functionsProto, 'invoke').mockImplementation(async () => ({
+      const invokeSpy = vi.spyOn(supabase.functions, 'invoke').mockImplementation(async () => ({
         data: {
           success: true,
           message: 'Verification code sent',
           provider: 'termii',
         },
         error: null,
-      }));
+      } as any));
 
       const { data, error } = await supabase.functions.invoke('phone-otp-custom', {
         body: {
@@ -249,7 +249,7 @@ describe('Auth End-to-End Integration Suite', () => {
         refresh_token: 'phone-auth-refresh-token',
       };
 
-      vi.spyOn(functionsProto, 'invoke').mockImplementation(async () => ({
+      vi.spyOn(supabase.functions, 'invoke').mockImplementation(async () => ({
         data: {
           success: true,
           user_id: 'usr-phone-456',
@@ -257,7 +257,7 @@ describe('Auth End-to-End Integration Suite', () => {
           is_new_user: true,
         },
         error: null,
-      }));
+      } as any));
 
       const setSessionSpy = vi.spyOn(supabase.auth, 'setSession').mockResolvedValue({
         data: {
@@ -297,12 +297,12 @@ describe('Auth End-to-End Integration Suite', () => {
     });
 
     it('rejects invalid or expired OTP verification code', async () => {
-      vi.spyOn(functionsProto, 'invoke').mockImplementation(async () => ({
+      vi.spyOn(supabase.functions, 'invoke').mockImplementation(async () => ({
         data: {
           error: 'Invalid or expired verification code',
         },
         error: null,
-      }));
+      } as any));
 
       const { data } = await supabase.functions.invoke('phone-otp-custom', {
         body: {

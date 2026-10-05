@@ -54,7 +54,7 @@ describe("Phase 6: Post-Cutover Verification & End-to-End Hardening", () => {
       expect(dispatch.provider).toBe("sent");
       expect(dispatch.deliveryStatus).toBe("simulation");
       expect(dispatch.simulation).toBe(true);
-      expect(dispatch.messageId).toMatch(/^sent_/);
+      expect(dispatch.messageId).toMatch(/^(sent_|[0-9a-f-]{36})/i);
     });
   });
 

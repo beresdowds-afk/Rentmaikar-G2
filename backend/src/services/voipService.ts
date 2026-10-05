@@ -118,7 +118,6 @@ function xmlEscape(v: string): string {
 }
 
 export function getBaseCallbackUrl(req?: Request): string {
-  export function getBaseCallbackUrl(req?: Request): string {
   const configured = String(
     process.env.PUBLIC_BACKEND_URL || "",
   ).trim();
@@ -314,24 +313,30 @@ const isUuid = (val?: string | null): boolean =>
 export async function resolveCallerId(
   callerUserId: string | null | undefined,
   region: string,
-): Promise<string | null> {
+): Promise<string> {
   const pool = getDbPool();
 
-  if (!pool || !callerUserId || !isUuid(callerUserId)) {
-    return null;
+  if (callerUserId && isUuid(callerUserId) && pool) {
+    try {
+      const result = await pool.query(
+        "SELECT public.voip_resolve_outbound_number($1, $2) AS num",
+        [callerUserId, region],
+      );
+
+      if (result.rows?.[0]?.num) {
+        return result.rows[0].num;
+      }
+    } catch (error) {
+      console.warn("[VoIP Service] outbound line resolution failed:", error);
+    }
   }
 
-  try {
-    const result = await pool.query(
-      "SELECT public.voip_resolve_outbound_number($1, $2) AS num",
-      [callerUserId, region],
-    );
-
-    return result.rows?.[0]?.num || null;
-  } catch (error) {
-    console.warn("[VoIP Service] outbound line resolution failed:", error);
-    return null;
-  }
+  return (
+    process.env.TWILIO_VOICE_FROM ||
+    process.env.TWILIO_OUTBOUND_NUMBER ||
+    process.env.TWILIO_PHONE_NUMBER ||
+    (region === "Nigeria" ? "+2348139051772" : "+13806003018")
+  );
 }
 
 // -----------------------------------------------------------------
@@ -356,7 +361,7 @@ const baseUrl = params.baseUrl.replace(/\/+$/, "");
 if (!to) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="alice">No destination was supplied for this call.</Say>
+  <Say voice="alice">No destination was provided for this call.</Say>
   <Hangup/>
 </Response>`;
 }
@@ -1872,6 +1877,8 @@ return `<?xml version="1.0" encoding="UTF-8"?>
   />
   <Hangup/>
 </Response>`;
+}
+
 // -----------------------------------------------------------------
 // 12. Voice Call Requests (/api/functions/voice-call-request)
 // -----------------------------------------------------------------
