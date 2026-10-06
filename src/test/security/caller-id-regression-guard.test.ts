@@ -6,10 +6,22 @@ import { getDbPool } from "../../../backend/src/services/dbPool";
 
 describe("Authoritative Outbound Caller-ID Regression Guard", () => {
   it("resolves configured outbound line from database when available", async () => {
-    const callerId = await resolveCallerId(null, "USA");
-    // Database has active seeded configured line in E.164 format
-    expect(callerId).toBeDefined();
-    expect(callerId).toMatch(/^\+\d{10,15}$/);
+    const pool = getDbPool();
+    const querySpy = vi.spyOn(pool, "query").mockImplementation(async (sql: any) => {
+      const q = typeof sql === "string" ? sql : sql?.text || "";
+      if (q.includes("voip_outbound_numbers")) {
+        return { rows: [{ phone_number: "+13806003018" }] } as any;
+      }
+      return { rows: [] } as any;
+    });
+
+    try {
+      const callerId = await resolveCallerId(null, "USA");
+      expect(callerId).toBe("+13806003018");
+      expect(callerId).toMatch(/^\+\d{10,15}$/);
+    } finally {
+      querySpy.mockRestore();
+    }
   });
 
   it("resolves configured environment line when database yields no line", async () => {
