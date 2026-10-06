@@ -449,10 +449,14 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         const channel = body.channel || "sms";
         const accountSid = process.env.TWILIO_ACCOUNT_SID;
         const authToken = process.env.TWILIO_AUTH_TOKEN;
-        const fromNumber = process.env.TWILIO_PHONE_NUMBER || "+18482035389";
+        const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
         if (!to) {
           return res.status(400).json({ success: false, error: "Recipient phone number required for Twilio diagnostic probe" });
+        }
+
+        if (!fromNumber) {
+          return res.status(503).json({ success: false, error: "No configured Twilio sender line in environment" });
         }
 
         if (accountSid && authToken) {

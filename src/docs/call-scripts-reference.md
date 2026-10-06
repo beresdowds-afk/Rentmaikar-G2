@@ -1,5 +1,13 @@
 # Rentmaikar Localized Call Scripts Reference
 
+> [!NOTE]
+> **REFERENCE SCRIPT CATALOG — NON-AUTHORITATIVE FOR ARCHITECTURAL ROUTING**
+> This document catalogs IVR dialogue scripts and localization translations.
+> For authoritative outbound call routing, caller-ID resolution, and runtime dispatching, refer to:
+> - `docs/architecture/DOCUMENTATION_AUTHORITY_AND_AI_STUDIO_GUARDRAILS.md`
+> - `docs/architecture/ROUTING_BRIDGE_ADAPTER_ARCHITECTURE.md`
+> - `backend/src/services/voipService.ts`
+
 ## Overview
 
 All outbound IVR calls and automated messages use region-aware, multilingual scripts. Language selection is determined by user profile preferences and phone country code routing (+1 → USA, +234 → Nigeria).

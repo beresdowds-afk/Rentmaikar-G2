@@ -1,5 +1,17 @@
 # RentMaikar Database Cutover & Migration Plan
 
+> [!WARNING]
+> **HISTORICAL / SUPERSEDED ARCHITECTURAL RECORD — NON-AUTHORITATIVE FOR RUNTIME IMPLEMENTATION**
+> This document preserves the historical audit trail and step-by-step checklist of the multi-phase database cutover and migration execution.
+> 
+> **Current Authoritative Architecture References**:
+> - Repository Guardrails & Authority: `docs/architecture/DOCUMENTATION_AUTHORITY_AND_AI_STUDIO_GUARDRAILS.md`
+> - Routing, Bridges & Adapters: `docs/architecture/ROUTING_BRIDGE_ADAPTER_ARCHITECTURE.md`
+> - Interceptor Verification Rules: `docs/architecture/supabase-functions-invoke-interceptor-rule.md`
+> - Communication & Provider Preservation: `docs/architecture/PLATFORM_PROVIDER_PRESERVATION.md`
+>
+> *Authoritative Caller ID Principle*: `canonical region → voip_resolve_outbound_number() → configured eligible outbound line → configured provider`. If unresolvable, the runtime produces a controlled failure rather than defaulting to hardcoded telephone numbers (e.g. historical mentions of static lines such as `+18482035389` are superseded).
+
 ## 1. Migration Overview
 
 - **Legacy Instance**: `https://bwvocmhcledbwqlpcswp.supabase.co` (Managed by Lovable)

@@ -1,5 +1,16 @@
 # Rentmaikar Outgoing Call Flow — Reference
 
+> [!NOTE]
+> **REFERENCE / NON-AUTHORITATIVE ARCHITECTURAL SPECIFICATION**
+> This document illustrates conceptual reference flows for IVR branching, business escalation timing, and retry scheduling.
+>
+> **Current Authoritative Routing & Caller-ID References**:
+> - Repository Guardrails: `docs/architecture/DOCUMENTATION_AUTHORITY_AND_AI_STUDIO_GUARDRAILS.md`
+> - Routing Bridge & Adapters: `docs/architecture/ROUTING_BRIDGE_ADAPTER_ARCHITECTURE.md`
+> - Provider Preservation: `docs/architecture/PLATFORM_PROVIDER_PRESERVATION.md`
+>
+> *Authoritative Caller-ID Principle*: Dynamic outbound line resolution adheres strictly to `canonical region → voip_resolve_outbound_number() → configured eligible outbound line → configured provider`. The runtime produces a controlled failure when no line is configured, never falling back to hard-coded telephone numbers or hardcoded country assumptions.
+
 ## Architecture Overview
 
 ```mermaid

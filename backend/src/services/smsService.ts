@@ -277,8 +277,12 @@ export async function sendApplicationMessage(
     try {
       const isWa = channel === "whatsapp";
       const fromNumber = isWa
-        ? process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER || "+16083843932"
-        : process.env.TWILIO_PHONE_NUMBER || "+18482035389";
+        ? process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER
+        : process.env.TWILIO_PHONE_NUMBER;
+
+      if (!fromNumber) {
+        throw new Error("No configured Twilio sender line in environment");
+      }
 
       const toFormatted = isWa && !to.startsWith("whatsapp:") ? `whatsapp:${to}` : to;
       const fromFormatted = isWa && !fromNumber.startsWith("whatsapp:") ? `whatsapp:${fromNumber}` : fromNumber;

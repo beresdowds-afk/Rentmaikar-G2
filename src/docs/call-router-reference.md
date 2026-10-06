@@ -1,5 +1,12 @@
 # Rentmaikar Call Router & Emergency Handler - Reference Implementation
 
+> [!NOTE]
+> **HISTORICAL / REFERENCE IMPLEMENTATION ONLY — NON-AUTHORITATIVE**
+> This prototype expresses early Express pseudo-code. Authoritative production call routing is implemented via:
+> - `backend/src/services/voipService.ts`
+> - `src/lib/telephony/` and `src/hooks/useTelephonyControl.ts`
+> - Authoritative architecture: `docs/architecture/ROUTING_BRIDGE_ADAPTER_ARCHITECTURE.md` and `docs/architecture/DOCUMENTATION_AUTHORITY_AND_AI_STUDIO_GUARDRAILS.md`.
+
 This is a reference implementation for the call routing and emergency handling APIs.
 These patterns should be adapted into Supabase Edge Functions for production use.
 

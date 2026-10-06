@@ -20,28 +20,7 @@ import { SignJWT } from "jose";
 import pg from "pg";
 import { Request } from "express";
 import { supabaseBackendService } from "./supabaseService";
-
-let pgPool: pg.Pool | null = null;
-
-function getDbPool(): pg.Pool | null {
-  if (!pgPool && process.env.SUPABASE_DB_PASSWORD) {
-    try {
-      pgPool = new pg.Pool({
-        host: "db.jrsydiofzceoeddjogov.supabase.co",
-        port: 5432,
-        user: "postgres",
-        password: process.env.SUPABASE_DB_PASSWORD,
-        database: "postgres",
-        ssl: { rejectUnauthorized: false },
-        max: 5,
-        idleTimeoutMillis: 30000,
-      });
-    } catch (e: any) {
-      console.warn("[VoIP Service] Failed to initialize Postgres pool:", e.message);
-    }
-  }
-  return pgPool;
-}
+import { getDbPool } from "./dbPool";
 
 // -----------------------------------------------------------------
 // Helpers
@@ -313,7 +292,7 @@ const isUuid = (val?: string | null): boolean =>
 export async function resolveCallerId(
   callerUserId: string | null | undefined,
   region: string,
-): Promise<string> {
+): Promise<string | null> {
   const pool = getDbPool();
 
   if (callerUserId && isUuid(callerUserId) && pool) {
@@ -331,12 +310,35 @@ export async function resolveCallerId(
     }
   }
 
-  return (
+  if (pool) {
+    try {
+      const result = await pool.query(
+        `SELECT phone_number FROM public.voip_outbound_numbers 
+         WHERE is_active = true 
+         ORDER BY (region = $1) DESC, is_default DESC, priority ASC 
+         LIMIT 1`,
+        [region],
+      );
+      if (result.rows?.[0]?.phone_number) {
+        return result.rows[0].phone_number;
+      }
+    } catch (error) {
+      console.warn("[VoIP Service] voip_outbound_numbers query failed:", error);
+    }
+  }
+
+  // Fall back strictly to environment-configured provider lines (never hard-coded DIDs)
+  const envConfiguredNumber =
     process.env.TWILIO_VOICE_FROM ||
     process.env.TWILIO_OUTBOUND_NUMBER ||
-    process.env.TWILIO_PHONE_NUMBER ||
-    (region === "Nigeria" ? "+2348139051772" : "+13806003018")
-  );
+    process.env.TWILIO_PHONE_NUMBER;
+
+  if (envConfiguredNumber) {
+    return envConfiguredNumber;
+  }
+
+  // Controlled failure: no eligible configured outbound line found.
+  return null;
 }
 
 // -----------------------------------------------------------------
@@ -1020,6 +1022,15 @@ if (!region) {
 
     if (!to) {
       callResults.push({ recipient: rawPhone, success: false, error: "Invalid phone number" });
+      continue;
+    }
+
+    if (!callerId) {
+      callResults.push({
+        recipient: rawPhone,
+        success: false,
+        error: "No eligible outbound line is configured for this region",
+      });
       continue;
     }
 

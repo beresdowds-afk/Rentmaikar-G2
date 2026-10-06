@@ -1,5 +1,14 @@
 # Rentmaikar Incoming Call Flow
 
+> [!NOTE]
+> **REFERENCE / CONCEPTUAL SPECIFICATION — NON-AUTHORITATIVE FOR RUNTIME TELEPHONY**
+> This document illustrates conceptual inbound IVR menu branches and user tier segregation. Numbers and provider paths depicted (such as placeholder +1-202-555-0123) are illustrative.
+>
+> **Authoritative Inbound Telephony References**:
+> - Repository Guardrails: `docs/architecture/DOCUMENTATION_AUTHORITY_AND_AI_STUDIO_GUARDRAILS.md`
+> - Routing Bridge & Adapters: `docs/architecture/ROUTING_BRIDGE_ADAPTER_ARCHITECTURE.md`
+> - Telephony Controller & Softphone: `backend/src/services/voipService.ts` & `src/lib/telephony/`
+
 ```mermaid
 graph TB
 

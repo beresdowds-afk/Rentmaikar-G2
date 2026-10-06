@@ -1,5 +1,13 @@
 # Rentmaikar Call Strategy Reference
 
+> [!NOTE]
+> **REFERENCE STRATEGY DOCUMENTATION — NON-AUTHORITATIVE FOR PROVIDER ROUTING**
+> This reference outlines priority retry schedules and operational windows.
+> Current authoritative routing and caller-ID principles are governed by:
+> - `docs/architecture/DOCUMENTATION_AUTHORITY_AND_AI_STUDIO_GUARDRAILS.md`
+> - `docs/architecture/ROUTING_BRIDGE_ADAPTER_ARCHITECTURE.md`
+> - `backend/src/services/voipService.ts`
+
 ## Overview
 
 The call strategy module (`supabase/functions/_shared/call-strategy.ts`) governs all outbound system call behavior — retry logic, time-of-day restrictions, and multi-channel escalation.

@@ -40,7 +40,7 @@ export class TwilioAdapter {
   constructor() {
     this.accountSid = process.env.TWILIO_ACCOUNT_SID || '';
     this.authToken = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_API_KEY_SECRET || '';
-    this.masterPhoneNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_NUMBER_USA || '+18482035389';
+    this.masterPhoneNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_NUMBER_USA || '';
   }
 
   isConnected(): boolean {

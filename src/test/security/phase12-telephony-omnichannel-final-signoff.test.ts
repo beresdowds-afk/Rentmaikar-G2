@@ -7,7 +7,7 @@
  * 3. Complete 12-Phase Enterprise Production Cutover Sign-Off
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   mintVoiceAccessToken,
   resolveCallerId,
@@ -17,6 +17,7 @@ import {
   handleEndVoipCall,
   handleGetVoipCallStatus,
 } from "../../../backend/src/services/voipService";
+import { getDbPool } from "../../../backend/src/services/dbPool";
 import {
   parseEmailAddress,
   rewriteSenderAddress,
@@ -42,10 +43,37 @@ describe("Phase 12: Production Telephony, Omnichannel Communications & Final Han
       expect(typeof handleGetVoipCallStatus).toBe("function");
     });
 
-    it("resolves authoritative caller ID in E.164 format", async () => {
-      const callerId = await resolveCallerId(null, "USA");
-      expect(callerId).toBeDefined();
-      expect(callerId).toMatch(/^\+\d{10,15}$/);
+    it("resolves authoritative caller ID in E.164 format when configured", async () => {
+      const prev = process.env.TWILIO_PHONE_NUMBER;
+      try {
+        process.env.TWILIO_PHONE_NUMBER = "+18482035389";
+        const callerId = await resolveCallerId(null, "USA");
+        expect(callerId).toBeDefined();
+        expect(callerId).toMatch(/^\+\d{10,15}$/);
+      } finally {
+        if (prev) process.env.TWILIO_PHONE_NUMBER = prev;
+        else delete process.env.TWILIO_PHONE_NUMBER;
+      }
+    });
+
+    it("returns controlled failure (null) when no eligible line is configured", async () => {
+      const pool = getDbPool();
+      const querySpy = vi.spyOn(pool, "query").mockImplementation(async () => ({ rows: [] } as any));
+      const prevPhone = process.env.TWILIO_PHONE_NUMBER;
+      const prevVoice = process.env.TWILIO_VOICE_FROM;
+      const prevOutbound = process.env.TWILIO_OUTBOUND_NUMBER;
+      try {
+        delete process.env.TWILIO_PHONE_NUMBER;
+        delete process.env.TWILIO_VOICE_FROM;
+        delete process.env.TWILIO_OUTBOUND_NUMBER;
+        const callerId = await resolveCallerId(null, "USA");
+        expect(callerId).toBeNull();
+      } finally {
+        querySpy.mockRestore();
+        if (prevPhone) process.env.TWILIO_PHONE_NUMBER = prevPhone;
+        if (prevVoice) process.env.TWILIO_VOICE_FROM = prevVoice;
+        if (prevOutbound) process.env.TWILIO_OUTBOUND_NUMBER = prevOutbound;
+      }
     });
 
     it("handles TwiML outbound dial routing and rejects missing destination", async () => {
