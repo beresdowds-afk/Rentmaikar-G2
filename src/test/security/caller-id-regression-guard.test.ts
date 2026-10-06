@@ -82,4 +82,82 @@ describe("Authoritative Outbound Caller-ID Regression Guard", () => {
       expect(block).not.toMatch(/return\s*["']\+\d{10,15}["']/);
     }
   });
+
+  it("enforces immediate controlled rejection TwiML in handleVoiceTwimlDial when dialing PSTN without configured line", async () => {
+    const { handleVoiceTwimlDial } = await import("../../../backend/src/services/voipService");
+    const pool = getDbPool();
+    const querySpy = vi.spyOn(pool, "query").mockImplementation(async (sql: any) => {
+      const q = typeof sql === "string" ? sql : sql?.text || "";
+      if (q.includes("get_allowed_regions")) {
+        return { rows: [{ value: "USA", phone_prefix: "+1" }, { value: "Nigeria", phone_prefix: "+234" }] } as any;
+      }
+      return { rows: [] } as any;
+    });
+    const prevPhone = process.env.TWILIO_PHONE_NUMBER;
+    const prevVoice = process.env.TWILIO_VOICE_FROM;
+    const prevOutbound = process.env.TWILIO_OUTBOUND_NUMBER;
+
+    try {
+      delete process.env.TWILIO_PHONE_NUMBER;
+      delete process.env.TWILIO_VOICE_FROM;
+      delete process.env.TWILIO_OUTBOUND_NUMBER;
+
+      const twiml = await handleVoiceTwimlDial({
+        To: "+15551234567",
+        From: "client:agent_1",
+        region: "USA",
+        baseUrl: "https://staging.rentmaikar.com",
+      });
+
+      // Must be an immediate controlled rejection, NEVER an unauthenticated or missing-callerId <Dial>
+      expect(twiml).not.toContain("<Dial");
+      expect(twiml).toContain("<Say");
+      expect(twiml).toContain("No eligible outbound line is configured for this call.");
+      expect(twiml).toContain("<Hangup/>");
+    } finally {
+      querySpy.mockRestore();
+      if (prevPhone) process.env.TWILIO_PHONE_NUMBER = prevPhone;
+      if (prevVoice) process.env.TWILIO_VOICE_FROM = prevVoice;
+      if (prevOutbound) process.env.TWILIO_OUTBOUND_NUMBER = prevOutbound;
+    }
+  });
+
+  it("enforces controlled failure in handleInitiateVoipCall when no eligible outbound line is configured", async () => {
+    const { handleInitiateVoipCall } = await import("../../../backend/src/services/voipService");
+    const pool = getDbPool();
+    const querySpy = vi.spyOn(pool, "query").mockImplementation(async (sql: any) => {
+      const q = typeof sql === "string" ? sql : sql?.text || "";
+      if (q.includes("get_allowed_regions")) {
+        return { rows: [{ value: "USA", phone_prefix: "+1" }, { value: "Nigeria", phone_prefix: "+234" }] } as any;
+      }
+      if (q.includes("INSERT INTO public.voip_calls")) {
+        return { rows: [{ id: "11111111-1111-1111-1111-111111111111" }] } as any;
+      }
+      return { rows: [] } as any;
+    });
+    const prevPhone = process.env.TWILIO_PHONE_NUMBER;
+    const prevVoice = process.env.TWILIO_VOICE_FROM;
+    const prevOutbound = process.env.TWILIO_OUTBOUND_NUMBER;
+
+    try {
+      delete process.env.TWILIO_PHONE_NUMBER;
+      delete process.env.TWILIO_VOICE_FROM;
+      delete process.env.TWILIO_OUTBOUND_NUMBER;
+
+      const res = await handleInitiateVoipCall({
+        callerUserId: null,
+        region: "USA",
+        recipients: [{ phoneNumber: "+15551234567" }],
+        baseUrl: "https://staging.rentmaikar.com",
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.message).toContain("Controlled failure");
+    } finally {
+      querySpy.mockRestore();
+      if (prevPhone) process.env.TWILIO_PHONE_NUMBER = prevPhone;
+      if (prevVoice) process.env.TWILIO_VOICE_FROM = prevVoice;
+      if (prevOutbound) process.env.TWILIO_OUTBOUND_NUMBER = prevOutbound;
+    }
+  });
 });

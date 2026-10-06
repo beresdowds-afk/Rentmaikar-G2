@@ -357,7 +357,7 @@ export async function handleVoiceTwimlDial(params: {
 const from = String(params.From || "").trim();
 const callSid = String(params.CallSid || "");
 const sessionId = String(params.SessionId || "");
-let region = String(params.Region || "").trim();
+let region = String(params.Region || (params as any).region || "").trim();
 const baseUrl = params.baseUrl.replace(/\/+$/, "");
 
 if (!to) {
@@ -415,14 +415,28 @@ if (!region) {
   const callerId = await resolveCallerId(callerUserId, region);
 
   let dialTarget = "";
-  if (to.startsWith("client:") || to.startsWith("user_")) {
+  const isClientTarget = to.startsWith("client:") || to.startsWith("user_");
+
+  if (isClientTarget) {
     const identity = to.replace(/^client:/, "");
     dialTarget = `<Client>${xmlEscape(identity)}</Client>`;
-  } else if (to === "support") {
-    dialTarget = `<Number>${xmlEscape(callerId)}</Number>`;
   } else {
-    const normalizedTo = normalizeE164(to);
-    dialTarget = `<Number>${xmlEscape(normalizedTo || to)}</Number>`;
+    // External PSTN destinations require an authoritative configured outbound line.
+    // When no eligible line is configured, enforce immediate controlled failure.
+    if (!callerId) {
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">No eligible outbound line is configured for this call.</Say>
+  <Hangup/>
+</Response>`;
+    }
+
+    if (to === "support") {
+      dialTarget = `<Number>${xmlEscape(callerId)}</Number>`;
+    } else {
+      const normalizedTo = normalizeE164(to);
+      dialTarget = `<Number>${xmlEscape(normalizedTo || to)}</Number>`;
+    }
   }
 
   // Resolve the canonical Rentmaikar call record.
@@ -947,6 +961,18 @@ if (!region) {
     : null;
 
   const callerId = await resolveCallerId(callerUserId, region);
+  if (!callerId) {
+    return {
+      success: false,
+      callId,
+      message: "Controlled failure: No eligible outbound line is configured for this region",
+      recipients: recipients.map((r: any) => ({
+        recipient: r.phoneNumber || r.phone || "",
+        success: false,
+        error: "No eligible outbound line is configured for this region",
+      })),
+    };
+  }
   const statusCallback =
     `${baseUrl}/api/functions/voip-status-callback`;
 
