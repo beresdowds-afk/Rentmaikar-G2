@@ -343,17 +343,30 @@ Deno.serve(async (req) => {
      * financial reservation for this payout.
      */
     await transitionState(
-      supabase,
-      "payout",
-      payout.id,
-      "captured",
-      "Transfer submitted to Paystack"
-    );
+  supabase,
+  "payout",
+  payout.id,
+  "captured",
+  "transfer submitted to Paystack",
+  {
+    provider_status: body.data.status ?? null,
+    transfer_code: body.data.transfer_code ?? null,
+  },
+);
 
-    if (
-      String(
-        providerBody.data?.status || ""
-      ).toLowerCase() === "success"
+// IMPORTANT:
+// Do not settle or complete the payout from the initiation response.
+// Paystack transfer processing is asynchronous. Final payout completion
+// must come from the verified transfer.success webhook.
+await notifyWithdrawalEvent(supabase, {
+  event: "submitted",
+  ownerId: owner.id,
+  amount: b.amount,
+  currency: acc.currency,
+  provider: "paystack",
+  payoutId: payout.id,
+  destination: acc.bank_name ?? "your bank account",
+});
     ) {
       await transitionState(
         supabase,
