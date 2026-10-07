@@ -1190,23 +1190,118 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       return { status: 200, data: { code: "00000", message: "SUCCESS" } };
     }
 
-    case "process-owner-payouts":
-    case "initiate-paypal-payout":
     case "initiate-paystack-transfer": {
-      try {
-        const result = await paymentService.processOwnerPayout({
-          owner_id: body.owner_id || body.user_id,
-          amount: Number(body.amount),
-          currency: body.currency || "USD",
-          provider: functionName.includes("paystack") ? "paystack" : "paypal",
-          payout_account_id: body.payout_account_id,
-          initiated_by: body.initiated_by,
-        });
-        return { status: 200, data: result };
-      } catch (err: any) {
-        return { status: 400, data: { ok: false, error: err.message } };
-      }
-    }
+  try {
+    const { supabaseBackendService } =
+      await import("../../backend/src/services/supabaseService");
+
+    const edgeResult =
+      await supabaseBackendService.invokeEdgeFunction(
+        "initiate-paystack-transfer",
+        body,
+        {
+          userToken: token,
+          method: "POST",
+          headers: {
+            ...(headers["idempotency-key"]
+              ? {
+                  "idempotency-key": String(
+                    headers["idempotency-key"]
+                  ),
+                }
+              : {}),
+          },
+          timeoutMs: 120000,
+        }
+      );
+
+    return {
+      status: edgeResult.status,
+      data: edgeResult.data ?? {},
+    };
+  } catch (err: any) {
+    console.error(
+      "[FunctionsHandler] initiate-paystack-transfer failed:",
+      err
+    );
+
+    return {
+      status: 502,
+      data: {
+        ok: false,
+        success: false,
+        error:
+          err?.message ||
+          "Paystack transfer request failed",
+      },
+    };
+  }
+}
+
+case "initiate-paypal-payout": {
+  try {
+    const result =
+      await paymentService.processPayPalOwnerPayout({
+        owner_id: body.owner_id || body.user_id,
+        amount: Number(body.amount),
+        currency:
+          String(body.currency || "USD").toUpperCase(),
+        payout_account_id:
+          body.payout_account_id ||
+          body.payoutAccountId,
+        authorization_id:
+          body.authorization_id ||
+          body.authorizationId,
+        note: body.note,
+        idempotency_key:
+          headers["idempotency-key"] ||
+          body.idempotencyKey,
+      });
+
+    return {
+      status: 200,
+      data: {
+        ok: true,
+        ...result,
+      },
+    };
+  } catch (err: any) {
+    return {
+      status: 400,
+      data: {
+        ok: false,
+        error: err?.message || "PayPal payout failed",
+      },
+    };
+  }
+}
+
+case "process-owner-payouts": {
+  try {
+    const result =
+      await paymentService.processOwnerPayout({
+        owner_id: body.owner_id || body.user_id,
+        amount: Number(body.amount),
+        currency: body.currency || "USD",
+        provider: body.provider || "paypal",
+        payout_account_id: body.payout_account_id,
+        initiated_by: body.initiated_by,
+      });
+
+    return {
+      status: 200,
+      data: result,
+    };
+  } catch (err: any) {
+    return {
+      status: 400,
+      data: {
+        ok: false,
+        error: err?.message || "Owner payout failed",
+      },
+    };
+  }
+}
 
     case "persona-create-inquiry": {
       const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
