@@ -399,59 +399,180 @@ class PaymentService {
   }
 
   async createPaystackTransaction(params: PaystackInitParams) {
-        const config = this.getPaystackConfig();
-    const amountVal = Number(params.amount);
-    const purpose = normalizePaymentPurpose(params.purpose);
-    if (!amountVal || amountVal <= 0) {
-      throw new Error("Payment amount must be greater than 0");
+  const config = this.getPaystackConfig();
+
+  if (!config.secretKey) {
+    throw new Error(
+      "Paystack is not configured: PAYSTACK_SECRET_KEY is required"
+    );
+  }
+
+  const amountVal = Number(params.amount);
+  const purpose = normalizePaymentPurpose(params.purpose);
+
+  if (!Number.isFinite(amountVal) || amountVal <= 0) {
+    throw new Error("Payment amount must be greater than 0");
+  }
+
+  const email = (params.email || "").trim();
+
+  if (!email) {
+    throw new Error(
+      "Customer email is required for Paystack transaction"
+    );
+  }
+
+  const currency =
+    (params.currency || "NGN").toUpperCase();
+
+  const reference =
+    `rm_pstk_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(2, 8)}`;
+
+  const res = await fetch(
+    "https://api.paystack.co/transaction/initialize",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.secretKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        amount: Math.round(amountVal * 100),
+        currency,
+        reference,
+        callback_url:
+          params.callback_url ||
+          "https://rentmaikar.com/payment-success",
+        metadata: {
+          rental_id: params.rental_id,
+          vehicle_id: params.vehicle_id,
+          driver_id: params.driver_id,
+          owner_id: params.owner_id,
+          ...params.metadata,
+        },
+      }),
     }
+  );
 
-    const email = (params.email || "").trim();
-    if (!email) {
-      throw new Error("Customer email is required for Paystack transaction");
-    }
+  const payload = await res
+    .json()
+    .catch(() => null);
 
-    const reference = `rm_pstk_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const pool = getDbPool();
+  if (!res.ok) {
+    throw new Error(
+      `Paystack transaction initialization failed [${res.status}]: ${
+        payload?.message ||
+        "Paystack rejected the request"
+      }`
+    );
+  }
 
-    let authUrl = `https://checkout.paystack.com/${reference}`;
-    let accessCode = `code_${reference}`;
+  if (
+    payload?.status !== true ||
+    !payload?.data?.authorization_url ||
+    !payload?.data?.access_code
+  ) {
+    throw new Error(
+      "Paystack transaction initialization returned invalid checkout credentials"
+    );
+  }
 
-    if (config.isConfigured) {
-      try {
-        const res = await fetch("https://api.paystack.co/transaction/initialize", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.secretKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email,
-            amount: Math.round(amountVal * 100), // convert to kobo
-            currency: (params.currency || "NGN").toUpperCase(),
-            reference,
-            callback_url: params.callback_url || "https://rentmaikar.com/payment-success",
-            metadata: {
-              rental_id: params.rental_id,
-              vehicle_id: params.vehicle_id,
-              driver_id: params.driver_id,
-              owner_id: params.owner_id,
-              ...params.metadata,
-            },
-          }),
-        });
+  const pool = getDbPool();
 
-        if (res.ok) {
-          const payload = await res.json();
-          if (payload.status && payload.data) {
-            authUrl = payload.data.authorization_url;
-            accessCode = payload.data.access_code;
-          }
-        }
-      } catch (err: any) {
-        console.warn("[Paystack Service] Initialize error:", err.message);
-      }
-    }
+  let paymentId: string | null = null;
+
+  try {
+    const pRes = await pool.query(
+      `INSERT INTO public.payments (
+        amount,
+        currency,
+        payment_method,
+        status,
+        driver_id,
+        owner_id,
+        rental_id,
+        vehicle_id,
+        purpose,
+        transaction_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id`,
+      [
+        amountVal,
+        currency,
+        "paystack",
+        "pending",
+        params.driver_id || null,
+        params.owner_id || null,
+        params.rental_id || null,
+        params.vehicle_id || null,
+        purpose,
+        reference,
+      ]
+    );
+
+    paymentId =
+      pRes.rows[0]?.id || null;
+  } catch (e: any) {
+    console.error(
+      "[Paystack Service] Error recording payment row:",
+      e.message
+    );
+
+    throw new Error(
+      `Failed to create payment record: ${e.message}`
+    );
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO public.paystack_transactions (
+        reference,
+        access_code,
+        authorization_url,
+        amount,
+        currency,
+        status,
+        payment_id,
+        driver_id,
+        rental_id,
+        vehicle_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        reference,
+        payload.data.access_code,
+        payload.data.authorization_url,
+        amountVal,
+        currency,
+        "pending",
+        paymentId,
+        params.driver_id || null,
+        params.rental_id || null,
+        params.vehicle_id || null,
+      ]
+    );
+  } catch (e: any) {
+    console.error(
+      "[Paystack Service] Error recording paystack transaction:",
+      e.message
+    );
+
+    throw new Error(
+      `Failed to record Paystack transaction: ${e.message}`
+    );
+  }
+
+  return {
+    authorization_url:
+      payload.data.authorization_url,
+    access_code:
+      payload.data.access_code,
+    reference,
+    payment_id: paymentId,
+  };
+}
 
     // Record payment
     let paymentId: string | null = null;
