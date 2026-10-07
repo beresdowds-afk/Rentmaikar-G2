@@ -1751,9 +1751,100 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     });
   }
       }
-      case "process-owner-payouts":
-      case "initiate-paystack-transfer":
-      case "initiate-paypal-payout": {
+      case "initiate-paystack-transfer": {
+  try {
+    const edgeResult =
+      await supabaseBackendService.invokeEdgeFunction(
+        "initiate-paystack-transfer",
+        body,
+        {
+          userToken: clientAuth,
+          method: "POST",
+          headers: {
+            ...(req.headers["x-client-info"]
+              ? {
+                  "x-client-info": String(
+                    req.headers["x-client-info"]
+                  ),
+                }
+              : {}),
+            ...(req.headers["idempotency-key"]
+              ? {
+                  "idempotency-key": String(
+                    req.headers["idempotency-key"]
+                  ),
+                }
+              : {}),
+          },
+          timeoutMs: 120000,
+        }
+      );
+
+    return res
+      .status(edgeResult.status)
+      .json(edgeResult.data ?? {});
+  } catch (err: any) {
+    console.error(
+      "[Backend Functions] initiate-paystack-transfer failed:",
+      err
+    );
+
+    return res.status(502).json({
+      ok: false,
+      success: false,
+      error:
+        err?.message ||
+        "Paystack transfer request failed",
+    });
+  }
+}
+
+case "initiate-paypal-payout": {
+  const ownerId =
+    body.owner_id || body.user_id;
+
+  const amount =
+    Number(body.amount);
+
+  const payoutAccountId =
+    body.payout_account_id ||
+    body.payoutAccountId;
+
+  const authorizationId =
+    body.authorization_id ||
+    body.authorizationId;
+
+  if (!ownerId || !payoutAccountId) {
+    return res.status(400).json({
+      ok: false,
+      error:
+        "owner_id and payout_account_id are required",
+    });
+  }
+
+  const result =
+    await paymentService.processPayPalOwnerPayout({
+      owner_id: ownerId,
+      amount,
+      currency:
+        String(body.currency || "USD").toUpperCase(),
+      payout_account_id:
+        payoutAccountId,
+      authorization_id:
+        authorizationId,
+      note: body.note,
+      idempotency_key:
+        (req.headers["idempotency-key"] as string | undefined) ||
+        body.idempotencyKey,
+    });
+
+  return res.status(200).json({
+    ok: true,
+    ...result,
+  });
+}
+
+case "process-owner-payouts": {
   const ownerId =
     body.owner_id || body.user_id;
 
