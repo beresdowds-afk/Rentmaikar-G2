@@ -148,6 +148,16 @@ Deno.serve(async (req) => {
           }],
         },
       });
+      const led = await postLedgerEntry(supabase, {
+  userId: owner.id,
+  accountType: "owner",
+  currency: "USD",
+  direction: "debit",
+  amount: b.amount,
+  entryType: "payout",
+  ...
+  status: batchStatus === "SUCCESS" ? "posted" : "pending",
+});
     } catch (e) {
       const isAuth = e instanceof PayPalError && (e.status === 401 || e.status === 403);
       const message = e instanceof PayPalError
