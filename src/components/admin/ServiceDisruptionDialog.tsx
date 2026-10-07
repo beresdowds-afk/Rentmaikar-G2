@@ -97,6 +97,10 @@ export function ServiceDisruptionDialog({
     setTimeout(() => setCopiedNotice(false), 2000);
   };
 
+  const safeWindowText = stationaryEnforced
+    ? "Only executes while telemetry confirms speed = 0 mph and ignition OFF. Active trips remain unaffected."
+    : "Interlock disabled; verify telemetry and safe parking state before dispatching any engine stop command.";
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-xl">
@@ -119,7 +123,6 @@ export function ServiceDisruptionDialog({
 
         {isDisrupted ? (
           <div className="space-y-4 text-xs">
-            {/* Active Alert Banner */}
             <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-destructive text-sm flex items-center gap-1.5">
@@ -141,10 +144,9 @@ export function ServiceDisruptionDialog({
               )}
             </div>
 
-            {/* Telematics Safety Status */}
             <div className="p-3 rounded-lg border bg-muted/30 space-y-2">
               <span className="font-semibold text-foreground text-[11px] block">
-                Telematics Safety &amp; Interlock Verification:
+                Telemetry Safety &amp; Interlock Verification
               </span>
               <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
@@ -161,15 +163,14 @@ export function ServiceDisruptionDialog({
                 </div>
                 <div className="flex items-center gap-1.5 text-foreground">
                   <FileText className="h-3.5 w-3.5 text-primary" />
-                  Clause 3 Enforced
+                  Provider dispatch: telemetry-dispatch
                 </div>
               </div>
             </div>
 
-            {/* Quick Resolution Actions */}
             <div className="space-y-2 pt-2">
               <span className="font-semibold text-foreground text-xs block">
-                Support Resolution Options:
+                Support Resolution Options
               </span>
               <div className="flex flex-col sm:flex-row gap-2">
                 <Button
@@ -191,7 +192,7 @@ export function ServiceDisruptionDialog({
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground text-center">
-                Releasing the starter will dispatch an immediate <code className="bg-muted px-1 py-0.5 rounded text-[10px]">engineResume</code> telematics command and reset vehicle status to active.
+                Releasing the starter dispatches an <code className="bg-muted px-1 py-0.5 rounded text-[10px]">engineResume</code> command through the active telemetry provider and clears the lock only after the safe-window check passes.
               </p>
             </div>
           </div>
@@ -200,22 +201,25 @@ export function ServiceDisruptionDialog({
             <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 space-y-1">
               <div className="font-semibold flex items-center gap-1.5">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                Stationary Safety Mandate
+                Safe-Window Enforcement
               </div>
               <p className="text-[11px] leading-relaxed">
-                Service disruption engages starter restriction ONLY when the vehicle is verified stationary (0 mph) with the ignition off. It will never interrupt an active trip on a roadway.
+                Service disruption is only valid when vehicle telemetry confirms speed = 0 mph and ignition is OFF. This prevents immobilization during an active trip or roadway movement.
               </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-foreground">Disruption / Call-In Reason</label>
+              <label className="text-xs font-semibold text-foreground">
+                Disruption / Call-In Reason
+                <span className="text-muted-foreground"> (backend rules apply)</span>
+              </label>
               <Select value={reason} onValueChange={setReason}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue placeholder="Select disruption reason" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="36h Payment Default">36h+ Daily Payment Default</SelectItem>
-                  <SelectItem value="72h Payment Default">72h+ Weekly Payment Default</SelectItem>
+                  <SelectItem value="24h Payment Default">24h+ Daily Payment Default</SelectItem>
+                  <SelectItem value="36h Payment Default">36h+ Weekly Payment Default</SelectItem>
                   <SelectItem value="24-Hour Call-In Non-Compliance">24-Hour Call-In Non-Compliance</SelectItem>
                   <SelectItem value="Adverse Referee Attestation">Adverse Referee / Guarantor Attestation</SelectItem>
                   <SelectItem value="Boundary Geofence Breach">Boundary / Geofence Breach</SelectItem>
@@ -223,30 +227,50 @@ export function ServiceDisruptionDialog({
                   <SelectItem value="Other">Other (Custom Note)</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-[10px] text-muted-foreground italic">
+                Daily default = 24h, weekly default = 36h. Enforcement is handled by telemetry-safe dispatch rules, not by the UI alone.
+              </p>
             </div>
 
             <div className="space-y-2">
               <label className="text-xs font-semibold text-foreground">Operational Notes / Context</label>
               <Textarea
-                placeholder="Provide incident details, ticket number, or driver communication log..."
+                placeholder="Provide incident details, ticket number, driver communication log, or proof of safe parking..."
                 value={customNote}
                 onChange={(e) => setCustomNote(e.target.value)}
                 className="text-xs h-20"
               />
             </div>
 
-            <div className="p-3 rounded-lg border bg-muted/20 flex items-center justify-between">
+            <div className="p-3 rounded-lg border bg-muted/20 flex items-center justify-between gap-3">
               <div>
                 <span className="font-semibold text-foreground text-xs block">
-                  Enforce Stationary Interlock (Speed 0 mph)
+                  Stationary Interlock Gate
                 </span>
                 <span className="text-[11px] text-muted-foreground">
-                  Safety lock ensures immobilization commands only execute when safely parked.
+                  {safeWindowText}
                 </span>
               </div>
-              <Badge variant="outline" className="text-emerald-600 border-emerald-500/30 bg-emerald-500/10 font-semibold">
-                Enforced (Mandatory)
+              <Badge
+                variant={stationaryEnforced ? "outline" : "secondary"}
+                className={stationaryEnforced
+                  ? "text-emerald-600 border-emerald-500/30 bg-emerald-500/10 font-semibold"
+                  : "text-amber-600 border-amber-500/30 bg-amber-500/10 font-semibold"}
+              >
+                {stationaryEnforced ? "Interlock ON" : "Interlock OFF"}
               </Badge>
+            </div>
+
+            <div className="p-3 rounded-lg border bg-muted/20 flex items-center justify-between gap-3">
+              <div>
+                <span className="font-semibold text-foreground text-xs block">
+                  Provider Dispatch Flow
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  Active telemetry provider resolves device state, then sends <code className="bg-muted px-1 py-0.5 rounded text-[10px]">immobilize</code> / <code className="bg-muted px-1 py-0.5 rounded text-[10px]">engineStop</code> or the reverse through telemetry-dispatch.
+                </span>
+              </div>
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
             </div>
           </div>
         )}
