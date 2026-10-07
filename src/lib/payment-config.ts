@@ -3,6 +3,11 @@
 // - Drivers pay: base + 20% (admin fee)
 // - Owners receive: base - 20% (management fee)
 // - Platform earns: 40% total
+//
+// Business rule source of truth:
+// - Daily plans: 24h overdue window with final lockdown at 24h
+// - Weekly plans: 36h overdue window with final lockdown at 36h
+// - Notification cadence: 3 stages per plan type
 
 export const PAYMENT_CONFIG = {
   // Fee percentages
@@ -18,18 +23,18 @@ export const PAYMENT_CONFIG = {
   DAILY_DEBIT_TIME: '00:01', // 12:01 AM
   WEEKLY_PAYOUT_DAY: 5, // Friday (0 = Sunday)
   
-  // Default sequence for WEEKLY payments (72 hours / 3 days)
+  // Default sequence for WEEKLY payments (36 hours / 3 days)
   WEEKLY_DEFAULT: {
-    GRACE_PERIOD_HOURS: 72,
-    NOTIFICATION_HOURS: [24, 48, 72], // 3 notifications at 24-hour intervals
-    LOCKDOWN_AFTER_HOURS: 72,
-  },
-  
-  // Default sequence for DAILY payments (36 hours)
-  DAILY_DEFAULT: {
     GRACE_PERIOD_HOURS: 36,
     NOTIFICATION_HOURS: [12, 24, 36], // 3 notifications at 12-hour intervals
     LOCKDOWN_AFTER_HOURS: 36,
+  },
+  
+  // Default sequence for DAILY payments (24 hours)
+  DAILY_DEFAULT: {
+    GRACE_PERIOD_HOURS: 24,
+    NOTIFICATION_HOURS: [8, 16, 24], // 3 notifications at 8-hour intervals
+    LOCKDOWN_AFTER_HOURS: 24,
   },
   
   // Currency settings
@@ -262,3 +267,4 @@ export function getHoursUntilLockdown(paymentDefault: PaymentDefault): number {
   const config = getDefaultConfig(paymentDefault.paymentFrequency);
   return Math.max(0, config.LOCKDOWN_AFTER_HOURS - paymentDefault.hoursOverdue);
 }
+
