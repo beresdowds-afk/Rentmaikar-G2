@@ -124,51 +124,22 @@ Deno.serve(async (req) => {
       destination: acc.bank_name ?? "your bank account",
     });
 
-    const resp = await fetch("https://api.paystack.co/transfer", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source: "balance", amount: amountMinor, currency: acc.currency,
-        recipient: acc.recipient_code, reason: b.reason ?? "RentMaikar owner payout", reference,
-      }),
-    });
-    const body = await resp.json();
-    if (!resp.ok || !body?.status) {
-      await transitionState(supabase, "payout", payout.id, "failed", body?.message ?? "transfer failed");
-      await supabase.from("owner_payouts")
-        .update({ failure_reason: body?.message ?? "transfer failed", raw_payload: body ?? null })
-        .eq("id", payout.id);
-      await completeIdempotencyKey(supabase, idemKey, "failed");
-      await notifyWithdrawalEvent(supabase, {
-        event: "failed", ownerId: owner.id, amount: b.amount, currency: acc.currency,
-        provider: "paystack", payoutId: payout.id,
-        reason: body?.message ?? "transfer failed",
-      });
-      return json({ error: body?.message ?? "transfer failed" }, 502);
-    }
+        /*
+     * IMPORTANT ACCOUNTING ORDER
+     *
+     * The owner payout debit MUST exist before money is sent
+     * to Paystack.
+     *
+     * This is the single authoritative payout debit.
+     *
+     * Do NOT create another debit from the Paystack webhook.
+     * On successful webhook reconciliation, the existing debit
+     * remains the debit for this payout.
+     *
+     * On failed webhook reconciliation, the existing debit is
+     * reversed once.
+     */
 
-    await supabase.from("owner_payouts")
-      .update({ transfer_code: body.data.transfer_code, raw_payload: body.data })
-      .eq("id", payout.id);
-    await transitionState(supabase, "payout", payout.id, "captured", "transfer submitted to Paystack");
-    if (body.data.status === "success") {
-      await transitionState(supabase, "payout", payout.id, "settled", "Paystack reported success");
-      await transitionState(supabase, "payout", payout.id, "completed", "payout complete");
-      await notifyWithdrawalEvent(supabase, {
-        event: "completed", ownerId: owner.id, amount: b.amount, currency: acc.currency,
-        provider: "paystack", payoutId: payout.id,
-        destination: acc.bank_name ?? "your bank account",
-      });
-    } else {
-      await notifyWithdrawalEvent(supabase, {
-        event: "submitted", ownerId: owner.id, amount: b.amount, currency: acc.currency,
-        provider: "paystack", payoutId: payout.id,
-        destination: acc.bank_name ?? "your bank account",
-      });
-    }
-
-    // Ledger: reserve the payout against the owner wallet immediately; the
-    // webhook flips it to settled or reverses it on failure.
     const led = await postLedgerEntry(supabase, {
       userId: owner.id,
       accountType: "owner",
@@ -181,11 +152,276 @@ Deno.serve(async (req) => {
       referenceId: payout.id,
       provider: "paystack",
       providerReference: reference,
-      description: "Owner payout requested",
-      status: "pending",
+      description: "Owner payout reserved before Paystack transfer",
+      status: "posted",
     });
-    if (!led.ok) console.error("[initiate-paystack-transfer] ledger error:", led.error);
 
+    if (!led.ok) {
+      console.error(
+        "[initiate-paystack-transfer] Unable to reserve wallet funds:",
+        led.error
+      );
+
+      await transitionState(
+        supabase,
+        "payout",
+        payout.id,
+        "failed",
+        "Wallet reservation failed"
+      );
+
+      await supabase
+        .from("owner_payouts")
+        .update({
+          failure_reason:
+            led.error ||
+            "Unable to reserve wallet funds",
+          raw_payload: {
+            ledger_error: led.error,
+          },
+        })
+        .eq("id", payout.id);
+
+      await completeIdempotencyKey(
+        supabase,
+        idemKey,
+        "failed",
+        {
+          error:
+            led.error ||
+            "Unable to reserve wallet funds",
+        }
+      );
+
+      await notifyWithdrawalEvent(supabase, {
+        event: "failed",
+        ownerId: owner.id,
+        amount: b.amount,
+        currency: acc.currency,
+        provider: "paystack",
+        payoutId: payout.id,
+        reason:
+          led.error ||
+          "Unable to reserve wallet funds",
+      });
+
+      return json(
+        {
+          error:
+            led.error ||
+            "Unable to reserve wallet funds",
+        },
+        500
+      );
+    }
+
+    /*
+     * The wallet debit now exists.
+     *
+     * Only after this succeeds may the external PSP be called.
+     */
+    const resp = await fetch(
+      "https://api.paystack.co/transfer",
+      {
+        method: "POST",
+        headers: {
+          Authorization:
+            `Bearer ${secret}`,
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          source: "balance",
+          amount: amountMinor,
+          currency: acc.currency,
+          recipient: acc.recipient_code,
+          reason:
+            b.reason ??
+            "RentMaikar owner payout",
+          reference,
+        }),
+      }
+    );
+
+    const providerBody =
+      await resp.json().catch(() => null);
+
+    if (!resp.ok || providerBody?.status !== true) {
+      /*
+       * Paystack did not accept the transfer.
+       *
+       * The wallet debit already exists, so immediately
+       * reverse THAT debit. Do not create another payout debit.
+       */
+      const reversal = await supabase.rpc(
+        "reverse_wallet_entry",
+        {
+          _entry_id: led.entryId,
+          _reason:
+            providerBody?.message ||
+            "Paystack transfer failed",
+        }
+      );
+
+      if (reversal.error) {
+        console.error(
+          "[initiate-paystack-transfer] CRITICAL: wallet reservation reversal failed:",
+          reversal.error
+        );
+      }
+
+      await transitionState(
+        supabase,
+        "payout",
+        payout.id,
+        "failed",
+        providerBody?.message ||
+          "Paystack transfer failed"
+      );
+
+      await supabase
+        .from("owner_payouts")
+        .update({
+          failure_reason:
+            providerBody?.message ||
+            "transfer failed",
+          raw_payload:
+            providerBody ?? null,
+        })
+        .eq("id", payout.id);
+
+      await completeIdempotencyKey(
+        supabase,
+        idemKey,
+        "failed",
+        {
+          error:
+            providerBody?.message ||
+            "transfer failed",
+        }
+      );
+
+      await notifyWithdrawalEvent(supabase, {
+        event: "failed",
+        ownerId: owner.id,
+        amount: b.amount,
+        currency: acc.currency,
+        provider: "paystack",
+        payoutId: payout.id,
+        reason:
+          providerBody?.message ||
+          "transfer failed",
+      });
+
+      return json(
+        {
+          error:
+            providerBody?.message ||
+            "transfer failed",
+        },
+        502
+      );
+    }
+
+    await supabase
+      .from("owner_payouts")
+      .update({
+        transfer_code:
+          providerBody.data?.transfer_code ??
+          null,
+        raw_payload:
+          providerBody.data ?? providerBody,
+      })
+      .eq("id", payout.id);
+
+    /*
+     * Paystack has accepted the transfer.
+     *
+     * Do NOT post another wallet debit here.
+     *
+     * The debit created above is the authoritative
+     * financial reservation for this payout.
+     */
+    await transitionState(
+      supabase,
+      "payout",
+      payout.id,
+      "captured",
+      "Transfer submitted to Paystack"
+    );
+
+    if (
+      String(
+        providerBody.data?.status || ""
+      ).toLowerCase() === "success"
+    ) {
+      await transitionState(
+        supabase,
+        "payout",
+        payout.id,
+        "settled",
+        "Paystack reported success"
+      );
+
+      await transitionState(
+        supabase,
+        "payout",
+        payout.id,
+        "completed",
+        "Payout complete"
+      );
+
+      await notifyWithdrawalEvent(supabase, {
+        event: "completed",
+        ownerId: owner.id,
+        amount: b.amount,
+        currency: acc.currency,
+        provider: "paystack",
+        payoutId: payout.id,
+        destination:
+          acc.bank_name ??
+          "your bank account",
+      });
+    } else {
+      /*
+       * Paystack has accepted the transfer but has not
+       * necessarily completed it.
+       *
+       * Leave it in processing/captured until the webhook
+       * gives the final provider state.
+       */
+      await notifyWithdrawalEvent(supabase, {
+        event: "submitted",
+        ownerId: owner.id,
+        amount: b.amount,
+        currency: acc.currency,
+        provider: "paystack",
+        payoutId: payout.id,
+        destination:
+          acc.bank_name ??
+          "your bank account",
+      });
+    }
+
+    const { data: finalPayout } =
+      await supabase
+        .from("owner_payouts")
+        .select("*")
+        .eq("id", payout.id)
+        .maybeSingle();
+
+    await completeIdempotencyKey(
+      supabase,
+      idemKey,
+      "succeeded",
+      {
+        payout: finalPayout,
+      }
+    );
+
+    return json({
+      payout: finalPayout,
+    });
     const { data: finalPayout } = await supabase.from("owner_payouts")
       .select("*").eq("id", payout.id).maybeSingle();
 
