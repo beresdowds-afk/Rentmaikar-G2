@@ -600,7 +600,7 @@ class PaymentService {
           params.owner_id || null,
                     params.rental_id || null,
           params.vehicle_id || null,
-          purpose,
+          purpose, by to use by
           reference,
         ]
       );
