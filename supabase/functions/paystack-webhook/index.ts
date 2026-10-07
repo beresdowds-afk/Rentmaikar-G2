@@ -188,44 +188,74 @@ Deno.serve(async (req) => {
       }
     }
 
-  } else if (evt.event === "transfer.success" || evt.event === "transfer.failed") {
-    const ref = evt?.data?.reference ?? evt?.data?.transfer_code;
-    if (ref) {
-      const success = evt.event === "transfer.success";
-      const { data: payoutRow } = await supabase.from("owner_payouts")
-        .update({
-          status: success ? "completed" : "failed",
-          processed_at: new Date().toISOString(),
-          failure_reason: success ? null : evt.data.reason ?? "transfer failed",
-          raw_payload: evt.data,
-        }).eq("transfer_reference", ref).select("id, owner_id, amount, currency").maybeSingle();
+  } else if (
+  evt.event === "transfer.success" ||
+  evt.event === "transfer.failed"
+) {
+  const ref = evt?.data?.reference ?? evt?.data?.transfer_code;
 
-      if (payoutRow?.id) {
-        await transitionState(
-          supabase, "payout", payoutRow.id,
-          success ? "completed" : "failed",
-          success ? "paystack transfer.success" : (evt.data.reason ?? "transfer failed"),
-          {},
-          logger,
-        );
+  if (ref) {
+    const success = evt.event === "transfer.success";
+
+    const { data: payoutRow, error: payoutError } = await supabase
+      .from("owner_payouts")
+      .update({
+        status: success ? "completed" : "failed",
+        processed_at: new Date().toISOString(),
+        failure_reason: success
+          ? null
+          : evt.data.reason ?? "transfer failed",
+        raw_payload: evt.data,
+      })
+      .eq("transfer_reference", ref)
+      .select("id, owner_id, amount, currency")
+      .maybeSingle();
+
+    if (payoutError || !payoutRow) {
+      console.error(
+        "[paystack-webhook] Unable to reconcile owner payout:",
+        payoutError
+      );
+      throw new Error("Owner payout reconciliation failed");
+    }
+
+    /*
+     * IMPORTANT:
+     * Do NOT call postLedgerEntry() here.
+     *
+     * The payout debit/reservation was already created when the
+     * payout was initiated. Creating another debit here would
+     * double-charge the owner's wallet.
+     *
+     * Success:
+     *   Keep/settle the existing payout reservation.
+     *
+     * Failure:
+     *   Release/reverse the existing reservation.
+     */
+    const reconciliation = await reconcileExistingPayoutLedgerEntry(
+      supabase,
+      {
+        payoutId: payoutRow.id,
+        ownerId: payoutRow.owner_id,
+        amount: Number(payoutRow.amount),
+        currency: payoutRow.currency,
+        outcome: success ? "settled" : "reversed",
+        providerReference: ref,
+        providerPayload: evt.data,
       }
+    );
 
-      if (payoutRow?.owner_id) {
+    if (!reconciliation.ok) {
+      console.error(
+        "[paystack-webhook] Payout ledger reconciliation failed:",
+        reconciliation.error
+      );
 
-        const res = await postLedgerEntry(supabase, {
-          userId: payoutRow.owner_id,
-          accountType: "owner",
-          currency: payoutRow.currency,
-          direction: success ? "debit" : "credit",
-          amount: Number(payoutRow.amount),
-          entryType: success ? "payout" : "payout_reversal",
-          idempotencyKey: `payout:${payoutRow.id}:${success ? "settled" : "reversed"}`,
-          referenceTable: "owner_payouts",
-          referenceId: payoutRow.id,
-          provider: "paystack",
-          providerReference: ref,
-          description: success ? "Owner payout settled" : "Owner payout failed — funds returned",
-        });
+      throw new Error("Payout ledger reconciliation failed");
+    }
+  }
+}
         if (!res.ok) console.error("[paystack-webhook] ledger payout error:", res.error);
 
         await notifyWithdrawalEvent(supabase, {
