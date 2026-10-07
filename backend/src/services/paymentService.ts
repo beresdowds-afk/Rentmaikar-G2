@@ -642,88 +642,136 @@ class PaymentService {
   }
 
   async verifyPaystackTransaction(reference: string) {
-    if (!reference) {
-      throw new Error("Missing required reference for verification");
+  if (!reference) {
+    throw new Error(
+      "Missing required reference for verification"
+    );
+  }
+
+  const config = this.getPaystackConfig();
+
+  if (!config.secretKey) {
+    throw new Error(
+      "Paystack is not configured: PAYSTACK_SECRET_KEY is required"
+    );
+  }
+
+  const pool = getDbPool();
+
+  const res = await fetch(
+    `https://api.paystack.co/transaction/verify/${encodeURIComponent(
+      reference
+    )}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization:
+          `Bearer ${config.secretKey}`,
+      },
     }
+  );
 
-    const config = this.getPaystackConfig();
-    const pool = getDbPool();
+  const payload = await res
+    .json()
+    .catch(() => null);
 
-    let isSuccess = false;
-    let gatewayResponse = "Approved";
+  if (!res.ok) {
+    throw new Error(
+      `Paystack transaction verification failed [${res.status}]: ${
+        payload?.message ||
+        "Paystack rejected the verification request"
+      }`
+    );
+  }
 
-    if (config.isConfigured) {
-      try {
-        const res = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${config.secretKey}`,
-          },
-        });
+  if (payload?.status !== true || !payload?.data) {
+    throw new Error(
+      "Paystack returned an invalid verification response"
+    );
+  }
 
-        if (res.ok) {
-          const payload = await res.json();
-          if (payload.status && payload.data?.status === "success") {
-            isSuccess = true;
-            gatewayResponse = payload.data.gateway_response || "Successful";
-          }
-        }
-      } catch (err: any) {
-        console.warn("[Paystack Service] Verify error:", err.message);
-      }
-    } else {
-      isSuccess = true;
-    }
+  const providerStatus =
+    String(payload.data.status || "").toLowerCase();
 
-    if (isSuccess) {
-      await pool.query(
-        `UPDATE public.paystack_transactions
-         SET status = 'success',
-             gateway_response = $1,
-             updated_at = now()
-         WHERE reference = $2`,
-        [gatewayResponse, reference]
-      );
+  const isSuccess =
+    providerStatus === "success";
 
-      const txRes = await pool.query(
-        `SELECT * FROM public.paystack_transactions WHERE reference = $1`,
-        [reference]
-      );
-      const tx = txRes.rows[0];
+  const gatewayResponse =
+    payload.data.gateway_response ||
+    (isSuccess
+      ? "Successful"
+      : providerStatus || "Verification incomplete");
 
-      if (tx?.payment_id) {
-        await pool.query(
-          `UPDATE public.payments
-           SET status = 'completed',
-               processed_at = now(),
-               updated_at = now()
-           WHERE id = $1`,
-          [tx.payment_id]
-        );
-      }
-
-      if (tx && Number(tx.amount) > 0) {
-        await this.settlePaymentFinancials({
-          paymentId: tx.payment_id,
-          provider: "paystack",
-          providerReference: reference,
-          driverId: tx.driver_id,
-          rentalId: tx.rental_id,
-          vehicleId: tx.vehicle_id,
-          amount: Number(tx.amount),
-          currency: tx.currency || "NGN",
-        });
-      }
-    }
-
+  if (!isSuccess) {
     return {
-      success: isSuccess,
-      status: isSuccess ? "success" : "failed",
+      success: false,
+      status: providerStatus || "failed",
       reference,
       gateway_response: gatewayResponse,
     };
   }
 
+  await pool.query(
+    `UPDATE public.paystack_transactions
+     SET status = 'success',
+         gateway_response = $1,
+         updated_at = now()
+     WHERE reference = $2`,
+    [
+      gatewayResponse,
+      reference,
+    ]
+  );
+
+  const txRes = await pool.query(
+    `SELECT *
+     FROM public.paystack_transactions
+     WHERE reference = $1`,
+    [reference]
+  );
+
+  const tx = txRes.rows[0];
+
+  if (!tx) {
+    throw new Error(
+      `Paystack transaction record not found for reference ${reference}`
+    );
+  }
+
+  if (tx.payment_id) {
+    await pool.query(
+      `UPDATE public.payments
+       SET status = 'completed',
+           processed_at = now(),
+           updated_at = now()
+       WHERE id = $1`,
+      [tx.payment_id]
+    );
+  }
+
+  if (
+    tx.payment_id &&
+    Number(tx.amount) > 0
+  ) {
+    await this.settlePaymentFinancials({
+      paymentId: tx.payment_id,
+      provider: "paystack",
+      providerReference: reference,
+      driverId: tx.driver_id,
+      rentalId: tx.rental_id,
+      vehicleId: tx.vehicle_id,
+      amount: Number(tx.amount),
+      currency: tx.currency || "NGN",
+    });
+  }
+
+  return {
+    success: true,
+    status: "success",
+    reference,
+    gateway_response: gatewayResponse,
+  };
+}
   // ---------------------------------------------------------------------------
   // Financial Settlement, Ledger, and Owner Earnings
   // ---------------------------------------------------------------------------
