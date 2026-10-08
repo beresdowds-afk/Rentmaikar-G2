@@ -1235,52 +1235,68 @@ case "opay-webhook": {
   };
 }
     case "initiate-paystack-transfer": {
+  /*
+   * Paystack payout has its own authoritative implementation.
+   * Never route it through the generic PayPal/ledger-only payout method.
+   */
   try {
-    const { supabaseBackendService } =
-      await import("../../backend/src/services/supabaseService");
+    const { createClient } =
+      await import("@supabase/supabase-js");
 
-    const edgeResult =
-      await supabaseBackendService.invokeEdgeFunction(
-        "initiate-paystack-transfer",
-        body,
-        {
-          userToken: token,
-          method: "POST",
-          headers: {
-            ...(headers["idempotency-key"]
-              ? {
-                  "idempotency-key": String(
-                    headers["idempotency-key"]
-                  ),
-                }
-              : {}),
-          },
-          timeoutMs: 120000,
-        }
+    const supabase =
+      createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
       );
 
+    const result =
+      await supabase.functions.invoke(
+        "initiate-paystack-transfer",
+        {
+          body: body,
+          headers: {
+            Authorization:
+              headers.authorization ||
+              headers.Authorization ||
+              "",
+            "X-Idempotency-Key":
+              headers["x-idempotency-key"] ||
+              headers["idempotency-key"] ||
+              body.idempotencyKey ||
+              "",
+          },
+        },
+      );
+
+    if (result.error) {
+      return {
+        status: 502,
+        data: {
+          ok: false,
+          error:
+            result.error.message ||
+            "Paystack transfer failed",
+        },
+      };
+    }
+
     return {
-      status: edgeResult.status,
-      data: edgeResult.data ?? {},
+      status: 200,
+      data: result.data,
     };
   } catch (err: any) {
-    console.error(
-      "[FunctionsHandler] initiate-paystack-transfer failed:",
-      err
-    );
-
     return {
       status: 502,
       data: {
         ok: false,
-        success: false,
         error:
           err?.message ||
-          "Paystack transfer request failed",
+          "Paystack transfer failed",
       },
     };
   }
 }
+
 
 case "initiate-paypal-payout": {
   try {
@@ -1304,14 +1320,12 @@ case "initiate-paypal-payout": {
 
     return {
       status: 200,
-      data: {
-        ok: true,
-        ...result,
+      data: result,
       },
     };
   } catch (err: any) {
     return {
-      status: 400,
+      status: 502,
       data: {
         ok: false,
         error: err?.message || "PayPal payout failed",
