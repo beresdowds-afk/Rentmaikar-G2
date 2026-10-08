@@ -49,6 +49,20 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
 });
 
 // Resilient Edge Function gateway: Routes all available edge functions between frontend files and backend files
+const PAYMENT_AUTHORITY_FUNCTIONS = new Set([
+  "create-paypal-order",
+  "capture-paypal-order",
+  "initiate-paypal-payout",
+  "paypal-webhook",
+  "create-paystack-transaction",
+  "verify-paystack-transaction",
+  "initiate-paystack-transfer",
+  "paystack-webhook",
+  "create-opay-order",
+  "verify-opay-order",
+  "opay-webhook",
+  "process-owner-payouts",
+]);
 const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "accident-emergency-dispatch",
   "activate-subscription",
@@ -441,6 +455,48 @@ singletonFunctions.invoke = (async (functionName: string, options?: any) => {
   // Authoritative Backend Functions:
   // Cloud Run/backend gateway is the ONLY frontend execution path.
   // Do not fall back to direct Supabase Edge Function invocation here.
+    /*
+   * Payment authority:
+   *
+   * Browser payment operations must go through BackendBridge.
+   * Never let these operations fall through to direct Supabase
+   * Edge Function execution.
+   */
+  if (PAYMENT_AUTHORITY_FUNCTIONS.has(functionName)) {
+    const bridge = await getLinkBridge();
+
+    if (!bridge) {
+      return {
+        data: null,
+        error: new Error(
+          `Payment operation '${functionName}' requires BackendBridge`,
+        ),
+      };
+    }
+
+    const bridgeResult =
+      await bridge.invokeEdgeFunction(
+        functionName,
+        options?.body,
+        options,
+      );
+
+    if (bridgeResult.error || !bridgeResult.data) {
+      return {
+        data: null,
+        error:
+          bridgeResult.error ||
+          new Error(
+            `Payment operation '${functionName}' failed`,
+          ),
+      };
+    }
+
+    return {
+      data: bridgeResult.data,
+      error: null,
+    };
+  }
   if (LOCAL_GATEWAY_FUNCTIONS.has(functionName)) {
     return await callLocalGateway(functionName, options);
   }
