@@ -202,7 +202,171 @@ Deno.serve(async (req) => {
     }
   }
 
+  } else if (
+    eventType === "PAYMENT.PAYOUTSBATCH.PROCESSING" ||
+    eventType === "PAYMENT.PAYOUTSBATCH.SUCCESS" ||
+    eventType === "PAYMENT.PAYOUTSBATCH.DENIED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.FAILED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.BLOCKED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.CANCELED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.RETURNED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.REFUNDED" ||
+    eventType === "PAYMENT.PAYOUTS-ITEM.UNCLAIMED"
+  ) {
+    const batchId =
+      resource?.payout_batch_id ??
+      resource?.payout_batch_header?.payout_batch_id ??
+      resource?.batch_header?.payout_batch_id;
 
+    const senderItemId =
+      resource?.payout_item?.sender_item_id ??
+      resource?.sender_item_id ??
+      resource?.payout_item?.sender_item_id;
+
+    const providerReference = senderItemId || batchId;
+
+    if (!providerReference && !batchId) {
+      logger.warn("payout.webhook.missing_reference");
+    } else {
+      let payoutQuery = supabase
+        .from("owner_payouts")
+        .select("id, owner_id, amount, currency, status, transfer_reference, transfer_code")
+        .eq("provider", "paypal")
+        .limit(1);
+
+      if (senderItemId) {
+        payoutQuery = payoutQuery.eq("transfer_reference", senderItemId);
+      } else {
+        payoutQuery = payoutQuery.eq("transfer_code", batchId);
+      }
+
+      const { data: payout } = await payoutQuery.maybeSingle();
+
+      if (!payout) {
+        logger.warn("payout.webhook.unmatched", {
+          batch_id: batchId ?? null,
+          sender_item_id: senderItemId ?? null,
+          event_type: eventType,
+        });
+      } else {
+        const terminalSuccess =
+          eventType === "PAYMENT.PAYOUTSBATCH.SUCCESS" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED";
+
+        const terminalFailure =
+          eventType === "PAYMENT.PAYOUTSBATCH.DENIED" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.FAILED" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.BLOCKED" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.CANCELED" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.RETURNED" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.REFUNDED" ||
+          eventType === "PAYMENT.PAYOUTS-ITEM.UNCLAIMED";
+
+        if (
+          eventType === "PAYMENT.PAYOUTSBATCH.PROCESSING"
+        ) {
+          await transitionState(
+            supabase,
+            "payout",
+            payout.id,
+            "captured",
+            "PayPal payout batch processing",
+            {
+              provider_event: eventType,
+              payout_batch_id: batchId ?? null,
+            },
+          );
+        } else if (terminalSuccess) {
+          /*
+           * FINAL SUCCESS ONLY.
+           */
+          const settled = await transitionState(
+            supabase,
+            "payout",
+            payout.id,
+            "settled",
+            "PayPal confirmed payout success",
+            {
+              provider_event: eventType,
+              payout_batch_id: batchId ?? null,
+              payout_item_id: resource?.payout_item_id ?? null,
+            },
+          );
+
+          if (settled.ok) {
+            await transitionState(
+              supabase,
+              "payout",
+              payout.id,
+              "completed",
+              "PayPal payout completed after verified webhook",
+              {
+                provider_event: eventType,
+                payout_batch_id: batchId ?? null,
+                payout_item_id: resource?.payout_item_id ?? null,
+              },
+            );
+          }
+
+          await supabase
+            .from("owner_payouts")
+            .update({
+              processed_at: new Date().toISOString(),
+              raw_payload: evt,
+            })
+            .eq("id", payout.id);
+        } else if (terminalFailure) {
+          /*
+           * The reservation was already debited before the PSP call.
+           * Return the reserved amount exactly once.
+           */
+          const reversal = await postLedgerEntry(supabase, {
+            userId: payout.owner_id,
+            accountType: "owner",
+            currency: payout.currency,
+            direction: "credit",
+            amount: Number(payout.amount),
+            entryType: "payout_reversal",
+            idempotencyKey: `payout:${payout.id}:reversal`,
+            referenceTable: "owner_payouts",
+            referenceId: payout.id,
+            provider: "paypal",
+            providerReference: batchId || payout.transfer_reference,
+            description: "PayPal payout failed/reversed; wallet reservation returned",
+          });
+
+          if (!reversal.ok) {
+            logger.error("payout.reversal.failed", {
+              payout_id: payout.id,
+              error: reversal.error,
+            });
+          }
+
+          await transitionState(
+            supabase,
+            "payout",
+            payout.id,
+            "failed",
+            `PayPal payout failed: ${eventType}`,
+            {
+              provider_event: eventType,
+              payout_batch_id: batchId ?? null,
+              payout_item_id: resource?.payout_item_id ?? null,
+            },
+          );
+
+          await supabase
+            .from("owner_payouts")
+            .update({
+              failure_reason: evt.summary || eventType,
+              raw_payload: evt,
+              processed_at: new Date().toISOString(),
+            })
+            .eq("id", payout.id);
+        }
+      }
+      }
   logger.info("completed", { duration_ms: logger.elapsedMs() });
   return new Response(
     JSON.stringify({ received: true, event: eventType, amount: amountValue, correlation_id: logger.ctx.correlationId }),
