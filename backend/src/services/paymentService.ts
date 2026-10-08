@@ -1895,6 +1895,27 @@ async processPayPalOwnerPayout(opts: {
   // ---------------------------------------------------------------------------
 
   async handlePayPalWebhook(headers: Record<string, any>, rawBody: string | any) {
+    const raw =
+  typeof rawBody === "string"
+    ? rawBody
+    : JSON.stringify(rawBody);
+
+const signatureValid =
+  await this.verifyPayPalWebhookSignature(
+    headers,
+    raw,
+  );
+
+if (!signatureValid) {
+  throw new Error(
+    "Invalid PayPal webhook signature",
+  );
+}
+
+const event =
+  typeof rawBody === "string"
+    ? JSON.parse(rawBody)
+    : rawBody;
     const pool = getDbPool();
     const event = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
     const eventType = event.event_type || "";
@@ -1963,3 +1984,115 @@ async processPayPalOwnerPayout(opts: {
 }
 
 export const paymentService = new PaymentService();
+
+private async verifyPayPalWebhookSignature(
+  headers: Record<string, any>,
+  rawBody: string,
+): Promise<boolean> {
+  const clientId = (
+    process.env.PAYPAL_CLIENT_ID || ""
+  ).trim();
+
+  const clientSecret = (
+    process.env.PAYPAL_CLIENT_SECRET || ""
+  ).trim();
+
+  const webhookId = (
+    process.env.PAYPAL_WEBHOOK_ID || ""
+  ).trim();
+
+  if (!clientId || !clientSecret || !webhookId) {
+    throw new Error(
+      "PayPal webhook verification is not configured",
+    );
+  }
+
+  const mode = (
+    process.env.PAYPAL_MODE ||
+    process.env.PAYPAL_ENVIRONMENT ||
+    ""
+  ).toLowerCase();
+
+  if (mode !== "live" && mode !== "production" && mode !== "sandbox" && mode !== "test") {
+    throw new Error(
+      "PAYPAL_MODE must explicitly be live or sandbox",
+    );
+  }
+
+  const baseUrl =
+    mode === "live" || mode === "production"
+      ? "https://api-m.paypal.com"
+      : "https://api-m.sandbox.paypal.com";
+
+  const basic = Buffer.from(
+    `${clientId}:${clientSecret}`,
+  ).toString("base64");
+
+  const tokenResponse = await fetch(
+    `${baseUrl}/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type":
+          "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    },
+  );
+
+  if (!tokenResponse.ok) {
+    throw new Error(
+      "PayPal webhook verification OAuth failed",
+    );
+  }
+
+  const tokenPayload = await tokenResponse.json();
+  const accessToken = tokenPayload?.access_token;
+
+  if (!accessToken) {
+    throw new Error(
+      "PayPal webhook verification access token missing",
+    );
+  }
+
+  const response = await fetch(
+    `${baseUrl}/v1/notifications/verify-webhook-signature`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        auth_algo:
+          headers["paypal-auth-algo"] ??
+          headers["PayPal-Auth-Algo"],
+        cert_url:
+          headers["paypal-cert-url"] ??
+          headers["PayPal-Cert-Url"],
+        transmission_id:
+          headers["paypal-transmission-id"] ??
+          headers["PayPal-Transmission-Id"],
+        transmission_sig:
+          headers["paypal-transmission-sig"] ??
+          headers["PayPal-Transmission-Sig"],
+        transmission_time:
+          headers["paypal-transmission-time"] ??
+          headers["PayPal-Transmission-Time"],
+        webhook_id: webhookId,
+        webhook_event: JSON.parse(rawBody),
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `PayPal webhook verification failed [${response.status}]`,
+    );
+  }
+
+  const result = await response.json();
+
+  return result?.verification_status === "SUCCESS";
+}
