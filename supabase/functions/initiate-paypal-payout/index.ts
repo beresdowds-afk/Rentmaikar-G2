@@ -105,10 +105,16 @@ Deno.serve(async (req) => {
 
     // Create the payout in the canonical Pending state before touching the PSP.
     const { data: payout } = await supabase.from("owner_payouts").insert({
-      owner_id: owner.id, payout_account_id: acc.id, provider: "paypal",
-      amount: b.amount, currency: "USD", status: "pending",
-      transfer_reference: reference, initiated_by: "owner",
-    }).select("*").maybeSingle();
+  owner_id: owner.id,
+  payout_account_id: acc.id,
+  authorization_id: authz.authorizationId,
+  provider: "paypal",
+  amount: b.amount,
+  currency: "USD",
+  status: "pending",
+  transfer_reference: reference,
+  initiated_by: "owner",
+}).select("*").maybeSingle();
 
     if (!payout?.id) {
       await completeIdempotencyKey(supabase, idemKey, "failed");
