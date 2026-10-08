@@ -42,6 +42,7 @@ import { CallInPanel } from '@/components/driver/CallInPanel';
 import { PaymentMethodPicker } from '@/components/payments/PaymentMethodPicker';
 import { RentalPaymentStatusPanel } from '@/components/payments/RentalPaymentStatusPanel';
 import { UnifiedBillingPanel } from '@/components/payments/UnifiedBillingPanel';
+import { createPaymentGateway } from '@/lib/payment-gateway';
 import { InvoiceStatusPanel } from '@/components/payments/InvoiceStatusPanel';
 import { ProxyBillingSettings } from '@/components/driver/ProxyBillingSettings';
 import { EnablePushButton } from '@/components/notifications/EnablePushButton';
@@ -183,18 +184,70 @@ export default function DriverDashboard() {
   const totalDue = weeklyRate + adminFee;
 
   const handlePaymentSubmit = async (selection: PaymentSelection) => {
-    setIsProcessing(true);
-    try {
-      // Simulate payment processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      toast.success(`Payment of ${formatCurrency(selection.totalAmount, currency)} initiated successfully!`);
-      setShowPaymentModal(false);
-    } catch (error) {
-      toast.error('Payment failed. Please try again.');
-    } finally {
-      setIsProcessing(false);
+  if (!targetId) {
+    toast.error("Unable to identify the driver account.");
+    return;
+  }
+
+  if (!vehicle?.id) {
+    toast.error("No active rental vehicle is available for payment.");
+    return;
+  }
+
+  if (!rental?.id) {
+    toast.error("No active rental is available for payment.");
+    return;
+  }
+
+  setIsProcessing(true);
+
+  try {
+    const gateway = createPaymentGateway(country);
+
+    const result = await gateway.initializePayment(
+      selection.totalAmount,
+      targetId,
+      vehicle.id,
+      rental.id,
+      {
+        paymentMethod: selection.method,
+        paymentFrequency: selection.frequency,
+        downPaymentDays: selection.downPaymentDays,
+      }
+    );
+
+    if (!result.success) {
+      throw new Error(
+        result.error || "Payment initialization failed."
+      );
     }
-  };
+
+    if (result.redirectUrl) {
+      window.location.assign(result.redirectUrl);
+      return;
+    }
+
+    toast.success(
+      `Payment of ${formatCurrency(
+        selection.totalAmount,
+        currency
+      )} initiated successfully.`
+    );
+
+    setShowPaymentModal(false);
+    setPaymentRefreshKey((value) => value + 1);
+  } catch (error) {
+    console.error("[DriverDashboard] Payment initialization failed:", error);
+
+    toast.error(
+      error instanceof Error
+        ? error.message
+        : "Payment failed. Please try again."
+    );
+  } finally {
+    setIsProcessing(false);
+  }
+};
 
   const handleRequestNegotiation = () => {
     toast.info('Price negotiation request submitted. Admin will review shortly.');
