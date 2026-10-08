@@ -1068,14 +1068,21 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         status: 200,
         data: {
           paypal: {
-            configured: Boolean(process.env.PAYPAL_CLIENT_ID),
-            clientId: process.env.PAYPAL_CLIENT_ID || "demo_paypal_client_id",
-            mode: process.env.PAYPAL_MODE || process.env.PAYPAL_ENVIRONMENT || "sandbox",
-          },
+  configured: Boolean(process.env.PAYPAL_CLIENT_ID),
+  clientId: process.env.PAYPAL_CLIENT_ID || null,
+  mode:
+    process.env.PAYPAL_MODE ||
+    process.env.PAYPAL_ENVIRONMENT ||
+    null,
+},
           paystack: {
-            configured: Boolean(process.env.PAYSTACK_PUBLIC_KEY || process.env.PAYSTACK_SECRET_KEY),
-            publicKey: process.env.PAYSTACK_PUBLIC_KEY || "pk_test_demo",
-          },
+  configured: Boolean(
+    process.env.PAYSTACK_PUBLIC_KEY ||
+    process.env.PAYSTACK_SECRET_KEY
+  ),
+  publicKey:
+    process.env.PAYSTACK_PUBLIC_KEY || null,
+},
           opay: {
             configured: Boolean(process.env.OPAY_MERCHANT_ID),
             merchantId: process.env.OPAY_MERCHANT_ID || "",
