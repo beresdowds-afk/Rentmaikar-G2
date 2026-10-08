@@ -55,7 +55,20 @@ export function generateBridgeCorrelationId(prefix: string = "call"): string {
   const perf = (typeof performance !== "undefined" ? performance.now() : 0).toString(36).replace(".", "");
   return `${prefix}-${now}-${perf}`.slice(0, 48);
 }
-
+const PAYMENT_PROVIDER_FUNCTIONS = new Set([
+  "create-paypal-order",
+  "capture-paypal-order",
+  "initiate-paypal-payout",
+  "paypal-webhook",
+  "create-paystack-transaction",
+  "verify-paystack-transaction",
+  "initiate-paystack-transfer",
+  "paystack-webhook",
+  "create-opay-order",
+  "verify-opay-order",
+  "opay-webhook",
+  "process-owner-payouts",
+]);
 // Edge functions that may safely use non-authoritative simulation in explicit test/diagnostic mode
 const SAFE_DIAGNOSTIC_EDGE_FUNCTIONS = new Set([
   "ping",
@@ -81,7 +94,24 @@ export const MUST_NEVER_SIMULATE_EDGE_FUNCTIONS = new Set([
   "admin-auth",
   "payment-webhook",
 ]);
+    if (PAYMENT_FUNCTION_NAMES.has(functionName)) {
+      return {
+        data: null,
+        error: new Error(
+          `Payment operation '${functionName}' failed and cannot use a simulated fallback`,
+        ),
+      };
+    }
 
+    return {
+      data: {
+        ok: true,
+        simulated: true,
+        fallback: true,
+        functionName,
+      },
+      error: null,
+    };
 export interface FrontendCallTriggerInfo {
   timestamp: string;
   origin?: string;
@@ -1208,7 +1238,38 @@ private async executeCallWithRetry<T>(
 
     try {
       const endpoint = `/functions/${encodeURIComponent(functionName)}`;
+    if (PAYMENT_PROVIDER_FUNCTIONS.has(functionName)) {
+      /*
+       * Payment calls must never be converted into simulated success.
+       * Preserve the real backend/provider response and failure.
+       */
+      const result =
+        await this.call<T>(
+          endpoint,
+          {
+            ...options,
+            method,
+            correlationId,
+            skipRetry:
+              options.skipRetry ?? true,
+            body:
+              method === "GET" ||
+              method === "HEAD"
+                ? undefined
+                : typeof payload === "string"
+                  ? payload
+                  : JSON.stringify(payload),
+          },
+        );
 
+      return {
+        data: result,
+        error: null,
+        status: 200,
+        handledBy:
+          "backendBridge.paymentAuthority",
+      };
+    }
       const result = await this.call<T>(endpoint, {
         ...options,
         method,
