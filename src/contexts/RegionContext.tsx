@@ -143,8 +143,7 @@ const NairaIcon = ({ className }: { className?: string }) => (
 
 const RegionContext = createContext<RegionContextType | undefined>(undefined);
 
-const SAFE_DEFAULT: Country = "USA";
-
+const UNRESOLVED_REGION: Country = "" as Country;
 export const RegionProvider = ({ children }: { children: ReactNode }) => {
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -156,10 +155,10 @@ export const RegionProvider = ({ children }: { children: ReactNode }) => {
     const stored = getStoredCountry();
     if (stored) return stored;
     try {
-      return detectCountryFromTimezone();
-    } catch {
-      return SAFE_DEFAULT;
-    }
+  return detectCountryFromTimezone();
+} catch {
+  return UNRESOLVED_REGION;
+}
   });
 
 // ---------------------------------------------------------------------
@@ -268,8 +267,14 @@ useEffect(() => {
           availableRegions
         );
 
-        const selected = resolved?.value ?? SAFE_DEFAULT;
-
+        const selected = resolved?.value ?? UNRESOLVED_REGION;
+if (resolved) {
+  setCountryState(resolved.value);
+  persistCountry(resolved.value);
+} else {
+  setCountryState(UNRESOLVED_REGION);
+  persistCountry(UNRESOLVED_REGION);
+}
         setCountryState(selected);
         persistCountry(selected);
       }
@@ -343,9 +348,9 @@ useEffect(() => {
       // ------------------------------------------------------------------
       if (!isAdminLike) {
         const lockedCountry =
-          resolved?.value ??
-          getStoredCountry() ??
-          SAFE_DEFAULT;
+  resolved?.value ??
+  getStoredCountry() ??
+  UNRESOLVED_REGION;
 
         // Non-admins are locked to their registration region.
         manualSelectRef.current = false;
@@ -360,17 +365,20 @@ useEffect(() => {
 
         // First sign-in or unpublished region -> repair profile.
         if (
-          !profileCountry ||
-          profileCountry !== lockedCountry
-        ) {
-          void supabase
-            .from("profiles")
-            .update({
-              preferred_country: lockedCountry,
-              region_mode: "manual",
-            })
-            .eq("user_id", userId);
-        }
+  lockedCountry !== UNRESOLVED_REGION &&
+  (
+    !profileCountry ||
+    profileCountry !== lockedCountry
+  )
+) {
+  void supabase
+    .from("profiles")
+    .update({
+      preferred_country: lockedCountry,
+      region_mode: "manual",
+    })
+    .eq("user_id", userId);
+}
 
         return;
       }
@@ -424,9 +432,9 @@ useEffect(() => {
         setCountryState(resolved.value);
         persistCountry(resolved.value);
       } else if (profileMode === "manual") {
-        setCountryState(SAFE_DEFAULT);
-        persistCountry(SAFE_DEFAULT);
-      }
+  setCountryState(UNRESOLVED_REGION);
+  persistCountry(UNRESOLVED_REGION);
+}
 
 
     } catch (error) {
@@ -491,10 +499,10 @@ useEffect(() => {
   );
 
   if (!resolved) {
-    setCountryState(SAFE_DEFAULT);
-    persistCountry(SAFE_DEFAULT);
-    return;
-  }
+  setCountryState(UNRESOLVED_REGION);
+  persistCountry(UNRESOLVED_REGION);
+  return;
+}
 
   if (resolved.value !== country) {
     setCountryState(resolved.value);
@@ -757,12 +765,9 @@ useEffect(() => {
 const baseConfig: RegionConfig =
   regionConfig[country] ??
   {
-    currency: selectedRegion?.currency ?? "USD",
-    currencySymbol: selectedRegion?.currencySymbol ?? "$",
-
-    // Never assume +1 unless the selected region actually uses it.
+    currency: selectedRegion?.currency ?? "",
+    currencySymbol: selectedRegion?.currencySymbol ?? "",
     phonePrefix: selectedRegion?.phonePrefix ?? "",
-
     whatsappNumber: "",
     smsNumber: "",
     supportEmail: "",
