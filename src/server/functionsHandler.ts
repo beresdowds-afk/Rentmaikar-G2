@@ -1156,40 +1156,84 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "create-opay-order": {
-      const amount = Number(body.amount || 0);
-      const reference = `rm_opay_${Date.now()}`;
-      return {
-        status: 200,
-        data: {
-          code: "00000",
-          message: "SUCCESS",
-          data: {
-            orderNo: reference,
-            cashierUrl: `https://cashier.opayweb.com/pay/${reference}`,
-            amount,
-            currency: "NGN",
-          },
-        },
-      };
-    }
+  try {
+    const { createOpayOrder } =
+      await import("../../backend/src/services/opayService");
 
-    case "verify-opay-order": {
-      const orderNo = body.orderNo || body.reference;
-      return {
-        status: 200,
-        data: {
-          code: "00000",
-          status: "SUCCESS",
-          orderNo,
-          message: "Transaction verified successfully",
-        },
-      };
-    }
+    const result = await createOpayOrder({
+      amount: Number(body.amount),
+      rentalId: body.rental_id,
+      vehicleId: body.vehicle_id,
+      driverId: body.driver_id,
+      currency: String(body.currency || "NGN").toUpperCase(),
+      returnUrl: body.return_url,
+    });
 
-    case "opay-webhook": {
-      return { status: 200, data: { code: "00000", message: "SUCCESS" } };
-    }
+    return {
+      status: 200,
+      data: result,
+    };
+  } catch (err: any) {
+    return {
+      status: 502,
+      data: {
+        ok: false,
+        error:
+          err?.message ||
+          "OPay order creation failed",
+      },
+    };
+  }
+}
 
+case "verify-opay-order": {
+  try {
+    const { verifyOpayOrder } =
+      await import("../../backend/src/services/opayService");
+
+    const result =
+      await verifyOpayOrder(
+        body.orderNo ||
+        body.reference,
+      );
+
+    return {
+      status: 200,
+      data: result,
+    };
+  } catch (err: any) {
+    return {
+      status: 502,
+      data: {
+        ok: false,
+        error:
+          err?.message ||
+          "OPay verification failed",
+      },
+    };
+  }
+}
+
+case "opay-webhook": {
+  const {
+    handleOpayWebhook,
+  } = await import(
+    "../../backend/src/services/opayService"
+  );
+
+  const result =
+    await handleOpayWebhook(
+      headers,
+      typeof request.body === "string"
+        ? request.body
+        : JSON.stringify(request.body || {}),
+    );
+
+  return {
+    status: 200,
+    data: result,
+  };
+}
     case "initiate-paystack-transfer": {
   try {
     const { supabaseBackendService } =
