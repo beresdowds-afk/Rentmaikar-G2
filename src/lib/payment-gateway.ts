@@ -8,7 +8,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { idempotencyHeaders } from './idempotency';
 import { marketingEngine } from '@/services/marketingEngine';
-
+import { backendBridge } from './backend-bridge';
 // PayPal types
 export interface PayPalConfig {
   clientId: string;
@@ -145,7 +145,47 @@ export class PaymentGateway {
     metadata?: Record<string, unknown>
   ): Promise<PaymentResult> {
     try {
-      const { data, error } = await supabase.functions.invoke('create-paystack-transaction', {
+      const result =
+  await backendBridge.invokeEdgeFunction(
+    'create-paystack-transaction',
+    {
+      amount: breakdown.driverTotal,
+      currency: 'NGN',
+      rental_id:
+        rentalId &&
+        /^[0-9a-f-]{36}$/i.test(rentalId)
+          ? rentalId
+          : undefined,
+      vehicle_id:
+        vehicleId &&
+        /^[0-9a-f-]{36}$/i.test(vehicleId)
+          ? vehicleId
+          : undefined,
+      payment_frequency:
+        breakdown.frequency,
+      description:
+        `Rentmaikar payment — ${formatCurrency(
+          breakdown.baseAmount,
+          'NGN'
+        )}`,
+      driver_id: driverId,
+      metadata,
+    },
+    {
+      method: 'POST',
+      idempotencyKey:
+        `charge.paystack:${driverId}:${vehicleId}:${rentalId}:${breakdown.driverTotal}`,
+    },
+  );
+
+if (result.error || !result.data) {
+  throw result.error ||
+    new Error(
+      'Paystack payment initialization failed',
+    );
+}
+
+const data = result.data; {
         body: {
           amount: breakdown.driverTotal,
           currency: 'NGN',
@@ -336,7 +376,40 @@ export class PaymentGateway {
       if (!payoutDetails.authorizationId) {
         return { success: false, error: 'Withdrawal authorization required before payout' };
       }
-      const { data, error } = await supabase.functions.invoke('initiate-paypal-payout', {
+      const result =
+  await backendBridge.invokeEdgeFunction(
+    'initiate-paypal-payout',
+    {
+      amount,
+      payout_account_id:
+        payoutDetails.payoutAccountId,
+      note: payoutDetails.note,
+      authorization_id:
+        payoutDetails.authorizationId,
+    },
+    {
+      method: 'POST',
+      idempotencyKey:
+        `payout.paypal:${payoutDetails.payoutAccountId}:${amount}`,
+    },
+  );
+
+if (result.error || !result.data) {
+  throw result.error ||
+    new Error(
+      'PayPal payout failed',
+    );
+}
+
+return {
+  success: true,
+  transactionId:
+    result.data?.payout?.transfer_reference ||
+    result.data?.payout?.transfer_code,
+  gatewayResponse:
+    result.data,
+}; 
+      {
         body: {
           amount,
           payoutAccountId: payoutDetails.payoutAccountId,
@@ -368,22 +441,39 @@ export class PaymentGateway {
       if (!payoutDetails.authorizationId) {
         return { success: false, error: 'Withdrawal authorization required before payout' };
       }
-      const { data, error } = await supabase.functions.invoke('initiate-paystack-transfer', {
-        body: {
-          amount,
-          payoutAccountId: payoutDetails.payoutAccountId,
-          note: payoutDetails.note,
-          authorizationId: payoutDetails.authorizationId,
-        },
-        headers: idempotencyHeaders('payout.paystack', { amount, payoutAccountId: payoutDetails.payoutAccountId }),
-      });
-      if (error) throw error;
-      return { success: true, transactionId: data?.reference ?? data?.transfer_code, gatewayResponse: data };
-    } catch (error) {
-      console.error('[Paystack] Transfer failed:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Paystack transfer failed' };
-    }
-  }
+      const result =
+  await backendBridge.invokeEdgeFunction(
+    'initiate-paystack-transfer',
+    {
+      amount,
+      payout_account_id:
+        payoutDetails.payoutAccountId,
+      note: payoutDetails.note,
+      authorization_id:
+        payoutDetails.authorizationId,
+    },
+    {
+      method: 'POST',
+      idempotencyKey:
+        `payout.paystack:${payoutDetails.payoutAccountId}:${amount}`,
+    },
+  );
+
+if (result.error || !result.data) {
+  throw result.error ||
+    new Error(
+      'Paystack transfer failed',
+    );
+}
+
+return {
+  success: true,
+  transactionId:
+    result.data?.payout?.transfer_reference ||
+    result.data?.payout?.transfer_code,
+  gatewayResponse:
+    result.data,
+};
 
   /**
    * Process refund
