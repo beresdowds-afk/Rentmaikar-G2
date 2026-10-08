@@ -94,24 +94,7 @@ export const MUST_NEVER_SIMULATE_EDGE_FUNCTIONS = new Set([
   "admin-auth",
   "payment-webhook",
 ]);
-    if (PAYMENT_FUNCTION_NAMES.has(functionName)) {
-      return {
-        data: null,
-        error: new Error(
-          `Payment operation '${functionName}' failed and cannot use a simulated fallback`,
-        ),
-      };
-    }
-
-    return {
-      data: {
-        ok: true,
-        simulated: true,
-        fallback: true,
-        functionName,
-      },
-      error: null,
-    };
+    
 export interface FrontendCallTriggerInfo {
   timestamp: string;
   origin?: string;
@@ -1291,19 +1274,73 @@ private async executeCallWithRetry<T>(
     } catch (err: any) {
       return {
         data: null,
-        error:
-          err instanceof Error
-            ? err
-            : new Error(
-                err?.message ||
-                  `Backend function '${functionName}' failed`
-              ),
-        status: Number(err?.status) || 503,
-        handledBy: "backendBridge_failure",
-      };
-    }
-  }
+public async invokeEdgeFunction<T = any>(
+  functionName: string,
+  payload: any = {},
+  options: BackendCallOptions = {}
+): Promise<{
+  data: T | null;
+  error: Error | null;
+  status: number;
+  handledBy: string;
+}> {
+  const correlationId =
+    options.correlationId ||
+    generateBridgeCorrelationId(`edge-${functionName}`);
 
+  const method = (options.method || "POST").toUpperCase();
+
+  const isAuthoritative =
+    MUST_NEVER_SIMULATE_EDGE_FUNCTIONS.has(functionName) ||
+    PAYMENT_PROVIDER_FUNCTIONS.has(functionName);
+
+  try {
+    const endpoint =
+      `/functions/${encodeURIComponent(functionName)}`;
+
+    const result = await this.call<T>(endpoint, {
+      ...options,
+      method,
+      correlationId,
+      skipRetry:
+        isAuthoritative
+          ? true
+          : options.skipRetry,
+      body:
+        method === "GET" || method === "HEAD"
+          ? undefined
+          : typeof payload === "string"
+            ? payload
+            : JSON.stringify(payload),
+    });
+
+    return {
+      data: result,
+      error: null,
+      status: 200,
+      handledBy:
+        PAYMENT_PROVIDER_FUNCTIONS.has(functionName)
+          ? "backendBridge.paymentAuthority"
+          : "backendBridge",
+    };
+  } catch (err: any) {
+    return {
+      data: null,
+      error:
+        err instanceof Error
+          ? err
+          : new Error(
+              err?.message ||
+                `Backend function '${functionName}' failed`
+            ),
+      status: Number(err?.status) || 503,
+      handledBy:
+        isAuthoritative
+          ? "backendBridge_authoritative_failure"
+          : "backendBridge_failure",
+    };
+  }
+}
   /**
    * Authoritative reconciliation lookup for operations where client lost contact.
    * Enables discovery of "already completed" operations by correlation ID,
