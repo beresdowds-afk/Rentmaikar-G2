@@ -516,7 +516,19 @@ return {
      */
     const { backendBridge } =
       await import("./backend-bridge");
-
+await fetch("https://api.paystack.co/refund", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${secret}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    transaction: originalTransactionId,
+    amount: Math.round(amount * 100),
+    currency,
+    merchant_note: reason,
+  }),
+});
     const result =
       await backendBridge.invokeEdgeFunction(
         "process-refund",
