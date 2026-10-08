@@ -400,17 +400,87 @@ export class PaymentGateway {
         reason,
       });
 
-      const mockRefundId = `REFUND-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
+      async processRefund(
+  originalTransactionId: string,
+  amount: number,
+  reason: string
+): Promise<PaymentResult> {
+  try {
+    if (!originalTransactionId) {
       return {
-        success: true,
-        transactionId: mockRefundId,
-        gatewayResponse: {
-          status: 'completed',
-          refund_id: mockRefundId,
-          amount,
-        },
+        success: false,
+        error: "Original transaction ID is required",
       };
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        success: false,
+        error: "Refund amount must be greater than zero",
+      };
+    }
+
+    /*
+     * Refund execution belongs to the authoritative backend/provider
+     * implementation. The browser must never fabricate a refund success.
+     */
+    const { backendBridge } =
+      await import("./backend-bridge");
+
+    const result =
+      await backendBridge.invokeEdgeFunction(
+        "process-refund",
+        {
+          provider: this.gateway,
+          originalTransactionId,
+          amount,
+          reason,
+        },
+        {
+          method: "POST",
+          idempotencyKey:
+            `refund:${this.gateway}:${originalTransactionId}:${amount}`,
+        },
+      );
+
+    if (result.error || !result.data) {
+      return {
+        success: false,
+        error:
+          result.error?.message ||
+          "Refund execution failed",
+      };
+    }
+
+    return {
+      success:
+        result.data?.success === true,
+      transactionId:
+        result.data?.transactionId ||
+        result.data?.refund_id,
+      gatewayResponse:
+        result.data,
+      error:
+        result.data?.success === true
+          ? undefined
+          : result.data?.error ||
+            "Refund was not confirmed by provider",
+    };
+  } catch (error) {
+    console.error(
+      `[${this.gateway}] Refund failed:`,
+      error,
+    );
+
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Refund failed",
+    };
+  }
+}
     } catch (error) {
       console.error(`[${this.gateway}] Refund failed:`, error);
       return {
