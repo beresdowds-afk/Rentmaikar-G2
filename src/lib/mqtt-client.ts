@@ -1187,14 +1187,18 @@ class MQTTVehicleTracker {
   ): Promise<{ success: boolean; message: string }> {
     return new Promise((resolve) => {
       if (!this.client || !this.isConnected) {
-        // For demo/offline mode, still allow command
-        console.log(`[MQTT] Offline mode: ${command} command for vehicle ${vehicleId}`);
-        resolve({
-          success: true,
-          message: `${command.charAt(0).toUpperCase() + command.slice(1)} command queued (offline mode)`,
-        });
-        return;
-      }
+  console.error(
+    `[MQTT] Cannot execute ${command} command for ${vehicleId}: MQTT is unavailable`
+  );
+
+  resolve({
+    success: false,
+    message:
+      "Vehicle command could not be executed because the command channel is unavailable.",
+  });
+
+  return;
+}
 
       const topic = `rentmaikar/vehicles/${vehicleId}/commands`;
       const payload = JSON.stringify({
