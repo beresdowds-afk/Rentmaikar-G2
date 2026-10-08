@@ -189,15 +189,50 @@ Deno.serve(async (req) => {
       raw_payload: payoutBody,
     }).eq("id", payout.id);
 
-    await transitionState(supabase, "payout", payout.id, "captured", "payout batch submitted to PayPal");
-    if (batchStatus === "SUCCESS") {
-      await transitionState(supabase, "payout", payout.id, "settled", "PayPal batch success");
-      await transitionState(supabase, "payout", payout.id, "completed", "payout complete");
-      await notifyWithdrawalEvent(supabase, {
-        event: "completed", ownerId: owner.id, amount: b.amount, currency: "USD",
-        provider: "paypal", payoutId: payout.id, destination: acc.paypal_email,
-      });
-    } else if (batchStatus === "DENIED") {
+    await transitionState(
+  supabase,
+  "payout",
+  payout.id,
+  "captured",
+  "payout batch submitted to PayPal; awaiting provider confirmation",
+  {
+    provider_status: batchStatus,
+    payout_batch_id: payoutBody?.batch_header?.payout_batch_id ?? null,
+  },
+);
+
+if (batchStatus === "DENIED" || batchStatus === "CANCELED") {
+  await transitionState(
+    supabase,
+    "payout",
+    payout.id,
+    "failed",
+    "PayPal denied or canceled the payout",
+    {
+      provider_status: batchStatus,
+    },
+  );
+
+  await notifyWithdrawalEvent(supabase, {
+    event: "failed",
+    ownerId: owner.id,
+    amount: b.amount,
+    currency: "USD",
+    provider: "paypal",
+    payoutId: payout.id,
+    reason: `PayPal payout ${batchStatus.toLowerCase()}`,
+  });
+} else {
+  await notifyWithdrawalEvent(supabase, {
+    event: "submitted",
+    ownerId: owner.id,
+    amount: b.amount,
+    currency: "USD",
+    provider: "paypal",
+    payoutId: payout.id,
+    destination: acc.paypal_email,
+  });
+}
       await transitionState(supabase, "payout", payout.id, "failed", "PayPal denied the batch");
       await notifyWithdrawalEvent(supabase, {
         event: "failed", ownerId: owner.id, amount: b.amount, currency: "USD",
