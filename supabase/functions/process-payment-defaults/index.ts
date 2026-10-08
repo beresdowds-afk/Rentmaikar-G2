@@ -488,26 +488,54 @@ const handler = async (req: Request): Promise<Response> => {
 
         // ─── LOCKDOWN + DOWNGRADE LOGIC ───
         if (deactivationEligible) {
-          results.lockdownsEligible++;
+  results.lockdownsEligible++;
 
-          // Weekly plan lockdown → downgrade to Daily
-          if (paymentDefault.payment_frequency === 'weekly') {
-            console.log(`[PaymentDefaults] Weekly driver ${paymentDefault.driver_id} downgraded to Daily plan`);
-            // The forbid_daily_plan_on_default trigger handles the profile flag
-          }
-
-          console.log(`[PaymentDefaults] Lockdown eligible: ${paymentDefault.id} (${paymentDefault.payment_frequency})`);
-        }
-
-        results.processed++;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        results.errors.push(`Error processing ${paymentDefault.id}: ${errorMessage}`);
+  try {
+    const restrictionResponse = await fetch(
+      `${supabaseUrl}/functions/v1/process-payment-restriction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+          "x-internal-secret":
+            Deno.env.get("CRON_SECRET") || "",
+        },
+        body: JSON.stringify({
+          paymentDefaultId: paymentDefault.id,
+        }),
       }
+    );
+
+    const restrictionResult =
+      await restrictionResponse.json().catch(() => ({}));
+
+    if (!restrictionResponse.ok || restrictionResult.success !== true) {
+      results.errors.push(
+        `Restriction failed for ${paymentDefault.id}: ${
+          restrictionResult.error ||
+          `HTTP ${restrictionResponse.status}`
+        }`
+      );
+
+      continue;
     }
 
-    console.log("[PaymentDefaults] Processing complete:", results);
+    console.log(
+      `[PaymentDefaults] Vehicle restriction accepted for ${paymentDefault.id}`
+    );
+  } catch (error) {
+    results.errors.push(
+      `Restriction invocation failed for ${paymentDefault.id}: ${
+        error instanceof Error
+          ? error.message
+          : "Unknown error"
+      }`
+    );
 
+    continue;
+  }
+}
     return new Response(
       JSON.stringify({ 
         success: true, 
