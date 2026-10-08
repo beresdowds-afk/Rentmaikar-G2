@@ -17,10 +17,25 @@ export const normalizeCountryCodeToRegion = (rawCode: string): { country: Countr
     return { country: "Nigeria", countryCode: "NG" };
   }
   if (code === "US" || code === "USA") {
-    return { country: "USA", countryCode: "US" };
-  }
-  // If in another region, map known builder regions or default to USA as safe default
-  return { country: "USA", countryCode: code || "US" };
+  return {
+    country: "USA",
+    countryCode: "US",
+  };
+}
+
+if (code === "NG" || code === "NGA" || code === "NIGERIA") {
+  return {
+    country: "Nigeria",
+    countryCode: "NG",
+  };
+}
+
+// Unknown / unsupported country.
+// Never silently convert it to USA.
+return {
+  country: "" as Country,
+  countryCode: code,
+};
 };
 
 // Provider 1: ipwho.is (Free, HTTPS, CORS-friendly, no API key required)
@@ -93,14 +108,40 @@ export const detectCountryFromIP = async (): Promise<GeoLocationResult> => {
   }
 
   // If all external IP providers fail, fall back to timezone heuristics
-  const fallbackCountry = detectCountryFromTimezone();
-  return {
-    country: fallbackCountry,
-    countryCode: fallbackCountry === "Nigeria" ? "NG" : "US",
-    detected: false,
-    provider: "timezone_fallback",
-  };
+  export const detectCountryFromTimezone = (): Country => {
+  try {
+    const timezone =
+      Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    if (
+      timezone.startsWith("Africa/Lagos") ||
+      timezone.startsWith("Africa/")
+    ) {
+      return "Nigeria";
+    }
+
+    const language =
+      typeof navigator !== "undefined"
+        ? (
+            navigator.language ||
+            navigator.languages?.[0] ||
+            ""
+          )
+        : "";
+
+    if (
+      language.toLowerCase().includes("-ng") ||
+      language.toLowerCase() === "ng"
+    ) {
+      return "Nigeria";
+    }
+
+    return "" as Country;
+  } catch {
+    return "" as Country;
+  }
 };
+
 
 // Fallback: Detect country from timezone & locale heuristics
 export const detectCountryFromTimezone = (): Country => {
