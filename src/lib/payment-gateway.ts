@@ -115,7 +115,7 @@ if (this.gateway === "paystack") {
     rentalId,
     metadata
   );
-
+    }
 return {
   success: false,
   error: `Unsupported payment gateway '${this.gateway}' for region '${this.region.id}'`,
