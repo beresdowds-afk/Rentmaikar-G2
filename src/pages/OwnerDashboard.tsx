@@ -49,7 +49,7 @@ import { CallSupportButton } from '@/components/support/CallSupportButton';
 
 import { VoiceCallHistory } from '@/components/voice/VoiceCallHistory';
 import { useVoiceCall } from '@/hooks/useVoiceCall';
-
+import { backendBridge } from "@/lib/backend-bridge";
 import { AdminViewBanner } from '@/components/admin/AdminViewBanner';
 import { AdminNotificationsBell as NotificationsBell } from "@/components/admin/AdminNotificationsBell";
 import { useAuth } from '@/contexts/AuthContext';
@@ -222,11 +222,32 @@ export default function OwnerDashboard() {
         return;
       }
 
-      const fnName = account.provider === 'paypal'
-        ? 'initiate-paypal-payout'
-        : 'initiate-paystack-transfer';
+      const fnName =
+  account.provider === "paypal"
+    ? "initiate-paypal-payout"
+    : "initiate-paystack-transfer";
 
-      const { data, error } = await supabase.functions.invoke(fnName, {
+const result =
+  await backendBridge.invokeEdgeFunction(
+    fnName,
+    {
+      ...existingPayload,
+    },
+    {
+      method: "POST",
+      idempotencyKey:
+        `owner-payout:${account.id}:${amount}`,
+    }
+  );
+
+if (result.error || !result.data) {
+  throw (
+    result.error ||
+    new Error("Owner payout failed")
+  );
+}
+
+const data = result.data;
         body: {
           amount,
           payoutAccountId: account.id,
