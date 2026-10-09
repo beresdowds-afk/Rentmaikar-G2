@@ -1392,7 +1392,11 @@ class MQTTVehicleTracker {
     this.client.publish(topic, JSON.stringify({
       command: 'report_gps',
       timestamp: new Date().toISOString(),
-      requestId: Math.random().toString(36).slice(2, 11),
+      requestId:
+  typeof crypto !== "undefined" &&
+  typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${crypto.getRandomValues(new Uint32Array(2)).join("-")}`,
     }), { qos: TELEMETRY_SCHEDULES.GPS.qos });
   }
 
