@@ -223,42 +223,54 @@ export default function OwnerDashboard() {
       }
 
       const fnName =
-  account.provider === "paypal"
-    ? "initiate-paypal-payout"
-    : "initiate-paystack-transfer";
+        account.provider === "paypal"
+          ? "initiate-paypal-payout"
+          : account.provider === "paystack"
+            ? "initiate-paystack-transfer"
+            : null;
 
-const result =
-  await backendBridge.invokeEdgeFunction(
-    fnName,
-    {
-      ...existingPayload,
-    },
-    {
-      method: "POST",
-      idempotencyKey:
-        `owner-payout:${account.id}:${amount}`,
-    }
-  );
+      if (!fnName) {
+        throw new Error(
+          `Unsupported payout provider: ${account.provider}`
+        );
+      }
 
-if (result.error || !result.data) {
-  throw (
-    result.error ||
-    new Error("Owner payout failed")
-  );
-}
+      const idempotencyKey = `owner-payout:${authorizationId}`;
 
-const data = result.data;
-        body: {
-          amount,
-          payoutAccountId: account.id,
-          authorizationId,
-          note: 'RentMaikar owner withdrawal',
-          reason: 'RentMaikar owner withdrawal',
-        },
-      });
+      const result =
+        await backendBridge.invokeEdgeFunction(
+          fnName,
+          {
+            owner_id: targetId,
+            user_id: targetId,
+            amount,
+            currency: String(account.currency || currency).toUpperCase(),
+            payout_account_id: account.id,
+            payoutAccountId: account.id,
+            authorization_id: authorizationId,
+            authorizationId,
+            note: "RentMaikar owner withdrawal",
+            reason: "RentMaikar owner withdrawal",
+            idempotencyKey,
+          },
+          {
+            method: "POST",
+            idempotencyKey,
+          }
+        );
 
-      if (error) throw error;
-      if (data?.error) throw new Error(String(data.error));
+      if (result.error || !result.data) {
+        throw (
+          result.error ||
+          new Error("Owner payout failed")
+        );
+      }
+
+      const data = result.data;
+
+      if (data?.error) {
+        throw new Error(String(data.error));
+      }
 
       toast.success(`Withdrawal of ${formatCurrency(amount, currency)} submitted for processing.`);
       setIsWithdrawOpen(false);
