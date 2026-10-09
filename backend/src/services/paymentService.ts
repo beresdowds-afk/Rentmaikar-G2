@@ -1894,97 +1894,205 @@ async processPayPalOwnerPayout(opts: {
   // Webhook Signature Verifiers & Processors
   // ---------------------------------------------------------------------------
 
-  async handlePayPalWebhook(headers: Record<string, any>, rawBody: string | any) {
-    const raw =
-  typeof rawBody === "string"
-    ? rawBody
-    : JSON.stringify(rawBody);
+  async handlePayPalWebhook(
+headers: Record<string, any>,
+rawBody: string | any,
+) {
+const raw =
+typeof rawBody === "string"
+? rawBody
+: JSON.stringify(rawBody);
+
+if (!raw) {
+  throw new Error("PayPal webhook body is required");
+}
 
 const signatureValid =
-  await this.verifyPayPalWebhookSignature(
-    headers,
-    raw,
-  );
+  await this.verifyPayPalWebhookSignature(headers, raw);
 
 if (!signatureValid) {
-  throw new Error(
-    "Invalid PayPal webhook signature",
-  );
+  throw new Error("Invalid PayPal webhook signature");
 }
 
 const event =
   typeof rawBody === "string"
     ? JSON.parse(rawBody)
     : rawBody;
-    const pool = getDbPool();
-    const event = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
-    const eventType = event.event_type || "";
-    const eventId = event.id || "";
-    const resource = event.resource || {};
-    const orderId = resource.supplementary_data?.related_ids?.order_id || resource.id;
 
-    const existingRes = await pool.query(
-      `SELECT id FROM public.payment_webhook_events WHERE external_event_id = $1`,
-      [eventId]
-    );
+if (!event || typeof event !== "object") {
+  throw new Error("Invalid PayPal webhook event");
+}
 
-    if (existingRes.rows.length > 0) {
-      return { received: true, duplicate: true };
+const pool = getDbPool();
+const eventType = event.event_type || "";
+const eventId = event.id || "";
+const resource = event.resource || {};
+const orderId =
+  resource.supplementary_data?.related_ids?.order_id ||
+  resource.id ||
+  "";
+
+if (!eventId || !eventType) {
+  throw new Error("PayPal webhook event ID and type are required");
+}
+
+const existingRes = await pool.query(
+  `SELECT id
+   FROM public.payment_webhook_events
+   WHERE external_event_id = $1`,
+  [eventId],
+);
+
+if (existingRes.rows.length > 0) {
+  return { received: true, duplicate: true };
+}
+
+await pool.query(
+  `INSERT INTO public.payment_webhook_events (
+    provider,
+    event_type,
+    external_event_id,
+    reference,
+    status,
+    signature_valid,
+    payload
+  ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
+  [
+    "paypal",
+    eventType,
+    eventId,
+    orderId || null,
+    JSON.stringify(event),
+  ],
+);
+
+if (
+  eventType === "PAYMENT.CAPTURE.COMPLETED" ||
+  eventType === "CHECKOUT.ORDER.APPROVED"
+) {
+  if (orderId) {
+    try {
+      await this.capturePayPalOrder({ order_id: orderId });
+    } catch (error) {
+      console.error(
+        "[PayPal Webhook] Order processing failed:",
+        error,
+      );
+      throw error;
     }
-
-    await pool.query(
-      `INSERT INTO public.payment_webhook_events (
-        provider, event_type, external_event_id, reference, status, signature_valid, payload
-      ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
-      ["paypal", eventType, eventId, orderId || null, JSON.stringify(event)]
-    );
-
-    if (eventType === "PAYMENT.CAPTURE.COMPLETED" || eventType === "CHECKOUT.ORDER.APPROVED") {
-      if (orderId) {
-        try {
-          await this.capturePayPalOrder({ order_id: orderId });
-        } catch (e: any) {
-          console.warn("[PayPal Webhook] Capture failed or already completed:", e.message);
-        }
-      }
-    }
-
-    return { received: true };
-  }
-
-  async handlePaystackWebhook(headers: Record<string, any>, rawBody: string | any) {
-    const pool = getDbPool();
-    const event = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
-    const eventType = event.event || "";
-    const reference = event.data?.reference || "";
-
-    const externalId = `${eventType}:${reference}`;
-    const existingRes = await pool.query(
-      `SELECT id FROM public.payment_webhook_events WHERE external_event_id = $1`,
-      [externalId]
-    );
-
-    if (existingRes.rows.length > 0) {
-      return { received: true, duplicate: true };
-    }
-
-    await pool.query(
-      `INSERT INTO public.payment_webhook_events (
-        provider, event_type, external_event_id, reference, status, signature_valid, payload
-      ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
-      ["paystack", eventType, externalId, reference || null, JSON.stringify(event)]
-    );
-
-    if (eventType === "charge.success" && reference) {
-      await this.verifyPaystackTransaction(reference);
-    }
-
-    return { received: true };
   }
 }
 
-export const paymentService = new PaymentService();
+return { received: true };
 
+}
+
+async handlePaystackWebhook(
+headers: Record<string, any>,
+rawBody: string | any,
+) {
+const raw =
+typeof rawBody === "string"
+? rawBody
+: JSON.stringify(rawBody);
+
+if (!raw) {
+  throw new Error("Paystack webhook body is required");
+}
+
+const config = this.getPaystackConfig();
+
+if (!config.secretKey) {
+  throw new Error(
+    "Paystack webhook verification is not configured",
+  );
+}
+
+const crypto = await import("node:crypto");
+const suppliedSignature =
+  headers["x-paystack-signature"] ??
+  headers["X-Paystack-Signature"];
+
+if (
+  typeof suppliedSignature !== "string" ||
+  !suppliedSignature.trim()
+) {
+  throw new Error("Missing Paystack webhook signature");
+}
+
+const expectedSignature = crypto
+  .createHmac("sha512", config.secretKey)
+  .update(raw)
+  .digest("hex");
+
+const supplied = Buffer.from(suppliedSignature, "hex");
+const expected = Buffer.from(expectedSignature, "hex");
+
+if (
+  supplied.length !== expected.length ||
+  !crypto.timingSafeEqual(supplied, expected)
+) {
+  throw new Error("Invalid Paystack webhook signature");
+}
+
+const event =
+  typeof rawBody === "string"
+    ? JSON.parse(rawBody)
+    : rawBody;
+
+if (!event || typeof event !== "object") {
+  throw new Error("Invalid Paystack webhook event");
+}
+
+const pool = getDbPool();
+const eventType = event.event || "";
+const reference = event.data?.reference || "";
+
+if (!eventType || !reference) {
+  throw new Error(
+    "Paystack webhook event type and transaction reference are required",
+  );
+}
+
+const externalId = `${eventType}:${reference}`;
+
+const existingRes = await pool.query(
+  `SELECT id
+   FROM public.payment_webhook_events
+   WHERE external_event_id = $1`,
+  [externalId],
+);
+
+if (existingRes.rows.length > 0) {
+  return { received: true, duplicate: true };
+}
+
+await pool.query(
+  `INSERT INTO public.payment_webhook_events (
+    provider,
+    event_type,
+    external_event_id,
+    reference,
+    status,
+    signature_valid,
+    payload
+  ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
+  [
+    "paystack",
+    eventType,
+    externalId,
+    reference,
+    JSON.stringify(event),
+  ],
+);
+
+if (eventType === "charge.success") {
+  await this.verifyPaystackTransaction(reference);
+}
+
+return { received: true };
+
+}
 private async verifyPayPalWebhookSignature(
   headers: Record<string, any>,
   rawBody: string,
