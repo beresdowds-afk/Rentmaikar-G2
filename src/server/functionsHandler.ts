@@ -1328,7 +1328,6 @@ case "initiate-paypal-payout": {
     return {
       status: 200,
       data: result,
-      },
     };
   } catch (err: any) {
     return {
