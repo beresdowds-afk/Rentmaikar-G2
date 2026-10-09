@@ -211,25 +211,12 @@ if (result.error || !result.data) {
     );
 }
 
-const data = result.data; {
-        body: {
-          amount: breakdown.driverTotal,
-          currency: 'NGN',
-          rentalId: rentalId && /^[0-9a-f-]{36}$/i.test(rentalId) ? rentalId : undefined,
-          vehicleId: vehicleId && /^[0-9a-f-]{36}$/i.test(vehicleId) ? vehicleId : undefined,
-          paymentFrequency: breakdown.frequency,
-          description: `Rentmaikar payment — ${formatCurrency(breakdown.baseAmount, 'NGN')}`,
-          metadata,
-        },
-        headers: idempotencyHeaders('charge.paystack', {
-          amount: breakdown.driverTotal, driverId, vehicleId, rentalId,
-        }),
-      });
-      if (error) throw error;
+      const data = result.data;
+
       return {
         success: true,
-        transactionId: data?.reference,
-        redirectUrl: data?.authorization_url ?? null,
+        transactionId: data.reference,
+        redirectUrl: data.authorization_url ?? null,
         gatewayResponse: data,
       };
     } catch (error) {
