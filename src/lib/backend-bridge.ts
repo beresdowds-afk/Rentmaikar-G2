@@ -1202,78 +1202,7 @@ private async executeCallWithRetry<T>(
       clearTimeout(timeout);
     }
   }
-
-  public async invokeEdgeFunction<T = any>(
-    functionName: string,
-    payload: any = {},
-    options: BackendCallOptions = {}
-  ): Promise<{
-    data: T | null;
-    error: Error | null;
-    status: number;
-    handledBy: string;
-  }> {
-    const correlationId =
-      options.correlationId ||
-      generateBridgeCorrelationId(`edge-${functionName}`);
-
-    const method = (options.method || "POST").toUpperCase();
-
-    try {
-      const endpoint = `/functions/${encodeURIComponent(functionName)}`;
-    if (PAYMENT_PROVIDER_FUNCTIONS.has(functionName)) {
-      /*
-       * Payment calls must never be converted into simulated success.
-       * Preserve the real backend/provider response and failure.
-       */
-      const result =
-        await this.call<T>(
-          endpoint,
-          {
-            ...options,
-            method,
-            correlationId,
-            skipRetry:
-              options.skipRetry ?? true,
-            body:
-              method === "GET" ||
-              method === "HEAD"
-                ? undefined
-                : typeof payload === "string"
-                  ? payload
-                  : JSON.stringify(payload),
-          },
-        );
-
-      return {
-        data: result,
-        error: null,
-        status: 200,
-        handledBy:
-          "backendBridge.paymentAuthority",
-      };
-    }
-      const result = await this.call<T>(endpoint, {
-        ...options,
-        method,
-        correlationId,
-        body:
-          method === "GET" || method === "HEAD"
-            ? undefined
-            : typeof payload === "string"
-              ? payload
-              : JSON.stringify(payload),
-      });
-
-      return {
-        data: result,
-        error: null,
-        status: 200,
-        handledBy: "backendBridge",
-      };
-    } catch (err: any) {
-      return {
-        data: null,
+  
 public async invokeEdgeFunction<T = any>(
   functionName: string,
   payload: any = {},
