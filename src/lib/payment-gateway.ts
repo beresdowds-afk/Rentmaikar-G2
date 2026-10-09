@@ -528,126 +528,90 @@ return {
 };
 
   /**
-   * Process refund
-   */
-  async processRefund(
-    originalTransactionId: string,
-    amount: number,
-    reason: string
-  ): Promise<PaymentResult> {
-    try {
-      console.log(`[${this.gateway}] Processing refund:`, {
-        originalTransactionId,
-        amount,
-        reason,
-      });
 
-      async processRefund(
+* Process a refund through the authoritative backend.
+  */
+  async processRefund(
   originalTransactionId: string,
   amount: number,
-  reason: string
-): Promise<PaymentResult> {
-  try {
-    if (!originalTransactionId) {
-      return {
-        success: false,
-        error: "Original transaction ID is required",
-      };
-    }
+  reason: string,
+  ): Promise<PaymentResult> {
+  if (!originalTransactionId?.trim()) {
+  return {
+  success: false,
+  error: "Original transaction ID is required",
+  };
+  }
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return {
-        success: false,
-        error: "Refund amount must be greater than zero",
-      };
-    }
+if (!Number.isFinite(amount) || amount <= 0) {
+  return {
+    success: false,
+    error: "Refund amount must be greater than zero",
+  };
+}
 
-    /*
-     * Refund execution belongs to the authoritative backend/provider
-     * implementation. The browser must never fabricate a refund success.
-     */
-    const { backendBridge } =
-      await import("./backend-bridge");
-await fetch("https://api.paystack.co/refund", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${secret}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    transaction: originalTransactionId,
-    amount: Math.round(amount * 100),
-    currency,
-    merchant_note: reason,
-  }),
-});
-    const result =
-      await backendBridge.invokeEdgeFunction(
-        "process-refund",
-        {
-          provider: this.gateway,
-          originalTransactionId,
-          amount,
-          reason,
-        },
-        {
-          method: "POST",
-          idempotencyKey:
-            `refund:${this.gateway}:${originalTransactionId}:${amount}`,
-        },
-      );
+try {
+  const result = await backendBridge.invokeEdgeFunction(
+    "process-refund",
+    {
+      provider: this.gateway,
+      originalTransactionId,
+      amount,
+      reason,
+    },
+    {
+      method: "POST",
+      idempotencyKey:
+        `refund:${this.gateway}:${originalTransactionId}:${amount}`,
+    },
+  );
 
-    if (result.error || !result.data) {
-      return {
-        success: false,
-        error:
-          result.error?.message ||
-          "Refund execution failed",
-      };
-    }
-
-    return {
-      success:
-        result.data?.success === true,
-      transactionId:
-        result.data?.transactionId ||
-        result.data?.refund_id,
-      gatewayResponse:
-        result.data,
-      error:
-        result.data?.success === true
-          ? undefined
-          : result.data?.error ||
-            "Refund was not confirmed by provider",
-    };
-  } catch (error) {
-    console.error(
-      `[${this.gateway}] Refund failed:`,
-      error,
-    );
-
+  if (result.error || !result.data) {
     return {
       success: false,
       error:
-        error instanceof Error
-          ? error.message
-          : "Refund failed",
+        result.error?.message ||
+        "Refund execution failed",
     };
   }
+
+  return {
+    success: result.data.success === true,
+    transactionId:
+      result.data.transactionId ||
+      result.data.refund_id,
+    gatewayResponse: result.data,
+    error:
+      result.data.success === true
+        ? undefined
+        : result.data.error ||
+          "Refund was not confirmed by provider",
+  };
+} catch (error) {
+  console.error(
+    `[${this.gateway}] Refund failed:`,
+    error,
+  );
+
+  return {
+    success: false,
+    error:
+      error instanceof Error
+        ? error.message
+        : "Refund failed",
+  };
 }
-    } catch (error) {
-      console.error(`[${this.gateway}] Refund failed:`, error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Refund failed',
-      };
-    }
-  }
+
+}
 }
 
 /**
- * Factory function to create payment gateway for a region
- */
-export function createPaymentGateway(regionId: string): PaymentGateway {
+
+* Factory function to create payment gateway for a region
+  */
+  export function createPaymentGateway(
+  regionId: string,
+  ): PaymentGateway {
   return new PaymentGateway(regionId);
-}
+  }
+ 
