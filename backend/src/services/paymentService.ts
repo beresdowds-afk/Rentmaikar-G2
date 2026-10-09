@@ -1544,11 +1544,23 @@ if (!signatureValid) {
 }
 
 const event =
-  typeof rawBody === "string"
-    ? JSON.parse(rawBody)
-    : rawBody;
+      typeof rawBody === "string"
+        ? JSON.parse(rawBody)
+        : rawBody;
+
+    if (!event || typeof event !== "object") {
+      throw new Error("Invalid Paystack webhook event");
+    }
+
+    const eventType = event.event || "";
+    const reference = event.data?.reference || "";
+
+    if (!eventType || !reference) {
+      throw new Error(
+        "Paystack webhook event type and transaction reference are required",
+      );
+    }
     const pool = getDbPool();
-    const event = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
     const eventType = event.event_type || "";
     const eventId = event.id || "";
     const resource = event.resource || {};
