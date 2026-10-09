@@ -31,20 +31,6 @@ export const normalizeCountryCodeToRegion = (
   };
 };
 
-if (code === "NG" || code === "NGA" || code === "NIGERIA") {
-  return {
-    country: "Nigeria",
-    countryCode: "NG",
-  };
-}
-
-// Unknown / unsupported country.
-// Never silently convert it to USA.
-return {
-  country: "" as Country,
-  countryCode: code,
-};
-};
 
 // Provider 1: ipwho.is (Free, HTTPS, CORS-friendly, no API key required)
 const fetchFromIpWhoIs = async (): Promise<{ countryCode: string; ip?: string }> => {
