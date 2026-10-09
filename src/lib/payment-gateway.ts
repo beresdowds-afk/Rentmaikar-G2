@@ -87,13 +87,39 @@ export class PaymentGateway {
       rentalId,
     });
     
-    if (this.gateway === 'paypal') {
-      return this.initializePayPalPayment(breakdown, driverId, vehicleId, rentalId, metadata);
-    } else if (this.gateway === 'opay') {
-      return this.initializeOPayPayment(breakdown, driverId, vehicleId, rentalId, metadata);
-    } else {
-      return this.initializePaystackPayment(breakdown, driverId, vehicleId, rentalId, metadata);
-    }
+    if (this.gateway === "paypal") {
+  return this.initializePayPalPayment(
+    breakdown,
+    driverId,
+    vehicleId,
+    rentalId,
+    metadata
+  );
+}
+
+if (this.gateway === "opay") {
+  return this.initializeOPayPayment(
+    breakdown,
+    driverId,
+    vehicleId,
+    rentalId,
+    metadata
+  );
+}
+
+if (this.gateway === "paystack") {
+  return this.initializePaystackPayment(
+    breakdown,
+    driverId,
+    vehicleId,
+    rentalId,
+    metadata
+  );
+
+return {
+  success: false,
+  error: `Unsupported payment gateway '${this.gateway}' for region '${this.region.id}'`,
+};
   }
 
   /**
@@ -327,9 +353,35 @@ const data = result.data; {
    */
   private async verifyPaystackPayment(reference: string): Promise<PaymentResult> {
     try {
-      const { data, error } = await supabase.functions.invoke('verify-paystack-transaction', {
-        body: { reference },
-      });
+      const result =
+  await backendBridge.invokeEdgeFunction(
+    "verify-paystack-transaction",
+    {
+      reference,
+    },
+    {
+      method: "POST",
+      idempotencyKey:
+        `verify.paystack:${reference}`,
+    }
+  );
+
+if (result.error || !result.data) {
+  throw (
+    result.error ||
+    new Error(
+      "Paystack payment verification failed"
+    )
+  );
+}
+
+const data = result.data;
+
+return {
+  success: data?.status === "completed",
+  transactionId: reference,
+  gatewayResponse: data,
+};
       if (error) throw error;
       return {
         success: data?.status === 'completed',
