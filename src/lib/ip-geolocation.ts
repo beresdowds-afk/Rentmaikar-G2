@@ -11,32 +11,26 @@ export interface GeoLocationResult {
 /**
  * Normalizes ISO alpha-2 country codes into canonical Country names
  */
-export const normalizeCountryCodeToRegion = (rawCode: string): { country: Country; countryCode: string } => {
+export const normalizeCountryCodeToRegion = (
+  rawCode: string
+): { country: Country; countryCode: string } => {
   const code = (rawCode || "").trim().toUpperCase();
-  if (code === "NG") {
+
+  if (code === "NG" || code === "NGA" || code === "NIGERIA") {
     return { country: "Nigeria", countryCode: "NG" };
   }
+
   if (code === "US" || code === "USA") {
-  return {
-    country: "USA",
-    countryCode: "US",
-  };
-}
+    return { country: "USA", countryCode: "US" };
+  }
 
-if (code === "NG" || code === "NGA" || code === "NIGERIA") {
+  // Unknown or unsupported country: never silently default to USA.
   return {
-    country: "Nigeria",
-    countryCode: "NG",
+    country: "" as Country,
+    countryCode: code,
   };
-}
+};
 
-// Unknown / unsupported country.
-// Never silently convert it to USA.
-return {
-  country: "" as Country,
-  countryCode: code,
-};
-};
 
 // Provider 1: ipwho.is (Free, HTTPS, CORS-friendly, no API key required)
 const fetchFromIpWhoIs = async (): Promise<{ countryCode: string; ip?: string }> => {
@@ -107,16 +101,30 @@ export const detectCountryFromIP = async (): Promise<GeoLocationResult> => {
     }
   }
 
-  // If all external IP providers fail, fall back to timezone heuristics
-  export const detectCountryFromTimezone = (): Country => {
-  try {
-    const timezone =
-      Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // If all IP providers fail, use only a limited timezone/locale
+  // fallback. Leave the region unresolved when evidence is insufficient.
+  const country = detectCountryFromTimezone();
 
-    if (
-      timezone.startsWith("Africa/Lagos") ||
-      timezone.startsWith("Africa/")
-    ) {
+  return {
+    country,
+    countryCode:
+      country === "Nigeria"
+        ? "NG"
+        : country === "USA"
+          ? "US"
+          : "",
+    detected: Boolean(country),
+    provider: country ? "timezone-locale-fallback" : undefined,
+  };
+};
+
+// Fallback: use timezone and locale only when they provide a clear signal.
+export const detectCountryFromTimezone = (): Country => {
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    // Only the Lagos timezone is specific enough to infer Nigeria.
+    if (timezone === "Africa/Lagos") {
       return "Nigeria";
     }
 
@@ -126,39 +134,16 @@ export const detectCountryFromIP = async (): Promise<GeoLocationResult> => {
             navigator.language ||
             navigator.languages?.[0] ||
             ""
-          )
+          ).toLowerCase()
         : "";
 
-    if (
-      language.toLowerCase().includes("-ng") ||
-      language.toLowerCase() === "ng"
-    ) {
+    if (language === "ng" || language.endsWith("-ng")) {
       return "Nigeria";
     }
 
+    // Do not assume USA when the user's region is unknown.
     return "" as Country;
   } catch {
     return "" as Country;
   }
 };
-
-
-// Fallback: Detect country from timezone & locale heuristics
-export const detectCountryFromTimezone = (): Country => {
-  try {
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (timezone.startsWith("Africa/Lagos") || timezone.startsWith("Africa/")) {
-      return "Nigeria";
-    }
-    
-    const language = typeof navigator !== "undefined" ? (navigator.language || navigator.languages?.[0] || "") : "";
-    if (language.includes("NG") || language.includes("ng")) {
-      return "Nigeria";
-    }
-    
-    return "USA";
-  } catch {
-    return "USA";
-  }
-};
-

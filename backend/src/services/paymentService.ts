@@ -573,74 +573,6 @@ class PaymentService {
     payment_id: paymentId,
   };
 }
-
-    // Record payment
-    let paymentId: string | null = null;
-    try {
-      const pRes = await pool.query(
-                `INSERT INTO public.payments (
-          amount,
-          currency,
-          payment_method,
-          status,
-          driver_id,
-          owner_id,
-          rental_id,
-          vehicle_id,
-          purpose,
-          transaction_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id`,
-        [
-          amountVal,
-          (params.currency || "NGN").toUpperCase(),
-          "paystack",
-          "pending",
-          params.driver_id || null,
-          params.owner_id || null,
-                    params.rental_id || null,
-          params.vehicle_id || null,
-          purpose, by to use by
-          reference,
-        ]
-      );
-      paymentId = pRes.rows[0]?.id || null;
-        } catch (e: any) {
-      console.error("[Paystack Service] Error recording payments row:", e.message);
-      throw new Error(`Failed to create payment record: ${e.message}`);
-    }
-
-    // Record paystack_transactions
-    try {
-      await pool.query(
-        `INSERT INTO public.paystack_transactions (
-          reference, access_code, authorization_url, amount, currency, status, payment_id, driver_id, rental_id, vehicle_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [
-          reference,
-          accessCode,
-          authUrl,
-          amountVal,
-          (params.currency || "NGN").toUpperCase(),
-          "pending",
-          paymentId,
-          params.driver_id || null,
-          params.rental_id || null,
-          params.vehicle_id || null,
-        ]
-      );
-    } catch (e: any) {
-      console.error("[Paystack Service] Error recording paystack_transactions row:", e.message);
-    }
-
-    return {
-      authorization_url: authUrl,
-      access_code: accessCode,
-      reference,
-      payment_id: paymentId,
-    };
-  }
-
   async verifyPaystackTransaction(reference: string) {
   if (!reference) {
     throw new Error(
@@ -864,306 +796,6 @@ async processPayPalOwnerPayout(opts: {
   note?: string;
   idempotency_key?: string;
 }) {
-  const amount = Number(opts.amount);
-  const currency = String(opts.currency || "USD").toUpperCase();
-
-  if (!opts.owner_id) {
-    throw new Error("owner_id is required");
-  }
-
-  if (!Number.isFinite(amount) || amount < 1) {
-    throw new Error("PayPal payout amount must be at least 1.00");
-  }
-
-  if (Math.round(amount * 100) !== amount * 100) {
-    throw new Error(
-      "PayPal payout amount must have at most 2 decimals",
-    );
-  }
-
-  if (currency !== "USD") {
-    throw new Error(
-      "PayPal owner payouts currently support USD only",
-    );
-  }
-
-  if (!opts.payout_account_id) {
-    throw new Error("PayPal payout account is required");
-  }
-
-  if (!opts.authorization_id) {
-    throw new Error(
-      "withdrawal authorization required",
-    );
-  }
-
-  const pool = getDbPool();
-
-  /*
-   * 1. Verify the payout destination belongs to the owner.
-   */
-  const accountResult = await pool.query(
-    `SELECT
-       id,
-       owner_id,
-       provider,
-       currency,
-       paypal_email,
-       is_default
-     FROM public.owner_payout_accounts
-     WHERE id = $1
-       AND owner_id = $2
-     LIMIT 1`,
-    [
-      opts.payout_account_id,
-      opts.owner_id,
-    ],
-  );
-
-  const account = accountResult.rows[0];
-
-  if (
-    !account ||
-    account.provider !== "paypal" ||
-    !account.paypal_email
-  ) {
-    throw new Error(
-      "Invalid PayPal payout account",
-    );
-  }
-
-  /*
-   * 2. Verify the withdrawal authorization.
-   */
-  const authorizationResult = await pool.query(
-    `SELECT *
-     FROM public.withdrawal_authorizations
-     WHERE id = $1
-     LIMIT 1`,
-    [opts.authorization_id],
-  );
-
-  const authorization =
-    authorizationResult.rows[0];
-
-  if (!authorization) {
-    throw new Error(
-      "withdrawal authorization not found",
-    );
-  }
-
-  if (
-    authorization.subject_user_id !==
-    opts.owner_id
-  ) {
-    throw new Error(
-      "withdrawal authorization belongs to another user",
-    );
-  }
-
-  if (
-    authorization.request_type !==
-    "owner_payout"
-  ) {
-    throw new Error(
-      "withdrawal authorization type mismatch",
-    );
-  }
-
-  if (
-    Math.abs(
-      Number(authorization.amount) - amount,
-    ) > 0.009
-  ) {
-    throw new Error(
-      "withdrawal authorization amount mismatch",
-    );
-  }
-
-  if (
-    String(authorization.currency).toUpperCase() !==
-    currency
-  ) {
-    throw new Error(
-      "withdrawal authorization currency mismatch",
-    );
-  }
-
-  if (authorization.status !== "approved") {
-    throw new Error(
-      `withdrawal authorization is ${authorization.status}`,
-    );
-  }
-
-  if (
-    new Date(
-      authorization.expires_at,
-    ).getTime() < Date.now()
-  ) {
-    throw new Error(
-      "withdrawal authorization expired",
-    );
-  }
-
-  /*
-   * 3. Prevent concurrent owner payouts.
-   */
-  const activePayoutResult = await pool.query(
-    `SELECT id
-     FROM public.owner_payouts
-     WHERE owner_id = $1
-       AND status IN (
-         'pending',
-         'authorized',
-         'captured',
-         'processing'
-       )
-     LIMIT 1`,
-    [opts.owner_id],
-  );
-
-  if (activePayoutResult.rows.length > 0) {
-    throw new Error(
-      "A payout is already in progress",
-    );
-  }
-
-  /*
-   * 4. Verify available owner balance.
-   */
-  const balanceResult = await pool.query(
-    `SELECT public.get_owner_available_balance(
-       $1,
-       $2
-     ) AS balance`,
-    [
-      opts.owner_id,
-      currency,
-    ],
-  );
-
-  const available = Number(
-    balanceResult.rows[0]?.balance || 0,
-  );
-
-  if (amount > available) {
-    throw new Error(
-      `Amount exceeds available balance (${available.toFixed(2)} available)`,
-    );
-  }
-
-  /*
-   * 5. Idempotency.
-   *
-   * Do not create a second payout if the same request
-   * is retried.
-   */
-  if (opts.idempotency_key) {
-    const existing = await pool.query(
-      `SELECT *
-       FROM public.owner_payouts
-       WHERE owner_id = $1
-         AND transfer_reference = $2
-       LIMIT 1`,
-      [
-        opts.owner_id,
-        opts.idempotency_key,
-      ],
-    );
-
-    if (existing.rows[0]) {
-      return {
-        success: true,
-        duplicate: true,
-        payout: existing.rows[0],
-      };
-    }
-  }
-
-  const reference =
-    `pyt_${Date.now()}_${Math.random()
-      .toString(36)
-      .slice(2, 10)}`;
-
-  /*
-   * 6. Create canonical payout record.
-   */
-  const payoutResult = await pool.query(
-    `INSERT INTO public.owner_payouts (
-       owner_id,
-       payout_account_id,
-       provider,
-       amount,
-       currency,
-       status,
-       transfer_reference,
-       initiated_by,
-       scheduled_for
-     )
-     VALUES (
-       $1, $2, 'paypal', $3, 'USD',
-       'pending', $4, 'owner', now()
-     )
-     RETURNING *`,
-    [
-      opts.owner_id,
-      opts.payout_account_id,
-      amount,
-      reference,
-    ],
-  );
-
-  const payout =
-    payoutResult.rows[0];
-
-  if (!payout?.id) {
-    throw new Error(
-      "Could not create PayPal payout record",
-    );
-  }
-
-  /*
-   * 7. Move payout into authorized state.
-   */
-  await pool.query(
-    `SELECT public.transition_payment_state(
-       'payout',
-       $1,
-       'authorized',
-       'withdrawal authorization approved',
-       $2::jsonb
-     )`,
-    [
-      payout.id,
-      JSON.stringify({
-        authorization_id:
-          opts.authorization_id,
-      }),
-    ],
-  );
-
-  /*
-   * 8. Execute actual PayPal Payouts API call.
-   */
-  const paypalResult =
-    await this.executePayPalPayout({
-      amount,
-      receiver: account.paypal_email,
-      reference,
-      note:
-        opts.note ||
-        "Your Rentmaikar owner earnings",
-    });
-
-async processPayPalOwnerPayout(opts: {
-  owner_id: string;
-  amount: number;
-  currency: string;
-  payout_account_id: string;
-  authorization_id: string;
-  note?: string;
-  idempotency_key?: string;
-}) {
   const pool = getDbPool();
   const currency = String(opts.currency || "USD").toUpperCase();
   const amount = Number(opts.amount);
@@ -1191,7 +823,6 @@ async processPayPalOwnerPayout(opts: {
   if (!opts.authorization_id) {
     throw new Error("withdrawal authorization required");
   }
-
   /*
    * 1. Idempotency.
    *
@@ -1954,7 +1585,6 @@ const event =
 
   async handlePaystackWebhook(headers: Record<string, any>, rawBody: string | any) {
     const pool = getDbPool();
-    const event = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
     const eventType = event.event || "";
     const reference = event.data?.reference || "";
 
@@ -1981,11 +1611,7 @@ const event =
 
     return { received: true };
   }
-}
-
-export const paymentService = new PaymentService();
-
-private async verifyPayPalWebhookSignature(
+  private async verifyPayPalWebhookSignature(
   headers: Record<string, any>,
   rawBody: string,
 ): Promise<boolean> {
@@ -2079,20 +1705,155 @@ private async verifyPayPalWebhookSignature(
           headers["PayPal-Transmission-Sig"],
         transmission_time:
           headers["paypal-transmission-time"] ??
-          headers["PayPal-Transmission-Time"],
-        webhook_id: webhookId,
-        webhook_event: JSON.parse(rawBody),
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `PayPal webhook verification failed [${response.status}]`,
+      [externalId]
     );
+
+    if (existingRes.rows.length > 0) {
+      return { received: true, duplicate: true };
+    }
+
+    await pool.query(
+      `INSERT INTO public.payment_webhook_events (
+        provider,
+        event_type,
+        external_event_id,
+        reference,
+        status,
+        signature_valid,
+        payload
+      ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
+      [
+        "paystack",
+        eventType,
+        externalId,
+        reference || null,
+        JSON.stringify(event),
+      ],
+    );
+
+    if (eventType === "charge.success" && reference) {
+      await this.verifyPaystackTransaction(reference);
+    }
+
+    return { received: true };
   }
 
-  const result = await response.json();
+  private async verifyPayPalWebhookSignature(
+    headers: Record<string, any>,
+    rawBody: string,
+  ): Promise<boolean> {
+    const clientId = (
+      process.env.PAYPAL_CLIENT_ID || ""
+    ).trim();
 
-  return result?.verification_status === "SUCCESS";
+    const clientSecret = (
+      process.env.PAYPAL_CLIENT_SECRET || ""
+    ).trim();
+
+    const webhookId = (
+      process.env.PAYPAL_WEBHOOK_ID || ""
+    ).trim();
+
+    if (!clientId || !clientSecret || !webhookId) {
+      throw new Error(
+        "PayPal webhook verification is not configured",
+      );
+    }
+
+    const mode = (
+      process.env.PAYPAL_MODE ||
+      process.env.PAYPAL_ENVIRONMENT ||
+      ""
+    ).toLowerCase();
+
+    if (
+      mode !== "live" &&
+      mode !== "production" &&
+      mode !== "sandbox" &&
+      mode !== "test"
+    ) {
+      throw new Error(
+        "PAYPAL_MODE must explicitly be live or sandbox",
+      );
+    }
+
+    const baseUrl =
+      mode === "live" || mode === "production"
+        ? "https://api-m.paypal.com"
+        : "https://api-m.sandbox.paypal.com";
+
+    const basic = Buffer.from(
+      `${clientId}:${clientSecret}`,
+    ).toString("base64");
+
+    const tokenResponse = await fetch(
+      `${baseUrl}/v1/oauth2/token`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${basic}`,
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+        body: "grant_type=client_credentials",
+      },
+    );
+
+    if (!tokenResponse.ok) {
+      throw new Error(
+        "PayPal webhook verification OAuth failed",
+      );
+    }
+
+    const tokenPayload = await tokenResponse.json();
+    const accessToken = tokenPayload?.access_token;
+
+    if (!accessToken) {
+      throw new Error(
+        "PayPal webhook verification access token missing",
+      );
+    }
+
+    const response = await fetch(
+      `${baseUrl}/v1/notifications/verify-webhook-signature`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          auth_algo:
+            headers["paypal-auth-algo"] ??
+            headers["PayPal-Auth-Algo"],
+          cert_url:
+            headers["paypal-cert-url"] ??
+            headers["PayPal-Cert-Url"],
+          transmission_id:
+            headers["paypal-transmission-id"] ??
+            headers["PayPal-Transmission-Id"],
+          transmission_sig:
+            headers["paypal-transmission-sig"] ??
+            headers["PayPal-Transmission-Sig"],
+          transmission_time:
+            headers["paypal-transmission-time"] ??
+            headers["PayPal-Transmission-Time"],
+          webhook_id: webhookId,
+          webhook_event: JSON.parse(rawBody),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `PayPal webhook verification failed [${response.status}]`,
+      );
+    }
+
+    const result = await response.json();
+
+    return result?.verification_status === "SUCCESS";
+  }
 }
+
+export const paymentService = new PaymentService();
