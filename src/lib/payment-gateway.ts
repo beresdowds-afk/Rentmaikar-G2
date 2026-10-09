@@ -447,18 +447,7 @@ return {
     result.data?.payout?.transfer_code,
   gatewayResponse:
     result.data,
-}; 
-      {
-        body: {
-          amount,
-          payoutAccountId: payoutDetails.payoutAccountId,
-          note: payoutDetails.note,
-          authorizationId: payoutDetails.authorizationId,
-        },
-        headers: idempotencyHeaders('payout.paypal', { amount, payoutAccountId: payoutDetails.payoutAccountId }),
-      });
-      if (error) throw error;
-      return { success: true, transactionId: data?.reference ?? data?.payout_batch_id, gatewayResponse: data };
+};   
     } catch (error) {
       console.error('[PayPal] Payout failed:', error);
       return { success: false, error: error instanceof Error ? error.message : 'PayPal payout failed' };
@@ -480,16 +469,13 @@ return {
       if (!payoutDetails.authorizationId) {
         return { success: false, error: 'Withdrawal authorization required before payout' };
       }
-      const result =
-  await backendBridge.invokeEdgeFunction(
+      const result = await backendBridge.invokeEdgeFunction(
     'initiate-paystack-transfer',
     {
       amount,
-      payout_account_id:
-        payoutDetails.payoutAccountId,
+      payout_account_id: payoutDetails.payoutAccountId,
       note: payoutDetails.note,
-      authorization_id:
-        payoutDetails.authorizationId,
+      authorization_id: payoutDetails.authorizationId,
     },
     {
       method: 'POST',
@@ -498,22 +484,46 @@ return {
     },
   );
 
-if (result.error || !result.data) {
-  throw result.error ||
-    new Error(
-      'Paystack transfer failed',
-    );
+  if (result.error || !result.data) {
+    throw result.error ||
+      new Error('Paystack transfer failed');
+  }
+
+  return {
+    success: true,
+    transactionId:
+      result.data?.payout?.transfer_reference ||
+      result.data?.payout?.transfer_code,
+    gatewayResponse: result.data,
+  };
+} catch (error) {
+  console.error('[Paystack] Transfer failed:', error);
+  return {
+    success: false,
+    error:
+      error instanceof Error
+        ? error.message
+        : 'Paystack transfer failed',
+  };
 }
 
-return {
-  success: true,
-  transactionId:
-    result.data?.payout?.transfer_reference ||
-    result.data?.payout?.transfer_code,
-  gatewayResponse:
-    result.data,
-};
+}
 
+/**
+
+* Process refund
+  */
+  async processRefund(
+  originalTransactionId: string,
+  amount: number,
+  reason: string
+  ): Promise<PaymentResult> {
+  try {
+  console.log("[${this.gateway}] Processing refund:", {
+  originalTransactionId,
+  amount,
+  reason,
+  });
   /**
    * Process refund
    */
@@ -528,14 +538,15 @@ return {
         amount,
         reason,
       });
-
-      async processRefund(
-  originalTransactionId: string,
-  amount: number,
-  reason: string
-): Promise<PaymentResult> {
-  try {
-    if (!originalTransactionId) {
+    /**
+   * Process refund through the authoritative backend.
+   */
+  async processRefund(
+    originalTransactionId: string,
+    amount: number,
+    reason: string
+  ): Promise<PaymentResult> {
+    if (!originalTransactionId?.trim()) {
       return {
         success: false,
         error: "Original transaction ID is required",
@@ -549,27 +560,8 @@ return {
       };
     }
 
-    /*
-     * Refund execution belongs to the authoritative backend/provider
-     * implementation. The browser must never fabricate a refund success.
-     */
-    const { backendBridge } =
-      await import("./backend-bridge");
-await fetch("https://api.paystack.co/refund", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${secret}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    transaction: originalTransactionId,
-    amount: Math.round(amount * 100),
-    currency,
-    merchant_note: reason,
-  }),
-});
-    const result =
-      await backendBridge.invokeEdgeFunction(
+    try {
+      const result = await backendBridge.invokeEdgeFunction(
         "process-refund",
         {
           provider: this.gateway,
@@ -584,57 +576,39 @@ await fetch("https://api.paystack.co/refund", {
         },
       );
 
-    if (result.error || !result.data) {
+      if (result.error || !result.data) {
+        return {
+          success: false,
+          error:
+            result.error?.message ||
+            "Refund execution failed",
+        };
+      }
+
+      return {
+        success: result.data.success === true,
+        transactionId:
+          result.data.transactionId ||
+          result.data.refund_id,
+        gatewayResponse: result.data,
+        error:
+          result.data.success === true
+            ? undefined
+            : result.data.error ||
+              "Refund was not confirmed by provider",
+      };
+    } catch (error) {
+      console.error(
+        `[${this.gateway}] Refund failed:`,
+        error,
+      );
+
       return {
         success: false,
         error:
-          result.error?.message ||
-          "Refund execution failed",
-      };
-    }
-
-    return {
-      success:
-        result.data?.success === true,
-      transactionId:
-        result.data?.transactionId ||
-        result.data?.refund_id,
-      gatewayResponse:
-        result.data,
-      error:
-        result.data?.success === true
-          ? undefined
-          : result.data?.error ||
-            "Refund was not confirmed by provider",
-    };
-  } catch (error) {
-    console.error(
-      `[${this.gateway}] Refund failed:`,
-      error,
-    );
-
-    return {
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Refund failed",
-    };
-  }
-}
-    } catch (error) {
-      console.error(`[${this.gateway}] Refund failed:`, error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Refund failed',
+          error instanceof Error
+            ? error.message
+            : "Refund failed",
       };
     }
   }
-}
-
-/**
- * Factory function to create payment gateway for a region
- */
-export function createPaymentGateway(regionId: string): PaymentGateway {
-  return new PaymentGateway(regionId);
-}
