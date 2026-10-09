@@ -1126,7 +1126,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "paypal-webhook": {
       const result = await paymentService.handlePayPalWebhook(headers, body);
       return { status: 200, data: result };
-    }
+    
 
     case "create-paystack-transaction": {
       try {
