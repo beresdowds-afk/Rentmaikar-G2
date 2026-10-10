@@ -1715,40 +1715,6 @@ const event =
         transmission_sig:
           headers["paypal-transmission-sig"] ??
           headers["PayPal-Transmission-Sig"],
-        transmission_time:
-          headers["paypal-transmission-time"] ??
-      [externalId]
-    );
-
-    if (existingRes.rows.length > 0) {
-      return { received: true, duplicate: true };
-    }
-
-    await pool.query(
-      `INSERT INTO public.payment_webhook_events (
-        provider,
-        event_type,
-        external_event_id,
-        reference,
-        status,
-        signature_valid,
-        payload
-      ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
-      [
-        "paystack",
-        eventType,
-        externalId,
-        reference || null,
-        JSON.stringify(event),
-      ],
-    );
-
-    if (eventType === "charge.success" && reference) {
-      await this.verifyPaystackTransaction(reference);
-    }
-
-    return { received: true };
-  }
 
   private async verifyPayPalWebhookSignature(
     headers: Record<string, any>,
