@@ -1,14 +1,12 @@
 import { getRegionById, type Region } from './regions';
 import {
   type PaymentBreakdown,
-  type PaymentTransaction,
   calculatePaymentBreakdown,
-  formatCurrency
+  formatCurrency,
 } from './payment-config';
-import { supabase } from '@/integrations/supabase/client';
-import { idempotencyHeaders } from './idempotency';
 import { marketingEngine } from '@/services/marketingEngine';
 import { backendBridge } from './backend-bridge';
+
 // PayPal types
 export interface PayPalConfig {
   clientId: string;
@@ -17,8 +15,18 @@ export interface PayPalConfig {
 
 export interface PayPalOrder {
   id: string;
-  status: 'CREATED' | 'SAVED' | 'APPROVED' | 'VOIDED' | 'COMPLETED' | 'PAYER_ACTION_REQUIRED';
-  links: { href: string; rel: string; method: string }[];
+  status:
+    | 'CREATED'
+    | 'SAVED'
+    | 'APPROVED'
+    | 'VOIDED'
+    | 'COMPLETED'
+    | 'PAYER_ACTION_REQUIRED';
+  links: {
+    href: string;
+    rel: string;
+    method: string;
+  }[];
 }
 
 // Paystack types
@@ -42,17 +50,22 @@ export interface PaymentResult {
 }
 
 /**
- * Payment Gateway Manager
- * Handles PayPal (USA) and Paystack (Nigeria) integrations
+ * Payment Gateway Manager.
+ *
+ * Uses the gateway configured for the selected region.
+ * Sensitive payment and payout operations must be performed
+ * by the authoritative backend or the provider client.
  */
 export class PaymentGateway {
-  private region: Region;
+  private readonly region: Region;
 
   constructor(regionId: string) {
     const region = getRegionById(regionId);
+
     if (!region) {
       throw new Error(`Invalid region: ${regionId}`);
     }
+
     this.region = region;
   }
 
@@ -65,75 +78,108 @@ export class PaymentGateway {
   }
 
   /**
-   * Initialize a payment for driver rental
+   * Initialize a driver rental payment.
    */
   async initializePayment(
     baseAmount: number,
     driverId: string,
     vehicleId: string,
     rentalId: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): Promise<PaymentResult> {
-    const breakdown = calculatePaymentBreakdown(baseAmount, this.currency);
+    if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+      return {
+        success: false,
+        error: 'Payment amount must be greater than zero.',
+      };
+    }
 
-    // Marketing Engine: Observe payment started event
-    void marketingEngine.track('PAYMENT_STARTED', {
-      gateway: this.gateway,
-      currency: this.currency,
+    if (!driverId?.trim() || !vehicleId?.trim() || !rentalId?.trim()) {
+      return {
+        success: false,
+        error: 'Driver, vehicle, and rental IDs are required.',
+      };
+    }
+
+    const breakdown = calculatePaymentBreakdown(
       baseAmount,
-      driverTotal: breakdown.driverTotal,
-      driverId,
-      vehicleId,
-      rentalId,
-    });
-    
-    if (this.gateway === "paypal") {
-  return this.initializePayPalPayment(
-    breakdown,
-    driverId,
-    vehicleId,
-    rentalId,
-    metadata
-  );
-}
+      this.currency,
+    );
 
-if (this.gateway === "opay") {
-  return this.initializeOPayPayment(
-    breakdown,
-    driverId,
-    vehicleId,
-    rentalId,
-    metadata
-  );
-}
+    // Marketing analytics must not block payment initialization.
+    try {
+      void marketingEngine.track('PAYMENT_STARTED', {
+        gateway: this.gateway,
+        currency: this.currency,
+        baseAmount,
+        driverTotal: breakdown.driverTotal,
+        driverId,
+        vehicleId,
+        rentalId,
+      });
+    } catch (error) {
+      console.error(
+        '[Marketing] Failed to track payment started:',
+        error,
+      );
+    }
 
-if (this.gateway === "paystack") {
-  return this.initializePaystackPayment(
-    breakdown,
-    driverId,
-    vehicleId,
-    rentalId,
-    metadata
-  );
+    switch (this.gateway) {
+      case 'paypal':
+        return this.initializePayPalPayment(
+          breakdown,
+          driverId,
+          vehicleId,
+          rentalId,
+          metadata,
+        );
 
-return {
-  success: false,
-  error: `Unsupported payment gateway '${this.gateway}' for region '${this.region.id}'`,
-};
+      case 'paystack':
+        return this.initializePaystackPayment(
+          breakdown,
+          driverId,
+          vehicleId,
+          rentalId,
+          metadata,
+        );
+
+      case 'opay':
+        return this.initializeOPayPayment(
+          breakdown,
+          driverId,
+          vehicleId,
+          rentalId,
+          metadata,
+        );
+
+      default:
+        return {
+          success: false,
+          error: `Unsupported payment gateway '${this.gateway}' for region '${this.region.id}'.`,
+        };
+    }
   }
 
   /**
-   * Initialize PayPal payment (USA)
+   * Initialize PayPal payment.
    */
   private async initializePayPalPayment(
     breakdown: PaymentBreakdown,
     driverId: string,
     vehicleId: string,
     rentalId: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): Promise<PaymentResult> {
     try {
+      if (this.currency !== 'USD') {
+        return {
+          success: false,
+          error: 'PayPal payment requires USD currency.',
+        };
+      }
+
       const { createPayPalOrder } = await import('./paypal-client');
+
       const result = await createPayPalOrder({
         amount: breakdown.driverTotal,
         currency: 'USD',
@@ -141,118 +187,151 @@ return {
         vehicleId,
         rentalId,
         paymentFrequency: breakdown.frequency,
-        description: `Vehicle Rental - ${formatCurrency(breakdown.baseAmount, 'USD')} + ${formatCurrency(breakdown.adminFee, 'USD')} admin fee`,
+        description:
+          `Vehicle Rental - ${formatCurrency(
+            breakdown.baseAmount,
+            'USD',
+          )} + ${formatCurrency(
+            breakdown.adminFee,
+            'USD',
+          )} admin fee`,
         metadata,
       });
+
+      if (!result.orderId) {
+        throw new Error('PayPal did not return an order ID.');
+      }
 
       return {
         success: true,
         transactionId: result.orderId,
-        redirectUrl: result.approveUrl ?? null,
+        redirectUrl: result.approveUrl ?? undefined,
         gatewayResponse: result,
       };
     } catch (error) {
-      console.error('[PayPal] Payment initialization failed:', error);
+      console.error(
+        '[PayPal] Payment initialization failed:',
+        error,
+      );
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'PayPal payment initialization failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'PayPal payment initialization failed.',
       };
     }
   }
 
   /**
-   * Initialize Paystack payment (Nigeria) via edge function.
+   * Initialize Paystack payment through the backend bridge.
+   *
+   * Request field names match create-paystack-transaction.
    */
   private async initializePaystackPayment(
     breakdown: PaymentBreakdown,
     driverId: string,
     vehicleId: string,
     rentalId: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): Promise<PaymentResult> {
     try {
-      const result =
-  await backendBridge.invokeEdgeFunction(
-    'create-paystack-transaction',
-    {
-      amount: breakdown.driverTotal,
-      currency: 'NGN',
-      rental_id:
-        rentalId &&
-        /^[0-9a-f-]{36}$/i.test(rentalId)
-          ? rentalId
-          : undefined,
-      vehicle_id:
-        vehicleId &&
-        /^[0-9a-f-]{36}$/i.test(vehicleId)
-          ? vehicleId
-          : undefined,
-      payment_frequency:
-        breakdown.frequency,
-      description:
-        `Rentmaikar payment — ${formatCurrency(
-          breakdown.baseAmount,
-          'NGN'
-        )}`,
-      driver_id: driverId,
-      metadata,
-    },
-    {
-      method: 'POST',
-      idempotencyKey:
-        `charge.paystack:${driverId}:${vehicleId}:${rentalId}:${breakdown.driverTotal}`,
-    },
-  );
+      if (this.currency !== 'NGN') {
+        return {
+          success: false,
+          error: 'Paystack payment requires NGN currency.',
+        };
+      }
 
-if (result.error || !result.data) {
-  throw result.error ||
-    new Error(
-      'Paystack payment initialization failed',
-    );
-}
+      const isValidUuid = (value: string): boolean =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          value,
+        );
 
-const data = result.data; {
-        body: {
+      const result = await backendBridge.invokeEdgeFunction(
+        'create-paystack-transaction',
+        {
           amount: breakdown.driverTotal,
           currency: 'NGN',
-          rentalId: rentalId && /^[0-9a-f-]{36}$/i.test(rentalId) ? rentalId : undefined,
-          vehicleId: vehicleId && /^[0-9a-f-]{36}$/i.test(vehicleId) ? vehicleId : undefined,
+          rentalId: isValidUuid(rentalId)
+            ? rentalId
+            : undefined,
+          vehicleId: isValidUuid(vehicleId)
+            ? vehicleId
+            : undefined,
           paymentFrequency: breakdown.frequency,
-          description: `Rentmaikar payment — ${formatCurrency(breakdown.baseAmount, 'NGN')}`,
+          description:
+            `Rentmaikar payment — ${formatCurrency(
+              breakdown.baseAmount,
+              'NGN',
+            )}`,
           metadata,
         },
-        headers: idempotencyHeaders('charge.paystack', {
-          amount: breakdown.driverTotal, driverId, vehicleId, rentalId,
-        }),
-      });
-      if (error) throw error;
+        {
+          method: 'POST',
+          idempotencyKey:
+            `charge.paystack:${driverId}:${vehicleId}:${rentalId}:${breakdown.driverTotal}`,
+        },
+      );
+
+      if (result.error || !result.data) {
+        throw (
+          result.error ??
+          new Error('Paystack payment initialization failed.')
+        );
+      }
+
+      const data = result.data;
+
+      if (!data.reference || !data.authorization_url) {
+        throw new Error(
+          'Paystack response is missing the transaction reference or authorization URL.',
+        );
+      }
+
       return {
         success: true,
-        transactionId: data?.reference,
-        redirectUrl: data?.authorization_url ?? null,
+        transactionId: data.reference,
+        redirectUrl: data.authorization_url,
         gatewayResponse: data,
       };
     } catch (error) {
-      console.error('[Paystack] Payment initialization failed:', error);
+      console.error(
+        '[Paystack] Payment initialization failed:',
+        error,
+      );
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Paystack payment initialization failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Paystack payment initialization failed.',
       };
     }
   }
 
   /**
-   * Initialize OPay payment (Nigeria) via Cashier API.
+   * Initialize OPay payment through the existing OPay client.
    */
   private async initializeOPayPayment(
     breakdown: PaymentBreakdown,
     driverId: string,
     vehicleId: string,
     rentalId: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): Promise<PaymentResult> {
     try {
+      if (this.currency !== 'NGN') {
+        return {
+          success: false,
+          error: 'OPay payment requires NGN currency.',
+        };
+      }
+
       const { createOPayOrder } = await import('./opay-client');
+
       const result = await createOPayOrder({
         amount: breakdown.driverTotal,
         currency: 'NGN',
@@ -260,358 +339,576 @@ const data = result.data; {
         vehicleId,
         rentalId,
         paymentFrequency: breakdown.frequency,
-        productName: `Rentmaikar Vehicle Rental`,
-        productDesc: `Rental payment — ${formatCurrency(breakdown.baseAmount, 'NGN')}`,
+        productName: 'Rentmaikar Vehicle Rental',
+        productDesc:
+          `Rental payment — ${formatCurrency(
+            breakdown.baseAmount,
+            'NGN',
+          )}`,
         metadata,
       });
+
+      if (!result.reference) {
+        throw new Error(
+          'OPay did not return a transaction reference.',
+        );
+      }
 
       return {
         success: true,
         transactionId: result.reference,
-        redirectUrl: result.cashierUrl ?? null,
+        redirectUrl: result.cashierUrl ?? undefined,
         gatewayResponse: result,
       };
     } catch (error) {
-      console.error('[OPay] Payment initialization failed:', error);
+      console.error(
+        '[OPay] Payment initialization failed:',
+        error,
+      );
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'OPay payment initialization failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'OPay payment initialization failed.',
       };
     }
   }
 
   /**
-   * Verify payment completion
+   * Verify a transaction with the configured payment provider.
    */
-  async verifyPayment(transactionId: string): Promise<PaymentResult> {
-    let res: PaymentResult;
-    if (this.gateway === 'paypal') {
-      res = await this.verifyPayPalPayment(transactionId);
-    } else if (this.gateway === 'opay') {
-      res = await this.verifyOPayPayment(transactionId);
-    } else {
-      res = await this.verifyPaystackPayment(transactionId);
+  async verifyPayment(
+    transactionId: string,
+  ): Promise<PaymentResult> {
+    if (!transactionId?.trim()) {
+      return {
+        success: false,
+        error: 'Transaction ID is required.',
+      };
     }
 
-    if (res.success) {
-      void marketingEngine.track('PAYMENT_COMPLETED', {
-        transactionId,
-        gateway: this.gateway,
-        currency: this.currency,
-      });
+    let result: PaymentResult;
+
+    switch (this.gateway) {
+      case 'paypal':
+        result = await this.verifyPayPalPayment(transactionId);
+        break;
+
+      case 'paystack':
+        result = await this.verifyPaystackPayment(transactionId);
+        break;
+
+      case 'opay':
+        result = await this.verifyOPayPayment(transactionId);
+        break;
+
+      default:
+        return {
+          success: false,
+          error: `Unsupported payment gateway '${this.gateway}'.`,
+        };
     }
 
-    return res;
+    if (result.success) {
+      try {
+        void marketingEngine.track('PAYMENT_COMPLETED', {
+          transactionId,
+          gateway: this.gateway,
+          currency: this.currency,
+        });
+      } catch (error) {
+        console.error(
+          '[Marketing] Failed to track payment completion:',
+          error,
+        );
+      }
+    }
+
+    return result;
   }
 
   /**
-   * Verify OPay transaction status via Cashier Status API
+   * Verify OPay transaction status.
    */
-  private async verifyOPayPayment(reference: string): Promise<PaymentResult> {
+  private async verifyOPayPayment(
+    reference: string,
+  ): Promise<PaymentResult> {
     try {
       const { queryOPayStatus } = await import('./opay-client');
       const result = await queryOPayStatus({ reference });
 
+      const success = result.status === 'SUCCESSFUL';
+
       return {
-        success: result.status === 'SUCCESSFUL',
+        success,
         transactionId: result.reference,
         gatewayResponse: result,
+        error: success
+          ? undefined
+          : `OPay payment is not confirmed successful. Status: ${result.status}`,
       };
     } catch (error) {
-      console.error('[OPay] Payment verification failed:', error);
+      console.error(
+        '[OPay] Payment verification failed:',
+        error,
+      );
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'OPay payment verification failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'OPay payment verification failed.',
       };
     }
   }
 
   /**
-   * Verify / capture PayPal payment
+   * Capture and verify a PayPal order.
    */
-  private async verifyPayPalPayment(orderId: string): Promise<PaymentResult> {
+  private async verifyPayPalPayment(
+    orderId: string,
+  ): Promise<PaymentResult> {
     try {
       const { capturePayPalOrder } = await import('./paypal-client');
       const result = await capturePayPalOrder({ orderId });
 
+      const success = result.status === 'COMPLETED';
+
       return {
-        success: result.status === 'COMPLETED',
+        success,
         transactionId: result.orderId,
         gatewayResponse: result,
+        error: success
+          ? undefined
+          : `PayPal payment is not confirmed completed. Status: ${result.status}`,
       };
     } catch (error) {
-      console.error('[PayPal] Payment verification failed:', error);
+      console.error(
+        '[PayPal] Payment verification failed:',
+        error,
+      );
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'PayPal payment verification failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'PayPal payment verification failed.',
       };
     }
   }
 
   /**
-   * Verify Paystack payment via edge function.
+   * Verify Paystack payment through the backend bridge.
    */
-  private async verifyPaystackPayment(reference: string): Promise<PaymentResult> {
+  private async verifyPaystackPayment(
+    reference: string,
+  ): Promise<PaymentResult> {
     try {
-      const result =
-  await backendBridge.invokeEdgeFunction(
-    "verify-paystack-transaction",
-    {
-      reference,
-    },
-    {
-      method: "POST",
-      idempotencyKey:
-        `verify.paystack:${reference}`,
-    }
-  );
+      const result = await backendBridge.invokeEdgeFunction(
+        'verify-paystack-transaction',
+        { reference },
+        {
+          method: 'POST',
+          idempotencyKey: `verify.paystack:${reference}`,
+        },
+      );
 
-if (result.error || !result.data) {
-  throw (
-    result.error ||
-    new Error(
-      "Paystack payment verification failed"
-    )
-  );
-}
+      if (result.error || !result.data) {
+        throw (
+          result.error ??
+          new Error('Paystack payment verification failed.')
+        );
+      }
 
-const data = result.data;
+      const data = result.data;
 
-return {
-  success: data?.status === "completed",
-  transactionId: reference,
-  gatewayResponse: data,
-};
-      if (error) throw error;
+      // The Edge Function returns the provider transaction status.
+      const success = data.status === 'success';
+
       return {
-        success: data?.status === 'completed',
-        transactionId: reference,
+        success,
+        transactionId: data.reference ?? reference,
         gatewayResponse: data,
+        error: success
+          ? undefined
+          : `Paystack payment is not confirmed successful. Status: ${data.status}`,
       };
     } catch (error) {
-      console.error('[Paystack] Payment verification failed:', error);
+      console.error(
+        '[Paystack] Payment verification failed:',
+        error,
+      );
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Paystack payment verification failed',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Paystack payment verification failed.',
       };
     }
   }
 
   /**
-   * Process owner payout (weekly on Fridays). Requires an existing
-   * owner_payout_accounts row; `payoutAccountId` is the row ID.
+   * Process an owner payout.
+   *
+   * The backend validates the authenticated owner, payout account,
+   * available balance, verified phone, and withdrawal authorization.
    */
   async processOwnerPayout(
     ownerId: string,
     amount: number,
-    payoutDetails: { accountNumber?: string; email?: string; payoutAccountId?: string; note?: string; authorizationId?: string }
+    payoutDetails: {
+      accountNumber?: string;
+      email?: string;
+      payoutAccountId?: string;
+      note?: string;
+      authorizationId?: string;
+    },
   ): Promise<PaymentResult> {
-    if (this.gateway === 'paypal') {
-      return this.processPayPalPayout(ownerId, amount, payoutDetails);
-    } else {
-      return this.processPaystackTransfer(ownerId, amount, payoutDetails);
+    if (!ownerId?.trim()) {
+      return {
+        success: false,
+        error: 'Owner ID is required.',
+      };
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        success: false,
+        error: 'Payout amount must be greater than zero.',
+      };
+    }
+
+    switch (this.gateway) {
+      case 'paypal':
+        return this.processPayPalPayout(
+          ownerId,
+          amount,
+          payoutDetails,
+        );
+
+      case 'paystack':
+        return this.processPaystackTransfer(
+          ownerId,
+          amount,
+          payoutDetails,
+        );
+
+      case 'opay':
+        // Never route an OPay payout through Paystack.
+        // A dedicated, verified OPay payout implementation is required.
+        return {
+          success: false,
+          error:
+            'OPay owner payouts are not implemented by this payment gateway.',
+        };
+
+      default:
+        return {
+          success: false,
+          error: `Unsupported payout gateway '${this.gateway}'.`,
+        };
     }
   }
 
   /**
-   * Process PayPal payout to owner via edge function.
+   * Initiate a PayPal payout through the authoritative backend.
    */
   private async processPayPalPayout(
     _ownerId: string,
     amount: number,
-    payoutDetails: { payoutAccountId?: string; note?: string; authorizationId?: string }
+    payoutDetails: {
+      payoutAccountId?: string;
+      note?: string;
+      authorizationId?: string;
+    },
   ): Promise<PaymentResult> {
     try {
       if (!payoutDetails.payoutAccountId) {
-        return { success: false, error: 'Missing payoutAccountId' };
+        return {
+          success: false,
+          error: 'Missing payoutAccountId.',
+        };
       }
+
       if (!payoutDetails.authorizationId) {
-        return { success: false, error: 'Withdrawal authorization required before payout' };
+        return {
+          success: false,
+          error:
+            'Withdrawal authorization required before payout.',
+        };
       }
-      const result =
-  await backendBridge.invokeEdgeFunction(
-    'initiate-paypal-payout',
-    {
-      amount,
-      payout_account_id:
-        payoutDetails.payoutAccountId,
-      note: payoutDetails.note,
-      authorization_id:
-        payoutDetails.authorizationId,
-    },
-    {
-      method: 'POST',
-      idempotencyKey:
-        `payout.paypal:${payoutDetails.payoutAccountId}:${amount}`,
-    },
-  );
 
-if (result.error || !result.data) {
-  throw result.error ||
-    new Error(
-      'PayPal payout failed',
-    );
-}
-
-return {
-  success: true,
-  transactionId:
-    result.data?.payout?.transfer_reference ||
-    result.data?.payout?.transfer_code,
-  gatewayResponse:
-    result.data,
-}; 
-      {
-        body: {
+      const result = await backendBridge.invokeEdgeFunction(
+        'initiate-paypal-payout',
+        {
           amount,
           payoutAccountId: payoutDetails.payoutAccountId,
           note: payoutDetails.note,
           authorizationId: payoutDetails.authorizationId,
         },
-        headers: idempotencyHeaders('payout.paypal', { amount, payoutAccountId: payoutDetails.payoutAccountId }),
-      });
-      if (error) throw error;
-      return { success: true, transactionId: data?.reference ?? data?.payout_batch_id, gatewayResponse: data };
+        {
+          method: 'POST',
+          idempotencyKey:
+            `payout.paypal:${payoutDetails.payoutAccountId}:${amount}`,
+        },
+      );
+
+      if (result.error || !result.data) {
+        throw (
+          result.error ??
+          new Error('PayPal payout request failed.')
+        );
+      }
+
+      const data = result.data;
+      const payout = data.payout;
+
+      if (!payout) {
+        return {
+          success: false,
+          error:
+            data.error ??
+            'PayPal payout response did not contain a payout record.',
+          gatewayResponse: data,
+        };
+      }
+
+      const transactionId =
+        payout.transfer_reference ??
+        payout.transfer_code ??
+        payout.reference ??
+        payout.id;
+
+      if (!transactionId) {
+        return {
+          success: false,
+          error:
+            'PayPal payout record is missing its transaction reference.',
+          gatewayResponse: data,
+        };
+      }
+
+      // A submitted payout is not necessarily a completed payout.
+      const status = String(payout.status ?? '').toLowerCase();
+
+      return {
+        success: !['failed', 'cancelled', 'canceled'].includes(status),
+        transactionId,
+        gatewayResponse: data,
+        error: ['failed', 'cancelled', 'canceled'].includes(status)
+          ? `PayPal payout has status '${status}'.`
+          : undefined,
+      };
     } catch (error) {
       console.error('[PayPal] Payout failed:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'PayPal payout failed' };
+
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'PayPal payout failed.',
+      };
     }
   }
 
   /**
-   * Process Paystack transfer to owner via edge function.
+   * Initiate a Paystack transfer through the authoritative backend.
    */
   private async processPaystackTransfer(
     _ownerId: string,
     amount: number,
-    payoutDetails: { payoutAccountId?: string; note?: string; authorizationId?: string }
+    payoutDetails: {
+      payoutAccountId?: string;
+      note?: string;
+      authorizationId?: string;
+    },
   ): Promise<PaymentResult> {
     try {
       if (!payoutDetails.payoutAccountId) {
-        return { success: false, error: 'Missing payoutAccountId' };
+        return {
+          success: false,
+          error: 'Missing payoutAccountId.',
+        };
       }
+
       if (!payoutDetails.authorizationId) {
-        return { success: false, error: 'Withdrawal authorization required before payout' };
+        return {
+          success: false,
+          error:
+            'Withdrawal authorization required before payout.',
+        };
       }
-      const result =
-  await backendBridge.invokeEdgeFunction(
-    'initiate-paystack-transfer',
-    {
-      amount,
-      payout_account_id:
-        payoutDetails.payoutAccountId,
-      note: payoutDetails.note,
-      authorization_id:
-        payoutDetails.authorizationId,
-    },
-    {
-      method: 'POST',
-      idempotencyKey:
-        `payout.paystack:${payoutDetails.payoutAccountId}:${amount}`,
-    },
-  );
 
-if (result.error || !result.data) {
-  throw result.error ||
-    new Error(
-      'Paystack transfer failed',
-    );
-}
+      const result = await backendBridge.invokeEdgeFunction(
+        'initiate-paystack-transfer',
+        {
+          amount,
+          payoutAccountId: payoutDetails.payoutAccountId,
+          reason: payoutDetails.note,
+          authorizationId: payoutDetails.authorizationId,
+        },
+        {
+          method: 'POST',
+          idempotencyKey:
+            `payout.paystack:${payoutDetails.payoutAccountId}:${amount}`,
+        },
+      );
 
-return {
-  success: true,
-  transactionId:
-    result.data?.payout?.transfer_reference ||
-    result.data?.payout?.transfer_code,
-  gatewayResponse:
-    result.data,
-};
+      if (result.error || !result.data) {
+        throw (
+          result.error ??
+          new Error('Paystack transfer request failed.')
+        );
+      }
+
+      const data = result.data;
+      const payout = data.payout;
+
+      if (!payout) {
+        return {
+          success: false,
+          error:
+            data.error ??
+            'Paystack transfer response did not contain a payout record.',
+          gatewayResponse: data,
+        };
+      }
+
+      const transactionId =
+        payout.transfer_reference ??
+        payout.transfer_code ??
+        payout.reference ??
+        payout.id;
+
+      if (!transactionId) {
+        return {
+          success: false,
+          error:
+            'Paystack payout record is missing its transaction reference.',
+          gatewayResponse: data,
+        };
+      }
+
+      // The transfer may still be pending provider confirmation.
+      const status = String(payout.status ?? '').toLowerCase();
+
+      return {
+        success: !['failed', 'cancelled', 'canceled'].includes(status),
+        transactionId,
+        gatewayResponse: data,
+        error: ['failed', 'cancelled', 'canceled'].includes(status)
+          ? `Paystack payout has status '${status}'.`
+          : undefined,
+      };
+    } catch (error) {
+      console.error('[Paystack] Transfer failed:', error);
+
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Paystack transfer failed.',
+      };
+    }
+  }
 
   /**
-
-* Process a refund through the authoritative backend.
-  */
+   * Process a refund through the authoritative backend.
+   */
   async processRefund(
-  originalTransactionId: string,
-  amount: number,
-  reason: string,
+    originalTransactionId: string,
+    amount: number,
+    reason: string,
   ): Promise<PaymentResult> {
-  if (!originalTransactionId?.trim()) {
-  return {
-  success: false,
-  error: "Original transaction ID is required",
-  };
+    if (!originalTransactionId?.trim()) {
+      return {
+        success: false,
+        error: 'Original transaction ID is required.',
+      };
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        success: false,
+        error: 'Refund amount must be greater than zero.',
+      };
+    }
+
+    if (!reason?.trim()) {
+      return {
+        success: false,
+        error: 'A refund reason is required.',
+      };
+    }
+
+    try {
+      const result = await backendBridge.invokeEdgeFunction(
+        'process-refund',
+        {
+          provider: this.gateway,
+          originalTransactionId,
+          amount,
+          reason,
+        },
+        {
+          method: 'POST',
+          idempotencyKey:
+            `refund:${this.gateway}:${originalTransactionId}:${amount}`,
+        },
+      );
+
+      if (result.error || !result.data) {
+        return {
+          success: false,
+          error:
+            result.error?.message ??
+            'Refund execution failed.',
+        };
+      }
+
+      const data = result.data;
+      const success = data.success === true;
+
+      return {
+        success,
+        transactionId:
+          data.transactionId ?? data.refund_id,
+        gatewayResponse: data,
+        error: success
+          ? undefined
+          : data.error ??
+            'Refund was not confirmed by the provider.',
+      };
+    } catch (error) {
+      console.error(
+        `[${this.gateway}] Refund failed:`,
+        error,
+      );
+
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Refund failed.',
+      };
+    }
   }
-
-if (!Number.isFinite(amount) || amount <= 0) {
-  return {
-    success: false,
-    error: "Refund amount must be greater than zero",
-  };
-}
-
-try {
-  const result = await backendBridge.invokeEdgeFunction(
-    "process-refund",
-    {
-      provider: this.gateway,
-      originalTransactionId,
-      amount,
-      reason,
-    },
-    {
-      method: "POST",
-      idempotencyKey:
-        `refund:${this.gateway}:${originalTransactionId}:${amount}`,
-    },
-  );
-
-  if (result.error || !result.data) {
-    return {
-      success: false,
-      error:
-        result.error?.message ||
-        "Refund execution failed",
-    };
-  }
-
-  return {
-    success: result.data.success === true,
-    transactionId:
-      result.data.transactionId ||
-      result.data.refund_id,
-    gatewayResponse: result.data,
-    error:
-      result.data.success === true
-        ? undefined
-        : result.data.error ||
-          "Refund was not confirmed by provider",
-  };
-} catch (error) {
-  console.error(
-    `[${this.gateway}] Refund failed:`,
-    error,
-  );
-
-  return {
-    success: false,
-    error:
-      error instanceof Error
-        ? error.message
-        : "Refund failed",
-  };
-}
-
-}
 }
 
 /**
-
-* Factory function to create payment gateway for a region
-  */
-  export function createPaymentGateway(
+ * Factory function to create a payment gateway for a region.
+ */
+export function createPaymentGateway(
   regionId: string,
-  ): PaymentGateway {
+): PaymentGateway {
   return new PaymentGateway(regionId);
-  }
- 
+}
