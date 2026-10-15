@@ -184,33 +184,103 @@ const AdminDashboard = () => {
   const monthlyWithdrawalsNgnInUsd = convertToUSD(financials.adminWithdrawals.monthly.ngn, 'NGN');
   const totalMonthlyWithdrawalsUsd = financials.adminWithdrawals.monthly.usd + monthlyWithdrawalsNgnInUsd;
 
+  
   const handleApproval = async (item: PendingApprovalItem) => {
+    if (approvingId !== null) return;
+
     setApprovingId(item.id);
 
     try {
-      const { error: approveError } = await supabase.rpc('approve_application', {
-        _app_id: item.id,
-        _notes: 'Approved from admin dashboard',
-      });
-      if (approveError) throw approveError;
+      // Step 1: Approve the application through the existing database RPC.
+      const { error: approveError } = await supabase.rpc(
+        "approve_application",
+        {
+          _app_id: item.id,
+          _notes: "Approved from admin dashboard",
+        },
+      );
 
-      const userType = item.type === "Owner" ? "owner" : "driver";
-      const region = /lagos|abuja|port harcourt|nigeria/i.test(item.location) ? "NIGERIA" : "USA";
+      if (approveError) {
+        throw new Error(
+          `Application approval failed: ${approveError.message}`,
+        );
+      }
 
-      await supabase.functions.invoke("send-approval-notification", {
-        body: { email: item.email, name: item.name, userType, region },
-      });
+      // Refresh approval records immediately after successful approval.
+      await refreshApprovals();
 
-      refreshApprovals();
+      // Step 2: Resolve the applicant's region without silently
+      // assigning USA to an unknown or newly configured region.
+      const location = (item.location || "").trim();
 
-      toast.success(`${item.type} approved successfully!`, {
-        description: `Notification email sent to ${item.email}`,
+      const isNigeria =
+        /\bnigeria\b|\blagos\b|\babuja\b|\bport\s+harcourt\b/i.test(
+          location,
+        );
+
+      const isUSA =
+        /\busa\b|\bu\.s\.a\.?\b|\bunited states\b|\bamerica\b|\bdmv\b|\bvirginia\b|\bmaryland\b|\bwashington,?\s*d\.?c\.?\b/i.test(
+          location,
+        );
+
+      const region =
+        isNigeria && !isUSA
+          ? "NIGERIA"
+          : isUSA && !isNigeria
+            ? "USA"
+            : null;
+
+      if (!region) {
+        toast.warning("Application approved; notification needs attention.", {
+          description:
+            `The application for ${item.name} was approved, but its region ` +
+            "could not be resolved unambiguously. Verify the applicant's " +
+            "country before sending the regional notification.",
+        });
+        return;
+      }
+
+      // Step 3: Send the notification and inspect the returned error.
+      const { error: notificationError } =
+        await supabase.functions.invoke("send-approval-notification", {
+          body: {
+            email: item.email,
+            name: item.name,
+            userType: item.type === "Owner" ? "owner" : "driver",
+            region,
+          },
+        });
+
+      if (notificationError) {
+        console.error(
+          "Application approved, but notification delivery failed:",
+          notificationError,
+        );
+
+        toast.warning("Application approved; notification failed.", {
+          description:
+            `The application was approved, but notification delivery ` +
+            `to ${item.email} could not be confirmed. Check the delivery logs.`,
+        });
+        return;
+      }
+
+      toast.success(`${item.type} approved successfully.`, {
+        description:
+          `The notification request for ${item.email} completed without ` +
+          "a reported function error.",
         icon: <Mail className="h-4 w-4" />,
       });
-    } catch (error: any) {
-      console.error("Error approving:", error);
-      toast.error("Failed to approve application", {
-        description: error.message || "Please try again",
+    } catch (error: unknown) {
+      console.error("Error approving application:", error);
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred.";
+
+      toast.error("Application approval failed.", {
+        description: message,
       });
     } finally {
       setApprovingId(null);
