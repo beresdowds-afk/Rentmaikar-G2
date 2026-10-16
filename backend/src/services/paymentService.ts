@@ -2580,7 +2580,8 @@ private async verifyPayPalWebhookSignature(
     );
   }
 
-  const result = await response.json();
+    const result = await response.json();
 
   return result?.verification_status === "SUCCESS";
+  }
 }
