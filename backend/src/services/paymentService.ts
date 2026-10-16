@@ -1183,16 +1183,6 @@ async processPayPalOwnerPayout(opts: {
      * A transport/network ambiguity must NOT automatically reverse the
      * reservation because PayPal may already have accepted the payout.
      */
-
-async processPayPalOwnerPayout(opts: {
-  owner_id: string;
-  amount: number;
-  currency: string;
-  payout_account_id: string;
-  authorization_id: string;
-  note?: string;
-  idempotency_key?: string;
-}) {
   const pool = getDbPool();
 
   const amount = Number(opts.amount);
