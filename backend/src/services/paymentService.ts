@@ -559,51 +559,52 @@ class PaymentService {
       e.message
     );
 
-    throw new Error(
-      `Failed to record Paystack transaction: ${e.message}`
-    );
-  }
-
-  return {
-    authorization_url:
-      payload.data.authorization_url,
-    access_code:
-      payload.data.access_code,
-    reference,
-    payment_id: paymentId,
-  };
+    
+throw new Error(
+  `Failed to record Paystack transaction: ${e.message}`
+);
 }
 
-    // Record payment
-    let paymentId: string | null = null;
-    try {
-      const pRes = await pool.query(
-                `INSERT INTO public.payments (
-          amount,
-          currency,
-          payment_method,
-          status,
-          driver_id,
-          owner_id,
-          rental_id,
-          vehicle_id,
-          purpose,
-          transaction_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id`,
-        [
-          amountVal,
-          (params.currency || "NGN").toUpperCase(),
-          "paystack",
-          "pending",
-          params.driver_id || null,
-          params.owner_id || null,
-                    params.rental_id || null,
-          params.vehicle_id || null,
-          purpose, by to use by
-          reference,
-        ]
-      );
+return {
+  authorization_url: payload.data.authorization_url,
+  access_code: payload.data.access_code,
+  reference,
+  payment_id: paymentId,
+};
+}
+
+// Record payment
+let paymentId: string | null = null;
+
+try {
+  const pRes = await pool.query(
+    `INSERT INTO public.payments (
+      amount,
+      currency,
+      payment_method,
+      status,
+      driver_id,
+      owner_id,
+      rental_id,
+      vehicle_id,
+      purpose,
+      transaction_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    RETURNING id`,
+    [
+      amountVal,
+      (params.currency || "NGN").toUpperCase(),
+      "paystack",
+      "pending",
+      params.driver_id || null,
+      params.owner_id || null,
+      params.rental_id || null,
+      params.vehicle_id || null,
+      purpose,
+      reference,
+    ]
+  );
+
       paymentId = pRes.rows[0]?.id || null;
         } catch (e: any) {
       console.error("[Paystack Service] Error recording payments row:", e.message);
