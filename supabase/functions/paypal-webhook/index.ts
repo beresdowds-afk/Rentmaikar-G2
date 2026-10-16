@@ -250,120 +250,51 @@ Deno.serve(async (req) => {
           event_type: eventType,
         });
       } else {
-        const terminalSuccess =
-          eventType === "PAYMENT.PAYOUTSBATCH.SUCCESS" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED";
+        // Batch-level events carry no per-item amount; only item events and
+        // batch DENIED can settle or release funds. Everything else is
+        // informational (submission is not settlement).
+        const outcome =
+          eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" ? "settled"
+          : (eventType === "PAYMENT.PAYOUTSBATCH.DENIED" ||
+             eventType === "PAYMENT.PAYOUTS-ITEM.FAILED" ||
+             eventType === "PAYMENT.PAYOUTS-ITEM.BLOCKED" ||
+             eventType === "PAYMENT.PAYOUTS-ITEM.CANCELED") ? "failed"
+          : (eventType === "PAYMENT.PAYOUTS-ITEM.RETURNED" ||
+             eventType === "PAYMENT.PAYOUTS-ITEM.REFUNDED") ? "reversed"
+          : null;
 
-        const terminalFailure =
-          eventType === "PAYMENT.PAYOUTSBATCH.DENIED" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.FAILED" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.BLOCKED" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.CANCELED" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.RETURNED" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.REFUNDED" ||
-          eventType === "PAYMENT.PAYOUTS-ITEM.UNCLAIMED";
-
-        if (
-          eventType === "PAYMENT.PAYOUTSBATCH.PROCESSING"
-        ) {
-          await transitionState(
-            supabase,
-            "payout",
-            payout.id,
-            "captured",
-            "PayPal payout batch processing",
-            {
-              provider_event: eventType,
-              payout_batch_id: batchId ?? null,
-            },
-          );
-        } else if (terminalSuccess) {
-          /*
-           * FINAL SUCCESS ONLY.
-           */
-          const settled = await transitionState(
-            supabase,
-            "payout",
-            payout.id,
-            "settled",
-            "PayPal confirmed payout success",
-            {
-              provider_event: eventType,
-              payout_batch_id: batchId ?? null,
-              payout_item_id: resource?.payout_item_id ?? null,
-            },
-          );
-
-          if (settled) {
-            await transitionState(
-              supabase,
-              "payout",
-              payout.id,
-              "completed",
-              "PayPal payout completed after verified webhook",
-              {
-                provider_event: eventType,
-                payout_batch_id: batchId ?? null,
-                payout_item_id: resource?.payout_item_id ?? null,
-              },
-            );
-          }
-
-          await supabase
-            .from("owner_payouts")
-            .update({
-              processed_at: new Date().toISOString(),
-              raw_payload: evt,
-            })
-            .eq("id", payout.id);
-        } else if (terminalFailure) {
-          /*
-           * The reservation was already debited before the PSP call.
-           * Return the reserved amount exactly once.
-           */
-          const reversal = await postLedgerEntry(supabase, {
-            userId: payout.owner_id,
-            accountType: "owner",
-            currency: payout.currency,
-            direction: "credit",
-            amount: Number(payout.amount),
-            entryType: "payout_reversal",
-            idempotencyKey: `payout:${payout.id}:reversal`,
-            referenceTable: "owner_payouts",
-            referenceId: payout.id,
-            provider: "paypal",
-            providerReference: batchId || payout.transfer_reference,
-            description: "PayPal payout failed/reversed; wallet reservation returned",
+        if (eventType === "PAYMENT.PAYOUTS-ITEM.UNCLAIMED") {
+          // Funds are held by PayPal and may be returned later: not a failure.
+          await supabase.rpc("mark_owner_payout_reconciliation_required", {
+            _payout_id: payout.id,
+            _reason: "PayPal reported the payout item as UNCLAIMED",
+            _payload: evt,
           });
-
-          if (!reversal.ok) {
-            logger.error("payout.reversal.failed", {
-              payout_id: payout.id,
-              error: reversal.error,
+        } else if (outcome) {
+          const itemAmount = resource?.payout_item?.amount;
+          const { data: fin, error: finErr } = await supabase.rpc("finalize_owner_payout", {
+            _payout_id: payout.id,
+            _outcome: outcome,
+            _provider: "paypal",
+            _evidence: { event: eventType, batch_id: batchId ?? null, sender_item_id: senderItemId ?? null },
+            _expected_amount: itemAmount?.value != null ? Number(itemAmount.value) : null,
+            _expected_currency: itemAmount?.currency ?? null,
+          });
+          if (finErr) {
+            logger.error("payout.finalize.failed", { payout_id: payout.id, error: finErr.message });
+            if (idem.eventRowId) {
+              await supabase.from("payment_webhook_events").delete().eq("id", idem.eventRowId);
+            }
+            return new Response("payout reconciliation failed", { status: 500 });
+          }
+          if (!fin?.ok) {
+            // Mismatch / invalid transition: never settle, keep reserved.
+            await supabase.rpc("mark_owner_payout_reconciliation_required", {
+              _payout_id: payout.id,
+              _reason: `PayPal ${eventType} could not be applied: ${fin?.error ?? "unknown"}`,
+              _payload: evt,
             });
           }
-
-          await transitionState(
-            supabase,
-            "payout",
-            payout.id,
-            "failed",
-            `PayPal payout failed: ${eventType}`,
-            {
-              provider_event: eventType,
-              payout_batch_id: batchId ?? null,
-              payout_item_id: resource?.payout_item_id ?? null,
-            },
-          );
-
-          await supabase
-            .from("owner_payouts")
-            .update({
-              failure_reason: evt.summary || eventType,
-              raw_payload: evt,
-              processed_at: new Date().toISOString(),
-            })
-            .eq("id", payout.id);
         }
       }
     }

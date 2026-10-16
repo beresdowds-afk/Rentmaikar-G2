@@ -1,315 +1,111 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { requireCronSecretAsync } from "../_shared/cron-auth.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { postLedgerEntry } from "../_shared/wallet-ledger.ts";
-import { transitionState } from "../_shared/withdrawal-authorization.ts";
-
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const supabase = createClient(
-  supabaseUrl,
-  serviceRoleKey,
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
+/*
+ * Weekly bulk payout worker.
+ *
+ * Selection is explicit and durable: only rows classified
+ * workflow_type = 'weekly_bulk' that an administrator approved
+ * (weekly_approved_at) and that are due, still pending, never submitted to a
+ * provider and not flagged for reconciliation are processed. Ordinary
+ * self-withdrawals (workflow_type = 'self_withdrawal') are never selected, and
+ * the cron secret authenticates the worker only - it is not business approval.
+ *
+ * This worker never creates payouts or reserves funds. For each selected row
+ * it calls the backend `process-owner-payouts` endpoint, which atomically
+ * claims the row (claim_weekly_owner_payout) before the single provider call.
+ * Re-running after a crash is safe: claimed/submitted rows are not selected
+ * again and ambiguous ones wait for reconciliation.
+ */
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders,
-    });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const cronDenied =
-    await requireCronSecretAsync(req);
-
+  const cronDenied = await requireCronSecretAsync(req);
   if (cronDenied) return cronDenied;
 
   try {
-    /*
-     * Only payout records already authorized for scheduled processing
-     * are eligible here.
-     *
-     * Do NOT turn owner_earnings directly into a payout without the
-     * existing withdrawal authorization/risk process.
-     */
+    const backendUrl = Deno.env.get("BACKEND_URL");
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    if (!backendUrl || !cronSecret) throw new Error("Worker backend is not configured");
+
     const { data: payouts, error } = await supabase
       .from("owner_payouts")
-      .select(`
-        *,
-        owner_payout_accounts(*)
-      `)
-      .in("status", ["authorized", "pending"])
+      .select("id, provider, payout_account_id, owner_payout_accounts(provider)")
+      .eq("workflow_type", "weekly_bulk")
+      .eq("status", "pending")
+      .not("weekly_approved_at", "is", null)
+      .eq("provider_attempts", 0)
+      .eq("reconciliation_required", false)
       .lte("scheduled_for", new Date().toISOString())
-      .order("scheduled_for", {
-        ascending: true,
-      })
+      .order("scheduled_for", { ascending: true })
       .limit(200);
 
-    if (error) {
-      throw new Error(
-        `Failed to load scheduled payouts: ${error.message}`,
-      );
-    }
+    if (error) throw new Error(`Failed to load scheduled payouts: ${error.message}`);
 
-    const results = {
-      attempted: 0,
-      submitted: 0,
-      failed: 0,
-      skipped: 0,
-      payouts: [] as unknown[],
-    };
+    const results = { attempted: 0, submitted: 0, failed: 0, skipped: 0, payouts: [] as unknown[] };
 
-    for (const payout of payouts || []) {
+    for (const payout of payouts ?? []) {
       results.attempted++;
-
-      const account =
-        payout.owner_payout_accounts;
-
-      if (!account) {
+      const account = (payout as any).owner_payout_accounts;
+      if (!account || account.provider !== payout.provider) {
         results.skipped++;
-
         results.payouts.push({
           payout_id: payout.id,
           status: "skipped",
-          reason: "payout account not found",
+          reason: account ? "provider mismatch" : "payout account not found",
         });
-
         continue;
       }
 
-      if (
-        payout.provider !== account.provider
-      ) {
-        results.skipped++;
-
+      try {
+        const response = await fetch(`${backendUrl}/api/functions/process-owner-payouts`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Cron-Secret": cronSecret,
+            "X-Idempotency-Key": `weekly-payout:${payout.id}`,
+          },
+          body: JSON.stringify({ payout_id: payout.id, note: "Rentmaikar weekly owner payout" }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body?.error || `Payout execution failed [${response.status}]`);
+        }
+        results.submitted++;
         results.payouts.push({
           payout_id: payout.id,
-          status: "skipped",
-          reason: "provider mismatch",
+          provider: payout.provider,
+          status: body?.payout?.status ?? body?.status ?? "submitted",
         });
-
-        continue;
+      } catch (err) {
+        results.failed++;
+        results.payouts.push({
+          payout_id: payout.id,
+          provider: payout.provider,
+          status: "failed",
+          error: err instanceof Error ? err.message : "Payout execution failed",
+        });
       }
-
-      /*
-       * PayPal.
-       */
-      if (payout.provider === "paypal") {
-        if (!account.paypal_email) {
-          results.skipped++;
-
-          results.payouts.push({
-            payout_id: payout.id,
-            status: "skipped",
-            reason: "PayPal email missing",
-          });
-
-          continue;
-        }
-
-        /*
-         * The actual PayPal disbursement should be executed by the
-         * authoritative PayPal payout service.
-         *
-         * Do not mark the payout completed here.
-         */
-        try {
-          const response = await fetch(
-            `${Deno.env.get("BACKEND_URL")}/api/functions/initiate-paypal-payout`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-                "X-Cron-Secret":
-                  Deno.env.get("CRON_SECRET") || "",
-                "X-Idempotency-Key":
-                  `weekly-payout:${payout.id}`,
-              },
-              body: JSON.stringify({
-                owner_id: payout.owner_id,
-                amount: Number(payout.amount),
-                currency: payout.currency,
-                payout_account_id:
-                  payout.payout_account_id,
-                authorization_id:
-                  payout.authorization_id,
-                note:
-                  "Rentmaikar weekly owner payout",
-              }),
-            },
-          );
-
-          const body =
-            await response.json().catch(
-              () => ({}),
-            );
-
-          if (!response.ok) {
-            throw new Error(
-              body?.error ||
-              `PayPal payout orchestration failed [${response.status}]`,
-            );
-          }
-
-          results.submitted++;
-
-          results.payouts.push({
-            payout_id: payout.id,
-            provider: "paypal",
-            status:
-              body?.payout?.status ||
-              "submitted",
-          });
-        } catch (err) {
-          results.failed++;
-
-          results.payouts.push({
-            payout_id: payout.id,
-            provider: "paypal",
-            status: "failed",
-            error:
-              err instanceof Error
-                ? err.message
-                : "PayPal payout failed",
-          });
-        }
-
-        continue;
-      }
-
-      /*
-       * Paystack.
-       */
-      if (payout.provider === "paystack") {
-        if (!account.recipient_code) {
-          results.skipped++;
-
-          results.payouts.push({
-            payout_id: payout.id,
-            status: "skipped",
-            reason:
-              "Paystack recipient code missing",
-          });
-
-          continue;
-        }
-
-        try {
-          const response = await fetch(
-            `${Deno.env.get("BACKEND_URL")}/api/functions/initiate-paystack-transfer`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-                "X-Cron-Secret":
-                  Deno.env.get("CRON_SECRET") || "",
-                "X-Idempotency-Key":
-                  `weekly-payout:${payout.id}`,
-              },
-              body: JSON.stringify({
-                owner_id: payout.owner_id,
-                amount: Number(payout.amount),
-                currency: payout.currency,
-                payout_account_id:
-                  payout.payout_account_id,
-                authorization_id:
-                  payout.authorization_id,
-                note:
-                  "Rentmaikar weekly owner payout",
-              }),
-            },
-          );
-
-          const body =
-            await response.json().catch(
-              () => ({}),
-            );
-
-          if (!response.ok) {
-            throw new Error(
-              body?.error ||
-              `Paystack payout orchestration failed [${response.status}]`,
-            );
-          }
-
-          results.submitted++;
-
-          results.payouts.push({
-            payout_id: payout.id,
-            provider: "paystack",
-            status:
-              body?.payout?.status ||
-              "submitted",
-          });
-        } catch (err) {
-          results.failed++;
-
-          results.payouts.push({
-            payout_id: payout.id,
-            provider: "paystack",
-            status: "failed",
-            error:
-              err instanceof Error
-                ? err.message
-                : "Paystack payout failed",
-          });
-        }
-
-        continue;
-      }
-
-      /*
-       * No provider = no disbursement.
-       */
-      results.skipped++;
-
-      results.payouts.push({
-        payout_id: payout.id,
-        status: "skipped",
-        reason: `Unsupported provider: ${payout.provider}`,
-      });
     }
 
     return new Response(
-      JSON.stringify({
-        success: true,
-        results,
-        timestamp:
-          new Date().toISOString(),
-      }),
-      {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type":
-            "application/json",
-        },
-      },
+      JSON.stringify({ success: true, results, timestamp: new Date().toISOString() }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error) {
-    console.error(
-      "[process-owner-payouts]",
-      error,
-    );
-
+    console.error("[process-owner-payouts]", error);
     return new Response(
       JSON.stringify({
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Weekly payout orchestration failed",
+        error: error instanceof Error ? error.message : "Weekly payout orchestration failed",
       }),
-      {
-        status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type":
-            "application/json",
-        },
-      },
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });

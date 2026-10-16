@@ -655,7 +655,7 @@ export class PaymentGateway {
         {
           method: 'POST',
           idempotencyKey:
-            `payout.paypal:${payoutDetails.payoutAccountId}:${amount}`,
+            `owner-withdrawal:${payoutDetails.authorizationId}`,
         },
       );
 
@@ -757,7 +757,7 @@ export class PaymentGateway {
         {
           method: 'POST',
           idempotencyKey:
-            `payout.paystack:${payoutDetails.payoutAccountId}:${amount}`,
+            `owner-withdrawal:${payoutDetails.authorizationId}`,
         },
       );
 
