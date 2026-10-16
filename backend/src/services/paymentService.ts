@@ -228,13 +228,20 @@ class PaymentService {
     return token;
   }
 
-  // Keep the remaining existing PaymentService methods below this point.
-}
 
-    // If live endpoint returned 401 invalid_client, fallback to sandbox
-    if (!res.ok && res.status === 401 && config.baseUrl.includes("api-m.paypal.com")) {
-      console.warn("[PayPal Service] Live endpoint returned 401 with provided credentials, falling back to Sandbox...");
+    
+    // If live endpoint returned 401 invalid_client, fallback to sandbox.
+    if (
+      !res.ok &&
+      res.status === 401 &&
+      config.baseUrl.includes("api-m.paypal.com")
+    ) {
+      console.warn(
+        "[PayPal Service] Live credentials rejected; attempting Sandbox fallback.",
+      );
+
       const sandboxBase = "https://api-m.sandbox.paypal.com";
+
       const sandboxRes = await fetch(`${sandboxBase}/v1/oauth2/token`, {
         method: "POST",
         headers: {
@@ -247,17 +254,44 @@ class PaymentService {
       if (sandboxRes.ok) {
         this.resolvedPayPalBase = sandboxBase;
         res = sandboxRes;
+      } else {
+        const sandboxError = await sandboxRes.text();
+
+        console.error(
+          "[PayPal Service] Sandbox OAuth fallback failed:",
+          sandboxRes.status,
+          sandboxError,
+        );
       }
     }
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error("[PayPal Service] Failed to retrieve OAuth token:", res.status, errText);
-      throw new Error(`PayPal OAuth failure [${res.status}]: ${errText}`);
+
+      console.error(
+        "[PayPal Service] Failed to retrieve OAuth token:",
+        res.status,
+        errText,
+      );
+
+      throw new Error(
+        `PayPal OAuth failure [${res.status}]: ${errText}`,
+      );
     }
 
     const data = await res.json();
-    const expiresIn = Number(data.expires_in) || 32400; // default 9h
+
+    if (
+      typeof data.access_token !== "string" ||
+      data.access_token.length === 0
+    ) {
+      throw new Error(
+        "PayPal OAuth response did not contain a valid access token.",
+      );
+    }
+
+    const expiresIn = Number(data.expires_in) || 32400;
+
     this.paypalTokenCache = {
       token: data.access_token,
       expiresAt: Date.now() + expiresIn * 1000,
@@ -274,7 +308,7 @@ class PaymentService {
     const amountVal = Number(params.amount);
     const purpose = normalizePaymentPurpose(params.purpose);
 
-    if (!amountVal || amountVal <= 0) {
+    if (!Number.isFinite(amountVal) || amountVal <= 0) {
       throw new Error("Payment amount must be greater than 0");
     }
 
