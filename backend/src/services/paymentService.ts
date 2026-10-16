@@ -1839,107 +1839,7 @@ async processPayPalOwnerPayout(opts: {
     awaiting_reconciliation: true,
   };
 }
-  private async executePayPalPayout(opts: {
-  amount: number;
-  receiver: string;
-  reference: string;
-  note: string;
-}) {
-  const clientId =
-    (process.env.PAYPAL_CLIENT_ID || "").trim();
-
-  const clientSecret =
-    (process.env.PAYPAL_CLIENT_SECRET || "").trim();
-
-  const mode = (
-    process.env.PAYPAL_MODE ||
-    process.env.PAYPAL_ENVIRONMENT ||
-    "sandbox"
-  ).toLowerCase();
-
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "PayPal payout credentials are not configured",
-    );
-  }
-
-  const baseUrl =
-    mode === "live" || mode === "production"
-      ? "https://api-m.paypal.com"
-      : "https://api-m.sandbox.paypal.com";
-
-  const basic =
-    Buffer.from(
-      `${clientId}:${clientSecret}`,
-    ).toString("base64");
-
-  const tokenResponse =
-    await fetch(
-      `${baseUrl}/v1/oauth2/token`,
-      {
-        method: "POST",
-        headers: {
-          Authorization:
-            `Basic ${basic}`,
-          "Content-Type":
-            "application/x-www-form-urlencoded",
-        },
-        body:
-          "grant_type=client_credentials",
-      },
-    );
-
-  if (!tokenResponse.ok) {
-    const errorText =
-      await tokenResponse.text();
-
-    throw new Error(
-      `PayPal authentication failed: ${errorText}`,
-    );
-  }
-
-  const tokenPayload =
-    await tokenResponse.json();
-
-  const accessToken =
-    tokenPayload.access_token;
-
-  if (!accessToken) {
-    throw new Error(
-      "PayPal access token missing",
-    );
-  }
-
-  const response =
-    await fetch(
-      `${baseUrl}/v1/payments/payouts`,
-      {
-        method: "POST",
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`,
-          "Content-Type":
-            "application/json",
-          Accept:
-            "application/json",
-          "PayPal-Request-Id":
-            `payout:${opts.reference}`,
-        },
-        body: JSON.stringify({
-          sender_batch_header: {
-            sender_batch_id:
-              opts.reference,
-            email_subject:
-              "RentMaikar payout",
-            email_message:
-              opts.note,
-          },
-          items: [
-            {
-              recipient_type:
-                "EMAIL",
-              amount: {
-
+   
 private async executePayPalPayout(opts: {
   amount: number;
   receiver: string;
@@ -1963,7 +1863,7 @@ private async executePayPalPayout(opts: {
     throw new Error("PayPal payout credentials are not configured");
   }
 
-  if (mode !== "live" && mode !== "production" && mode !== "sandbox") {
+  if (!["live", "production", "sandbox"].includes(mode)) {
     throw new Error(
       "PAYPAL_MODE must explicitly be set to 'live' or 'sandbox'",
     );
@@ -1980,24 +1880,158 @@ private async executePayPalPayout(opts: {
     Math.round(opts.amount * 100) !== opts.amount * 100
   ) {
     throw new Error(
-      "PayPal payout amount must be positive and have at most two decimal places",
+      "PayPal payout amount must be at least 1.00 and have at most two decimal places",
     );
   }
 
-  if (!opts.receiver?.trim()) {
+  const receiver = opts.receiver?.trim();
+  const reference = opts.reference?.trim();
+
+  if (!receiver) {
     throw new Error("PayPal payout receiver is required");
   }
 
   if (
-    !opts.reference ||
-    opts.reference.length > 50 ||
-    !/^[A-Za-z0-9._-]+$/.test(opts.reference)
+    !reference ||
+    reference.length > 50 ||
+    !/^[A-Za-z0-9._-]+$/.test(reference)
   ) {
+    throw new Error("PayPal payout reference is invalid");
+  }
+
+  const basic = Buffer.from(
+    `${clientId}:${clientSecret}`,
+  ).toString("base64");
+
+  const tokenResponse = await fetch(
+    `${baseUrl}/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: "grant_type=client_credentials",
+    },
+  );
+
+  const tokenText = await tokenResponse.text();
+
+  let tokenPayload: any;
+
+  try {
+    tokenPayload = tokenText ? JSON.parse(tokenText) : {};
+  } catch {
+    tokenPayload = {};
+  }
+
+  if (!tokenResponse.ok) {
     throw new Error(
-      "PayPal payout reference is invalid",
+      `PayPal authentication failed (HTTP ${tokenResponse.status})`,
     );
   }
 
+  const accessToken = tokenPayload?.access_token;
+
+  if (
+    typeof accessToken !== "string" ||
+    !accessToken.trim()
+  ) {
+    throw new Error("PayPal access token missing from response");
+  }
+
+  const response = await fetch(
+    `${baseUrl}/v1/payments/payouts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "PayPal-Request-Id": reference,
+      },
+      body: JSON.stringify({
+        sender_batch_header: {
+          sender_batch_id: reference,
+          email_subject: "RentMaikar payout",
+          email_message: opts.note,
+        },
+        items: [
+          {
+            recipient_type: "EMAIL",
+            receiver,
+            amount: {
+              value: opts.amount.toFixed(2),
+              currency: "USD",
+            },
+            sender_item_id: reference,
+            note: opts.note,
+          },
+        ],
+      }),
+    },
+  );
+
+  const responseText = await response.text();
+
+  let payload: any;
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    payload = {
+      unparsed_response: responseText.slice(0, 2000),
+    };
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      `PayPal payout request failed (HTTP ${response.status})`,
+    ) as Error & {
+      status?: number;
+      body?: unknown;
+    };
+
+    error.status = response.status;
+    error.body = payload;
+
+    throw error;
+  }
+
+  const batchId = payload?.batch_header?.payout_batch_id;
+  const batchStatus = String(
+    payload?.batch_header?.batch_status || "PENDING",
+  ).toUpperCase();
+
+  if (typeof batchId !== "string" || !batchId.trim()) {
+    /*
+     * PayPal may have accepted the request even if its response
+     * does not contain the expected batch ID.
+     * Reconcile this reference before attempting another payout.
+     */
+    const error = new Error(
+      "PayPal returned no payout batch ID; reconcile before retrying",
+    ) as Error & {
+      status?: number;
+      body?: unknown;
+      ambiguous?: boolean;
+    };
+
+    error.status = response.status;
+    error.body = payload;
+    error.ambiguous = true;
+
+    throw error;
+  }
+
+  return {
+    batchId,
+    batchStatus,
+    raw: payload,
+  };
+  }
+      
   const basic = Buffer.from(
     `${clientId}:${clientSecret}`,
   ).toString("base64");
