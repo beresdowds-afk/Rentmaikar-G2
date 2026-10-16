@@ -39,6 +39,7 @@ import {
 } from "../services/fileUploadService";
 import { visualDamageDetectionService } from "../services/visualDamageDetectionService";
 import { inspectionReminderService } from "../services/inspectionReminderService";
+import { enforceFunctionAccess, AccessDenied } from "../services/functionAccessPolicy";
 import { personaWebhookService } from "../services/personaWebhookService";
 export const functionsRouter = Router();
 
@@ -132,7 +133,6 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "initiate-paypal-payout",
   "reconcile-owner-payout",
   "initiate-paystack-transfer",
-  "persona-create-inquiry",
   "persona-webhook",
   "send-inbox-reply",
   // Inbound Email Retrieval & Secure Attachment Access
@@ -394,6 +394,19 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
     }
   }
+  // Central access policy: reject unauthenticated/unauthorized callers before any side effect.
+  let accessDecision: Awaited<ReturnType<typeof enforceFunctionAccess>> = null;
+  try {
+    accessDecision = await enforceFunctionAccess(functionName, req.headers as Record<string, unknown>);
+  } catch (err: any) {
+    if (err instanceof AccessDenied) {
+      return res.status(err.statusCode).json({ ok: false, error: err.message });
+    }
+    return res.status(401).json({ ok: false, error: "Authentication required" });
+  }
+  const gatedCaller = accessDecision?.caller ?? null;
+  void gatedCaller;
+
   // 1. Generic Supabase-first dispatch for all non-authoritative functions.
   // Authoritative functions (Email, VoIP, Call Center) execute directly on Cloud Run.
   if (!AUTHORITATIVE_BACKEND_FUNCTIONS.has(functionName)) {
@@ -1507,6 +1520,9 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       // Payment & Financial Settlement Authoritative Handlers
       // -----------------------------------------------------------------
       case "create-paypal-order": {
+        if (body.driver_id && gatedCaller && body.driver_id !== gatedCaller.userId && !gatedCaller.isAdmin) {
+          return res.status(403).json({ ok: false, error: "Forbidden" });
+        }
         const result = await paymentService.createPayPalOrder({
           amount: Number(body.amount),
           currency: body.currency,
@@ -1525,7 +1541,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       case "capture-paypal-order": {
         const result = await paymentService.capturePayPalOrder({
           order_id: body.order_id,
-          user_id: body.user_id,
+          user_id: gatedCaller && !gatedCaller.isAdmin ? gatedCaller.userId : body.user_id,
         });
         return res.status(200).json(result);
       }
@@ -1536,6 +1552,9 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
 
       case "create-paystack-transaction": {
+        if (body.driver_id && gatedCaller && body.driver_id !== gatedCaller.userId && !gatedCaller.isAdmin) {
+          return res.status(403).json({ ok: false, error: "Forbidden" });
+        }
         const result = await paymentService.createPaystackTransaction({
           amount: Number(body.amount),
           email: body.email,
@@ -1870,14 +1889,9 @@ case "reconcile-owner-payout": {
 }
 
       case "persona-create-inquiry": {
-        const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        return res.status(200).json({
-          inquiryId,
-          sessionToken: `tok_${inquiryId}`,
-          templateId: process.env.PERSONA_TEMPLATE_ID || "itmpl_rentmaikar_kyc",
-          environmentId: "env_production",
-          status: "created",
-        });
+        // Inquiries are created only by the real Persona-backed edge function,
+        // which persists them for webhook correlation. Never fabricate one here.
+        return res.status(503).json({ ok: false, error: "Persona inquiry service unavailable" });
       }
 
       case "persona-webhook": {
@@ -1971,6 +1985,19 @@ case "reconcile-owner-payout": {
         }
 
         const pool = getDbPool();
+        const ownerRow = await pool.query(
+          `SELECT owner_id FROM public.vehicles WHERE id = $1`,
+          [vehicleId]
+        );
+        if (!ownerRow.rows[0]) {
+          return res.status(404).json({ error: "Vehicle not found" });
+        }
+        if (
+          !gatedCaller ||
+          (!gatedCaller.isAdmin && String(ownerRow.rows[0].owner_id) !== gatedCaller.userId)
+        ) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
         await pool.query(
           `UPDATE public.vehicles
            SET review_status = 'pending',

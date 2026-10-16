@@ -1371,17 +1371,7 @@ case "opay-webhook": {
     }
 
     case "persona-create-inquiry": {
-      const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      return {
-        status: 200,
-        data: {
-          inquiryId,
-          sessionToken: `tok_${inquiryId}`,
-          templateId: process.env.PERSONA_TEMPLATE_ID || "itmpl_rentmaikar_kyc",
-          environmentId: "env_production",
-          status: "created",
-        },
-      };
+      return { status: 503, data: { ok: false, error: "Persona inquiry service unavailable" } };
     }
 
     case "persona-webhook": {
