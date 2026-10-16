@@ -39,6 +39,7 @@ import {
 } from "../services/fileUploadService";
 import { visualDamageDetectionService } from "../services/visualDamageDetectionService";
 import { inspectionReminderService } from "../services/inspectionReminderService";
+import { enforceFunctionAccess, AccessDenied } from "../services/functionAccessPolicy";
 import { personaWebhookService } from "../services/personaWebhookService";
 export const functionsRouter = Router();
 
@@ -61,6 +62,21 @@ import {
   sarekonService,
 } from "../services/iotService";
 import { paymentService } from "../services/paymentService";
+import { resolveCheckoutAuthority, createWithAuthoritativeAmount, PaymentAuthorityError } from "../services/paymentAuthority";
+import { PayoutError, resolveIdempotencyKey } from "../services/ownerPayoutWorkflow";
+import {
+  authenticateSelfWithdrawalCaller,
+  requireAdminCaller,
+  verifyCronSecret,
+} from "../services/payoutRequestAuth";
+
+function sendPayoutError(res: Response, fn: string, err: any) {
+  if (err instanceof PayoutError) {
+    return res.status(err.statusCode).json({ ok: false, code: err.code, error: err.message });
+  }
+  console.error(`[Backend Functions] ${fn} failed`, err);
+  return res.status(502).json({ ok: false, error: "Payout request failed" });
+}
 
 /**
  * List of functions for which Cloud Run backend is the primary authoritative engine.
@@ -116,8 +132,8 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "opay-webhook",
   "process-owner-payouts",
   "initiate-paypal-payout",
+  "reconcile-owner-payout",
   "initiate-paystack-transfer",
-  "persona-create-inquiry",
   "persona-webhook",
   "send-inbox-reply",
   // Inbound Email Retrieval & Secure Attachment Access
@@ -379,6 +395,19 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       }
     }
   }
+  // Central access policy: reject unauthenticated/unauthorized callers before any side effect.
+  let accessDecision: Awaited<ReturnType<typeof enforceFunctionAccess>> = null;
+  try {
+    accessDecision = await enforceFunctionAccess(functionName, req.headers as Record<string, unknown>);
+  } catch (err: any) {
+    if (err instanceof AccessDenied) {
+      return res.status(err.statusCode).json({ ok: false, error: err.message });
+    }
+    return res.status(401).json({ ok: false, error: "Authentication required" });
+  }
+  const gatedCaller = accessDecision?.caller ?? null;
+  void gatedCaller;
+
   // 1. Generic Supabase-first dispatch for all non-authoritative functions.
   // Authoritative functions (Email, VoIP, Call Center) execute directly on Cloud Run.
   if (!AUTHORITATIVE_BACKEND_FUNCTIONS.has(functionName)) {
@@ -1492,58 +1521,99 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       // Payment & Financial Settlement Authoritative Handlers
       // -----------------------------------------------------------------
       case "create-paypal-order": {
-        const result = await paymentService.createPayPalOrder({
-          amount: Number(body.amount),
-          currency: body.currency,
-          rental_id: body.rental_id,
-          vehicle_id: body.vehicle_id,
-          driver_id: body.driver_id,
-          owner_id: body.owner_id,
+        if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
+        const authority = await resolveCheckoutAuthority(getDbPool(), {
+          caller: gatedCaller,
+          provider: "paypal",
+          body,
+        });
+        const result = await createWithAuthoritativeAmount(getDbPool(), {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, (auth) => paymentService.createPayPalOrder({
+          amount: auth.amount,
+          currency: auth.currency,
+          rental_id: authority.rentalId ?? undefined,
+          vehicle_id: authority.vehicleId ?? undefined,
+          driver_id: authority.driverId,
+          owner_id: authority.ownerId ?? undefined,
           payment_frequency: body.payment_frequency,
           description: body.description,
           purpose: body.purpose,
           iot_device_order_id: body.iot_device_order_id,
-        });
+        }));
         return res.status(200).json(result);
       }
 
       case "capture-paypal-order": {
         const result = await paymentService.capturePayPalOrder({
           order_id: body.order_id,
-          user_id: body.user_id,
-        });
+          user_id: gatedCaller && !gatedCaller.isAdmin ? gatedCaller.userId : body.user_id,
+        }, { isAdmin: Boolean(gatedCaller?.isAdmin) });
         return res.status(200).json(result);
       }
 
       case "paypal-webhook": {
-        const result = await paymentService.handlePayPalWebhook(req.headers as Record<string, string>, body);
-        return res.status(200).json(result);
+        const rawPaypalBody = Buffer.isBuffer((req as any).rawBody) ? (req as any).rawBody.toString("utf8") : "";
+        try {
+          const result = await paymentService.handlePayPalWebhook(req.headers as Record<string, string>, rawPaypalBody);
+          return res.status(200).json(result);
+        } catch (err: any) {
+          const msg = String(err?.message || "");
+          if (/signature/i.test(msg) && !/not configured/i.test(msg)) return res.status(401).json({ received: false, error: "Invalid webhook signature" });
+          if (/not configured|PAYPAL_MODE/i.test(msg)) return res.status(503).json({ received: false, error: "Webhook verification not configured" });
+          if (/required|invalid paypal webhook/i.test(msg)) return res.status(400).json({ received: false, error: "Invalid webhook" });
+          throw err;
+        }
       }
 
       case "create-paystack-transaction": {
-        const result = await paymentService.createPaystackTransaction({
-          amount: Number(body.amount),
+        if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
+        const authority = await resolveCheckoutAuthority(getDbPool(), {
+          caller: gatedCaller,
+          provider: "paystack",
+          body,
+        });
+        const result = await createWithAuthoritativeAmount(getDbPool(), {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, (auth) => paymentService.createPaystackTransaction({
+          amount: auth.amount,
           email: body.email,
-          currency: body.currency,
-          rental_id: body.rental_id,
-          vehicle_id: body.vehicle_id,
-          driver_id: body.driver_id,
-          owner_id: body.owner_id,
+          currency: auth.currency,
+          rental_id: authority.rentalId ?? undefined,
+          vehicle_id: authority.vehicleId ?? undefined,
+          driver_id: authority.driverId,
+          owner_id: authority.ownerId ?? undefined,
+          purpose: body.purpose,
           callback_url: body.callback_url,
           metadata: body.metadata,
-        });
+        }));
         return res.status(200).json(result);
       }
 
       case "verify-paystack-transaction": {
         const reference = body.reference || String(req.query.reference || "");
-        const result = await paymentService.verifyPaystackTransaction(reference);
+        if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
+        const result = await paymentService.verifyPaystackTransaction(reference, {
+          callerId: gatedCaller.userId,
+          isAdmin: gatedCaller.isAdmin,
+        });
         return res.status(200).json(result);
       }
 
       case "paystack-webhook": {
-        const result = await paymentService.handlePaystackWebhook(req.headers as Record<string, string>, body);
-        return res.status(200).json(result);
+        const rawPaystackBody = Buffer.isBuffer((req as any).rawBody) ? (req as any).rawBody.toString("utf8") : "";
+        try {
+          const result = await paymentService.handlePaystackWebhook(req.headers as Record<string, string>, rawPaystackBody);
+          return res.status(200).json(result);
+        } catch (err: any) {
+          const msg = String(err?.message || "");
+          if (/signature/i.test(msg)) return res.status(401).json({ received: false, error: "Invalid webhook signature" });
+          if (/not configured/i.test(msg)) return res.status(503).json({ received: false, error: "Webhook verification not configured" });
+          if (/required|invalid paystack webhook/i.test(msg)) return res.status(400).json({ received: false, error: "Invalid webhook" });
+          throw err;
+        }
       }
 
       case "create-opay-order": {
@@ -1586,13 +1656,31 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       "../services/opayService"
     );
 
-    const result =
-      await createOpayOrder({
-        amount: Number(body.amount),
-        rentalId: body.rentalId,
-        vehicleId: body.vehicleId,
-        ownerId: body.ownerId,
-        driverId: userData.user.id,
+    const authority = await resolveCheckoutAuthority(getDbPool(), {
+      caller: {
+        userId: userData.user.id,
+        isAdmin: Boolean(gatedCaller?.isAdmin),
+      },
+      provider: "opay",
+      body: {
+        driver_id: body.driverId,
+        owner_id: body.ownerId,
+        vehicle_id: body.vehicleId,
+        rental_id: body.rentalId,
+        currency: body.currency,
+      },
+    });
+
+    const result = await createWithAuthoritativeAmount(getDbPool(), {
+      driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+      invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+    }, (auth) =>
+      createOpayOrder({
+        amount: auth.amount,
+        rentalId: authority.rentalId ?? undefined,
+        vehicleId: authority.vehicleId ?? undefined,
+        ownerId: authority.ownerId ?? undefined,
+        driverId: authority.driverId,
         paymentFrequency:
           body.paymentFrequency,
         description:
@@ -1611,7 +1699,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           req.headers[
             "idempotency-key"
           ] as string | undefined,
-      });
+      }));
 
     return res.status(200).json(result);
   } catch (err: any) {
@@ -1619,6 +1707,10 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       "[Backend Functions] create-opay-order failed",
       err,
     );
+
+    if (err instanceof PaymentAuthorityError) {
+      return res.status(err.status).json({ ok: false, error: err.message });
+    }
 
     return res.status(502).json({
       ok: false,
@@ -1683,6 +1775,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       await verifyOpayOrder(
         reference,
         userData.user.id,
+        Boolean(gatedCaller?.isAdmin),
       );
 
     return res.status(200).json(result);
@@ -1714,10 +1807,9 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       "../services/opayService"
     );
 
-    const rawBody =
-      typeof req.body === "string"
-        ? req.body
-        : JSON.stringify(req.body || {});
+    const rawBody = Buffer.isBuffer((req as any).rawBody)
+      ? (req as any).rawBody.toString("utf8")
+      : "";
 
     const result =
       await handleOpayWebhook(
@@ -1768,10 +1860,12 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
                   ),
                 }
               : {}),
-            ...(req.headers["idempotency-key"]
+            ...(req.headers["idempotency-key"] ||
+            req.headers["x-idempotency-key"]
               ? {
                   "idempotency-key": String(
-                    req.headers["idempotency-key"]
+                    req.headers["idempotency-key"] ||
+                      req.headers["x-idempotency-key"]
                   ),
                 }
               : {}),
@@ -1800,103 +1894,62 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 }
 
 case "initiate-paypal-payout": {
-  const ownerId =
-    body.owner_id || body.user_id;
+  try {
+    // Self-withdrawal: the owner is the authenticated caller, never the body.
+    const { ownerId } = await authenticateSelfWithdrawalCaller(
+      req.headers,
+      body.owner_id || body.user_id,
+    );
 
-  const amount =
-    Number(body.amount);
-
-  const payoutAccountId =
-    body.payout_account_id ||
-    body.payoutAccountId;
-
-  const authorizationId =
-    body.authorization_id ||
-    body.authorizationId;
-
-  if (!ownerId || !payoutAccountId) {
-    return res.status(400).json({
-      ok: false,
-      error:
-        "owner_id and payout_account_id are required",
-    });
-  }
-
-  const result =
-    await paymentService.processPayPalOwnerPayout({
+    const result = await paymentService.processPayPalOwnerPayout({
       owner_id: ownerId,
-      amount,
-      currency:
-        String(body.currency || "USD").toUpperCase(),
-      payout_account_id:
-        payoutAccountId,
-      authorization_id:
-        authorizationId,
+      amount: Number(body.amount),
+      currency: String(body.currency || "USD").toUpperCase(),
+      payout_account_id: body.payout_account_id || body.payoutAccountId,
+      authorization_id: body.authorization_id || body.authorizationId,
       note: body.note,
-      idempotency_key:
-        (req.headers["idempotency-key"] as string | undefined) ||
-        body.idempotencyKey,
+      idempotency_key: resolveIdempotencyKey(req.headers, body),
     });
 
-  return res.status(200).json({
-    ok: true,
-    ...result,
-  });
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err: any) {
+    return sendPayoutError(res, "initiate-paypal-payout", err);
+  }
 }
 
 case "process-owner-payouts": {
-  const ownerId =
-    body.owner_id || body.user_id;
-
-  const amount =
-    Number(body.amount);
-
-  const payoutAccountId =
-    body.payout_account_id ||
-    body.payoutAccountId;
-
-  const authorizationId =
-    body.authorization_id ||
-    body.authorizationId;
-
-  if (!ownerId || !payoutAccountId) {
-    return res.status(400).json({
-      ok: false,
-      error:
-        "owner_id and payout_account_id are required",
-    });
+  // Weekly bulk worker entry point: cron secret only. It executes an
+  // existing, admin-approved weekly_bulk payout; it never creates payouts.
+  try {
+    if (!verifyCronSecret(req.headers)) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+    const result = await paymentService.executeWeeklyOwnerPayout(
+      String(body.payout_id || body.payoutId || ""),
+      body.note,
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err: any) {
+    return sendPayoutError(res, "process-owner-payouts", err);
   }
-
-  const result =
-    await paymentService.processPayPalOwnerPayout({
-      owner_id: ownerId,
-      amount,
-      currency:
-        String(body.currency || "USD").toUpperCase(),
-      payout_account_id:
-        payoutAccountId,
-      authorization_id:
-        authorizationId,
-      note: body.note,
-      idempotency_key:
-        (req.headers["idempotency-key"] as string | undefined) ||
-        body.idempotencyKey,
-    });
-
-  return res.status(200).json({
-    ok: true,
-    ...result,
-  });
 }
+
+case "reconcile-owner-payout": {
+  try {
+    await requireAdminCaller(req.headers);
+    const result = await paymentService.reconcileOwnerPayout(
+      String(body.payout_id || body.payoutId || ""),
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err: any) {
+    return sendPayoutError(res, "reconcile-owner-payout", err);
+  }
+}
+
       case "persona-create-inquiry": {
-        const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        return res.status(200).json({
-          inquiryId,
-          sessionToken: `tok_${inquiryId}`,
-          templateId: process.env.PERSONA_TEMPLATE_ID || "itmpl_rentmaikar_kyc",
-          environmentId: "env_production",
-          status: "created",
-        });
+        // Inquiries are created only by the real Persona-backed edge function,
+        // which persists them for webhook correlation. Never fabricate one here.
+        return res.status(503).json({ ok: false, error: "Persona inquiry service unavailable" });
       }
 
       case "persona-webhook": {
@@ -1928,47 +1981,27 @@ case "process-owner-payouts": {
       }
 
       case "owner-withdrawal-data": {
-        const ownerId = body.owner_id || body.ownerId || body.userId;
-        const currency = body.currency || "USD";
-        if (!ownerId) {
-          return res.status(400).json({ error: "owner_id is required" });
+        // Identity comes from the verified bearer token; admins may read on behalf of an owner.
+        const caller = await authenticateCaller(
+          String(req.headers["authorization"] || ""),
+        ).catch((e: any) => {
+          const err: any = new Error(e?.message || "Authentication required");
+          err.statusCode = e?.statusCode || 401;
+          throw err;
+        });
+        const requested = String(body.owner_id || body.ownerId || body.userId || "").trim();
+        if (requested && requested !== caller.userId && !caller.isAdmin) {
+          return res.status(403).json({ error: "Forbidden" });
         }
+        const ownerId = requested || caller.userId;
+        const currency = body.currency || "USD";
         const data = await paymentService.getOwnerWithdrawalData(ownerId, currency);
         return res.status(200).json({ ok: true, ...data });
       }
 
       case "initiate-owner-withdrawal": {
   try {
-    const ownerId = body.owner_id || body.ownerId || body.userId;
-    const amount = Number(body.amount);
-    const currency = String(body.currency || "USD").toUpperCase();
     const provider = String(body.provider || "paypal").toLowerCase();
-    const payoutAccountId =
-      body.payout_account_id || body.payoutAccountId;
-    const authorizationId =
-      body.authorization_id || body.authorizationId;
-
-    if (!ownerId || !Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "owner_id and valid amount are required",
-      });
-    }
-
-    if (!payoutAccountId) {
-      return res.status(400).json({
-        ok: false,
-        error: "payout_account_id is required",
-      });
-    }
-
-    if (!authorizationId) {
-      return res.status(428).json({
-        ok: false,
-        error: "withdrawal authorization required",
-      });
-    }
-
     if (provider !== "paypal") {
       return res.status(400).json({
         ok: false,
@@ -1976,74 +2009,24 @@ case "process-owner-payouts": {
       });
     }
 
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        ok: false,
-        error: "Authentication required",
-      });
-    }
-
-    const token = authHeader.slice("Bearer ".length);
-    const supabase = supabaseBackendService.getAdminClient();
-
-    const {
-      data: userData,
-      error: userError,
-    } = await supabase.auth.getUser(token);
-
-    if (userError || !userData?.user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Invalid authentication token",
-      });
-    }
-
-    if (userData.user.id !== ownerId) {
-      return res.status(403).json({
-        ok: false,
-        error: "Owner identity mismatch",
-      });
-    }
+    const { ownerId } = await authenticateSelfWithdrawalCaller(
+      req.headers,
+      body.owner_id || body.ownerId || body.userId,
+    );
 
     const result = await paymentService.processPayPalOwnerPayout({
       owner_id: ownerId,
-      amount,
-      currency,
-      payout_account_id: payoutAccountId,
-      authorization_id: authorizationId,
+      amount: Number(body.amount),
+      currency: String(body.currency || "USD").toUpperCase(),
+      payout_account_id: body.payout_account_id || body.payoutAccountId,
+      authorization_id: body.authorization_id || body.authorizationId,
       note: body.note,
-      idempotency_key:
-        (req.headers["idempotency-key"] as string | undefined) ||
-        body.idempotencyKey,
+      idempotency_key: resolveIdempotencyKey(req.headers, body),
     });
 
-    return res.status(200).json({
-      ok: true,
-      ...result,
-    });
+    return res.status(200).json({ ok: true, ...result });
   } catch (err: any) {
-    console.error(
-      "[Backend Functions] initiate-owner-withdrawal failed",
-      err,
-    );
-
-    const message =
-      err?.message || "Owner withdrawal failed";
-
-    const status =
-      /authorization required/i.test(message)
-        ? 428
-        : /authorization|forbidden|belongs to another/i.test(message)
-          ? 403
-          : /insufficient|amount|payout account|currency/i.test(message)
-            ? 400
-            : 502;
-
-    return res.status(status).json({
-      ok: false,
-      error: message,
-    });
+    return sendPayoutError(res, "initiate-owner-withdrawal", err);
   }
 }
 
@@ -2060,6 +2043,19 @@ case "process-owner-payouts": {
         }
 
         const pool = getDbPool();
+        const ownerRow = await pool.query(
+          `SELECT owner_id FROM public.vehicles WHERE id = $1`,
+          [vehicleId]
+        );
+        if (!ownerRow.rows[0]) {
+          return res.status(404).json({ error: "Vehicle not found" });
+        }
+        if (
+          !gatedCaller ||
+          (!gatedCaller.isAdmin && String(ownerRow.rows[0].owner_id) !== gatedCaller.userId)
+        ) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
         await pool.query(
           `UPDATE public.vehicles
            SET review_status = 'pending',
@@ -2156,6 +2152,10 @@ case "process-owner-payouts": {
       }
 
       default: {
+        // Never return a simulated success for money-moving function names.
+        if (/payment|payout|paypal|paystack|opay|wallet|refund|withdraw|settle|transfer/i.test(functionName)) {
+          return res.status(404).json({ ok: false, error: `Unknown function '${functionName}'` });
+        }
         return res.status(200).json({
           ok: true,
           success: true,
@@ -2168,6 +2168,13 @@ case "process-owner-payouts": {
       }
     }
   } catch (err: any) {
+    if (err instanceof PaymentAuthorityError) {
+      return res.status(err.status).json({ ok: false, error: err.message });
+    }
+    if (functionName === "verify-paystack-transaction") {
+      if (err?.message === "Forbidden") return res.status(403).json({ ok: false, error: "Forbidden" });
+      if (/record not found/i.test(String(err?.message))) return res.status(404).json({ ok: false, error: "Transaction not found" });
+    }
     console.error(`[Edge Function ${functionName} Error]:`, err);
     return res.status(500).json({ error: err.message || "Internal gateway error" });
   }

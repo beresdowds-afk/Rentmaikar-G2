@@ -116,16 +116,14 @@ export const OwnerWithdrawalPanel = () => {
     if (!targetId) return;
     setLoading(true);
     try {
-      const data = await backendBridge.call<{
+      const { data, error: loadError } = await backendBridge.invokeEdgeFunction<{
         ok?: boolean;
         balance?: number;
         accounts?: PayoutAccount[];
         payouts?: Payout[];
         phoneVerified?: boolean;
-      }>("owner-withdrawal-data", {
-        owner_id: targetId,
-        currency,
-      });
+      }>("owner-withdrawal-data", { owner_id: targetId, currency }, { method: "POST" });
+      if (loadError) throw loadError;
 
       setBalance(Number(data?.balance ?? 0));
       if (data?.phoneVerified !== undefined) {
@@ -214,14 +212,21 @@ export const OwnerWithdrawalPanel = () => {
     if (!selected) return;
     setSubmitting(true);
     try {
-      await backendBridge.call("initiate-owner-withdrawal", {
-        owner_id: targetId,
-        amount: numericAmount,
-        currency,
-        provider: selected.provider,
-        payout_account_id: selected.id,
-        authorization_id: authorizationId,
-      });
+      const fnName =
+        selected.provider === "paypal" ? "initiate-paypal-payout" : "initiate-paystack-transfer";
+      // Authorization is single-use, so it is the stable idempotency key for retries.
+      const { error, data } = await backendBridge.invokeEdgeFunction(
+        fnName,
+        {
+          amount: numericAmount,
+          currency,
+          payoutAccountId: selected.id,
+          authorizationId,
+        },
+        { method: "POST", idempotencyKey: `owner-withdrawal:${authorizationId}` },
+      );
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
       toast.success("Withdrawal submitted — funds are on their way.");
       setAmount("");
       await load();

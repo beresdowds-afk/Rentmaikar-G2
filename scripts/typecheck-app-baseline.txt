@@ -1,0 +1,238 @@
+src/App.tsx: error TS2322: Type '"assistant"' is not assignable to type 'AppRole'.
+src/App.tsx: error TS2322: Type '"super_admin"' is not assignable to type 'AppRole'.
+src/components/admin/AdminIncidentManagement.tsx: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'RejectExcessProperties<{ acknowledged_at?: string; acknowledged_by?: string; actual_downtime_hours?: number; created_at?: string; description?: string; driver_id?: string; estimated_downtime_hours?: number; id?: string; ... 23 more ...; vehicle_id?: string; }, Record<...>>'.
+src/components/admin/AdminNotificationsBell.tsx: error TS2552: Cannot find name 'AdminNotification'. Did you mean 'Notification'?
+src/components/admin/AdminUnifiedInboxCore.tsx: error TS2305: Module '"@/hooks/useInboxAttachmentSearch"' has no exported member 'ATTACHMENT_KIND_LABELS'.
+src/components/admin/AdminUnifiedInboxCore.tsx: error TS2724: '"@/hooks/useInboxAttachmentSearch"' has no exported member named 'AttachmentKind'. Did you mean 'AttachmentHit'?
+src/components/admin/AdminUnifiedNavigation.tsx: error TS2322: Type '{ key: string; label: string; icon: Element; description: string; }[]' is not assignable to type '{ key: PortalType; label: string; icon: ReactNode; description: string; }[]'.
+src/components/admin/AdminUnifiedNavigation.tsx: error TS2345: Argument of type 'string' is not assignable to parameter of type 'PortalType'.
+src/components/admin/ApplicationManagement.tsx: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'RejectExcessProperties<{ agreed_fees?: boolean; agreed_iot?: boolean; agreed_privacy?: boolean; agreed_terms?: boolean; application_type?: "driver" | "owner"; assigned_at?: string; assigned_by?: string; assigned_to?: string; ... 51 more ...; zip_code?: string; }, Record<...>>'.
+src/components/admin/CannedRepliesManager.tsx: error TS2339: Property 'bracketSyntax' does not exist on type 'PlaceholderDefinition'.
+src/components/admin/CannedRepliesManager.tsx: error TS2339: Property 'example' does not exist on type 'PlaceholderDefinition'.
+src/components/admin/CannedRepliesManager.tsx: error TS2367: This comparison appears to be unintentional because the types '"email" | "sms" | "whatsapp"' and '"all"' have no overlap.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'ACCIDENT' does not exist on type '{ GPS: { parkedIntervalMs: number; movingIntervalMs: number; movingThresholdMph: number; }; ENGINE: { intervalMs: number; }; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'BATCH' does not exist on type '{ GPS: { parkedIntervalMs: number; movingIntervalMs: number; movingThresholdMph: number; }; ENGINE: { intervalMs: number; }; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'DIAGNOSTICS' does not exist on type '{ GPS: { parkedIntervalMs: number; movingIntervalMs: number; movingThresholdMph: number; }; ENGINE: { intervalMs: number; }; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'description' does not exist on type 'AlertRule'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'enabled' does not exist on type 'AlertRule'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'maxBandwidthPerVehiclePerHour' does not exist on type '{ maxSpeedMph: number; maxCoolantTempC: number; minBatteryVolts: number; offlineTimeoutSeconds: number; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'maxMessagesPerVehiclePerMinute' does not exist on type '{ maxSpeedMph: number; maxCoolantTempC: number; minBatteryVolts: number; offlineTimeoutSeconds: number; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'messageBacklogThreshold' does not exist on type '{ maxSpeedMph: number; maxCoolantTempC: number; minBatteryVolts: number; offlineTimeoutSeconds: number; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'qos' does not exist on type '{ intervalMs: number; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'qos' does not exist on type '{ parkedIntervalMs: number; movingIntervalMs: number; movingThresholdMph: number; }'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'source' does not exist on type 'AlertRule'.
+src/components/admin/IoTMonitoringHub.tsx: error TS2339: Property 'vehicleOfflineTimeoutMs' does not exist on type '{ maxSpeedMph: number; maxCoolantTempC: number; minBatteryVolts: number; offlineTimeoutSeconds: number; }'.
+src/components/admin/LegalAgreementsManagement.tsx: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'RejectExcessProperties<{ admin_witness_id?: string; admin_witness_signature?: string; admin_witnessed_at?: string; agreement_content?: string; agreement_type?: string; agreement_version?: string; created_at?: string; ... 17 more ...; vehicle_id?: string; }, Record<...>>'.
+src/components/admin/MessageComposer.tsx: error TS2304: Cannot find name 'audienceRole'.
+src/components/admin/NegativeAttestationReviewPanel.tsx: error TS2345: Argument of type '"lockdown_and_recall_vehicle"' is not assignable to parameter of type '"_match_broadcast" | "_testkit_run_trigger_guard_tests" | "activate_user_subscription" | "admin_accredit_match" | "admin_assign_driver_to_vehicle" | "admin_cancel_match" | ... 181 more ... | "voip_set_presence"'.
+src/components/admin/NigeriaDriverVerification.tsx: error TS2345: Argument of type 'Record<string, any>' is not assignable to parameter of type 'RejectExcessProperties<{ created_at?: string; document_category?: string; document_type?: string; expires_at?: string; expiry_date?: string; file_name?: string; file_path?: string; file_size?: number; id?: string; mime_type?: string; ... 6 more ...; verified_by?: string; }, Record<...>>'.
+src/components/admin/PoliceReportVerification.tsx: error TS2345: Argument of type 'Record<string, any>' is not assignable to parameter of type 'RejectExcessProperties<{ created_at?: string; document_category?: string; document_type?: string; expires_at?: string; expiry_date?: string; file_name?: string; file_path?: string; file_size?: number; id?: string; mime_type?: string; ... 6 more ...; verified_by?: string; }, Record<...>>'.
+src/components/admin/ProduceOwnerMessageDialog.tsx: error TS2339: Property 'owner_id' does not exist on type 'SelectQueryError<"column 'daily_rate' does not exist on 'vehicles'.">'.
+src/components/admin/ServiceProvidersHub.tsx: error TS2322: Type '"auto"' is not assignable to type 'CPaaSProvider'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'bracket' does not exist on type '{ rate: number; bracketName: string; description: string; }'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'cumulativeTransactions' does not exist on type 'NexusStatus'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'is_exempt' does not exist on type 'TaxRule'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'jurisdictionCode' does not exist on type 'NexusStatus'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'jurisdictionName' does not exist on type 'NexusStatus'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'nexusTriggered' does not exist on type 'NexusStatus'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'rate_percent' does not exist on type 'TaxRule'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'threshold_amount' does not exist on type 'TaxRule'.
+src/components/admin/TaxManagement.tsx: error TS2339: Property 'threshold_transactions' does not exist on type 'TaxRule'.
+src/components/admin/TaxManagement.tsx: error TS2551: Property 'jurisdiction_name' does not exist on type 'TaxRule'. Did you mean 'jurisdiction_code'?
+src/components/admin/communications-hub/CommunicationsHubContext.tsx: error TS2339: Property 'unread_count' does not exist on type 'SelectQueryError<"column 'unread_count' does not exist on 'inbox_conversations'.">'.
+src/components/admin/communications-hub/HubBulkMessaging.tsx: error TS2345: Argument of type '"is_verified"' is not assignable to parameter of type '"id" | "email" | "city" | "user_id" | "created_at" | "updated_at" | "is_active" | "data_sharing_consent" | "street_address" | "identity_verified_at" | "phone" | "full_name" | ... 42 more ... | "username"'.
+src/components/admin/communications-hub/HubBulkMessaging.tsx: error TS2367: This comparison appears to be unintentional because the types '"in_app" | "sms" | "whatsapp"' and '"email"' have no overlap.
+src/components/admin/communications-hub/HubCallDialer.tsx: error TS2322: Type '(callId: string) => Promise<boolean>' is not assignable to type '(callId: string) => Promise<void>'.
+src/components/admin/communications-hub/HubContextActions.tsx: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("driver" | "owner" | "admin" | "legal_support" | "iot_support" | "vehicle_support" | "admin_assistant" | "insurance_support")[]'.
+src/components/admin/communications-hub/HubConversationHistory.tsx: error TS2339: Property 'unread_count' does not exist on type '{ archived_at: string; assigned_to: string; case_id: string; channel: string; created_at: string; id: string; is_flagged: boolean; last_message_at: string; priority: string; region: string; status: string; ... 5 more ...; user_phone: string; }'.
+src/components/admin/communications-hub/HubMessageConsole.tsx: error TS2353: Object literal may only specify known properties, and 'unread_count' does not exist in type 'RejectExcessProperties<{ archived_at?: string; assigned_to?: string; case_id?: string; channel?: string; created_at?: string; id?: string; is_flagged?: boolean; last_message_at?: string; priority?: string; region?: string; status?: string; ... 5 more ...; user_phone?: string; }, { ...; }>'.
+src/components/admin/control-plane/AppealsPanel.tsx: error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/admin/control-plane/AuditLogPanel.tsx: error TS2322: Type '"pending" | "denied" | "executed"' is not assignable to type '"failed" | "denied" | "recorded" | "allowed" | "executed"'.
+src/components/admin/control-plane/AuditLogPanel.tsx: error TS2322: Type '"pending" | "executed"' is not assignable to type '"failed" | "denied" | "recorded" | "allowed" | "executed"'.
+src/components/admin/control-plane/AuditLogPanel.tsx: error TS2589: Type instantiation is excessively deep and possibly infinite.
+src/components/admin/control-plane/AuditLogPanel.tsx: error TS2769: No overload matches this call.
+src/components/admin/control-plane/DecisionLogPanel.tsx: error TS2322: Type '"action_required"' is not assignable to type '"pending" | "under_review" | "approved" | "rejected" | "needs_info"'.
+src/components/admin/control-plane/EventLedgerPanel.tsx: error TS2589: Type instantiation is excessively deep and possibly infinite.
+src/components/admin/control-plane/EventLedgerPanel.tsx: error TS2769: No overload matches this call.
+src/components/admin/control-plane/EvidenceStorePanel.tsx: error TS2769: No overload matches this call.
+src/components/admin/hardware/DeviceRegistry.tsx: error TS2322: Type '"inventory"' is not assignable to type '"active" | "maintenance" | "inactive" | "offline"'.
+src/components/admin/marketing/MarketingLeadDetailModal.tsx: error TS2739: Type '{ NEW: string; CONTACTED: string; QUALIFIED: string; REGISTERED: string; VERIFIED: string; KYC_COMPLETED: string; VEHICLE_LISTED: string; VEHICLE_APPROVED: string; RENTAL: string; CONVERTED: string; }' is missing the following properties from type 'Record<LeadStage, string>': OPTED_OUT, DISQUALIFIED
+src/components/admin/marketing/MarketingLeadsSection.tsx: error TS2739: Type '{ NEW: string; CONTACTED: string; QUALIFIED: string; REGISTERED: string; VERIFIED: string; KYC_COMPLETED: string; VEHICLE_LISTED: string; VEHICLE_APPROVED: string; RENTAL: string; CONVERTED: string; }' is missing the following properties from type 'Record<LeadStage, string>': OPTED_OUT, DISQUALIFIED
+src/components/admin/messaging/AdminMessageConsole.tsx: error TS2304: Cannot find name 'Save'.
+src/components/admin/messaging/AdminMessageConsole.tsx: error TS2322: Type '(initial?: { channel?: "email" | "in_app" | "sms" | "whatsapp"; to?: string; subject?: string; body?: string; }) => void' is not assignable to type 'MouseEventHandler<HTMLButtonElement>'.
+src/components/admin/messaging/BulkContactSelector.tsx: error TS2339: Property 'country' does not exist on type 'SelectQueryError<"column 'country' does not exist on 'profiles'.">'.
+src/components/admin/messaging/BulkContactSelector.tsx: error TS2339: Property 'email' does not exist on type 'SelectQueryError<"column 'country' does not exist on 'profiles'.">'.
+src/components/admin/messaging/BulkContactSelector.tsx: error TS2339: Property 'full_name' does not exist on type 'SelectQueryError<"column 'country' does not exist on 'profiles'.">'.
+src/components/admin/messaging/BulkContactSelector.tsx: error TS2339: Property 'is_active' does not exist on type 'SelectQueryError<"column 'country' does not exist on 'profiles'.">'.
+src/components/admin/messaging/BulkContactSelector.tsx: error TS2339: Property 'phone' does not exist on type 'SelectQueryError<"column 'country' does not exist on 'profiles'.">'.
+src/components/admin/messaging/BulkContactSelector.tsx: error TS2339: Property 'user_id' does not exist on type 'SelectQueryError<"column 'country' does not exist on 'profiles'.">'.
+src/components/admin/messaging/CentralMessagingCenter.tsx: error TS2740: Type '{}' is missing the following properties from type 'Props': rules, onEdit, onDelete, onToggle, and 2 more.
+src/components/admin/messaging/CentralMessagingCenter.tsx: error TS2741: Property 'body' is missing in type '{}' but required in type 'Props'.
+src/components/admin/messaging/CentralMessagingCenter.tsx: error TS2741: Property 'conversationId' is missing in type '{}' but required in type '{ conversationId: string; }'.
+src/components/admin/messaging/OmnichannelComposer.tsx: error TS2322: Type 'string' is not assignable to type 'string[]'.
+src/components/admin/messaging/OmnichannelComposer.tsx: error TS2339: Property 'subject' does not exist on type 'CannedReply'.
+src/components/admin/messaging/OmnichannelComposer.tsx: error TS2339: Property 'subject' does not exist on type '{ id: string; }'.
+src/components/admin/messaging/OmnichannelComposer.tsx: error TS2451: Cannot redeclare block-scoped variable 'isNg'.
+src/components/admin/portal/SupportUserManagement.tsx: error TS2345: Argument of type 'Record<string, any>' is not assignable to parameter of type 'RejectExcessProperties<{ assigned_city?: string; assigned_region?: string; created_at?: string; id?: string; is_active?: boolean; notes?: string; phone?: string; support_type?: "legal" | "iot_installation" | "iot_maintenance" | "vehicle_recall" | "vehicle_maintenance" | "insurance" | "payment_accounts"; updated_at?:...'.
+src/components/admin/portal/SupportUserManagement.tsx: error TS2345: Argument of type 'string' is not assignable to parameter of type 'AppRole'.
+src/components/admin/voip/CallCenterPage.tsx: error TS2322: Type '() => Promise<boolean>' is not assignable to type '() => void | Promise<void>'.
+src/components/admin/voip/CallCenterPage.tsx: error TS2322: Type '{ voice: UseVoiceDeviceResult; }' is not assignable to type 'IntrinsicAttributes & VisualIVRBuilderProps'.
+src/components/admin/voip/CallCenterPage.tsx: error TS2554: Expected 1 arguments, but got 0.
+src/components/admin/voip/CallRouterPanel.tsx: error TS2305: Module '"@/types/voip"' has no exported member 'CallQueueItem'.
+src/components/admin/voip/OutboundNumberRouting.tsx: error TS2339: Property 'code' does not exist on type 'RegionOption'.
+src/components/admin/voip/OutboundNumberRouting.tsx: error TS2339: Property 'name' does not exist on type 'RegionOption'.
+src/components/admin/voip/UnifiedTelephoneCard.tsx: error TS2724: '"@/hooks/useVoiceDevice"' has no exported member named 'UseVoiceDeviceResult'. Did you mean 'useVoiceDevice'?
+src/components/admin/voip/__tests__/CallCenterPage.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/auth/PhoneOtpPanel.tsx: error TS2339: Property 'e164' does not exist on type 'string'.
+src/components/auth/PortalSignInForm.tsx: error TS2538: Type 'true' cannot be used as an index type.
+src/components/catalogue/__tests__/VehicleComparison.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'fireEvent'.
+src/components/catalogue/__tests__/VehicleComparison.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/dev/AccessibilityOverlay.tsx: error TS2367: This comparison appears to be unintentional because the types '"admin"' and '"insurance_support"' have no overlap.
+src/components/documents/__tests__/DocumentUpload.autosubmit.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/documents/__tests__/DocumentUpload.autosubmit.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/components/driver/EmergencySOSButton.tsx: error TS2339: Property 'sos_id' does not exist on type 'string'.
+src/components/driver/EmergencySOSButton.tsx: error TS2345: Argument of type '"trigger_emergency_sos"' is not assignable to parameter of type '"_match_broadcast" | "_testkit_run_trigger_guard_tests" | "activate_user_subscription" | "admin_accredit_match" | "admin_assign_driver_to_vehicle" | "admin_cancel_match" | ... 181 more ... | "voip_set_presence"'.
+src/components/driver/ProxyBillingSettings.tsx: error TS2339: Property 'phoneDisplay' does not exist on type 'RegionSamples'.
+src/components/driver/RentToOwnSearch.tsx: error TS2304: Cannot find name 'toast'.
+src/components/incidents/IncidentReportForm.tsx: error TS2304: Cannot find name 'uploadedUrls'.
+src/components/incidents/IncidentReportForm.tsx: error TS2322: Type 'string' is not assignable to type 'never'.
+src/components/incidents/IncidentReportForm.tsx: error TS2322: Type '{ incident_id: string; vehicle_id: string; severity: "high" | "critical"; incident_type: IncidentType; }' is not assignable to type 'never'.
+src/components/incidents/IncidentReportForm.tsx: error TS2769: No overload matches this call.
+src/components/legal/AgreementSigningModal.tsx: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'RejectExcessProperties<{ admin_witness_id?: string; admin_witness_signature?: string; admin_witnessed_at?: string; agreement_content?: string; agreement_type?: string; agreement_version?: string; created_at?: string; ... 17 more ...; vehicle_id?: string; }, Record<...>>'.
+src/components/notifications/EnablePushButton.tsx: error TS2322: Type 'boolean' is not assignable to type 'object'.
+src/components/notifications/EnablePushButton.tsx: error TS2339: Property 'ok' does not exist on type 'boolean'.
+src/components/notifications/EnablePushButton.tsx: error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string | number | boolean | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | (() => ReactNode)'.
+src/components/notifications/__tests__/NotificationsScrollingIframe.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/onboarding/InsurancePortalDeepLink.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'fireEvent'.
+src/components/onboarding/InsurancePortalDeepLink.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/onboarding/InsurancePortalDeepLink.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/components/onboarding/PortalGate.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/onboarding/PortalRouteGuard.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/onboarding/PortalSubmit.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'fireEvent'.
+src/components/onboarding/PortalSubmit.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/onboarding/PortalSubmit.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/components/onboarding/TrainingPortalDeepLink.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'fireEvent'.
+src/components/onboarding/TrainingPortalDeepLink.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/components/onboarding/TrainingPortalDeepLink.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/components/payment/PaymentBreakdownCard.tsx: error TS2339: Property 'exemptionReason' does not exist on type 'TaxLine'.
+src/components/payment/PaymentBreakdownCard.tsx: error TS2339: Property 'taxType' does not exist on type 'TaxLine'.
+src/components/payments/UnifiedBillingPanel.tsx: error TS2322: Type '"driver_payment" | "invoice_payment"' is not assignable to type 'PreflightOperation'.
+src/components/profile/ProfileEditor.tsx: error TS2345: Argument of type 'Record<string, any>' is not assignable to parameter of type 'RejectExcessProperties<{ access_level?: "view_only" | "full"; avatar_url?: string; city?: string; cookie_consent?: Json; cookie_consent_at?: string; created_at?: string; daily_plan_forbidden?: boolean; daily_plan_forbidden_at?: string; ... 46 more ...; username?: string; }, Record<...>>'.
+src/components/seo/__tests__/DynamicMetaTagManager.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/components/ui/__tests__/phone-number-input.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'fireEvent'.
+src/components/ui/__tests__/phone-number-input.e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/contexts/AuthContext.tsx: error TS2322: Type '"customer"' is not assignable to type 'AppRole'.
+src/contexts/AuthContext.tsx: error TS2322: Type '"insurance_support"' is not assignable to type 'AppRole'.
+src/contexts/AuthContext.tsx: error TS2322: Type '(email: string, password: string, fullName: string, role: AppRole) => Promise<{ error: Error; emailExists: boolean; status?: undefined; userId?: undefined; user?: undefined; } | { error: Error; emailExists: boolean; status: string; userId?: undefined; user?: undefined; } | { ...; } | { ...; } | { ...; }>' is not assignable to type '(email: string, password: string, fullName: string, role: AppRole) => Promise<{ error: Error; emailExists?: boolean; user?: User; userId?: string; status?: "rejected" | "success" | "ambiguous"; }>'.
+src/contexts/AuthContext.tsx: error TS2339: Property 'catch' does not exist on type 'PromiseLike<void>'.
+src/contexts/AuthContext.tsx: error TS2551: Property 'catch' does not exist on type 'PostgrestFilterBuilder<{ PostgrestVersion: "14.5"; }, { Tables: { account_links: { Row: { created_at: string; created_by: string; id: string; link_type: string; notes: string; updated_at: string; user_a_id: string; user_b_id: string; }; Insert: { ...; }; Update: { ...; }; Relationships: []; }; ... 224 more ...; with...'. Did you mean 'match'?
+src/contexts/RegionContext.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/contexts/RegionContext.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/contexts/RegionContext.tsx: error TS2339: Property 'savedAt' does not exist on type '{ regions: RegionOption[]; timestamp: number; }'.
+src/contexts/RegionContext.tsx: error TS2339: Property 'stale' does not exist on type '{ regions: RegionOption[]; timestamp: number; }'.
+src/hooks/__tests__/usePersistedTab.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/hooks/useBackendStatus.ts: error TS2305: Module '"@/lib/backend-client"' has no exported member 'BackendDomains'.
+src/hooks/useBackendStatus.ts: error TS2305: Module '"@/lib/backend-client"' has no exported member 'BackendHealth'.
+src/hooks/useBackendStatus.ts: error TS2305: Module '"@/lib/backend-client"' has no exported member 'getBackendDomains'.
+src/hooks/useBackendStatus.ts: error TS2305: Module '"@/lib/backend-client"' has no exported member 'getBackendHealth'.
+src/hooks/useCallRouter.ts: error TS2305: Module '"@/types/voip"' has no exported member 'CallQueueItem'.
+src/hooks/useFAQ.ts: error TS2345: Argument of type 'Partial<FAQItem>' is not assignable to parameter of type 'RejectExcessProperties<{ answer?: string; category_id?: string; created_at?: string; display_order?: number; id?: string; is_active?: boolean; is_public?: boolean; question?: string; region?: string; updated_at?: string; }, Partial<...>>'.
+src/hooks/useInboundMessages.ts: error TS2339: Property 'attachments' does not exist on type 'InboundEmail'.
+src/hooks/useMessageComposer.ts: error TS2353: Object literal may only specify known properties, and 'messageId' does not exist in type 'SendOutcome'.
+src/hooks/useOnboardingJourney.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/hooks/useOnboardingMachine.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/hooks/useOnboardingProgressReconciliation.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/hooks/usePriceNegotiations.ts: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'RejectExcessProperties<{ admin_counter_offer?: number; admin_response?: string; approved_at?: string; approved_by?: string; created_at?: string; currency?: string; driver_id?: string; driver_message?: string; final_daily_rate?: number; ... 13 more ...; vehicle_year?: number; }, Record<...>>'.
+src/hooks/usePublishedCompanyInfo.ts: error TS2353: Object literal may only specify known properties, and 'whatsapp' does not exist in type 'CompanyInfo'.
+src/hooks/useRegistrationProgress.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/hooks/useSecurityDepositPayment.ts: error TS2339: Property 'amount' does not exist on type 'SelectQueryError<"column 'reference' does not exist on 'payments'.">'.
+src/hooks/useSecurityDepositPayment.ts: error TS2339: Property 'created_at' does not exist on type 'SelectQueryError<"column 'reference' does not exist on 'payments'.">'.
+src/hooks/useSecurityDepositPayment.ts: error TS2339: Property 'currency' does not exist on type 'SelectQueryError<"column 'reference' does not exist on 'payments'.">'.
+src/hooks/useSecurityDepositPayment.ts: error TS2339: Property 'id' does not exist on type 'SelectQueryError<"column 'reference' does not exist on 'payments'.">'.
+src/hooks/useSecurityDepositPayment.ts: error TS2339: Property 'payment_method' does not exist on type 'SelectQueryError<"column 'reference' does not exist on 'payments'.">'.
+src/hooks/useSecurityDepositPayment.ts: error TS2339: Property 'reference' does not exist on type 'SelectQueryError<"column 'reference' does not exist on 'payments'.">'.
+src/hooks/useSecurityDepositPayment.ts: error TS2345: Argument of type '"type"' is not assignable to parameter of type '"id" | "status" | "vehicle_id" | "rental_id" | "subscription_plan_id" | "owner_id" | "created_at" | "updated_at" | "driver_id" | "purpose" | "processed_at" | "amount" | "currency" | ... 8 more ... | "transaction_id"'.
+src/hooks/useSecurityDepositPayment.ts: error TS2345: Argument of type '"user_id"' is not assignable to parameter of type '"id" | "status" | "vehicle_id" | "rental_id" | "subscription_plan_id" | "owner_id" | "created_at" | "updated_at" | "driver_id" | "purpose" | "processed_at" | "amount" | "currency" | ... 8 more ... | "transaction_id"'.
+src/hooks/useSecurityDepositPayment.ts: error TS2345: Argument of type '"user_id"' is not assignable to parameter of type '"metadata" | "id" | "region" | "status" | "description" | "vehicle_id" | "rental_id" | "payment_id" | "invoice_id" | "owner_id" | "created_at" | "updated_at" | "sent_at" | "driver_id" | ... 12 more ... | "receipt_number"'.
+src/hooks/useTelephonyControl.ts: error TS2339: Property 'currentRegion' does not exist on type 'RegionContextType'.
+src/hooks/useUnifiedInbox.ts: error TS2345: Argument of type 'Partial<InboxConversation>' is not assignable to parameter of type 'RejectExcessProperties<{ archived_at?: string; assigned_to?: string; case_id?: string; channel?: string; created_at?: string; id?: string; is_flagged?: boolean; last_message_at?: string; priority?: string; region?: string; status?: string; ... 5 more ...; user_phone?: string; }, Partial<...>>'.
+src/hooks/useUnifiedInbox.ts: error TS2345: Argument of type '{ [x: string]: unknown; }' is not assignable to parameter of type 'RejectExcessProperties<{ archived_at?: string; assigned_to?: string; case_id?: string; channel?: string; created_at?: string; id?: string; is_flagged?: boolean; last_message_at?: string; priority?: string; region?: string; status?: string; ... 5 more ...; user_phone?: string; }, { ...; }>'.
+src/hooks/useWeeklyInspection.ts: error TS2345: Argument of type '{ [x: string]: string | { [x: string]: string; }; photo_timestamps: { [x: string]: string; }; }' is not assignable to parameter of type 'RejectExcessProperties<{ admin_decision?: string; admin_id?: string; admin_notes?: string; admin_reviewed_at?: string; created_at?: string; driver_accepted_withdrawal?: boolean; driver_id?: string; driver_responded_at?: string; ... 24 more ...; week_start_date?: string; }, { ...; }>'.
+src/hooks/useWeeklyInspection.ts: error TS2345: Argument of type '{ [x: string]: string | { [x: string]: string; }; vehicle_id: string; driver_id: string; owner_id: string; week_start_date: string; photo_timestamps: { [x: string]: string; }; status: string; }' is not assignable to parameter of type 'RejectExcessProperties<{ admin_decision?: string; admin_id?: string; admin_notes?: string; admin_reviewed_at?: string; created_at?: string; driver_accepted_withdrawal?: boolean; driver_id: string; driver_responded_at?: string; ... 24 more ...; week_start_date: string; }, { ...; }> | RejectExcessProperties<...>[]'.
+src/lib/ai-auto-responder.ts: error TS2322: Type '{ title: string; category: string; channel: string; body: string; is_active: boolean; }' is not assignable to type 'RejectExcessProperties<{ created_at?: string; created_by?: string; id?: string; link_type?: string; notes?: string; updated_at?: string; user_a_id: string; user_b_id: string; } | { can_approve_applications?: boolean; can_delete_users?: boolean; ... 22 more ...; user_id: string; } | ... 223 more ... | { ...; }, { ......'.
+src/lib/ai-auto-responder.ts: error TS2769: No overload matches this call.
+src/lib/auth/oauth.ts: error TS2322: Type '"google" | "apple" | "microsoft"' is not assignable to type 'Provider'.
+src/lib/file-upload-api.ts: error TS2339: Property 'fileUrl' does not exist on type 'GetFileUrlResponse'.
+src/lib/file-upload-api.ts: error TS2339: Property 'signedUrl' does not exist on type 'GetFileUrlResponse'.
+src/lib/iot-liveness.ts: error TS2352: Conversion of type '(SelectQueryError<"Invalid Relationships cannot infer result type"> | SelectQueryError<"Invalid RelationName cannot infer result type">)[]' to type 'IoTAuditLogRecord[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/lib/mqtt-client.ts: error TS2339: Property 'enabled' does not exist on type 'AlertRule'.
+src/lib/mqtt-client.ts: error TS2339: Property 'evaluate' does not exist on type 'AlertRule'.
+src/lib/mqtt-client.ts: error TS2339: Property 'qos' does not exist on type '{ intervalMs: number; }'.
+src/lib/mqtt-client.ts: error TS2339: Property 'qos' does not exist on type '{ parkedIntervalMs: number; movingIntervalMs: number; movingThresholdMph: number; }'.
+src/lib/mqtt-client.ts: error TS2339: Property 'source' does not exist on type 'AlertRule'.
+src/lib/post-login-destination.ts: error TS2339: Property 'agreement_signed' does not exist on type 'SelectQueryError<"column 'agreement_signed' does not exist on 'vehicles'."> | SelectQueryError<"column 'agreement_signed' does not exist on 'legal_agreements'."> | ... 223 more ... | SelectQueryError<...>'.
+src/lib/post-login-destination.ts: error TS2345: Argument of type '"user_id"' is not assignable to parameter of type 'never'.
+src/lib/post-login-destination.ts: error TS2769: No overload matches this call.
+src/lib/telephony/adapters/ServerRestAdapter.ts: error TS2551: Property 'callId' does not exist on type '{ success: boolean; providerStatus?: string; databaseStatus?: string; active: boolean; callSid?: string; message?: string; }'. Did you mean 'callSid'?
+src/lib/totp.ts: error TS2769: No overload matches this call.
+src/pages/A2P10DlcCompliancePage.tsx: error TS2741: Property 'path' is missing in type '{ title: string; description: string; }' but required in type 'SeoProps'.
+src/pages/Auth.tsx: error TS2322: Type 'string' is not assignable to type '"sms" | "whatsapp" | "authenticator"'.
+src/pages/Auth.tsx: error TS2551: Property 'catch' does not exist on type 'PostgrestFilterBuilder<{ PostgrestVersion: "14.5"; }, { Tables: { account_links: { Row: { created_at: string; created_by: string; id: string; link_type: string; notes: string; updated_at: string; user_a_id: string; user_b_id: string; }; Insert: { ...; }; Update: { ...; }; Relationships: []; }; ... 224 more ...; with...'. Did you mean 'match'?
+src/pages/Contact.tsx: error TS2339: Property 'supportEmail' does not exist on type 'CompanyInfo'.
+src/pages/Contact.tsx: error TS2339: Property 'whatsapp' does not exist on type 'CompanyInfo'.
+src/pages/DriverDashboard.tsx: error TS2304: Cannot find name 'PaymentSelection'.
+src/pages/DriverDashboard.tsx: error TS2304: Cannot find name 'setIsProcessing'.
+src/pages/DriverRegistration.tsx: error TS2345: Argument of type '{ phoneNumber: string; serviceConsent: boolean; marketingConsent: boolean; source: string; }' is not assignable to parameter of type '{ userId: string; phoneNumber?: string; serviceConsent: boolean; marketingConsent: boolean; source?: string; }'.
+src/pages/OnboardingLegalAgreement.tsx: error TS2322: Type 'AgreementRegion' is not assignable to type '"USA" | "Nigeria"'.
+src/pages/OwnerRegistration.tsx: error TS2345: Argument of type '{ phoneNumber: string; serviceConsent: boolean; marketingConsent: boolean; source: string; }' is not assignable to parameter of type '{ userId: string; phoneNumber?: string; serviceConsent: boolean; marketingConsent: boolean; source?: string; }'.
+src/pages/ProfileCompletionWizard.tsx: error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'RejectExcessProperties<{ access_level?: "view_only" | "full"; avatar_url?: string; city?: string; cookie_consent?: Json; cookie_consent_at?: string; created_at?: string; daily_plan_forbidden?: boolean; daily_plan_forbidden_at?: string; ... 46 more ...; username?: string; }, Record<...>>'.
+src/pages/ProfileSettingsPage.tsx: error TS2339: Property 'e164' does not exist on type 'string'.
+src/pages/__tests__/route-visibility.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/pages/__tests__/routes-region.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/pages/__tests__/routes-region.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/pages/admin/AdminSmsConsentAuditPage.tsx: error TS2339: Property 'disclosure_version' does not exist on type 'SmsConsentRecord'.
+src/pages/admin/AdminSmsConsentAuditPage.tsx: error TS2339: Property 'error' does not exist on type 'SmsConsentRecord[]'.
+src/pages/admin/AdminSmsConsentAuditPage.tsx: error TS2339: Property 'page_url' does not exist on type 'SmsConsentRecord'.
+src/pages/admin/AdminSmsConsentAuditPage.tsx: error TS2339: Property 'program_version' does not exist on type 'SmsConsentRecord'.
+src/pages/admin/AdminSmsConsentAuditPage.tsx: error TS2339: Property 'records' does not exist on type 'SmsConsentRecord[]'.
+src/pages/admin/AdminSmsConsentAuditPage.tsx: error TS2554: Expected 0 arguments, but got 1.
+src/pages/admin/BillingReconciliationPage.tsx: error TS2353: Object literal may only specify known properties, and 'limit' does not exist in type 'BackendCallOptions'.
+src/pages/admin/ControlEvidencePlanePage.tsx: error TS2741: Property 'path' is missing in type '{ title: string; description: string; }' but required in type 'SeoProps'.
+src/pages/admin/TodoListEmbedPage.tsx: error TS2322: Type '{ embedded: true; }' is not assignable to type 'IntrinsicAttributes & AdminDailyTodoListProps'.
+src/server/communicationServices.ts: error TS2552: Cannot find name 'getSupabaseAdmin'. Did you mean 'getSupabase'?
+src/server/functionsHandler.ts: error TS2339: Property 'checkDriverEligibility' does not exist on type 'typeof BackgroundCheckService'.
+src/server/functionsHandler.ts: error TS2339: Property 'getDriverStatus' does not exist on type 'typeof BackgroundCheckService'.
+src/server/marketing/__tests__/marketingEngine.test.ts: error TS2322: Type '"lagos"' is not assignable to type '"all" | "usa" | "nigeria"'.
+src/server/marketing/__tests__/marketingEngine.test.ts: error TS2345: Argument of type '{ eventId: string; eventName: string; eventTime: number; user: { email: string; }; }' is not assignable to parameter of type 'ConversionEventPayload'.
+src/server/marketing/__tests__/productionHardening.test.ts: error TS2345: Argument of type '{ name: string; objective: "conversions"; budgetAmount: number; currency: string; }' is not assignable to parameter of type 'CreateCampaignParams'.
+src/server/marketing/__tests__/productionHardening.test.ts: error TS2345: Argument of type '{ name: string; objective: "leads"; budgetAmount: number; currency: string; }' is not assignable to parameter of type 'CreateCampaignParams'.
+src/server/marketing/__tests__/productionHardening.test.ts: error TS2353: Object literal may only specify known properties, and 'timestamp' does not exist in type 'ConversionEventPayload'.
+src/server/marketing/__tests__/productionHardening.test.ts: error TS2554: Expected 2 arguments, but got 1.
+src/server/marketing/routes.ts: error TS2339: Property 'isUnsubscribe' does not exist on type '{ handled: boolean; eventType?: string; emailId?: string; recipient?: string; isBounce?: boolean; isComplaint?: boolean; error?: string; }'.
+src/server/marketing/routes.ts: error TS2339: Property 'refreshToken' does not exist on type '{ accessToken?: string; expiresIn?: number; error?: string; }'.
+src/server/marketing/routes.ts: error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string'.
+src/server/marketing/routes.ts: error TS2353: Object literal may only specify known properties, and 'timestamp' does not exist in type 'ConversionEventPayload'.
+src/services/cpaasRouterService.ts: error TS2367: This comparison appears to be unintentional because the types 'CPaaSProvider' and '"auto"' have no overlap.
+src/services/marketingEngine.ts: error TS2322: Type 'CanonicalMarketingEventType' is not assignable to type 'never'.
+src/services/marketingEngine.ts: error TS2322: Type 'Record<string, unknown>' is not assignable to type 'never'.
+src/services/marketingEngine.ts: error TS2322: Type 'number' is not assignable to type 'never'.
+src/services/marketingEngine.ts: error TS2322: Type 'string' is not assignable to type 'never'.
+src/services/marketingEngine.ts: error TS2322: Type '{ email?: string; phone?: string; first_name?: string; last_name?: string; city?: string; country?: string; fbp?: string; fbc?: string; }' is not assignable to type 'never'.
+src/services/marketingEngine.ts: error TS2769: No overload matches this call.
+src/services/sarekonAutoSyncService.ts: error TS2339: Property 'address' does not exist on type 'SelectQueryError<"column 'speed_kmh' does not exist on 'vehicle_telemetry_state'.">'.
+src/services/sarekonAutoSyncService.ts: error TS2339: Property 'latitude' does not exist on type 'SelectQueryError<"column 'speed_kmh' does not exist on 'vehicle_telemetry_state'.">'.
+src/services/sarekonAutoSyncService.ts: error TS2339: Property 'longitude' does not exist on type 'SelectQueryError<"column 'speed_kmh' does not exist on 'vehicle_telemetry_state'.">'.
+src/services/sarekonAutoSyncService.ts: error TS2339: Property 'speed_kmh' does not exist on type 'SelectQueryError<"column 'speed_kmh' does not exist on 'vehicle_telemetry_state'.">'.
+src/services/sarekonAutoSyncService.ts: error TS2339: Property 'vehicle_id' does not exist on type 'SelectQueryError<"column 'speed_kmh' does not exist on 'vehicle_telemetry_state'.">'.
+src/services/vehicleAuthorizationService.ts: error TS2353: Object literal may only specify known properties, and 'vehicleId' does not exist in type 'BackendCallOptions'.
+src/test/auth/duplicate-signup.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/test/auth/duplicate-signup.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/test/control-evidence-plane.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/test/registration/mobile-registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/test/registration/mobile-registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/test/registration/mobile-registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'within'.
+src/test/registration/registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'screen'.
+src/test/registration/registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'waitFor'.
+src/test/registration/registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'within'.
+src/test/security/caller-id-regression-guard.test.ts: error TS2554: Expected 2-3 arguments, but got 1.
+src/test/security/caller-id-regression-guard.test.ts: error TS2561: Object literal may only specify known properties, but 'region' does not exist in type '{ To?: string; From?: string; CallSid?: string; SessionId?: string; Region?: string; baseUrl: string; }'. Did you mean to write 'Region'?

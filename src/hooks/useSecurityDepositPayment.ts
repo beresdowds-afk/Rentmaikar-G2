@@ -14,8 +14,6 @@ export interface SecurityDepositStatus {
   status: 'paid' | 'unpaid' | 'processing';
 }
 
-const LOCAL_STORAGE_KEY_PREFIX = 'rentmaikar_security_deposit_paid_';
-
 /**
  * Checks and manages whether a driver has paid their required Platform Security Deposit / Fee.
  * Enforced as a strict prerequisite before signing owner-driver agreements.
@@ -45,19 +43,7 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
         };
       }
 
-      // 1. Check local storage cache for instant offline & demo verification
-      const localKey = `${LOCAL_STORAGE_KEY_PREFIX}${user.id}`;
-      let localStatus: Partial<SecurityDepositStatus> | null = null;
-      try {
-        const stored = localStorage.getItem(localKey);
-        if (stored) {
-          localStatus = JSON.parse(stored);
-        }
-      } catch {
-        // ignore storage parse errors
-      }
-
-      // 2. Query database for completed security deposit payments or receipts
+      // Authoritative state only: server-recorded payments/receipts (never browser storage). for completed security deposit payments or receipts
       try {
         const { data: paymentRecord, error } = await supabase
           .from('payments')
@@ -80,7 +66,6 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
             receiptNumber: `SEC-DEP-${paymentRecord.id.slice(0, 8).toUpperCase()}`,
             status: 'paid',
           };
-          localStorage.setItem(localKey, JSON.stringify(status));
           return status;
         }
 
@@ -105,24 +90,10 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
             receiptNumber: receiptRecord.receipt_number || receiptRecord.id,
             status: 'paid',
           };
-          localStorage.setItem(localKey, JSON.stringify(status));
           return status;
         }
       } catch (err) {
-        console.warn('Could not verify deposit via DB, checking local store:', err);
-      }
-
-      if (localStatus?.isPaid) {
-        return {
-          isPaid: true,
-          paidAt: localStatus.paidAt || new Date().toISOString(),
-          paymentMethod: localStatus.paymentMethod || 'Online Payment Gateway',
-          transactionReference: localStatus.transactionReference || `SEC-REF-${Date.now()}`,
-          amount: localStatus.amount || deposit?.amount || 0,
-          currency: localStatus.currency || deposit?.currency || 'USD',
-          receiptNumber: localStatus.receiptNumber || `REC-SEC-${user.id.slice(0, 6).toUpperCase()}`,
-          status: 'paid',
-        };
+        console.warn('Could not verify security deposit status:', err);
       }
 
       return {
@@ -138,63 +109,22 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
     },
   });
 
-  // Record / Pay Platform Security Deposit mutation
+  // The browser can never record or mark a security deposit as paid. A deposit
+  // becomes paid only when a verified provider webhook settles it server-side,
+  // so this fails closed instead of simulating a successful payment.
   const recordPaymentMutation = useMutation({
-    mutationFn: async ({
-      amount,
-      currency,
-      paymentMethod = 'Online Gateway',
-      reference,
-    }: {
+    mutationFn: async (_input: {
       amount: number;
       currency: string;
       paymentMethod?: string;
       reference?: string;
-    }) => {
+    }): Promise<SecurityDepositStatus> => {
       if (!user?.id) throw new Error('User not logged in');
-
-      const txRef = reference || `TX-SECDEP-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-      const recNo = `DEP-${user.id.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-6)}`;
-
-      const newRecord: SecurityDepositStatus = {
-        isPaid: true,
-        paidAt: new Date().toISOString(),
-        paymentMethod,
-        transactionReference: txRef,
-        amount,
-        currency,
-        receiptNumber: recNo,
-        status: 'paid',
-      };
-
-      // Save to localStorage immediately
-      const localKey = `${LOCAL_STORAGE_KEY_PREFIX}${user.id}`;
-      localStorage.setItem(localKey, JSON.stringify(newRecord));
-
-      // Attempt DB insert
-      try {
-        await supabase.from('payments').insert({
-          user_id: user.id,
-          amount,
-          currency,
-          payment_method: paymentMethod,
-          status: 'completed',
-          type: 'security_deposit',
-          reference: txRef,
-          metadata: {
-            deposit_type: 'platform_security_deposit',
-            receipt_number: recNo,
-            note: 'Platform Security Deposit payment for driver vehicle agreement eligibility',
-          },
-        });
-      } catch (e) {
-        console.warn('Payment record DB write error (handled gracefully):', e);
-      }
-
-      return newRecord;
+      throw new Error(
+        'Security deposit payments are confirmed by the payment provider. Complete payment through the secure checkout; your status updates once the provider confirms it.',
+      );
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData(queryKey, data);
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['driver-security-deposit-status'] });
     },
   });

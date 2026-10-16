@@ -873,6 +873,7 @@ export async function handleInitiateVoipCall(
   callId: string;
   results: Array<{ recipient: string; success: boolean; callSid?: string; error?: string }>;
   conferenceName?: string | null;
+  message?: string;
 }> {
   const recipients = Array.isArray(body.recipients) ? body.recipients : [];
   if (!recipients.length) {
@@ -966,7 +967,7 @@ if (!region) {
       success: false,
       callId,
       message: "Controlled failure: No eligible outbound line is configured for this region",
-      recipients: recipients.map((r: any) => ({
+      results: recipients.map((r: any) => ({
         recipient: r.phoneNumber || r.phone || "",
         success: false,
         error: "No eligible outbound line is configured for this region",

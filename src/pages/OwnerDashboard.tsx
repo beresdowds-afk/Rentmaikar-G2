@@ -223,39 +223,29 @@ export default function OwnerDashboard() {
       }
 
       const fnName =
-  account.provider === "paypal"
-    ? "initiate-paypal-payout"
-    : "initiate-paystack-transfer";
+        account.provider === 'paypal'
+          ? 'initiate-paypal-payout'
+          : 'initiate-paystack-transfer';
 
-const result =
-  await backendBridge.invokeEdgeFunction(
-    fnName,
-    {
-      ...existingPayload,
-    },
-    {
-      method: "POST",
-      idempotencyKey:
-        `owner-payout:${account.id}:${amount}`,
-    }
-  );
-
-if (result.error || !result.data) {
-  throw (
-    result.error ||
-    new Error("Owner payout failed")
-  );
-}
-
-const data = result.data;
-        body: {
+      // The authorization is single-use and bound to this withdrawal, so it
+      // is the stable idempotency key for every retry of the same request.
+      // The server derives the owner from the session and re-validates the
+      // authorization; this client gate is only a UX control.
+      const { data, error } = await backendBridge.invokeEdgeFunction(
+        fnName,
+        {
           amount,
+          currency,
           payoutAccountId: account.id,
           authorizationId,
           note: 'RentMaikar owner withdrawal',
           reason: 'RentMaikar owner withdrawal',
         },
-      });
+        {
+          method: 'POST',
+          idempotencyKey: `owner-withdrawal:${authorizationId}`,
+        },
+      );
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));

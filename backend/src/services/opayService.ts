@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getDbPool } from "./dbPool";
 import { paymentService } from "./paymentService";
+import { providerAmountMatches } from "./paymentAuthority";
 
 export type OpayStatus =
   | "SUCCESS"
@@ -213,6 +214,10 @@ async function opayRequest<T = Record<string, unknown>>(
     cfg,
   );
   }
+  // Amounts are sent to OPay in minor units (see createOpayOrder) and the
+  // status response is read in the same unit. Unverified against official
+  // OPay documentation; see the production readiness report.
+  const opayAmountDivisor = 100;
   async function queryCashierStatus(
   reference: string,
 ) {
@@ -504,6 +509,7 @@ export async function createOpayOrder(params: {
   export async function verifyOpayOrder(
   reference: string,
   userId: string,
+  isAdmin: boolean = false,
 ) {
   if (!reference) {
     throw new Error(
@@ -529,10 +535,11 @@ export async function createOpayOrder(params: {
 
   const tx = txResult.rows[0];
 
-  if (
-    tx?.driver_id &&
-    tx.driver_id !== userId
-  ) {
+  if (!tx) {
+    throw new Error("OPay transaction not found");
+  }
+
+  if (tx.driver_id !== userId && !isAdmin) {
     throw new Error("Forbidden");
   }
 
@@ -566,6 +573,26 @@ export async function createOpayOrder(params: {
     tx?.status === "completed" ||
     tx?.status === "refunded";
 
+  const amountOk =
+    status !== "completed" ||
+    providerAmountMatches(
+      Number(tx.amount),
+      String(tx.currency || ""),
+      Number(result.data?.amount?.total) / (opayAmountDivisor),
+      result.data?.amount?.currency,
+    );
+
+  if (status === "completed" && !amountOk) {
+    console.error("[OPay] amount/currency mismatch; refusing settlement", { reference });
+    return {
+      status: "amount_mismatch",
+      opay_status: opayStatus,
+      failure_reason: "Provider amount or currency does not match",
+      reference,
+      payment_id: tx.payment_id || null,
+    };
+  }
+
   if (!terminal) {
     await pool.query(
       `UPDATE public.opay_transactions
@@ -573,7 +600,8 @@ export async function createOpayOrder(params: {
            failure_reason = $2,
            raw_payload = $3,
            updated_at = now()
-       WHERE reference = $4`,
+       WHERE reference = $4
+         AND status NOT IN ('completed', 'refunded')`,
       [
         status,
         failure,
@@ -583,49 +611,29 @@ export async function createOpayOrder(params: {
     );
   }
 
-  const currentTxResult =
-    await pool.query(
-      `SELECT
-         payment_id,
-         amount,
-         currency,
-         driver_id,
-         rental_id,
-         vehicle_id,
-         status
-       FROM public.opay_transactions
-       WHERE reference = $1
-       LIMIT 1`,
-      [reference],
-    );
-
-  const currentTx =
-    currentTxResult.rows[0];
+  const currentTx = tx;
 
   if (
     currentTx?.payment_id &&
     !terminal &&
     status === "completed"
   ) {
-    await pool.query(
-      `UPDATE public.payments
-       SET status = 'completed',
-           processed_at = now(),
-           updated_at = now()
-       WHERE id = $1`,
-      [currentTx.payment_id],
-    );
-
-    await paymentService.settlePaymentFinancials({
+    const settled = await paymentService.completeVerifiedPaymentAndSettle({
       paymentId: currentTx.payment_id,
       provider: "opay",
       providerReference: reference,
-      driverId: currentTx.driver_id,
-      rentalId: currentTx.rental_id,
-      vehicleId: currentTx.vehicle_id,
-      amount: Number(currentTx.amount),
-      currency: currentTx.currency || "NGN",
+      providerAmount: Number(result.data?.amount?.total) / opayAmountDivisor,
+      providerCurrency: String(result.data?.amount?.currency || ""),
     });
+    if (!settled.ok) {
+      return {
+        status: settled.reason || "settlement_rejected",
+        opay_status: opayStatus,
+        failure_reason: null,
+        reference,
+        payment_id: currentTx.payment_id,
+      };
+    }
   }
 
   if (
@@ -744,23 +752,7 @@ export async function createOpayOrder(params: {
 
   const pool = getDbPool();
 
-  const existing =
-    await pool.query(
-      `SELECT id
-       FROM public.payment_webhook_events
-       WHERE external_event_id = $1
-       LIMIT 1`,
-      [String(externalEventId)],
-    );
-
-  if (existing.rows.length > 0) {
-    return {
-      received: true,
-      duplicate: true,
-    };
-  }
-
-  await pool.query(
+  const inserted = await pool.query(
     `INSERT INTO public.payment_webhook_events (
        provider,
        event_type,
@@ -770,15 +762,10 @@ export async function createOpayOrder(params: {
        signature_valid,
        payload
      )
-     VALUES (
-       'opay',
-       $1,
-       $2,
-       $3,
-       'received',
-       true,
-       $4
-     )`,
+     VALUES ('opay', $1, $2, $3, 'received', true, $4)
+     ON CONFLICT (provider, external_event_id)
+       WHERE external_event_id IS NOT NULL DO NOTHING
+     RETURNING id`,
     [
       opayStatus,
       String(externalEventId),
@@ -787,95 +774,76 @@ export async function createOpayOrder(params: {
     ],
   );
 
+  if (inserted.rows.length === 0) {
+    return {
+      received: true,
+      duplicate: true,
+    };
+  }
+
   const status =
     mapOpayStatus(opayStatus);
 
-  const failure =
-    status === "failed"
-      ? opayFailureReason(
-          opayStatus,
-          payload?.failureReason ||
-            payload?.errorMsg ||
-            null,
-        )
-      : null;
-
-  await pool.query(
-    `UPDATE public.opay_transactions
-     SET status = $1,
-         failure_reason = $2,
-         raw_payload = $3,
-         updated_at = now()
-     WHERE reference = $4`,
-    [
-      status,
-      failure,
-      JSON.stringify(payload),
-      reference,
-    ],
-  );
-
-  const txResult =
-    await pool.query(
-      `SELECT
-         payment_id,
-         amount,
-         currency,
-         rental_id,
-         driver_id,
-         vehicle_id
-       FROM public.opay_transactions
-       WHERE reference = $1
-       LIMIT 1`,
+  try {
+    const txResult = await pool.query(
+      `SELECT payment_id, driver_id, status
+         FROM public.opay_transactions
+        WHERE reference = $1
+        LIMIT 1`,
       [reference],
     );
+    const tx = txResult.rows[0];
 
-  const tx = txResult.rows[0];
-
-  if (tx?.payment_id) {
-    if (status === "completed") {
-      await pool.query(
-        `UPDATE public.payments
-         SET status = 'completed',
-             processed_at = now(),
-             updated_at = now()
-         WHERE id = $1
-           AND status <> 'completed'`,
-        [tx.payment_id],
-      );
-
-      await paymentService.settlePaymentFinancials({
-        paymentId: tx.payment_id,
-        provider: "opay",
-        providerReference: reference,
-        driverId: tx.driver_id,
-        rentalId: tx.rental_id,
-        vehicleId: tx.vehicle_id,
-        amount: Number(tx.amount),
-        currency: tx.currency || "NGN",
-      });
-
-      await pool.query(
-        `UPDATE public.iot_device_orders
-         SET payment_status = 'confirmed',
-             payment_confirmed_at = now()
-         WHERE payment_reference = $1`,
-        [reference],
-      );
-    } else if (status === "failed") {
-      await pool.query(
-        `UPDATE public.payments
-         SET status = 'failed',
-             failure_reason = $1,
-             updated_at = now()
-         WHERE id = $2
-           AND status <> 'completed'`,
-        [
-          failure,
-          tx.payment_id,
-        ],
-      );
+    if (!tx) {
+      return { received: true, ignored: "unknown_reference" };
     }
+
+    if (status === "completed") {
+      // Never trust the callback body for success: re-query OPay's
+      // authoritative status endpoint, which also validates amount/currency
+      // and settles atomically and idempotently.
+      await verifyOpayOrder(reference, tx.driver_id);
+    } else if (tx.status !== "completed" && tx.status !== "refunded") {
+      const failure =
+        status === "failed"
+          ? opayFailureReason(
+              opayStatus,
+              payload?.failureReason || payload?.errorMsg || null,
+            )
+          : null;
+
+      await pool.query(
+        `UPDATE public.opay_transactions
+            SET status = $1,
+                failure_reason = $2,
+                raw_payload = $3,
+                updated_at = now()
+          WHERE reference = $4
+            AND status NOT IN ('completed', 'refunded')`,
+        [status, failure, JSON.stringify(payload), reference],
+      );
+
+      if (status === "failed" && tx.payment_id) {
+        await pool.query(
+          `UPDATE public.payments
+              SET status = 'failed',
+                  failure_reason = $1,
+                  updated_at = now()
+            WHERE id = $2
+              AND status NOT IN ('completed', 'refunded')`,
+          [failure, tx.payment_id],
+        );
+      }
+    }
+  } catch (error) {
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events
+          WHERE provider = 'opay' AND external_event_id = $1`,
+        [String(externalEventId)],
+      )
+      .catch(() => undefined);
+    throw error;
   }
 
   return {

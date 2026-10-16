@@ -2,6 +2,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
+import { authorizeAmount, claimInvoice } from "../_shared/payment-obligation.ts";
 import { resolvePaymentContext } from "../_shared/resolve-payment-context.ts";
 import { createCashierOrder, getOpayConfig, toMinorUnits,
   ensureOpayConfig,
@@ -18,6 +19,7 @@ const BodySchema = z.object({
   callbackUrl: z.string().url().optional(),
   returnUrl: z.string().url().optional(),
   purpose: z.string().optional(),
+  invoiceId: z.string().uuid().optional(),
   iotDeviceId: z.string().uuid().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -46,6 +48,13 @@ Deno.serve(async (req) => {
     if (b.driverId && b.driverId !== driverId) {
       return json({ error: "driverId does not match authenticated user" }, 403);
     }
+
+    const obl = await authorizeAmount(supabase, {
+      driverId, purpose: b.purpose, rentalId: b.rentalId, invoiceId: b.invoiceId,
+      amount: b.amount, currency: "NGN",
+    });
+    if (!obl.ok) return json({ error: obl.error }, obl.status);
+    b.amount = obl.amount;
 
     const ctx = await resolvePaymentContext({
       supabase,
@@ -113,6 +122,10 @@ Deno.serve(async (req) => {
     if (paymentError || !payment?.id) {
       console.error("[create-opay-order] payment insert failed:", paymentError);
       return json({ error: "Failed to record payment" }, 500);
+    }
+
+    if (!(await claimInvoice(supabase, obl.invoiceId, payment.id))) {
+      return json({ error: "Payment already in progress for this invoice" }, 409);
     }
 
     await supabase.from("opay_transactions").insert({
