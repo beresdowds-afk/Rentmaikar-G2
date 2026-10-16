@@ -1838,7 +1838,7 @@ async processPayPalOwnerPayout(opts: {
     provider_status: batchStatus,
     awaiting_reconciliation: true,
   };
-  
+}
   private async executePayPalPayout(opts: {
   amount: number;
   receiver: string;
