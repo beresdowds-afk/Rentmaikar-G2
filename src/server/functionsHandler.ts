@@ -35,7 +35,7 @@ import {
 } from "../../backend/src/services/iotService";
 import { paymentService } from "../../backend/src/services/paymentService";
 import { enforceFunctionAccess, AccessDenied } from "../../backend/src/services/functionAccessPolicy";
-import { resolveCheckoutAuthority, PaymentAuthorityError } from "../../backend/src/services/paymentAuthority";
+import { resolveCheckoutAuthority, createWithAuthoritativeAmount, PaymentAuthorityError } from "../../backend/src/services/paymentAuthority";
 import { getDbPool } from "../../backend/src/services/dbPool";
 import type { AuthContext } from "../../backend/src/services/fileUploadService";
 
@@ -1120,9 +1120,12 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
         const authority = await resolveCheckoutAuthority(getDbPool(), { caller: gatedCaller, provider: "paypal", body });
-        const result = await paymentService.createPayPalOrder({
-          amount: Number(body.amount),
-          currency: authority.currency,
+        const result = await createWithAuthoritativeAmount(getDbPool(), {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, (auth) => paymentService.createPayPalOrder({
+          amount: auth.amount,
+          currency: auth.currency,
           rental_id: authority.rentalId ?? undefined,
           vehicle_id: authority.vehicleId ?? undefined,
           driver_id: authority.driverId,
@@ -1131,7 +1134,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
           description: body.description,
           purpose: body.purpose,
           iot_device_order_id: body.iot_device_order_id,
-        });
+        }));
         return { status: 200, data: result };
       } catch (err: any) {
         if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
@@ -1168,17 +1171,21 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
         const authority = await resolveCheckoutAuthority(getDbPool(), { caller: gatedCaller, provider: "paystack", body });
-        const result = await paymentService.createPaystackTransaction({
-          amount: Number(body.amount),
+        const result = await createWithAuthoritativeAmount(getDbPool(), {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, (auth) => paymentService.createPaystackTransaction({
+          amount: auth.amount,
           email: body.email,
-          currency: authority.currency,
+          currency: auth.currency,
+          purpose: body.purpose,
           rental_id: authority.rentalId ?? undefined,
           vehicle_id: authority.vehicleId ?? undefined,
           driver_id: authority.driverId,
           owner_id: authority.ownerId ?? undefined,
           callback_url: body.callback_url,
           metadata: body.metadata,
-        });
+        }));
         return { status: 200, data: result };
       } catch (err: any) {
         if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
@@ -1228,14 +1235,18 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       body,
     });
 
-    const result = await createOpayOrder({
-      amount: Number(body.amount),
+    const result = await createWithAuthoritativeAmount(getDbPool(), {
+      driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+      invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+    }, (auth) => createOpayOrder({
+      amount: auth.amount,
       rentalId: authority.rentalId ?? undefined,
       vehicleId: authority.vehicleId ?? undefined,
       ownerId: authority.ownerId ?? undefined,
       driverId: authority.driverId,
+      purpose: body.purpose,
       returnUrl: body.return_url,
-    });
+    }));
 
     return {
       status: 200,

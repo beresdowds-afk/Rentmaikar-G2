@@ -1,6 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { notifyWithdrawalEvent } from "../_shared/withdrawal-notify.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { amountsMatch } from "../_shared/amount-check.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { createHmac } from "node:crypto";
 import { timingSafeEqualHex } from "../_shared/timing-safe.ts";
@@ -85,6 +86,19 @@ Deno.serve(async (req) => {
   }
 
   if (evt.event === "charge.success" && reference) {
+    // A valid signature does not prove the amount is right: the event must
+    // match the stored transaction (status, amount in kobo -> major units, currency).
+    const { data: expected } = await supabase.from("paystack_transactions")
+      .select("payment_id, amount, currency").eq("reference", reference).maybeSingle();
+    const eventOk = expected?.payment_id
+      && String(evt?.data?.status ?? "").toLowerCase() === "success"
+      && amountsMatch(expected.amount, expected.currency, Number(evt?.data?.amount) / 100, evt?.data?.currency);
+    if (!eventOk) {
+      console.error("[paystack-webhook] rejected charge.success: unknown reference or status/amount/currency mismatch", reference);
+      return new Response(JSON.stringify({ received: true, rejected: "mismatch" }), {
+        headers: { ...corsHeaders, ...correlationHeaders(logger), "Content-Type": "application/json" },
+      });
+    }
     await supabase.from("paystack_transactions").update({
       status: "completed",
       channel: evt.data.channel,

@@ -2,6 +2,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
+import { authorizeAmount, claimInvoice } from "../_shared/payment-obligation.ts";
 import { resolvePaymentContext } from "../_shared/resolve-payment-context.ts";
 import { claimIdempotencyKey, completeIdempotencyKey, duplicateResponse, resolveIdempotencyKey } from "../_shared/payment-idempotency.ts";
 
@@ -16,6 +17,7 @@ const BodySchema = z.object({
   description: z.string().max(255).optional(),
   callbackUrl: z.string().url().optional(),
   purpose: z.string().optional(),
+  invoiceId: z.string().uuid().optional(),
   iotDeviceId: z.string().uuid().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -75,6 +77,18 @@ Deno.serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Authoritative amount/currency from the database rule; client values are only compared.
+    const obl = await authorizeAmount(supabase, {
+      driverId, purpose: body.purpose, rentalId: body.rentalId, invoiceId: body.invoiceId,
+      amount: body.amount, currency: body.currency,
+    });
+    if (!obl.ok) {
+      return new Response(JSON.stringify({ error: obl.error }), {
+        status: obl.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    body.amount = obl.amount;
 
     // Duplicate submissions (double-click, retry) must not create two charges.
     const idemKey = resolveIdempotencyKey(req, rawBody ?? {});
@@ -149,6 +163,13 @@ Deno.serve(async (req) => {
       await completeIdempotencyKey(supabase, idemKey, "failed");
       return new Response(JSON.stringify({ error: "Failed to record payment" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!(await claimInvoice(supabase, obl.invoiceId, payment.id))) {
+      await completeIdempotencyKey(supabase, idemKey, "failed");
+      return new Response(JSON.stringify({ error: "Payment already in progress for this invoice" }), {
+        status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 

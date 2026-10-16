@@ -398,3 +398,69 @@ describe("PayPal capture (mocked provider)", () => {
     expect(settle).toBe(1);
   });
 });
+
+describe("server-authoritative payment amounts (MOCKED DB rule; SQL rule tested in supabase/tests)", () => {
+  const rental = { id: "r1", driver_id: "driver-1", owner_id: "owner-1", vehicle_id: "v1", region: "Nigeria", currency: "NGN" };
+  const okProvider = () => ({ ok: true, status: 200, json: async () => ({ status: true, data: { authorization_url: "https://checkout.paystack.com/x", access_code: "ac" } }) });
+  let claim = true;
+  const rpc = (result: Row) => (sql: string, params: any[]) => {
+    if (/resolve_payment_obligation/i.test(sql)) return { rows: [{ result }] };
+    if (/claim_invoice_for_payment/i.test(sql)) return { rows: [{ ok: claim }] };
+    return checkoutDb({ rental })(sql);
+  };
+  const post = () => call("create-paystack-transaction", { amount: 1, email: "a@b.c", rental_id: "r1", purpose: "security_deposit" }, "tok-driver");
+  const providerBody = () => JSON.parse(providerFetch.mock.calls[0][1].body);
+  beforeEach(() => { claim = true; });
+
+  for (const [reason, status] of [
+    ["amount_mismatch", 422],           // client amount lower or higher than the authoritative amount
+    ["currency_mismatch", 422],
+    ["no_authoritative_rule", 422],     // missing/ambiguous rule or unauthorised partial payment: fail closed
+    ["payment_already_in_progress", 409],
+    ["already_paid", 409],
+    ["invoice_not_found_for_driver", 403],
+  ] as const) {
+    it(`rule rejection '${reason}' -> ${status}, provider never called, no payment row`, async () => {
+      state.handler = rpc({ ok: false, reason });
+      providerFetch.mockResolvedValue(okProvider());
+      const r = await post();
+      expect(r.status).toBe(status);
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(state.calls.some((c) => /INSERT INTO public\.payments/i.test(c.sql))).toBe(false);
+    });
+  }
+
+  it("the provider is charged the AUTHORITATIVE amount, not the client's", async () => {
+    state.handler = rpc({ ok: true, amount: 7500, currency: "NGN", invoice_id: null });
+    providerFetch.mockResolvedValue(okProvider());
+    const r = await post();
+    expect(r.status).toBeLessThan(300);
+    expect(providerBody().amount).toBe(750000); // 7500 NGN in kobo, client sent 1
+    expect(providerBody().currency).toBe("NGN");
+  });
+
+  it("an invoice already reserved by another payment -> 409 and the new payment is failed", async () => {
+    claim = false;
+    state.handler = rpc({ ok: true, amount: 7500, currency: "NGN", invoice_id: "inv-1" });
+    providerFetch.mockResolvedValue(okProvider());
+    const r = await post();
+    expect(r.status).toBe(409);
+    expect(state.calls.some((c) => /UPDATE public\.payments SET status = 'failed'/i.test(c.sql))).toBe(true);
+  });
+
+  it("a successful invoice payment claims the invoice exactly once", async () => {
+    state.handler = rpc({ ok: true, amount: 7500, currency: "NGN", invoice_id: "inv-1" });
+    providerFetch.mockResolvedValue(okProvider());
+    const r = await post();
+    expect(r.status).toBeLessThan(300);
+    expect(state.calls.filter((c) => /claim_invoice_for_payment/i.test(c.sql)).length).toBe(1);
+  });
+
+  it("rule evaluation failure (DB error) fails closed", async () => {
+    state.handler = (sql) => { if (/resolve_payment_obligation/i.test(sql)) throw new Error("db down"); return checkoutDb({ rental })(sql); };
+    providerFetch.mockResolvedValue(okProvider());
+    const r = await post();
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+});

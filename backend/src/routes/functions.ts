@@ -62,7 +62,7 @@ import {
   sarekonService,
 } from "../services/iotService";
 import { paymentService } from "../services/paymentService";
-import { resolveCheckoutAuthority, PaymentAuthorityError } from "../services/paymentAuthority";
+import { resolveCheckoutAuthority, createWithAuthoritativeAmount, PaymentAuthorityError } from "../services/paymentAuthority";
 import { PayoutError, resolveIdempotencyKey } from "../services/ownerPayoutWorkflow";
 import {
   authenticateSelfWithdrawalCaller,
@@ -1527,9 +1527,12 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           provider: "paypal",
           body,
         });
-        const result = await paymentService.createPayPalOrder({
-          amount: Number(body.amount),
-          currency: authority.currency,
+        const result = await createWithAuthoritativeAmount(getDbPool(), {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, (auth) => paymentService.createPayPalOrder({
+          amount: auth.amount,
+          currency: auth.currency,
           rental_id: authority.rentalId ?? undefined,
           vehicle_id: authority.vehicleId ?? undefined,
           driver_id: authority.driverId,
@@ -1538,7 +1541,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           description: body.description,
           purpose: body.purpose,
           iot_device_order_id: body.iot_device_order_id,
-        });
+        }));
         return res.status(200).json(result);
       }
 
@@ -1571,17 +1574,21 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           provider: "paystack",
           body,
         });
-        const result = await paymentService.createPaystackTransaction({
-          amount: Number(body.amount),
+        const result = await createWithAuthoritativeAmount(getDbPool(), {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, (auth) => paymentService.createPaystackTransaction({
+          amount: auth.amount,
           email: body.email,
-          currency: authority.currency,
+          currency: auth.currency,
           rental_id: authority.rentalId ?? undefined,
           vehicle_id: authority.vehicleId ?? undefined,
           driver_id: authority.driverId,
           owner_id: authority.ownerId ?? undefined,
+          purpose: body.purpose,
           callback_url: body.callback_url,
           metadata: body.metadata,
-        });
+        }));
         return res.status(200).json(result);
       }
 
@@ -1664,9 +1671,12 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       },
     });
 
-    const result =
-      await createOpayOrder({
-        amount: Number(body.amount),
+    const result = await createWithAuthoritativeAmount(getDbPool(), {
+      driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+      invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+    }, (auth) =>
+      createOpayOrder({
+        amount: auth.amount,
         rentalId: authority.rentalId ?? undefined,
         vehicleId: authority.vehicleId ?? undefined,
         ownerId: authority.ownerId ?? undefined,
@@ -1689,7 +1699,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           req.headers[
             "idempotency-key"
           ] as string | undefined,
-      });
+      }));
 
     return res.status(200).json(result);
   } catch (err: any) {

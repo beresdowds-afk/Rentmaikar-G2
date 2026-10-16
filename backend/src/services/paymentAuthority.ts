@@ -177,3 +177,72 @@ export function providerAmountMatches(
   }
   return Math.abs(amt - Number(expectedAmount)) < 0.005;
 }
+
+const OBLIGATION_REASON_STATUS: Record<string, number> = {
+  amount_mismatch: 422,
+  currency_mismatch: 422,
+  payment_already_in_progress: 409,
+  already_paid: 409,
+  rental_not_found_for_driver: 403,
+  invoice_not_found_for_driver: 403,
+};
+
+/**
+ * Resolve the amount the server permits for this payment via the database
+ * rule (public.resolve_payment_obligation), create the provider order with
+ * THAT amount, then atomically reserve the invoice (if any) for the created
+ * payment. Missing/ambiguous rules fail closed. A client amount is only
+ * compared, never used.
+ */
+export async function createWithAuthoritativeAmount<T extends { payment_id?: string | null }>(
+  pool: Pick<Pool, "query">,
+  args: {
+    driverId: string;
+    purpose?: string | null;
+    rentalId?: string | null;
+    invoiceId?: string | null;
+    clientAmount?: unknown;
+    clientCurrency?: string | null;
+  },
+  create: (authoritative: { amount: number; currency: string }) => Promise<T>
+): Promise<T> {
+  const purpose = String(args.purpose || "rental").trim();
+  const clientAmount =
+    args.clientAmount === undefined || args.clientAmount === null || args.clientAmount === ""
+      ? null
+      : Number(args.clientAmount);
+  if (clientAmount !== null && !Number.isFinite(clientAmount)) {
+    throw new PaymentAuthorityError(422, "Invalid amount");
+  }
+
+  const r = await pool.query(
+    `SELECT public.resolve_payment_obligation($1, $2, $3, $4, $5, $6) AS result`,
+    [args.driverId, purpose, args.rentalId ?? null, args.invoiceId ?? null, clientAmount, args.clientCurrency ?? null]
+  );
+  const rule = r.rows[0]?.result;
+  if (!rule?.ok) {
+    const reason = String(rule?.reason || "no_authoritative_rule");
+    throw new PaymentAuthorityError(
+      OBLIGATION_REASON_STATUS[reason] ?? 422,
+      `Payment not permitted: ${reason}`
+    );
+  }
+
+  const result = await create({ amount: Number(rule.amount), currency: String(rule.currency) });
+
+  if (rule.invoice_id) {
+    const paymentId = result?.payment_id;
+    const claimed = paymentId
+      ? (await pool.query(`SELECT public.claim_invoice_for_payment($1, $2) AS ok`, [rule.invoice_id, paymentId])).rows[0]?.ok
+      : false;
+    if (!claimed) {
+      if (paymentId) {
+        await pool
+          .query(`UPDATE public.payments SET status = 'failed', updated_at = now() WHERE id = $1 AND status = 'pending'`, [paymentId])
+          .catch(() => undefined);
+      }
+      throw new PaymentAuthorityError(409, "Payment not permitted: payment_already_in_progress");
+    }
+  }
+  return result;
+}

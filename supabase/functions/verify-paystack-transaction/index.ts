@@ -1,4 +1,5 @@
 // deno-lint-ignore-file no-explicit-any
+import { amountsMatch } from "../_shared/amount-check.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
@@ -44,6 +45,15 @@ Deno.serve(async (req) => {
 
     const data = body.data;
     const success = data.status === "success";
+    if (success) {
+      // Never complete a payment whose provider amount/currency differs from what we stored.
+      const { data: stored } = await supabase.from("paystack_transactions")
+        .select("amount, currency, payment_id").eq("reference", reference).maybeSingle();
+      if (!stored?.payment_id || !amountsMatch(stored.amount, stored.currency, Number(data.amount) / 100, data.currency)) {
+        console.error("[verify-paystack-transaction] amount/currency mismatch or unknown reference", reference);
+        return json({ error: "Provider amount or currency does not match the expected payment" }, 422);
+      }
+    }
     const status = success ? "completed" : data.status === "failed" ? "failed" : "pending";
     const failureReason = success ? null : data.gateway_response ?? null;
 
