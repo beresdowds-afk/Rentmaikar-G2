@@ -34,6 +34,10 @@ import {
   sarekonService,
 } from "../../backend/src/services/iotService";
 import { paymentService } from "../../backend/src/services/paymentService";
+import { enforceFunctionAccess, AccessDenied } from "../../backend/src/services/functionAccessPolicy";
+import { resolveCheckoutAuthority, PaymentAuthorityError } from "../../backend/src/services/paymentAuthority";
+import { getDbPool } from "../../backend/src/services/dbPool";
+import type { AuthContext } from "../../backend/src/services/fileUploadService";
 
 export interface FunctionsPayload {
   body?: any;
@@ -78,6 +82,19 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
   const headers = payload?.headers || {};
   const authHeader = headers["authorization"] || headers["Authorization"] || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const rawBodyText: string = typeof payload?.rawBody === "string" ? payload.rawBody : "";
+
+  // Same central policy as the Express gateway: enforced before any side effect.
+  let gatedCaller: AuthContext | null = null;
+  try {
+    const decision = await enforceFunctionAccess(functionName, headers);
+    gatedCaller = decision?.caller ?? null;
+  } catch (err: any) {
+    if (err instanceof AccessDenied) {
+      return { status: err.statusCode, data: { ok: false, error: err.message } };
+    }
+    throw err;
+  }
 
   switch (functionName) {
     case "hologram-admin":
@@ -1101,13 +1118,15 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
 
     case "create-paypal-order": {
       try {
+        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
+        const authority = await resolveCheckoutAuthority(getDbPool(), { caller: gatedCaller, provider: "paypal", body });
         const result = await paymentService.createPayPalOrder({
           amount: Number(body.amount),
-          currency: body.currency,
-          rental_id: body.rental_id,
-          vehicle_id: body.vehicle_id,
-          driver_id: body.driver_id,
-          owner_id: body.owner_id,
+          currency: authority.currency,
+          rental_id: authority.rentalId ?? undefined,
+          vehicle_id: authority.vehicleId ?? undefined,
+          driver_id: authority.driverId,
+          owner_id: authority.ownerId ?? undefined,
           payment_frequency: body.payment_frequency,
           description: body.description,
           purpose: body.purpose,
@@ -1115,6 +1134,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         });
         return { status: 200, data: result };
       } catch (err: any) {
+        if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
         return { status: 400, data: { ok: false, error: err.message } };
       }
     }
@@ -1123,7 +1143,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         const result = await paymentService.capturePayPalOrder({
           order_id: body.order_id,
-          user_id: body.user_id,
+          user_id: gatedCaller && !gatedCaller.isAdmin ? gatedCaller.userId : body.user_id,
         });
         return { status: 200, data: result };
       } catch (err: any) {
@@ -1132,25 +1152,36 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "paypal-webhook": {
-      const result = await paymentService.handlePayPalWebhook(headers, body);
-      return { status: 200, data: result };
+      try {
+        const result = await paymentService.handlePayPalWebhook(headers, rawBodyText);
+        return { status: 200, data: result };
+      } catch (err: any) {
+        const msg = String(err?.message || "");
+        if (/not configured|PAYPAL_MODE/i.test(msg)) return { status: 503, data: { received: false, error: "Webhook verification not configured" } };
+        if (/signature/i.test(msg)) return { status: 401, data: { received: false, error: "Invalid webhook signature" } };
+        if (/required|invalid paypal webhook/i.test(msg)) return { status: 400, data: { received: false, error: "Invalid webhook" } };
+        throw err;
+      }
     }
 
     case "create-paystack-transaction": {
       try {
+        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
+        const authority = await resolveCheckoutAuthority(getDbPool(), { caller: gatedCaller, provider: "paystack", body });
         const result = await paymentService.createPaystackTransaction({
           amount: Number(body.amount),
           email: body.email,
-          currency: body.currency,
-          rental_id: body.rental_id,
-          vehicle_id: body.vehicle_id,
-          driver_id: body.driver_id,
-          owner_id: body.owner_id,
+          currency: authority.currency,
+          rental_id: authority.rentalId ?? undefined,
+          vehicle_id: authority.vehicleId ?? undefined,
+          driver_id: authority.driverId,
+          owner_id: authority.ownerId ?? undefined,
           callback_url: body.callback_url,
           metadata: body.metadata,
         });
         return { status: 200, data: result };
       } catch (err: any) {
+        if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
         return { status: 400, data: { ok: false, error: err.message } };
       }
     }
@@ -1158,16 +1189,29 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "verify-paystack-transaction": {
       try {
         const reference = body.reference || "";
-        const result = await paymentService.verifyPaystackTransaction(reference);
+        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
+        const result = await paymentService.verifyPaystackTransaction(reference, {
+          callerId: gatedCaller.userId,
+          isAdmin: gatedCaller.isAdmin,
+        });
         return { status: 200, data: result };
       } catch (err: any) {
+        if (err?.message === "Forbidden") return { status: 403, data: { ok: false, error: "Forbidden" } };
         return { status: 400, data: { ok: false, error: err.message } };
       }
     }
 
     case "paystack-webhook": {
-      const result = await paymentService.handlePaystackWebhook(headers, body);
-      return { status: 200, data: result };
+      try {
+        const result = await paymentService.handlePaystackWebhook(headers, rawBodyText);
+        return { status: 200, data: result };
+      } catch (err: any) {
+        const msg = String(err?.message || "");
+        if (/not configured/i.test(msg)) return { status: 503, data: { received: false, error: "Webhook verification not configured" } };
+        if (/signature/i.test(msg)) return { status: 401, data: { received: false, error: "Invalid webhook signature" } };
+        if (/required|invalid paystack webhook/i.test(msg)) return { status: 400, data: { received: false, error: "Invalid webhook" } };
+        throw err;
+      }
     }
 
     case "create-opay-order": {
@@ -1175,11 +1219,21 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     const { createOpayOrder } =
       await import("../../backend/src/services/opayService");
 
+    if (!gatedCaller) {
+      return { status: 401, data: { ok: false, error: "Authentication required" } };
+    }
+    const authority = await resolveCheckoutAuthority(getDbPool(), {
+      caller: gatedCaller,
+      provider: "opay",
+      body,
+    });
+
     const result = await createOpayOrder({
       amount: Number(body.amount),
-      rentalId: body.rental_id,
-      vehicleId: body.vehicle_id,
-      driverId: body.driver_id,
+      rentalId: authority.rentalId ?? undefined,
+      vehicleId: authority.vehicleId ?? undefined,
+      ownerId: authority.ownerId ?? undefined,
+      driverId: authority.driverId,
       returnUrl: body.return_url,
     });
 
@@ -1188,6 +1242,9 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       data: result,
     };
   } catch (err: any) {
+    if (err instanceof PaymentAuthorityError) {
+      return { status: err.status, data: { ok: false, error: err.message } };
+    }
     return {
       status: 502,
       data: {
@@ -1218,6 +1275,7 @@ case "verify-opay-order": {
         body.orderNo ||
         body.reference,
         callerId,
+        Boolean(gatedCaller?.isAdmin),
       );
 
     return {
@@ -1247,9 +1305,7 @@ case "opay-webhook": {
   const result =
     await handleOpayWebhook(
       headers,
-      typeof body === "string"
-        ? body
-        : JSON.stringify(body || {}),
+      rawBodyText,
     );
 
   return {

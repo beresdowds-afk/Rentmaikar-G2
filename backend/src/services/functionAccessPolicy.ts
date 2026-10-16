@@ -33,6 +33,8 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "capture-paypal-order": "authenticated",
   "create-paystack-transaction": "authenticated",
   "verify-paystack-transaction": "authenticated",
+  "create-opay-order": "authenticated",
+  "verify-opay-order": "authenticated",
   "generate-vehicle-mqtt-token": "authenticated",
   "submit-vehicle-for-review": "authenticated",
 };

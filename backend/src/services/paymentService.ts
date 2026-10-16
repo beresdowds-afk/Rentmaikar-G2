@@ -10,6 +10,7 @@
  */
 
 import { getDbPool } from "./dbPool";
+import { providerAmountMatches } from "./paymentAuthority";
 import {
   PayoutError,
   PayoutProvider,
@@ -666,7 +667,10 @@ return {
 };
 }
 
- async verifyPaystackTransaction(reference: string) {
+ async verifyPaystackTransaction(
+  reference: string,
+  opts?: { callerId?: string; isAdmin?: boolean }
+) {
   if (!reference) {
     throw new Error(
       "Missing required reference for verification"
@@ -682,6 +686,20 @@ return {
   }
 
   const pool = getDbPool();
+
+  const storedRes = await pool.query(
+    `SELECT * FROM public.paystack_transactions WHERE reference = $1 LIMIT 1`,
+    [reference]
+  );
+  const stored = storedRes.rows[0];
+  if (!stored) {
+    throw new Error(`Paystack transaction record not found for reference ${reference}`);
+  }
+  // User-initiated verification: caller must own the transaction (or be admin).
+  // Internal (webhook) callers omit opts after cryptographic signature checks.
+  if (opts && !opts.isAdmin && (!opts.callerId || stored.driver_id !== opts.callerId)) {
+    throw new Error("Forbidden");
+  }
 
   const res = await fetch(
     `https://api.paystack.co/transaction/verify/${encodeURIComponent(
@@ -736,59 +754,67 @@ return {
     };
   }
 
+  if (String(payload.data.reference ?? "") !== reference) {
+    return {
+      success: false,
+      status: "reference_mismatch",
+      reference,
+      gateway_response: "Provider reference does not match",
+    };
+  }
+
+  const providerAmount = Number(payload.data.amount) / 100;
+  if (
+    !providerAmountMatches(
+      Number(stored.amount),
+      String(stored.currency || ""),
+      providerAmount,
+      payload.data.currency
+    )
+  ) {
+    console.error("[Paystack] amount/currency mismatch; refusing settlement", { reference });
+    return {
+      success: false,
+      status: "amount_mismatch",
+      reference,
+      gateway_response: "Provider amount or currency does not match the expected payment",
+    };
+  }
+
+  if (!stored.payment_id) {
+    return {
+      success: false,
+      status: "unassociated_payment",
+      reference,
+      gateway_response: "Transaction is not linked to a payment",
+    };
+  }
+
+  const settled = await this.completeVerifiedPaymentAndSettle({
+    paymentId: stored.payment_id,
+    provider: "paystack",
+    providerReference: reference,
+    providerAmount,
+    providerCurrency: String(payload.data.currency || ""),
+  });
+
+  if (!settled.ok) {
+    return {
+      success: false,
+      status: settled.reason || "settlement_rejected",
+      reference,
+      gateway_response: gatewayResponse,
+    };
+  }
+
   await pool.query(
     `UPDATE public.paystack_transactions
      SET status = 'success',
          gateway_response = $1,
          updated_at = now()
      WHERE reference = $2`,
-    [
-      gatewayResponse,
-      reference,
-    ]
+    [gatewayResponse, reference]
   );
-
-  const txRes = await pool.query(
-    `SELECT *
-     FROM public.paystack_transactions
-     WHERE reference = $1`,
-    [reference]
-  );
-
-  const tx = txRes.rows[0];
-
-  if (!tx) {
-    throw new Error(
-      `Paystack transaction record not found for reference ${reference}`
-    );
-  }
-
-  if (tx.payment_id) {
-    await pool.query(
-      `UPDATE public.payments
-       SET status = 'completed',
-           processed_at = now(),
-           updated_at = now()
-       WHERE id = $1`,
-      [tx.payment_id]
-    );
-  }
-
-  if (
-    tx.payment_id &&
-    Number(tx.amount) > 0
-  ) {
-    await this.settlePaymentFinancials({
-      paymentId: tx.payment_id,
-      provider: "paystack",
-      providerReference: reference,
-      driverId: tx.driver_id,
-      rentalId: tx.rental_id,
-      vehicleId: tx.vehicle_id,
-      amount: Number(tx.amount),
-      currency: tx.currency || "NGN",
-    });
-  }
 
   return {
     success: true,
@@ -817,25 +843,96 @@ return {
     }
 
     const pool = getDbPool();
-
-    const result = await pool.query(
-      `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
-      [
-        opts.paymentId,
-        opts.provider,
-        opts.providerReference,
-      ]
-    );
-
-    const settlement = result.rows[0]?.result;
-
-    if (!settlement?.ok) {
-      throw new Error(
-        settlement?.reason || "Authoritative payment settlement failed"
+    const client = await pool.connect();
+    let settlement: any;
+    try {
+      await client.query("BEGIN");
+      // Serialise concurrent settlement attempts (webhook + verify + capture)
+      // on the payment row; the SQL function is idempotent via settled_at.
+      await client.query(`SELECT id FROM public.payments WHERE id = $1 FOR UPDATE`, [opts.paymentId]);
+      const result = await client.query(
+        `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
+        [opts.paymentId, opts.provider, opts.providerReference]
       );
+      settlement = result.rows[0]?.result;
+      if (!settlement?.ok) {
+        throw new Error(settlement?.reason || "Authoritative payment settlement failed");
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
 
     return settlement;
+  }
+
+  /**
+   * Mark a payment completed and settle it atomically after the provider has
+   * been authoritatively queried. Validates provider amount/currency against
+   * the stored payment row inside the lock. Never settles refunded payments.
+   */
+  async completeVerifiedPaymentAndSettle(opts: {
+    paymentId: string;
+    provider: string;
+    providerReference: string;
+    providerAmount: number;
+    providerCurrency: string;
+  }): Promise<{ ok: boolean; reason?: string; duplicate?: boolean }> {
+    const pool = getDbPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const pRes = await client.query(
+        `SELECT id, status, amount, currency FROM public.payments WHERE id = $1 FOR UPDATE`,
+        [opts.paymentId]
+      );
+      const payment = pRes.rows[0];
+      if (!payment) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "payment_not_found" };
+      }
+      if (
+        !providerAmountMatches(
+          Number(payment.amount),
+          String(payment.currency || ""),
+          opts.providerAmount,
+          opts.providerCurrency
+        )
+      ) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "amount_or_currency_mismatch" };
+      }
+      if (payment.status === "refunded") {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "payment_refunded" };
+      }
+      if (payment.status !== "completed") {
+        await client.query(
+          `UPDATE public.payments
+              SET status = 'completed', processed_at = now(), updated_at = now()
+            WHERE id = $1`,
+          [opts.paymentId]
+        );
+      }
+      const result = await client.query(
+        `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
+        [opts.paymentId, opts.provider, opts.providerReference]
+      );
+      const settlement = result.rows[0]?.result;
+      if (!settlement?.ok) {
+        throw new Error(settlement?.reason || "Authoritative payment settlement failed");
+      }
+      await client.query("COMMIT");
+      return { ok: true, duplicate: Boolean(settlement.duplicate) };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1658,10 +1755,9 @@ async handlePaystackWebhook(
 headers: Record<string, any>,
 rawBody: string | any,
 ) {
-const raw =
-typeof rawBody === "string"
-? rawBody
-: JSON.stringify(rawBody);
+// The signature is computed over the exact bytes Paystack sent; a
+// re-serialised object can never be verified, so only raw text is accepted.
+const raw = typeof rawBody === "string" ? rawBody : "";
 
 if (!raw) {
   throw new Error("Paystack webhook body is required");
@@ -1702,10 +1798,12 @@ if (
   throw new Error("Invalid Paystack webhook signature");
 }
 
-const event =
-  typeof rawBody === "string"
-    ? JSON.parse(rawBody)
-    : rawBody;
+let event: any;
+try {
+  event = JSON.parse(raw);
+} catch {
+  throw new Error("Invalid Paystack webhook event");
+}
 
 if (!event || typeof event !== "object") {
   throw new Error("Invalid Paystack webhook event");
@@ -1723,18 +1821,7 @@ if (!eventType || !reference) {
 
 const externalId = `${eventType}:${reference}`;
 
-const existingRes = await pool.query(
-  `SELECT id
-   FROM public.payment_webhook_events
-   WHERE external_event_id = $1`,
-  [externalId],
-);
-
-if (existingRes.rows.length > 0) {
-  return { received: true, duplicate: true };
-}
-
-await pool.query(
+const insertRes = await pool.query(
   `INSERT INTO public.payment_webhook_events (
     provider,
     event_type,
@@ -1743,7 +1830,10 @@ await pool.query(
     status,
     signature_valid,
     payload
-  ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
+  ) VALUES ($1, $2, $3, $4, 'received', true, $5)
+  ON CONFLICT (provider, external_event_id)
+    WHERE external_event_id IS NOT NULL DO NOTHING
+  RETURNING id`,
   [
     "paystack",
     eventType,
@@ -1752,6 +1842,10 @@ await pool.query(
     JSON.stringify(event),
   ],
 );
+
+if (insertRes.rows.length === 0) {
+  return { received: true, duplicate: true };
+}
 
 if (
   eventType === "transfer.success" ||
@@ -1786,7 +1880,21 @@ if (
 }
 
 if (eventType === "charge.success") {
-  await this.verifyPaystackTransaction(reference);
+  try {
+    await this.verifyPaystackTransaction(reference);
+  } catch (error: any) {
+    // Allow provider redelivery after a transient failure.
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events WHERE provider = 'paystack' AND external_event_id = $1`,
+        [externalId],
+      )
+      .catch(() => undefined);
+    if (/record not found/i.test(String(error?.message))) {
+      return { received: true, ignored: "unknown_reference" };
+    }
+    throw error;
+  }
 }
 
 return { received: true };
