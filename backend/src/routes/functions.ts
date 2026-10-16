@@ -61,6 +61,20 @@ import {
   sarekonService,
 } from "../services/iotService";
 import { paymentService } from "../services/paymentService";
+import { PayoutError, resolveIdempotencyKey } from "../services/ownerPayoutWorkflow";
+import {
+  authenticateSelfWithdrawalCaller,
+  requireAdminCaller,
+  verifyCronSecret,
+} from "../services/payoutRequestAuth";
+
+function sendPayoutError(res: Response, fn: string, err: any) {
+  if (err instanceof PayoutError) {
+    return res.status(err.statusCode).json({ ok: false, code: err.code, error: err.message });
+  }
+  console.error(`[Backend Functions] ${fn} failed`, err);
+  return res.status(502).json({ ok: false, error: "Payout request failed" });
+}
 
 /**
  * List of functions for which Cloud Run backend is the primary authoritative engine.
@@ -116,6 +130,7 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "opay-webhook",
   "process-owner-payouts",
   "initiate-paypal-payout",
+  "reconcile-owner-payout",
   "initiate-paystack-transfer",
   "persona-create-inquiry",
   "persona-webhook",
@@ -1768,10 +1783,12 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
                   ),
                 }
               : {}),
-            ...(req.headers["idempotency-key"]
+            ...(req.headers["idempotency-key"] ||
+            req.headers["x-idempotency-key"]
               ? {
                   "idempotency-key": String(
-                    req.headers["idempotency-key"]
+                    req.headers["idempotency-key"] ||
+                      req.headers["x-idempotency-key"]
                   ),
                 }
               : {}),
@@ -1800,94 +1817,58 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 }
 
 case "initiate-paypal-payout": {
-  const ownerId =
-    body.owner_id || body.user_id;
+  try {
+    // Self-withdrawal: the owner is the authenticated caller, never the body.
+    const { ownerId } = await authenticateSelfWithdrawalCaller(
+      req.headers,
+      body.owner_id || body.user_id,
+    );
 
-  const amount =
-    Number(body.amount);
-
-  const payoutAccountId =
-    body.payout_account_id ||
-    body.payoutAccountId;
-
-  const authorizationId =
-    body.authorization_id ||
-    body.authorizationId;
-
-  if (!ownerId || !payoutAccountId) {
-    return res.status(400).json({
-      ok: false,
-      error:
-        "owner_id and payout_account_id are required",
-    });
-  }
-
-  const result =
-    await paymentService.processPayPalOwnerPayout({
+    const result = await paymentService.processPayPalOwnerPayout({
       owner_id: ownerId,
-      amount,
-      currency:
-        String(body.currency || "USD").toUpperCase(),
-      payout_account_id:
-        payoutAccountId,
-      authorization_id:
-        authorizationId,
+      amount: Number(body.amount),
+      currency: String(body.currency || "USD").toUpperCase(),
+      payout_account_id: body.payout_account_id || body.payoutAccountId,
+      authorization_id: body.authorization_id || body.authorizationId,
       note: body.note,
-      idempotency_key:
-        (req.headers["idempotency-key"] as string | undefined) ||
-        body.idempotencyKey,
+      idempotency_key: resolveIdempotencyKey(req.headers, body),
     });
 
-  return res.status(200).json({
-    ok: true,
-    ...result,
-  });
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err: any) {
+    return sendPayoutError(res, "initiate-paypal-payout", err);
+  }
 }
 
 case "process-owner-payouts": {
-  const ownerId =
-    body.owner_id || body.user_id;
-
-  const amount =
-    Number(body.amount);
-
-  const payoutAccountId =
-    body.payout_account_id ||
-    body.payoutAccountId;
-
-  const authorizationId =
-    body.authorization_id ||
-    body.authorizationId;
-
-  if (!ownerId || !payoutAccountId) {
-    return res.status(400).json({
-      ok: false,
-      error:
-        "owner_id and payout_account_id are required",
-    });
+  // Weekly bulk worker entry point: cron secret only. It executes an
+  // existing, admin-approved weekly_bulk payout; it never creates payouts.
+  try {
+    if (!verifyCronSecret(req.headers)) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
+    const result = await paymentService.executeWeeklyOwnerPayout(
+      String(body.payout_id || body.payoutId || ""),
+      body.note,
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err: any) {
+    return sendPayoutError(res, "process-owner-payouts", err);
   }
-
-  const result =
-    await paymentService.processPayPalOwnerPayout({
-      owner_id: ownerId,
-      amount,
-      currency:
-        String(body.currency || "USD").toUpperCase(),
-      payout_account_id:
-        payoutAccountId,
-      authorization_id:
-        authorizationId,
-      note: body.note,
-      idempotency_key:
-        (req.headers["idempotency-key"] as string | undefined) ||
-        body.idempotencyKey,
-    });
-
-  return res.status(200).json({
-    ok: true,
-    ...result,
-  });
 }
+
+case "reconcile-owner-payout": {
+  try {
+    await requireAdminCaller(req.headers);
+    const result = await paymentService.reconcileOwnerPayout(
+      String(body.payout_id || body.payoutId || ""),
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err: any) {
+    return sendPayoutError(res, "reconcile-owner-payout", err);
+  }
+}
+
       case "persona-create-inquiry": {
         const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         return res.status(200).json({
@@ -1939,36 +1920,7 @@ case "process-owner-payouts": {
 
       case "initiate-owner-withdrawal": {
   try {
-    const ownerId = body.owner_id || body.ownerId || body.userId;
-    const amount = Number(body.amount);
-    const currency = String(body.currency || "USD").toUpperCase();
     const provider = String(body.provider || "paypal").toLowerCase();
-    const payoutAccountId =
-      body.payout_account_id || body.payoutAccountId;
-    const authorizationId =
-      body.authorization_id || body.authorizationId;
-
-    if (!ownerId || !Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "owner_id and valid amount are required",
-      });
-    }
-
-    if (!payoutAccountId) {
-      return res.status(400).json({
-        ok: false,
-        error: "payout_account_id is required",
-      });
-    }
-
-    if (!authorizationId) {
-      return res.status(428).json({
-        ok: false,
-        error: "withdrawal authorization required",
-      });
-    }
-
     if (provider !== "paypal") {
       return res.status(400).json({
         ok: false,
@@ -1976,74 +1928,24 @@ case "process-owner-payouts": {
       });
     }
 
-    const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        ok: false,
-        error: "Authentication required",
-      });
-    }
-
-    const token = authHeader.slice("Bearer ".length);
-    const supabase = supabaseBackendService.getAdminClient();
-
-    const {
-      data: userData,
-      error: userError,
-    } = await supabase.auth.getUser(token);
-
-    if (userError || !userData?.user) {
-      return res.status(401).json({
-        ok: false,
-        error: "Invalid authentication token",
-      });
-    }
-
-    if (userData.user.id !== ownerId) {
-      return res.status(403).json({
-        ok: false,
-        error: "Owner identity mismatch",
-      });
-    }
+    const { ownerId } = await authenticateSelfWithdrawalCaller(
+      req.headers,
+      body.owner_id || body.ownerId || body.userId,
+    );
 
     const result = await paymentService.processPayPalOwnerPayout({
       owner_id: ownerId,
-      amount,
-      currency,
-      payout_account_id: payoutAccountId,
-      authorization_id: authorizationId,
+      amount: Number(body.amount),
+      currency: String(body.currency || "USD").toUpperCase(),
+      payout_account_id: body.payout_account_id || body.payoutAccountId,
+      authorization_id: body.authorization_id || body.authorizationId,
       note: body.note,
-      idempotency_key:
-        (req.headers["idempotency-key"] as string | undefined) ||
-        body.idempotencyKey,
+      idempotency_key: resolveIdempotencyKey(req.headers, body),
     });
 
-    return res.status(200).json({
-      ok: true,
-      ...result,
-    });
+    return res.status(200).json({ ok: true, ...result });
   } catch (err: any) {
-    console.error(
-      "[Backend Functions] initiate-owner-withdrawal failed",
-      err,
-    );
-
-    const message =
-      err?.message || "Owner withdrawal failed";
-
-    const status =
-      /authorization required/i.test(message)
-        ? 428
-        : /authorization|forbidden|belongs to another/i.test(message)
-          ? 403
-          : /insufficient|amount|payout account|currency/i.test(message)
-            ? 400
-            : 502;
-
-    return res.status(status).json({
-      ok: false,
-      error: message,
-    });
+    return sendPayoutError(res, "initiate-owner-withdrawal", err);
   }
 }
 

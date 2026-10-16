@@ -10,6 +10,23 @@
  */
 
 import { getDbPool } from "./dbPool";
+import {
+  PayoutError,
+  PayoutProvider,
+  assertTwoDecimalAmount,
+  claimProviderAttempt,
+  claimWeeklyPayout,
+  classifyProviderFailure,
+  createSelfWithdrawal,
+  finalizePayout,
+  isUuid,
+  mapPayPalItemStatus,
+  mapPaystackTransferStatus,
+  markReconciliationRequired,
+  reconcileProviderOutcome,
+  recordSubmitted,
+  resolveIdempotencyKey,
+} from "./ownerPayoutWorkflow";
 
 export const PAYMENT_PURPOSES = [
   "rental",
@@ -82,6 +99,11 @@ export interface OPayInitParams {
   vehicle_id?: string;
   user_phone?: string;
   return_url?: string;
+}
+
+/** Error raised before any payout request reached PayPal (no transfer can exist). */
+function notSentError(message: string): Error & { notSent: true } {
+  return Object.assign(new Error(message), { notSent: true as const });
 }
 
 class PaymentService {
@@ -858,1059 +880,373 @@ return {
       phoneVerified: Boolean(profileRes.rows[0]?.phone_verified),
     };
   }
-async processPayPalOwnerPayout(opts: {
-  owner_id: string;
-  amount: number;
-  currency: string;
-  payout_account_id: string;
-  authorization_id: string;
-  note?: string;
-  idempotency_key?: string;
-}) {
-  const amount = Number(opts.amount);
-  const currency = String(opts.currency || "USD").toUpperCase();
-
-  if (!opts.owner_id) {
-    throw new Error("owner_id is required");
-  }
-
-  if (!Number.isFinite(amount) || amount < 1) {
-    throw new Error("PayPal payout amount must be at least 1.00");
-  }
-
-  if (Math.round(amount * 100) !== amount * 100) {
-    throw new Error(
-      "PayPal payout amount must have at most 2 decimals",
-    );
-  }
-
-  if (currency !== "USD") {
-    throw new Error(
-      "PayPal owner payouts currently support USD only",
-    );
-  }
-
-  if (!opts.payout_account_id) {
-    throw new Error("PayPal payout account is required");
-  }
-
-  if (!opts.authorization_id) {
-    throw new Error(
-      "withdrawal authorization required",
-    );
-  }
-
-  const pool = getDbPool();
-
-  /*
-   * 1. Verify the payout destination belongs to the owner.
-   */
-  const accountResult = await pool.query(
-    `SELECT
-       id,
-       owner_id,
-       provider,
-       currency,
-       paypal_email,
-       is_default
-     FROM public.owner_payout_accounts
-     WHERE id = $1
-       AND owner_id = $2
-     LIMIT 1`,
-    [
-      opts.payout_account_id,
-      opts.owner_id,
-    ],
-  );
-
-  const account = accountResult.rows[0];
-
-  if (
-    !account ||
-    account.provider !== "paypal" ||
-    !account.paypal_email
-  ) {
-    throw new Error(
-      "Invalid PayPal payout account",
-    );
-  }
-
-  /*
-   * 2. Verify the withdrawal authorization.
-   */
-  const authorizationResult = await pool.query(
-    `SELECT *
-     FROM public.withdrawal_authorizations
-     WHERE id = $1
-     LIMIT 1`,
-    [opts.authorization_id],
-  );
-
-  const authorization =
-    authorizationResult.rows[0];
-
-  if (!authorization) {
-    throw new Error(
-      "withdrawal authorization not found",
-    );
-  }
-
-  if (
-    authorization.subject_user_id !==
-    opts.owner_id
-  ) {
-    throw new Error(
-      "withdrawal authorization belongs to another user",
-    );
-  }
-
-  if (
-    authorization.request_type !==
-    "owner_payout"
-  ) {
-    throw new Error(
-      "withdrawal authorization type mismatch",
-    );
-  }
-
-  if (
-    Math.abs(
-      Number(authorization.amount) - amount,
-    ) > 0.009
-  ) {
-    throw new Error(
-      "withdrawal authorization amount mismatch",
-    );
-  }
-
-  if (
-    String(authorization.currency).toUpperCase() !==
-    currency
-  ) {
-    throw new Error(
-      "withdrawal authorization currency mismatch",
-    );
-  }
-
-  if (authorization.status !== "approved") {
-    throw new Error(
-      `withdrawal authorization is ${authorization.status}`,
-    );
-  }
-
-  if (
-    new Date(
-      authorization.expires_at,
-    ).getTime() < Date.now()
-  ) {
-    throw new Error(
-      "withdrawal authorization expired",
-    );
-  }
-
-  /*
-   * 3. Prevent concurrent owner payouts.
-   */
-  const activePayoutResult = await pool.query(
-    `SELECT id
-     FROM public.owner_payouts
-     WHERE owner_id = $1
-       AND status IN (
-         'pending',
-         'authorized',
-         'captured',
-         'processing'
-       )
-     LIMIT 1`,
-    [opts.owner_id],
-  );
-
-  if (activePayoutResult.rows.length > 0) {
-    throw new Error(
-      "A payout is already in progress",
-    );
-  }
-
-  /*
-   * 4. Verify available owner balance.
-   */
-  const balanceResult = await pool.query(
-    `SELECT public.get_owner_available_balance(
-       $1,
-       $2
-     ) AS balance`,
-    [
-      opts.owner_id,
-      currency,
-    ],
-  );
-
-  const available = Number(
-    balanceResult.rows[0]?.balance || 0,
-  );
-
-  if (amount > available) {
-    throw new Error(
-      `Amount exceeds available balance (${available.toFixed(2)} available)`,
-    );
-  }
-
-  /*
-   * 5. Idempotency.
+  /**
+   * Self-withdrawal via PayPal.
    *
-   * Do not create a second payout if the same request
-   * is retried.
+   * Sequence: validate -> atomically (validate + consume authorization, create
+   * canonical payout, reserve wallet) in ONE database transaction -> claim the
+   * single provider attempt -> PayPal call (no DB transaction held open) ->
+   * record submission / definitive failure / reconciliation-required.
+   * Final settlement only comes from authenticated provider evidence.
    */
-  if (opts.idempotency_key) {
-    const existing = await pool.query(
-      `SELECT *
-       FROM public.owner_payouts
-       WHERE owner_id = $1
-         AND transfer_reference = $2
-       LIMIT 1`,
-      [
-        opts.owner_id,
-        opts.idempotency_key,
-      ],
-    );
+  async processPayPalOwnerPayout(opts: {
+    owner_id: string;
+    amount: number;
+    currency: string;
+    payout_account_id: string;
+    authorization_id: string;
+    note?: string;
+    idempotency_key?: string;
+  }) {
+    const ownerId = String(opts.owner_id || "").trim();
+    const currency = String(opts.currency || "USD").toUpperCase();
+    const accountId = String(opts.payout_account_id || "").trim();
+    const authorizationId = String(opts.authorization_id || "").trim();
 
-    if (existing.rows[0]) {
-      return {
-        success: true,
-        duplicate: true,
-        payout: existing.rows[0],
-      };
+    if (!ownerId) throw new PayoutError("invalid_request", "owner_id is required");
+    if (!accountId) {
+      throw new PayoutError("invalid_account", "PayPal payout account is required");
     }
-  }
-
-  const reference =
-    `pyt_${Date.now()}_${Math.random()
-      .toString(36)
-      .slice(2, 10)}`;
-
-  /*
-   * 6. Create canonical payout record.
-   */
-  const payoutResult = await pool.query(
-    `INSERT INTO public.owner_payouts (
-       owner_id,
-       payout_account_id,
-       provider,
-       amount,
-       currency,
-       status,
-       transfer_reference,
-       initiated_by,
-       scheduled_for
-     )
-     VALUES (
-       $1, $2, 'paypal', $3, 'USD',
-       'pending', $4, 'owner', now()
-     )
-     RETURNING *`,
-    [
-      opts.owner_id,
-      opts.payout_account_id,
-      amount,
-      reference,
-    ],
-  );
-
-  const payout =
-    payoutResult.rows[0];
-
-  if (!payout?.id) {
-    throw new Error(
-      "Could not create PayPal payout record",
+    if (!authorizationId) {
+      throw new PayoutError("authorization_required", "Withdrawal authorization is required");
+    }
+    const amount = assertTwoDecimalAmount(opts.amount, 1);
+    if (currency !== "USD") {
+      throw new PayoutError("invalid_request", "PayPal owner payouts currently support USD only");
+    }
+    const idempotencyKey = resolveIdempotencyKey(
+      {},
+      { idempotencyKey: opts.idempotency_key },
     );
-  }
 
-  /*
-   * 7. Move payout into authorized state.
-   */
-  await pool.query(
-    `SELECT public.transition_payment_state(
-       'payout',
-       $1,
-       'authorized',
-       'withdrawal authorization approved',
-       $2::jsonb
-     )`,
-    [
-      payout.id,
-      JSON.stringify({
-        authorization_id:
-          opts.authorization_id,
-      }),
-    ],
-  );
-
-  /*
-   * 8. Execute actual PayPal Payouts API call.
-   */
-  const paypalResult =
-    await this.executePayPalPayout({
+    const created = await createSelfWithdrawal({
+      ownerId,
+      authorizationId,
+      payoutAccountId: accountId,
       amount,
-      receiver: account.paypal_email,
-      reference,
-      note:
-        opts.note ||
-        "Your Rentmaikar owner earnings",
-    });
-  
-  /*
-   * 9. RESERVE OWNER WALLET BEFORE PAYPAL.
-   *
-   * This is the authoritative financial reservation.
-   *
-   * A posted debit is used intentionally: available balance is ledger-derived
-   * and therefore the reservation must immediately reduce available funds.
-   */
-  const reservation = await pool.query(
-    `SELECT public.post_wallet_entry(
-       $1,
-       'owner',
-       $2,
-       'debit',
-       $3,
-       'payout',
-       $4,
-       'owner_payouts',
-       $5,
-       'paypal',
-       $6,
-       $7
-     ) AS result`,
-    [
-      opts.owner_id,
       currency,
-      amount,
-      `payout:${payout.id}:reserved`,
-      payout.id,
-      reference,
-      "Owner payout reserved before PayPal disbursement",
-    ],
-  );
-
-  const reservationResult = reservation.rows[0]?.result;
-
-  if (!reservationResult?.ok) {
-    await pool.query(
-      `SELECT public.transition_payment_state(
-         'payout',
-         $1,
-         'failed',
-         'Wallet reservation failed',
-         $2::jsonb
-       )`,
-      [
-        payout.id,
-        JSON.stringify({
-          error: reservationResult?.error || "ledger reservation failed",
-        }),
-      ],
-    );
-
-    throw new Error(
-      reservationResult?.error || "Wallet reservation failed",
-    );
-  }
-
-  /*
-   * 10. Consume the withdrawal authorization only after the reservation
-   * succeeds. This prevents an authorization from being consumed when
-   * the wallet could not actually reserve the money.
-   */
-  await pool.query(
-    `UPDATE public.withdrawal_authorizations
-     SET status = 'consumed',
-         consumed_at = now(),
-         consumed_reference = $1,
-         updated_at = now()
-     WHERE id = $2
-       AND status = 'approved'`,
-    [payout.id, opts.authorization_id],
-  );
-
-  /*
-   * 11. Execute PayPal.
-   *
-   * IMPORTANT:
-   * PENDING / PROCESSING is NOT success.
-   */
-  let paypalResult: any;
-
-  try {
-    paypalResult = await this.executePayPalPayout({
-      amount,
-      receiver: account.paypal_email,
-      reference,
-      note: opts.note || "Your RentMaikar owner earnings",
+      provider: "paypal",
+      idempotencyKey,
     });
-  } catch (err: any) {
-    /*
-     * We only reverse the reservation for an explicit provider rejection.
-     *
-     * A transport/network ambiguity must NOT automatically reverse the
-     * reservation because PayPal may already have accepted the payout.
-     */
-  const pool = getDbPool();
 
-  const amount = Number(opts.amount);
-  const currency = String(opts.currency || "USD").toUpperCase();
-  const ownerId = opts.owner_id?.trim();
-  const accountId = opts.payout_account_id?.trim();
-  const authorizationId = opts.authorization_id?.trim();
-  const note = opts.note?.trim() || "Your RentMaikar owner earnings";
-
-  if (!ownerId) {
-    throw new Error("owner_id is required");
-  }
-
-  if (!Number.isFinite(amount) || amount < 1) {
-    throw new Error("PayPal payout amount must be at least 1.00");
-  }
-
-  if (Math.round(amount * 100) !== amount * 100) {
-    throw new Error(
-      "PayPal payout amount must have at most 2 decimal places",
+    return this.executePayPalPayoutRecord(
+      created.payoutId,
+      opts.note?.trim() || "Your RentMaikar owner earnings",
     );
   }
 
-  if (currency !== "USD") {
-    throw new Error("PayPal owner payouts currently support USD only");
-  }
-
-  if (!accountId) {
-    throw new Error("PayPal payout account is required");
-  }
-
-  if (!authorizationId) {
-    throw new Error("Withdrawal authorization is required");
-  }
-
-  /*
-   * Use one stable reference for the database record and provider request.
-   * An idempotency key must be reused for retries of the same request.
+  /**
+   * Weekly bulk payout execution: only an admin-approved, due, unattempted
+   * weekly_bulk payout can be claimed. Funds were reserved when it was created.
    */
-  const suppliedKey = opts.idempotency_key?.trim();
+  async executeWeeklyOwnerPayout(payoutId: string, note?: string) {
+    if (!isUuid(payoutId)) {
+      throw new PayoutError("invalid_request", "payout_id must be a valid identifier");
+    }
+    const claimed = await claimWeeklyPayout(payoutId);
+    if (!claimed) {
+      return { success: true, skipped: true, reason: "payout is not an eligible weekly payout" };
+    }
+    const text = note?.trim() || "Your RentMaikar weekly owner payout";
+    if (claimed.provider === "paypal") {
+      return this.executePayPalPayoutRecord(payoutId, text, true);
+    }
+    if (claimed.provider === "paystack") {
+      return this.executePaystackPayoutRecord(payoutId, text, true);
+    }
+    await markReconciliationRequired(payoutId, `Unsupported provider ${claimed.provider}`);
+    return { success: true, skipped: true, reason: "unsupported provider" };
+  }
 
-  if (
-    suppliedKey &&
-    (
-      suppliedKey.length > 50 ||
-      !/^[A-Za-z0-9._-]+$/.test(suppliedKey)
-    )
+  private async loadPayoutWithAccount(payoutId: string) {
+    const result = await getDbPool().query(
+      `SELECT p.*, a.paypal_email, a.recipient_code
+       FROM public.owner_payouts p
+       LEFT JOIN public.owner_payout_accounts a ON a.id = p.payout_account_id
+       WHERE p.id = $1`,
+      [payoutId],
+    );
+    return result.rows[0];
+  }
+
+  private async payoutResponse(payoutId: string, extra: Record<string, unknown> = {}) {
+    const row = await this.loadPayoutWithAccount(payoutId);
+    if (row) {
+      delete row.paypal_email;
+      delete row.recipient_code;
+    }
+    return {
+      success: true,
+      payout: row,
+      awaiting_reconciliation: Boolean(row?.reconciliation_required),
+      ...extra,
+    };
+  }
+
+  private async executePayPalPayoutRecord(
+    payoutId: string,
+    note: string,
+    alreadyClaimed = false,
   ) {
-    throw new Error(
-      "Invalid idempotency key: use 1–50 letters, numbers, dots, underscores, or hyphens",
-    );
-  }
+    const row = await this.loadPayoutWithAccount(payoutId);
+    if (!row || row.provider !== "paypal") {
+      throw new PayoutError("invalid_request", "PayPal payout record not found", 404);
+    }
 
-  const reference =
-    suppliedKey ||
-    `pyt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    if (!alreadyClaimed) {
+      // A replay must never reach the provider a second time.
+      if (row.status !== "authorized" || !(await claimProviderAttempt(payoutId))) {
+        return this.payoutResponse(payoutId, { duplicate: true });
+      }
+    }
 
-  /*
-   * 1. Idempotency check.
-   * Perform this before the active-payout check so a legitimate retry
-   * returns its existing payout instead of creating another one.
-   */
-  if (suppliedKey) {
-    const existingResult = await pool.query(
-      `SELECT *
-       FROM public.owner_payouts
-       WHERE owner_id = $1
-         AND transfer_reference = $2
-       LIMIT 1`,
-      [ownerId, reference],
-    );
+    if (!row.paypal_email) {
+      await finalizePayout({
+        payoutId,
+        outcome: "failed",
+        provider: "paypal",
+        evidence: { reason: "PayPal payout account has no email", request_sent: false },
+      });
+      throw new PayoutError("invalid_account", "Invalid PayPal payout account");
+    }
 
-    const existing = existingResult.rows[0];
+    let paypalResult: { batchId: string; batchStatus: string; raw: unknown };
+    try {
+      paypalResult = await this.executePayPalPayout({
+        amount: Number(row.amount),
+        receiver: row.paypal_email,
+        reference: row.transfer_reference,
+        note,
+      });
+    } catch (err: unknown) {
+      const error = err as Error & { status?: number; body?: unknown };
+      const message = error instanceof Error ? error.message : "PayPal payout request failed";
 
-    if (existing) {
-      if (
-        Number(existing.amount) !== amount ||
-        String(existing.currency).toUpperCase() !== currency ||
-        String(existing.provider).toLowerCase() !== "paypal" ||
-        String(existing.payout_account_id) !== accountId
-      ) {
-        throw new Error(
-          "Idempotency key already belongs to a different payout request",
-        );
+      if (classifyProviderFailure(err) === "definitive") {
+        const res = await finalizePayout({
+          payoutId,
+          outcome: "failed",
+          provider: "paypal",
+          evidence: { reason: message, provider_status: error?.status ?? null, provider_body: error?.body ?? null },
+        });
+        if (!res.ok) {
+          await markReconciliationRequired(payoutId, `Definitive failure could not be recorded: ${res.error}`);
+        }
+        throw new PayoutError("provider_rejected", message, 502);
       }
 
-      return {
-        success: true,
-        duplicate: true,
-        payout: existing,
-      };
-    }
-  }
-
-  /*
-   * 2. Verify the payout account belongs to this owner.
-   */
-  const accountResult = await pool.query(
-    `SELECT
-       id,
-       owner_id,
-       provider,
-       currency,
-       paypal_email,
-       is_default
-     FROM public.owner_payout_accounts
-     WHERE id = $1
-       AND owner_id = $2
-     LIMIT 1`,
-    [accountId, ownerId],
-  );
-
-  const account = accountResult.rows[0];
-
-  if (
-    !account ||
-    String(account.provider).toLowerCase() !== "paypal" ||
-    !account.paypal_email ||
-    String(account.currency).toUpperCase() !== currency
-  ) {
-    throw new Error("Invalid PayPal payout account or currency");
-  }
-
-  /*
-   * 3. Verify the approved withdrawal authorization.
-   */
-  const authorizationResult = await pool.query(
-    `SELECT *
-     FROM public.withdrawal_authorizations
-     WHERE id = $1
-     LIMIT 1`,
-    [authorizationId],
-  );
-
-  const authorization = authorizationResult.rows[0];
-
-  if (!authorization) {
-    throw new Error("Withdrawal authorization not found");
-  }
-
-  if (String(authorization.subject_user_id) !== ownerId) {
-    throw new Error(
-      "Withdrawal authorization belongs to another user",
-    );
-  }
-
-  if (authorization.request_type !== "owner_payout") {
-    throw new Error("Withdrawal authorization type mismatch");
-  }
-
-  if (Math.abs(Number(authorization.amount) - amount) > 0.001) {
-    throw new Error("Withdrawal authorization amount mismatch");
-  }
-
-  if (
-    String(authorization.currency).toUpperCase() !== currency
-  ) {
-    throw new Error("Withdrawal authorization currency mismatch");
-  }
-
-  if (authorization.status !== "approved") {
-    throw new Error(
-      `Withdrawal authorization is ${authorization.status}`,
-    );
-  }
-
-  if (
-    !authorization.expires_at ||
-    !Number.isFinite(new Date(authorization.expires_at).getTime()) ||
-    new Date(authorization.expires_at).getTime() <= Date.now()
-  ) {
-    throw new Error("Withdrawal authorization expired or invalid");
-  }
-
-  /*
-   * 4. Refuse to initiate another payout while one is active.
-   * A database-level lock/constraint is still required to make this
-   * check safe against concurrent requests.
-   */
-  const activePayoutResult = await pool.query(
-    `SELECT id
-     FROM public.owner_payouts
-     WHERE owner_id = $1
-       AND status IN (
-         'pending',
-         'authorized',
-         'captured',
-         'processing'
-       )
-     LIMIT 1`,
-    [ownerId],
-  );
-
-  if (activePayoutResult.rows.length > 0) {
-    throw new Error("A payout is already in progress");
-  }
-
-  /*
-   * 5. Check the authoritative available balance.
-   */
-  const balanceResult = await pool.query(
-    `SELECT public.get_owner_available_balance($1, $2) AS balance`,
-    [ownerId, currency],
-  );
-
-  const available = Number(balanceResult.rows[0]?.balance);
-
-  if (!Number.isFinite(available) || available < amount) {
-    throw new Error(
-      `Insufficient available balance (${Number.isFinite(available) ? available.toFixed(2) : "unavailable"})`,
-    );
-  }
-
-  /*
-   * 6. Create the canonical payout record.
-   */
-  const payoutResult = await pool.query(
-    `INSERT INTO public.owner_payouts (
-       owner_id,
-       payout_account_id,
-       provider,
-       amount,
-       currency,
-       status,
-       transfer_reference,
-       initiated_by,
-       scheduled_for
-     )
-     VALUES (
-       $1, $2, 'paypal', $3, $4,
-       'pending', $5, 'owner', now()
-     )
-     RETURNING *`,
-    [ownerId, accountId, amount, currency, reference],
-  );
-
-  const payout = payoutResult.rows[0];
-
-  if (!payout?.id) {
-    throw new Error("Could not create PayPal payout record");
-  }
-
-  /*
-   * Helper: transition the payout and preserve the diagnostic details.
-   */
-  const transitionPayout = async (
-    status: string,
-    reason: string,
-    metadata: Record<string, unknown> = {},
-  ) => {
-    await pool.query(
-      `SELECT public.transition_payment_state(
-         'payout',
-         $1,
-         $2,
-         $3,
-         $4::jsonb
-       )`,
-      [
-        payout.id,
-        status,
-        reason,
-        JSON.stringify(metadata),
-      ],
-    );
-  };
-
-  /*
-   * Helper: reverse the reservation exactly once.
-   * The ledger function/database must enforce idempotency on this reference.
-   */
-  const reverseReservation = async (reason: string) => {
-    const reversalResult = await pool.query(
-      `SELECT public.post_wallet_entry(
-         $1,
-         'owner',
-         $2,
-         'credit',
-         $3,
-         'payout_reversal',
-         $4,
-         'owner_payouts',
-         $5,
-         'paypal',
-         $6,
-         $7
-       ) AS result`,
-      [
-        ownerId,
-        currency,
-        amount,
-        `payout:${payout.id}:reversal`,
-        payout.id,
-        reference,
-        reason,
-      ],
-    );
-
-    const result = reversalResult.rows[0]?.result;
-
-    if (result && result.ok === false) {
-      throw new Error(
-        result.error || "Wallet reservation reversal failed",
+      // The request may have been accepted. Keep funds reserved; reconcile.
+      await markReconciliationRequired(
+        payoutId,
+        `PayPal outcome unknown: ${message}`,
+        { provider_status: error?.status ?? null, provider_body: error?.body ?? null },
       );
+      return this.payoutResponse(payoutId, { submitted: false });
     }
-  };
 
-  /*
-   * 7. Move to authorized state.
-   */
-  await transitionPayout(
-    "authorized",
-    "Withdrawal authorization approved",
-    { authorization_id: authorizationId },
-  );
+    const batchStatus = String(paypalResult.batchStatus || "PENDING").toUpperCase();
 
-  /*
-   * 8. Reserve the owner's funds BEFORE calling PayPal.
-   */
-  const reservationResult = await pool.query(
-    `SELECT public.post_wallet_entry(
-       $1,
-       'owner',
-       $2,
-       'debit',
-       $3,
-       'payout',
-       $4,
-       'owner_payouts',
-       $5,
-       'paypal',
-       $6,
-       $7
-     ) AS result`,
-    [
-      ownerId,
-      currency,
-      amount,
-      `payout:${payout.id}:reserved`,
-      payout.id,
-      reference,
-      "Owner payout reserved before PayPal disbursement",
-    ],
-  );
-
-  const reservation = reservationResult.rows[0]?.result;
-
-  if (!reservation?.ok) {
-    const reason = reservation?.error || "Wallet reservation failed";
-
-    await transitionPayout("failed", reason, {
-      error: reason,
-    });
-
-    await pool.query(
-      `UPDATE public.owner_payouts
-       SET failure_reason = $1,
-           updated_at = now()
-       WHERE id = $2`,
-      [reason, payout.id],
-    );
-
-    throw new Error(reason);
-  }
-
-  /*
-   * 9. Consume the authorization only if it remains approved.
-   * If another request consumed it, reverse this reservation and stop.
-   */
-  const consumeResult = await pool.query(
-    `UPDATE public.withdrawal_authorizations
-     SET status = 'consumed',
-         consumed_at = now(),
-         consumed_reference = $1,
-         updated_at = now()
-     WHERE id = $2
-       AND subject_user_id = $3
-       AND status = 'approved'
-       AND expires_at > now()`,
-    [reference, authorizationId, ownerId],
-  );
-
-  if (consumeResult.rowCount !== 1) {
-    await reverseReservation(
-      "Authorization could not be consumed; payout reservation reversed",
-    );
-
-    await transitionPayout(
-      "failed",
-      "Withdrawal authorization is no longer valid",
-      { authorization_id: authorizationId },
-    );
-
-    throw new Error(
-      "Withdrawal authorization is no longer approved or has expired",
-    );
-  }
-
-  /*
-   * 10. Submit exactly one payout request.
-   * Do not automatically reverse funds on an ambiguous network error:
-   * PayPal may have accepted the request even if the response was lost.
-   */
-  let paypalResult: {
-    batchId: string;
-    batchStatus: string;
-    raw: unknown;
-  };
-
-  try {
-    paypalResult = await this.executePayPalPayout({
-      amount,
-      receiver: account.paypal_email,
-      reference,
-      note,
-    });
-  } catch (err: unknown) {
-    const error = err as Error & {
-      status?: number;
-      body?: unknown;
-    };
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : "PayPal payout request failed";
-
-    const status = Number(error?.status || 0);
-
-    // Treat common transient/conflict responses as ambiguous.
-    const definitiveRejection =
-      status >= 400 &&
-      status < 500 &&
-      status !== 408 &&
-      status !== 409 &&
-      status !== 429;
-
-    if (definitiveRejection) {
-      await reverseReservation(
-        "PayPal definitively rejected the payout; reservation reversed",
-      );
-
-      await transitionPayout("failed", message, {
-        provider_status: status,
-      });
-    } else {
-      // Keep the funds reserved until the provider result is reconciled.
-      await transitionPayout(
-        "processing",
-        "PayPal result requires reconciliation",
-        {
-          provider_status: status || null,
-          ambiguous_provider_result: true,
+    if (batchStatus === "DENIED" || batchStatus === "CANCELED") {
+      await finalizePayout({
+        payoutId,
+        outcome: "failed",
+        provider: "paypal",
+        evidence: {
+          reason: `PayPal payout ${batchStatus}`,
+          provider_status: batchStatus,
+          payout_batch_id: paypalResult.batchId,
         },
-      );
+      });
+      throw new PayoutError("provider_rejected", `PayPal payout ${batchStatus}`, 502);
     }
 
-    await pool.query(
-      `UPDATE public.owner_payouts
-       SET failure_reason = $1,
-           raw_payload = $2::jsonb,
-           updated_at = now()
-       WHERE id = $3`,
-      [
-        message,
-        JSON.stringify(
-          error?.body ?? {
-            error: message,
-            provider_status: status || null,
-            ambiguous_provider_result: !definitiveRejection,
-          },
-        ),
-        payout.id,
-      ],
-    );
-
-    throw error;
-  }
-
-  /*
-   * 11. Persist the provider response.
-   */
-  await pool.query(
-    `UPDATE public.owner_payouts
-     SET transfer_code = $1,
-         raw_payload = $2::jsonb,
-         failure_reason = NULL,
-         updated_at = now()
-     WHERE id = $3`,
-    [
-      paypalResult.batchId,
-      JSON.stringify(paypalResult.raw ?? {}),
-      payout.id,
-    ],
-  );
-
-  const batchStatus = String(
-    paypalResult.batchStatus || "PENDING",
-  ).toUpperCase();
-
-  /*
-   * 12. A definitive DENIED/CANCELED result permits reversal.
-   * A submitted payout is not completed merely because the HTTP request
-   * succeeded. Final completion requires verified provider confirmation.
-   */
-  if (batchStatus === "DENIED" || batchStatus === "CANCELED") {
-    await reverseReservation(
-      `PayPal payout ${batchStatus}; wallet reservation reversed`,
-    );
-
-    await transitionPayout(
-      "failed",
-      `PayPal payout ${batchStatus}`,
-      {
-        provider_status: batchStatus,
-        payout_batch_id: paypalResult.batchId,
-      },
-    );
-
-    await pool.query(
-      `UPDATE public.owner_payouts
-       SET failure_reason = $1,
-           updated_at = now()
-       WHERE id = $2`,
-      [`PayPal payout ${batchStatus}`, payout.id],
-    );
-  } else {
-    await transitionPayout(
-      "processing",
-      "PayPal payout submitted; awaiting verified provider confirmation",
-      {
-        provider_status: batchStatus,
-        payout_batch_id: paypalResult.batchId,
-      },
-    );
-  }
-
-  const finalResult = await pool.query(
-    `SELECT *
-     FROM public.owner_payouts
-     WHERE id = $1
-     LIMIT 1`,
-    [payout.id],
-  );
-
-  return {
-    success: true,
-    payout: finalResult.rows[0],
-  };
-}
-
-  /*
-   *13. *NEVER complete a payout merely because the POST succeeded.
-   *
-   * PayPal documents PENDING and PROCESSING as non-terminal.
-   * Only the verified PayPal webhook may settle and complete it.
-   */
-  
-  const batchStatus = String(
-    paypalResult.batchStatus || "UNKNOWN",
-  ).toUpperCase();
-
-  /*
-   * The initial API response confirms submission, not final receipt
-   * of funds by the owner.
-   *
-   * Final success or failure must be established by verified,
-   * idempotent provider reconciliation.
-   */
-  await pool.query(
-    `UPDATE public.owner_payouts
-     SET transfer_code = $1,
-         raw_payload = $2::jsonb,
-         updated_at = now()
-     WHERE id = $3`,
-    [
-      paypalResult.batchId || null,
-      JSON.stringify({
+    try {
+      await recordSubmitted(payoutId, paypalResult.batchId, batchStatus, {
         provider: "paypal",
         provider_batch_status: batchStatus,
-        provider_response: paypalResult.raw || {},
-        awaiting_reconciliation: true,
-      }),
-      payout.id,
-    ],
-  );
+        provider_response: paypalResult.raw ?? {},
+      });
+    } catch (dbErr) {
+      // PayPal accepted the payout but we could not persist it: never retry.
+      console.error("[PayPal payout] CRITICAL: persisting accepted payout failed", payoutId, dbErr);
+      await markReconciliationRequired(
+        payoutId,
+        "PayPal accepted the payout but submission could not be persisted",
+        { payout_batch_id: paypalResult.batchId, provider_batch_status: batchStatus },
+      ).catch((e) => console.error("[PayPal payout] could not flag reconciliation", payoutId, e));
+      throw new PayoutError("persistence_failed", "Payout submitted but not recorded; reconciliation required", 500);
+    }
 
-  /*
-   * Do not infer the outcome of individual payout items from the
-   * batch status alone. The reconciliation workflow must retrieve
-   * the relevant item/batch details and verify the outcome.
-   */
-  if (
-    batchStatus === "PENDING" ||
-    batchStatus === "PROCESSING" ||
-    batchStatus === "SUCCESS" ||
-    batchStatus === "DENIED" ||
-    batchStatus === "CANCELED"
-  ) {
-    /*
-     * Keep the payout non-terminal until the authoritative
-     * reconciliation workflow confirms its final outcome.
-     *
-     * Confirm that "processing" is a permitted transition in
-     * public.transition_payment_state for your database state machine.
-     */
-    await pool.query(
-      `SELECT public.transition_payment_state(
-         'payout',
-         $1,
-         'processing',
-         'PayPal response received; awaiting verified reconciliation',
-         $2::jsonb
-       )`,
-      [
-        payout.id,
-        JSON.stringify({
-          provider_status: batchStatus,
-          payout_batch_id: paypalResult.batchId || null,
-          reconciliation_required: true,
-        }),
-      ],
-    );
-  } else {
-    /*
-     * Unknown statuses must not be interpreted as success.
-     * Keep the existing payout record for investigation.
-     */
-    await pool.query(
-      `UPDATE public.owner_payouts
-       SET failure_reason = $1,
-           updated_at = now()
-       WHERE id = $2`,
-      [
-        `Unrecognized PayPal payout batch status: ${batchStatus}`,
-        payout.id,
-      ],
-    );
+    return this.payoutResponse(payoutId, {
+      submitted: true,
+      provider_status: batchStatus,
+      awaiting_reconciliation: true,
+    });
   }
 
-  const finalResult = await pool.query(
-    `SELECT *
-     FROM public.owner_payouts
-     WHERE id = $1
-     LIMIT 1`,
-    [payout.id],
-  );
+  private async executePaystackPayoutRecord(
+    payoutId: string,
+    reason: string,
+    alreadyClaimed = false,
+  ) {
+    const row = await this.loadPayoutWithAccount(payoutId);
+    if (!row || row.provider !== "paystack") {
+      throw new PayoutError("invalid_request", "Paystack payout record not found", 404);
+    }
+    if (!alreadyClaimed) {
+      if (row.status !== "authorized" || !(await claimProviderAttempt(payoutId))) {
+        return this.payoutResponse(payoutId, { duplicate: true });
+      }
+    }
 
-  return {
-    success: true,
-    submitted: true,
-    payout: finalResult.rows[0],
-    provider_status: batchStatus,
-    awaiting_reconciliation: true,
-  };
-}
-   
+    const config = this.getPaystackConfig();
+    if (!config.secretKey || !row.recipient_code) {
+      await finalizePayout({
+        payoutId,
+        outcome: "failed",
+        provider: "paystack",
+        evidence: { reason: "Paystack not configured or recipient missing", request_sent: false },
+      });
+      throw new PayoutError("invalid_account", "Paystack payout cannot be executed", 400);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch("https://api.paystack.co/transfer", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.secretKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          source: "balance",
+          amount: Math.round(Number(row.amount) * 100),
+          currency: row.currency,
+          recipient: row.recipient_code,
+          reason,
+          reference: row.transfer_reference,
+        }),
+      });
+    } catch (err) {
+      await markReconciliationRequired(
+        payoutId,
+        `Paystack outcome unknown: ${err instanceof Error ? err.message : "network error"}`,
+      );
+      return this.payoutResponse(payoutId, { submitted: false });
+    }
+
+    const body: any = await response.json().catch(() => null);
+
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 408 &&
+      response.status !== 409 &&
+      response.status !== 429
+    ) {
+      await finalizePayout({
+        payoutId,
+        outcome: "failed",
+        provider: "paystack",
+        evidence: { reason: body?.message || "transfer rejected", provider_status: response.status },
+      });
+      throw new PayoutError("provider_rejected", body?.message || "Paystack transfer rejected", 502);
+    }
+
+    if (!response.ok || body?.status !== true || !body?.data) {
+      await markReconciliationRequired(
+        payoutId,
+        `Paystack response inconclusive (HTTP ${response.status})`,
+        { provider_status: response.status },
+      );
+      return this.payoutResponse(payoutId, { submitted: false });
+    }
+
+    try {
+      await recordSubmitted(payoutId, body.data.transfer_code ?? null, String(body.data.status ?? "pending"), body.data);
+    } catch (dbErr) {
+      console.error("[Paystack payout] CRITICAL: persisting accepted transfer failed", payoutId, dbErr);
+      await markReconciliationRequired(payoutId, "Paystack accepted the transfer but submission could not be persisted").catch(() => undefined);
+      throw new PayoutError("persistence_failed", "Transfer submitted but not recorded; reconciliation required", 500);
+    }
+
+    return this.payoutResponse(payoutId, {
+      submitted: true,
+      provider_status: String(body.data.status ?? "pending"),
+      awaiting_reconciliation: true,
+    });
+  }
+
+  /**
+   * Authenticated provider status lookup used to resolve payouts flagged as
+   * reconciliation-required or left non-terminal. It never creates a transfer.
+   * PayPal lookup needs the batch id; without it the payout stays flagged.
+   */
+  async reconcileOwnerPayout(payoutId: string) {
+    const row = await this.loadPayoutWithAccount(payoutId);
+    if (!row) throw new PayoutError("invalid_request", "payout not found", 404);
+    if (["completed", "failed", "refunded", "cancelled"].includes(row.status)) {
+      return { success: true, status: row.status, unchanged: true };
+    }
+
+    if (row.provider === "paystack") {
+      const config = this.getPaystackConfig();
+      if (!config.secretKey) throw new Error("Paystack is not configured");
+      const resp = await fetch(
+        `https://api.paystack.co/transfer/verify/${encodeURIComponent(row.transfer_reference)}`,
+        { headers: { Authorization: `Bearer ${config.secretKey}` } },
+      );
+      const body: any = await resp.json().catch(() => null);
+      if (resp.status === 404) {
+        return { success: true, status: row.status, found_at_provider: false };
+      }
+      if (!resp.ok || body?.status !== true) {
+        throw new Error(`Paystack transfer lookup failed (HTTP ${resp.status})`);
+      }
+      return {
+        success: true,
+        ...(await reconcileProviderOutcome({
+          provider: "paystack",
+          references: [row.transfer_reference],
+          outcome: mapPaystackTransferStatus(body.data?.status),
+          reportedAmount: body.data?.amount != null ? Number(body.data.amount) / 100 : null,
+          reportedCurrency: body.data?.currency ?? null,
+          evidence: { source: "paystack_verify", status: body.data?.status },
+        })),
+      };
+    }
+
+    if (row.provider === "paypal") {
+      if (!row.transfer_code) {
+        return { success: true, status: row.status, reason: "no PayPal batch id; manual reconciliation required" };
+      }
+      const config = this.getPayPalConfig();
+      const token = await this.getPayPalAccessToken();
+      const resp = await fetch(
+        `${config.baseUrl}/v1/payments/payouts/${encodeURIComponent(row.transfer_code)}`,
+        { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+      );
+      const body: any = await resp.json().catch(() => null);
+      if (!resp.ok) throw new Error(`PayPal payout lookup failed (HTTP ${resp.status})`);
+      const item = (body?.items || []).find(
+        (i: any) => i?.payout_item?.sender_item_id === row.transfer_reference,
+      );
+      if (!item) return { success: true, status: row.status, reason: "payout item not yet visible" };
+      return {
+        success: true,
+        ...(await reconcileProviderOutcome({
+          provider: "paypal",
+          references: [row.transfer_reference, row.transfer_code],
+          outcome: mapPayPalItemStatus(item.transaction_status),
+          reportedAmount: item.payout_item?.amount?.value != null ? Number(item.payout_item.amount.value) : null,
+          reportedCurrency: item.payout_item?.amount?.currency ?? null,
+          evidence: { source: "paypal_batch_lookup", transaction_status: item.transaction_status },
+        })),
+      };
+    }
+    throw new PayoutError("invalid_provider", "unsupported provider");
+  }
+
 private async executePayPalPayout(opts: {
   amount: number;
   receiver: string;
@@ -1931,11 +1267,11 @@ private async executePayPalPayout(opts: {
   ).trim().toLowerCase();
 
   if (!clientId || !clientSecret) {
-    throw new Error("PayPal payout credentials are not configured");
+    throw notSentError("PayPal payout credentials are not configured");
   }
 
   if (!["live", "production", "sandbox"].includes(mode)) {
-    throw new Error(
+    throw notSentError(
       "PAYPAL_MODE must explicitly be set to 'live' or 'sandbox'",
     );
   }
@@ -1950,7 +1286,7 @@ private async executePayPalPayout(opts: {
     opts.amount < 1 ||
     Math.round(opts.amount * 100) !== opts.amount * 100
   ) {
-    throw new Error(
+    throw notSentError(
       "PayPal payout amount must be at least 1.00 and have at most two decimal places",
     );
   }
@@ -1959,7 +1295,7 @@ private async executePayPalPayout(opts: {
   const reference = opts.reference?.trim();
 
   if (!receiver) {
-    throw new Error("PayPal payout receiver is required");
+    throw notSentError("PayPal payout receiver is required");
   }
 
   if (
@@ -1967,25 +1303,32 @@ private async executePayPalPayout(opts: {
     reference.length > 50 ||
     !/^[A-Za-z0-9._-]+$/.test(reference)
   ) {
-    throw new Error("PayPal payout reference is invalid");
+    throw notSentError("PayPal payout reference is invalid");
   }
 
   const basic = Buffer.from(
     `${clientId}:${clientSecret}`,
   ).toString("base64");
 
-  const tokenResponse = await fetch(
-    `${baseUrl}/v1/oauth2/token`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${basic}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
+  let tokenResponse: Response;
+  try {
+    tokenResponse = await fetch(
+      `${baseUrl}/v1/oauth2/token`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${basic}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: "grant_type=client_credentials",
       },
-      body: "grant_type=client_credentials",
-    },
-  );
+    );
+  } catch (e) {
+    throw notSentError(
+      `PayPal authentication request failed: ${e instanceof Error ? e.message : "network error"}`,
+    );
+  }
 
   const tokenText = await tokenResponse.text();
 
@@ -1998,7 +1341,7 @@ private async executePayPalPayout(opts: {
   }
 
   if (!tokenResponse.ok) {
-    throw new Error(
+    throw notSentError(
       `PayPal authentication failed (HTTP ${tokenResponse.status})`,
     );
   }
@@ -2009,7 +1352,7 @@ private async executePayPalPayout(opts: {
     typeof accessToken !== "string" ||
     !accessToken.trim()
   ) {
-    throw new Error("PayPal access token missing from response");
+    throw notSentError("PayPal access token missing from response");
   }
 
   const response = await fetch(
@@ -2102,173 +1445,78 @@ private async executePayPalPayout(opts: {
     raw: payload,
   };
   }
-async processOwnerPayout(opts: {
-  owner_id: string;
-  amount: number;
-  currency?: string;
-  provider?: string;
-  payout_account_id?: string;
-  initiated_by?: string;
-}) {
-  const pool = getDbPool();
-  const ownerId = opts.owner_id?.trim();
-  const currency = (opts.currency || "USD").toUpperCase();
-  const amount = Number(opts.amount);
-  const provider = (opts.provider || "paypal").toLowerCase();
-
-  if (!ownerId) {
-    throw new Error("owner_id is required");
-  }
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("Payout amount must be a positive finite number");
-  }
-
-  if (Math.round(amount * 100) !== amount * 100) {
-    throw new Error("Payout amount must have at most two decimal places");
-  }
-
-  /*
-   * This method only creates and reserves a payout request.
-   * It does NOT execute a provider transfer.
-   *
-   * Route actual disbursements through the authoritative provider-specific
-   * payout workflow instead of treating this request as a completed transfer.
+  /**
+   * Creates a weekly bulk payout row and reserves funds in one transaction.
+   * The row is NOT executable until an administrator approves it
+   * (approve_weekly_owner_payout) and its scheduled_for time has passed.
    */
-  const client = await pool.connect();
+  async createWeeklyBulkPayout(opts: {
+    owner_id: string;
+    amount: number;
+    currency?: string;
+    provider: PayoutProvider;
+    payout_account_id: string;
+    scheduled_for: Date;
+    initiated_by?: "cron" | "admin";
+  }) {
+    const ownerId = String(opts.owner_id || "").trim();
+    const currency = String(opts.currency || "USD").toUpperCase();
+    const amount = assertTwoDecimalAmount(opts.amount);
+    const initiatedBy = opts.initiated_by === "admin" ? "admin" : "cron";
+    if (!isUuid(ownerId) || !isUuid(opts.payout_account_id)) {
+      throw new PayoutError("invalid_request", "owner and payout account identifiers are required");
+    }
 
-  try {
-    await client.query("BEGIN");
+    const pool = getDbPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`owner_payout:${ownerId}`]);
 
-    const walletResult = await client.query(
-      `SELECT id, available_balance
-       FROM public.wallet_accounts
-       WHERE user_id = $1
-         AND currency = $2
-         AND account_type = 'owner'
-       FOR UPDATE`,
-      [ownerId, currency],
-    );
-
-    const wallet = walletResult.rows[0];
-
-    if (!wallet) {
-      throw new Error(
-        `Owner wallet not found for currency ${currency}`,
+      const acct = await client.query(
+        `SELECT 1 FROM public.owner_payout_accounts
+         WHERE id = $1 AND owner_id = $2 AND provider = $3 AND upper(currency) = $4`,
+        [opts.payout_account_id, ownerId, opts.provider, currency],
       );
-    }
+      if (!acct.rows[0]) throw new PayoutError("invalid_account", "Payout account does not match owner/provider/currency");
 
-    const balance = Number(wallet.available_balance);
-
-    if (!Number.isFinite(balance) || balance < amount) {
-      throw new Error(
-        `Insufficient available balance (${Number.isFinite(balance) ? balance.toFixed(2) : "unavailable"} available; ${amount.toFixed(2)} requested)`,
+      await client.query(`SELECT public.ensure_wallet_account($1, 'owner', $2)`, [ownerId, currency]);
+      await client.query(
+        `SELECT 1 FROM public.wallet_accounts WHERE user_id = $1 AND account_type = 'owner' AND currency = $2 FOR UPDATE`,
+        [ownerId, currency],
       );
-    }
+      const bal = await client.query(`SELECT public.get_owner_available_balance($1, $2) AS balance`, [ownerId, currency]);
+      if (!(Number(bal.rows[0]?.balance) >= amount)) {
+        throw new PayoutError("insufficient_balance", "Insufficient available balance");
+      }
 
-    const transferReference =
-      `payout_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
-    const initiatedBy = [
-      "owner",
-      "cron",
-      "admin",
-    ].includes(opts.initiated_by || "")
-      ? opts.initiated_by!
-      : "owner";
-
-    const payoutResult = await client.query(
-      `INSERT INTO public.owner_payouts (
-         owner_id,
-         payout_account_id,
-         provider,
-         amount,
-         currency,
-         status,
-         transfer_reference,
-         initiated_by,
-         scheduled_for
-       )
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, now())
-       RETURNING id`,
-      [
-        ownerId,
-        opts.payout_account_id || null,
-        provider,
-        amount,
-        currency,
-        transferReference,
-        initiatedBy,
-      ],
-    );
-
-    const payoutId = payoutResult.rows[0]?.id;
-
-    if (!payoutId) {
-      throw new Error("Failed to create payout record");
-    }
-
-    const ledgerResult = await client.query(
-      `SELECT public.post_wallet_entry(
-         $1,
-         'owner',
-         $2,
-         'debit',
-         $3,
-         'payout',
-         $4,
-         'owner_payouts',
-         $5,
-         $6,
-         $7,
-         $8
-       ) AS result`,
-      [
-        ownerId,
-        currency,
-        amount,
-        `payout_debit_${transferReference}`,
-        payoutId,
-        provider,
-        transferReference,
-        `Withdrawal request via ${provider}`,
-      ],
-    );
-
-    const ledger = ledgerResult.rows[0]?.result;
-
-    if (ledger?.ok === false) {
-      throw new Error(
-        ledger.error || "Wallet debit failed",
+      const ins = await client.query(
+        `INSERT INTO public.owner_payouts (
+           owner_id, payout_account_id, provider, amount, currency, status,
+           transfer_reference, initiated_by, scheduled_for, workflow_type, reserved_at
+         ) VALUES ($1, $2, $3, $4, $5, 'pending', 'pyt_' || replace(gen_random_uuid()::text, '-', ''),
+                   $6, $7, 'weekly_bulk', now())
+         RETURNING id, transfer_reference`,
+        [ownerId, opts.payout_account_id, opts.provider, amount, currency, initiatedBy, opts.scheduled_for],
       );
-    }
+      const payout = ins.rows[0];
 
-    if (ledger == null) {
-      throw new Error(
-        "Wallet ledger did not return a result; payout was not committed",
+      const ledger = await client.query(
+        `SELECT public.post_wallet_entry($1, 'owner', $2, 'debit', $3, 'payout', $4,
+           'owner_payouts', $5, $6, $7, 'Weekly owner payout reserved') AS result`,
+        [ownerId, currency, amount, `payout:${payout.id}:reserved`, payout.id, opts.provider, payout.transfer_reference],
       );
+      if (!ledger.rows[0]?.result?.entry_id) throw new Error("Wallet reservation failed");
+
+      await client.query("COMMIT");
+      return { success: true, payout_id: payout.id, status: "pending", workflow_type: "weekly_bulk" };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
     }
-
-    await client.query("COMMIT");
-
-    return {
-      success: true,
-      payout_id: payoutId,
-      transfer_reference: transferReference,
-      status: "pending",
-      amount,
-      currency,
-      provider,
-      requires_provider_execution: true,
-    };
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
   }
-}
-
 
   // ---------------------------------------------------------------------------
   // Webhook Signature Verifiers & Processors
@@ -2345,6 +1593,45 @@ await pool.query(
     JSON.stringify(event),
   ],
 );
+
+if (eventType.startsWith("PAYMENT.PAYOUTS-ITEM.")) {
+  try {
+    const item = resource.payout_item || {};
+    const outcome = mapPayPalItemStatus(
+      resource.transaction_status || eventType.split(".").pop() || "",
+    );
+    await reconcileProviderOutcome({
+      provider: "paypal",
+      references: [
+        item.sender_item_id,
+        resource.sender_batch_id,
+        resource.payout_batch_id,
+      ],
+      outcome,
+      reportedAmount:
+        item.amount?.value != null ? Number(item.amount.value) : null,
+      reportedCurrency: item.amount?.currency ?? null,
+      evidence: {
+        source: "paypal_webhook",
+        event_id: eventId,
+        event_type: eventType,
+        transaction_status: resource.transaction_status ?? null,
+        payout_item_id: resource.payout_item_id ?? null,
+        payout_batch_id: resource.payout_batch_id ?? null,
+      },
+    });
+  } catch (error) {
+    // Let PayPal redeliver: forget the dedupe row so the retry is processed.
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events WHERE external_event_id = $1`,
+        [eventId],
+      )
+      .catch(() => undefined);
+    throw error;
+  }
+  return { received: true };
+}
 
 if (
   eventType === "PAYMENT.CAPTURE.COMPLETED" ||
@@ -2466,6 +1753,38 @@ await pool.query(
   ],
 );
 
+if (
+  eventType === "transfer.success" ||
+  eventType === "transfer.failed" ||
+  eventType === "transfer.reversed"
+) {
+  try {
+    const data = event.data || {};
+    await reconcileProviderOutcome({
+      provider: "paystack",
+      references: [reference, data.transfer_code],
+      outcome: mapPaystackTransferStatus(eventType),
+      reportedAmount: data.amount != null ? Number(data.amount) / 100 : null,
+      reportedCurrency: data.currency ?? null,
+      evidence: {
+        source: "paystack_webhook",
+        event_type: eventType,
+        reason: data.reason ?? null,
+        transfer_code: data.transfer_code ?? null,
+      },
+    });
+  } catch (error) {
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events WHERE external_event_id = $1`,
+        [externalId],
+      )
+      .catch(() => undefined);
+    throw error;
+  }
+  return { received: true };
+}
+
 if (eventType === "charge.success") {
   await this.verifyPaystackTransaction(reference);
 }
@@ -2585,3 +1904,5 @@ private async verifyPayPalWebhookSignature(
   return result?.verification_status === "SUCCESS";
   }
 }
+
+export const paymentService = new PaymentService();

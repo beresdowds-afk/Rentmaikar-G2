@@ -17,8 +17,10 @@ import {
   deriveCorrelationId,
   correlationHeaders,
 } from "../_shared/webhook-logger.ts";
-import { settlePaymentFinancials } from "../_shared/wallet-ledger.ts";
-import { getPayPalConfig, verifyWebhookSignature,
+import { postLedgerEntry, settlePaymentFinancials } from "../_shared/wallet-ledger.ts";
+import {
+  getPayPalConfig,
+  verifyWebhookSignature,
   ensurePayPalConfig,
 } from "../_shared/paypal-client.ts";
 
@@ -200,8 +202,6 @@ Deno.serve(async (req) => {
         });
       }
     }
-  }
-
   } else if (
     eventType === "PAYMENT.PAYOUTSBATCH.PROCESSING" ||
     eventType === "PAYMENT.PAYOUTSBATCH.SUCCESS" ||
@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
             },
           );
 
-          if (settled.ok) {
+          if (settled) {
             await transitionState(
               supabase,
               "payout",
@@ -366,7 +366,8 @@ Deno.serve(async (req) => {
             .eq("id", payout.id);
         }
       }
-      }
+    }
+  }
   logger.info("completed", { duration_ms: logger.elapsedMs() });
   return new Response(
     JSON.stringify({ received: true, event: eventType, amount: amountValue, correlation_id: logger.ctx.correlationId }),
