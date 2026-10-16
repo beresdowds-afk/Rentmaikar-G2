@@ -6,7 +6,7 @@
  *   - provider HTTP responses (global fetch)
  * These are MOCKED-provider tests, NOT provider sandbox tests.
  */
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, type Mock } from "vitest";
 import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -54,14 +54,14 @@ let base = "";
 beforeAll(async () => {
   const app = express();
   app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = Buffer.from(buf); } }));
-  app.use("/api/functions", functionsRouter);
+  app.use("/api/functions", functionsRouter as unknown as express.RequestHandler);
   await new Promise<void>((r) => { server = app.listen(0, "127.0.0.1", () => r()); });
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/functions`;
 });
 afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
 const realFetch = globalThis.fetch;
-let providerFetch: ReturnType<typeof vi.fn>;
+let providerFetch: Mock<(...a: any[]) => any>;
 
 async function call(fn: string, body: any, token?: string, extraHeaders: Record<string, string> = {}, rawBody?: string) {
   const headers: Record<string, string> = { "content-type": "application/json", ...extraHeaders };
@@ -75,7 +75,7 @@ beforeEach(() => {
   state.calls = [];
   state.handler = null;
   process.env.PAYSTACK_SECRET_KEY = "sk_test_unit";
-  providerFetch = vi.fn();
+  providerFetch = vi.fn<(...a: any[]) => any>();
   // Route provider-bound fetches to the stub; let local test-server calls through.
   vi.stubGlobal("fetch", (url: any, init?: any) =>
     String(url).startsWith("http://127.0.0.1") ? realFetch(url, init) : providerFetch(url, init)
@@ -342,5 +342,59 @@ describe("OPay", () => {
     const r = await call("opay-webhook", null, undefined, { signature: "deadbeef" }, raw);
     expect(r.status).toBeGreaterThanOrEqual(400);
     expect(state.calls.length).toBe(0);
+  });
+});
+
+describe("PayPal capture (mocked provider)", () => {
+  process.env.PAYPAL_CLIENT_ID = "id"; process.env.PAYPAL_CLIENT_SECRET = "sec"; process.env.PAYPAL_MODE = "sandbox";
+  const tx = { order_id: "o1", payment_id: "pay-1", driver_id: "driver-1", amount: 10, currency: "USD", status: "created" };
+  let settle = 0;
+  const db = () => (sql: string) => {
+    if (/FROM public\.paypal_transactions/i.test(sql)) return { rows: [tx] };
+    if (/FROM public\.payments WHERE id/i.test(sql)) return { rows: [{ id: "pay-1", status: "pending", amount: 10, currency: "USD" }] };
+    if (/settle_payment_financials/i.test(sql)) { settle++; return { rows: [{ result: { ok: true } }] }; }
+    return { rows: [] };
+  };
+  const provider = (cap: Row, status = 200) => async (url: any) =>
+    String(url).includes("oauth2/token")
+      ? { ok: true, status: 200, text: async () => JSON.stringify({ access_token: "t", expires_in: 3000 }), json: async () => ({ access_token: "t", expires_in: 3000 }) }
+      : { ok: status < 300, status, json: async () => cap };
+  const good = { status: "COMPLETED", purchase_units: [{ payments: { captures: [{ id: "cap1", status: "COMPLETED", amount: { value: "10.00", currency_code: "USD" } }] } }] };
+  beforeEach(() => { settle = 0; });
+
+  it("another driver cannot capture (403), provider never called", async () => {
+    state.handler = db();
+    const r = await call("capture-paypal-order", { order_id: "o1" }, "tok-driver2");
+    expect(r.status).toBe(500);
+    expect(settle).toBe(0);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+  it("unknown order is rejected", async () => {
+    state.handler = () => ({ rows: [] });
+    expect((await call("capture-paypal-order", { order_id: "zz" }, "tok-driver")).status).toBeGreaterThanOrEqual(400);
+  });
+  it("422 / non-COMPLETED capture never settles and no fabricated capture id", async () => {
+    state.handler = db();
+    providerFetch.mockImplementation(provider({ name: "UNPROCESSABLE_ENTITY" }, 422));
+    expect((await call("capture-paypal-order", { order_id: "o1" }, "tok-driver")).status).toBeGreaterThanOrEqual(400);
+    providerFetch.mockImplementation(provider({ status: "PAYER_ACTION_REQUIRED" }));
+    const r = await call("capture-paypal-order", { order_id: "o1" }, "tok-driver");
+    expect(r.json.captured).toBe(false);
+    expect(settle).toBe(0);
+  });
+  it("captured amount mismatch never settles", async () => {
+    state.handler = db();
+    const bad = JSON.parse(JSON.stringify(good)); bad.purchase_units[0].payments.captures[0].amount.value = "0.01";
+    providerFetch.mockImplementation(provider(bad));
+    const r = await call("capture-paypal-order", { order_id: "o1" }, "tok-driver");
+    expect(r.json.captured).toBe(false);
+    expect(settle).toBe(0);
+  });
+  it("authentic matching capture settles once", async () => {
+    state.handler = db();
+    providerFetch.mockImplementation(provider(good));
+    const r = await call("capture-paypal-order", { order_id: "o1" }, "tok-driver");
+    expect(r.json.status).toBe("COMPLETED");
+    expect(settle).toBe(1);
   });
 });

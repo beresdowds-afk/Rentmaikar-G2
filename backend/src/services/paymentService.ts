@@ -370,7 +370,7 @@ class PaymentService {
   // PayPal Order Capture & Financial Settlement
   // ---------------------------------------------------------------------------
 
-  async capturePayPalOrder(params: CaptureOrderParams) {
+  async capturePayPalOrder(params: CaptureOrderParams, opts?: { isAdmin?: boolean }) {
     const { order_id, user_id } = params;
     if (!order_id) {
       throw new Error("Missing required order_id for capture");
@@ -378,14 +378,20 @@ class PaymentService {
 
     const pool = getDbPool();
 
-    // 1. Check existing transaction in DB
+    // 1. The order must be one we created, and the caller must own it.
     const txRes = await pool.query(
       `SELECT * FROM public.paypal_transactions WHERE order_id = $1`,
       [order_id]
     );
     const existingTx = txRes.rows[0];
+    if (!existingTx) {
+      throw new Error("PayPal order not found");
+    }
+    if (!opts?.isAdmin && (!user_id || existingTx.driver_id !== user_id)) {
+      throw new Error("Forbidden");
+    }
 
-    if (existingTx && (existingTx.status === "completed" || existingTx.status === "captured")) {
+    if (existingTx.status === "completed" || existingTx.status === "captured") {
       return {
         order_id,
         capture_id: existingTx.capture_id,
@@ -408,19 +414,53 @@ class PaymentService {
       body: JSON.stringify({}),
     });
 
-    const captureData = await res.json();
+    const captureData = await res.json().catch(() => null);
 
-    if (!res.ok && res.status !== 422) {
-      console.error("[PayPal Service] Capture error:", res.status, captureData);
-      throw new Error(captureData.message || `PayPal capture failed [${res.status}]`);
+    // Only an authentic 2xx capture response may complete a payment. A 422
+    // (e.g. ORDER_NOT_APPROVED / already captured) is NOT evidence of payment.
+    if (!res.ok || !captureData) {
+      console.error("[PayPal Service] Capture error:", res.status);
+      throw new Error(captureData?.message || `PayPal capture failed [${res.status}]`);
     }
 
     const captureUnit = captureData.purchase_units?.[0]?.payments?.captures?.[0];
-    const captureId = captureUnit?.id || (existingTx?.capture_id ?? `cap_${order_id}`);
+    if (captureData.status !== "COMPLETED" || !captureUnit?.id || captureUnit.status !== "COMPLETED") {
+      return {
+        order_id,
+        status: String(captureData.status || "PENDING"),
+        payment_id: existingTx.payment_id,
+        captured: false,
+      };
+    }
+
+    const captureId = String(captureUnit.id);
     const payerEmail = captureData.payer?.email_address || null;
     const payerId = captureData.payer?.payer_id || null;
+    const paymentId = existingTx.payment_id;
 
-    // 3. Update paypal_transactions
+    if (!paymentId) {
+      throw new Error("PayPal order is not linked to a payment");
+    }
+
+    // 3. Amount/currency must match what was ordered, then complete + settle
+    //    atomically (row lock; settlement is idempotent via settled_at).
+    const settled = await this.completeVerifiedPaymentAndSettle({
+      paymentId,
+      provider: "paypal",
+      providerReference: captureId,
+      providerAmount: Number(captureUnit.amount?.value),
+      providerCurrency: String(captureUnit.amount?.currency_code || ""),
+    });
+    if (!settled.ok) {
+      return {
+        order_id,
+        capture_id: captureId,
+        status: settled.reason || "settlement_rejected",
+        payment_id: paymentId,
+        captured: false,
+      };
+    }
+
     await pool.query(
       `UPDATE public.paypal_transactions
        SET status = 'completed',
@@ -432,42 +472,10 @@ class PaymentService {
        WHERE order_id = $5`,
       [captureId, payerEmail, payerId, JSON.stringify(captureData), order_id]
     );
-
-    const paymentId = existingTx?.payment_id;
-
-    // 4. Update payments record
-    if (paymentId) {
-      await pool.query(
-        `UPDATE public.payments
-         SET status = 'completed',
-             processed_at = now(),
-             transaction_id = $1,
-             updated_at = now()
-         WHERE id = $2`,
-        [captureId, paymentId]
-      );
-    }
-
-    // 5. Settle financials into wallet ledger & owner earnings
-    const driverId = existingTx?.driver_id || user_id;
-    const ownerId = existingTx?.owner_id;
-    const rentalId = existingTx?.rental_id;
-    const vehicleId = existingTx?.vehicle_id;
-    const amount = Number(existingTx?.amount || captureUnit?.amount?.value || 0);
-
-    if (amount > 0) {
-      await this.settlePaymentFinancials({
-        paymentId,
-        provider: "paypal",
-        providerReference: captureId,
-        driverId,
-        ownerId,
-        rentalId,
-        vehicleId,
-        amount,
-        currency: "USD",
-      });
-    }
+    await pool.query(
+      `UPDATE public.payments SET transaction_id = $1, updated_at = now() WHERE id = $2`,
+      [captureId, paymentId]
+    );
 
     return {
       order_id,

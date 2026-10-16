@@ -1546,7 +1546,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         const result = await paymentService.capturePayPalOrder({
           order_id: body.order_id,
           user_id: gatedCaller && !gatedCaller.isAdmin ? gatedCaller.userId : body.user_id,
-        });
+        }, { isAdmin: Boolean(gatedCaller?.isAdmin) });
         return res.status(200).json(result);
       }
 

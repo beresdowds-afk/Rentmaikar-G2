@@ -236,5 +236,3 @@ src/test/registration/registration-e2e.test.tsx: error TS2305: Module '"@testing
 src/test/registration/registration-e2e.test.tsx: error TS2305: Module '"@testing-library/react"' has no exported member 'within'.
 src/test/security/caller-id-regression-guard.test.ts: error TS2554: Expected 2-3 arguments, but got 1.
 src/test/security/caller-id-regression-guard.test.ts: error TS2561: Object literal may only specify known properties, but 'region' does not exist in type '{ To?: string; From?: string; CallSid?: string; SessionId?: string; Region?: string; baseUrl: string; }'. Did you mean to write 'Region'?
-src/tests/paymentRoutes.integration.test.ts: error TS2348: Value of type 'Mock<Procedure | Constructable>' is not callable. Did you mean to include 'new'?
-src/tests/paymentRoutes.integration.test.ts: error TS2769: No overload matches this call.
