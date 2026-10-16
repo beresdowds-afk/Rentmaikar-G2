@@ -1909,11 +1909,20 @@ case "reconcile-owner-payout": {
       }
 
       case "owner-withdrawal-data": {
-        const ownerId = body.owner_id || body.ownerId || body.userId;
-        const currency = body.currency || "USD";
-        if (!ownerId) {
-          return res.status(400).json({ error: "owner_id is required" });
+        // Identity comes from the verified bearer token; admins may read on behalf of an owner.
+        const caller = await authenticateCaller(
+          String(req.headers["authorization"] || ""),
+        ).catch((e: any) => {
+          const err: any = new Error(e?.message || "Authentication required");
+          err.statusCode = e?.statusCode || 401;
+          throw err;
+        });
+        const requested = String(body.owner_id || body.ownerId || body.userId || "").trim();
+        if (requested && requested !== caller.userId && !caller.isAdmin) {
+          return res.status(403).json({ error: "Forbidden" });
         }
+        const ownerId = requested || caller.userId;
+        const currency = body.currency || "USD";
         const data = await paymentService.getOwnerWithdrawalData(ownerId, currency);
         return res.status(200).json({ ok: true, ...data });
       }
