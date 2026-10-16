@@ -1734,7 +1734,8 @@ async processPayPalOwnerPayout(opts: {
   };
 }
 
- * 13. NEVER complete a payout merely because the POST succeeded.
+  /*
+   *13. *NEVER complete a payout merely because the POST succeeded.
    *
    * PayPal documents PENDING and PROCESSING as non-terminal.
    * Only the verified PayPal webhook may settle and complete it.
