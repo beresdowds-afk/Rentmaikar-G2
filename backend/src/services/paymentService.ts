@@ -1154,44 +1154,7 @@ async processPayPalOwnerPayout(opts: {
         opts.note ||
         "Your Rentmaikar owner earnings",
     });
-
-async processPayPalOwnerPayout(opts: {
-  owner_id: string;
-  amount: number;
-  currency: string;
-  payout_account_id: string;
-  authorization_id: string;
-  note?: string;
-  idempotency_key?: string;
-}) {
-  const pool = getDbPool();
-  const currency = String(opts.currency || "USD").toUpperCase();
-  const amount = Number(opts.amount);
-
-  if (!opts.owner_id) {
-    throw new Error("owner_id is required");
-  }
-
-  if (!Number.isFinite(amount) || amount < 1) {
-    throw new Error("PayPal payout amount must be at least 1.00");
-  }
-
-  if (Math.round(amount * 100) !== amount * 100) {
-    throw new Error("PayPal payout amount must have at most 2 decimals");
-  }
-
-  if (currency !== "USD") {
-    throw new Error("PayPal owner payouts currently support USD only");
-  }
-
-  if (!opts.payout_account_id) {
-    throw new Error("PayPal payout account is required");
-  }
-
-  if (!opts.authorization_id) {
-    throw new Error("withdrawal authorization required");
-  }
-
+  
   /*
    * 1. Idempotency.
    *
