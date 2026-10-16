@@ -1,14 +1,16 @@
+
 /**
  * Authoritative RentMaikar Payment, Ledger, and Settlement Service
- * 
- * Provides unified, production-grade payment execution for:
- * - USA: PayPal REST API (Order Creation, Capture, Webhook, Settlement)
- * - Nigeria: Paystack & OPay (Initialization, Verification, Webhook, Settlement)
- * - Platform Wallet Ledger & Owner Earnings Settlement
- * - Owner Payouts & Transfers
+ *
+ * Provides unified payment execution for:
+ * - USA: PayPal REST API
+ * - Nigeria: Paystack and OPay
+ * - Platform wallet ledger and owner earnings settlement
+ * - Owner payouts and transfers
  */
 
 import { getDbPool } from "./dbPool";
+
 export const PAYMENT_PURPOSES = [
   "rental",
   "security_deposit",
@@ -22,17 +24,22 @@ export const PAYMENT_PURPOSES = [
 
 export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
 
-function normalizePaymentPurpose(value?: string | null): PaymentPurpose {
+function normalizePaymentPurpose(
+  value?: string | null,
+): PaymentPurpose {
   const purpose = (value || "rental").trim();
 
-  if ((PAYMENT_PURPOSES as readonly string[]).includes(purpose)) {
+  if (
+    (PAYMENT_PURPOSES as readonly string[]).includes(purpose)
+  ) {
     return purpose as PaymentPurpose;
   }
 
   throw new Error(
-    `Invalid payment purpose "${purpose}". Allowed purposes: ${PAYMENT_PURPOSES.join(", ")}`
+    `Invalid payment purpose "${purpose}". Allowed purposes: ${PAYMENT_PURPOSES.join(", ")}`,
   );
 }
+
 export interface CreateOrderParams {
   amount: number;
   currency?: string;
@@ -65,6 +72,7 @@ export interface PaystackInitParams {
   callback_url?: string;
   metadata?: Record<string, unknown>;
 }
+
 export interface OPayInitParams {
   amount: number;
   currency?: string;
@@ -77,19 +85,56 @@ export interface OPayInitParams {
 }
 
 class PaymentService {
-  private paypalTokenCache: { token: string; expiresAt: number } | null = null;
+  private paypalTokenCache: {
+    token: string;
+    expiresAt: number;
+  } | null = null;
+
   private resolvedPayPalBase: string | null = null;
 
   // ---------------------------------------------------------------------------
   // PayPal REST Helpers & Authentication
   // ---------------------------------------------------------------------------
 
-  private getPayPalConfig() {
-    const clientId = (process.env.PAYPAL_CLIENT_ID || process.env.VITE_PAYPAL_CLIENT_ID || "").trim();
-    const clientSecret = (process.env.PAYPAL_CLIENT_SECRET || "").trim();
-    const mode = (process.env.PAYPAL_MODE || process.env.PAYPAL_ENVIRONMENT || "sandbox").toLowerCase();
-    const isLive = mode === "live" || mode === "production";
-    const defaultBase = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+  private getPayPalConfig(): {
+    clientId: string;
+    clientSecret: string;
+    mode: "live" | "sandbox";
+    baseUrl: string;
+    isConfigured: boolean;
+  } {
+    // Keep PayPal credentials server-side.
+    const clientId = (
+      process.env.PAYPAL_CLIENT_ID || ""
+    ).trim();
+
+    const clientSecret = (
+      process.env.PAYPAL_CLIENT_SECRET || ""
+    ).trim();
+
+    const configuredMode = (
+      process.env.PAYPAL_MODE ||
+      process.env.PAYPAL_ENVIRONMENT ||
+      ""
+    ).trim().toLowerCase();
+
+    if (
+      configuredMode !== "live" &&
+      configuredMode !== "production" &&
+      configuredMode !== "sandbox"
+    ) {
+      throw new Error(
+        "PayPal environment must be explicitly configured using PAYPAL_MODE=live or PAYPAL_MODE=sandbox.",
+      );
+    }
+
+    const isLive =
+      configuredMode === "live" ||
+      configuredMode === "production";
+
+    const defaultBase = isLive
+      ? "https://api-m.paypal.com"
+      : "https://api-m.sandbox.paypal.com";
 
     return {
       clientId,
@@ -102,25 +147,89 @@ class PaymentService {
 
   private async getPayPalAccessToken(): Promise<string> {
     const config = this.getPayPalConfig();
+
     if (!config.isConfigured) {
-      throw new Error("PayPal API credentials are not configured (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET).");
+      throw new Error(
+        "PayPal API credentials are not configured. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET.",
+      );
     }
 
-    if (this.paypalTokenCache && this.paypalTokenCache.expiresAt > Date.now() + 60000) {
+    // Reuse the token only while it has sufficient remaining validity.
+    if (
+      this.paypalTokenCache &&
+      this.paypalTokenCache.expiresAt > Date.now() + 60_000
+    ) {
       return this.paypalTokenCache.token;
     }
 
-    const auth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+    const auth = Buffer.from(
+      `${config.clientId}:${config.clientSecret}`,
+    ).toString("base64");
 
-    // Attempt request against current configured baseUrl
-    let res = await fetch(`${config.baseUrl}/v1/oauth2/token`, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+    const response = await fetch(
+      `${config.baseUrl}/v1/oauth2/token`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: "grant_type=client_credentials",
       },
-      body: "grant_type=client_credentials",
-    });
+    );
+
+    const responseText = await response.text();
+
+    let payload: {
+      access_token?: string;
+      expires_in?: number;
+      error_description?: string;
+    } = {};
+
+    try {
+      payload = responseText
+        ? JSON.parse(responseText)
+        : {};
+    } catch {
+      throw new Error(
+        `PayPal authentication returned an invalid response (HTTP ${response.status}).`,
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `PayPal authentication failed (HTTP ${response.status}): ${payload.error_description || "Provider rejected the request."}`,
+      );
+    }
+
+    const token = payload.access_token;
+
+    if (typeof token !== "string" || !token.trim()) {
+      throw new Error(
+        "PayPal authentication response did not contain a valid access token.",
+      );
+    }
+
+    const expiresIn = Number(payload.expires_in);
+
+    // Avoid caching tokens with an invalid or missing lifetime.
+    if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
+      throw new Error(
+        "PayPal authentication response contained an invalid token lifetime.",
+      );
+    }
+
+    this.paypalTokenCache = {
+      token,
+      expiresAt: Date.now() + expiresIn * 1000,
+    };
+
+    return token;
+  }
+
+  // Keep the remaining existing PaymentService methods below this point.
+}
 
     // If live endpoint returned 401 invalid_client, fallback to sandbox
     if (!res.ok && res.status === 401 && config.baseUrl.includes("api-m.paypal.com")) {
