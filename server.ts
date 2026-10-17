@@ -484,6 +484,7 @@ async function startServer() {
       const { handleEdgeFunction } = await import("./src/server/functionsHandler");
       const localResponse = await handleEdgeFunction(functionName, {
         body: req.body,
+        rawBody: Buffer.isBuffer((req as any).rawBody) ? (req as any).rawBody.toString("utf8") : undefined,
         headers: req.headers as Record<string, string>,
         method: req.method,
       });

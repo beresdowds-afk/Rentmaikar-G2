@@ -93,7 +93,7 @@ describe("Phase 11: Telematics Operations, Multi-Region Ledger & Day-2 Operation
       expect(typeof paymentService.createPaystackTransaction).toBe("function");
       expect(typeof paymentService.verifyPaystackTransaction).toBe("function");
       expect(typeof paymentService.settlePaymentFinancials).toBe("function");
-      expect(typeof paymentService.processOwnerPayout).toBe("function");
+      expect(typeof paymentService.processPayPalOwnerPayout).toBe("function");
     });
 
     it("validates double-entry accounting ledger balance constraints", () => {

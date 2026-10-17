@@ -19,8 +19,8 @@ const STATUS_MAP: Record<string, string> = {
 
 function verifySignature(rawBody: string, signatureHeader: string | undefined, secret: string | undefined): boolean {
   if (!secret) {
-    // If secret is not configured in environment, permit in test/dev
-    return true;
+    // Fail closed: an unconfigured secret must never accept unsigned events.
+    return false;
   }
   if (!signatureHeader) {
     return false;
@@ -81,10 +81,16 @@ export const personaWebhookService = {
   }): Promise<PersonaWebhookResult> {
     const secret = process.env.PERSONA_WEBHOOK_SECRET;
     const signatureHeader = req.headers["persona-signature"] || req.headers["Persona-Signature"];
-    const rawBody = req.rawBody || (typeof req.body === "string" ? req.body : JSON.stringify(req.body));
+    const rawInput: unknown =
+      req.rawBody ?? (typeof req.body === "string" ? req.body : JSON.stringify(req.body));
+    const rawBody = Buffer.isBuffer(rawInput) ? rawInput.toString("utf8") : String(rawInput ?? "");
 
-    if (secret && !verifySignature(rawBody, signatureHeader, secret)) {
-      console.warn("[PersonaWebhookService] Invalid signature header:", signatureHeader);
+    if (!secret) {
+      console.error("[PersonaWebhookService] PERSONA_WEBHOOK_SECRET is not configured; rejecting event");
+      return { status: 503, body: { error: "Persona webhook is not configured" } };
+    }
+    if (!verifySignature(rawBody, signatureHeader, secret)) {
+      console.warn("[PersonaWebhookService] Invalid webhook signature");
       return {
         status: 401,
         body: { error: "Invalid signature" },
@@ -92,6 +98,9 @@ export const personaWebhookService = {
     }
 
     let evt: any = req.body;
+    if (Buffer.isBuffer(evt) || typeof evt === "string") {
+      evt = rawBody;
+    }
     if (typeof evt === "string") {
       try {
         evt = JSON.parse(evt);
@@ -119,8 +128,42 @@ export const personaWebhookService = {
     const pool = getDbPool();
     const mismatch = collectMismatches(attrs);
 
+    const eventId: string | null = evt?.data?.id ? String(evt.data.id) : null;
+    const referenceId = attrs?.reference_id || attrs?.["reference-id"] || null;
+    let dedupeRowId: string | null = null;
+
     try {
-      // 1. Update persona_inquiries table
+      // Only inquiries we created for a known account can change state.
+      const known = await pool.query(
+        `SELECT user_id FROM public.persona_inquiries WHERE inquiry_id = $1 LIMIT 1`,
+        [inquiryId]
+      );
+      if (!known.rows[0]) {
+        console.warn("[PersonaWebhookService] Event for unknown inquiry ignored");
+        return { status: 200, body: { received: true, ignored: "unknown_inquiry" } };
+      }
+      const linkedUserId: string = known.rows[0].user_id;
+      if (referenceId && String(referenceId) !== String(linkedUserId)) {
+        console.warn("[PersonaWebhookService] Inquiry/account mismatch; event rejected");
+        return { status: 409, body: { error: "Inquiry does not belong to the referenced account" } };
+      }
+
+      // Deduplicate on the provider's stable event id.
+      if (eventId) {
+        const ins = await pool.query(
+          `INSERT INTO public.payment_webhook_events (provider, event_type, external_event_id, reference, status, signature_valid, payload)
+           VALUES ('persona', $1, $2, $3, 'received', true, '{}'::jsonb)
+           ON CONFLICT (provider, external_event_id) WHERE external_event_id IS NOT NULL DO NOTHING
+           RETURNING id`,
+          [String(evt?.data?.attributes?.name || "persona.event"), eventId, inquiryId]
+        );
+        if (!ins.rows[0]) {
+          return { status: 200, body: { received: true, duplicate: true } };
+        }
+        dedupeRowId = ins.rows[0].id;
+      }
+
+      // An approved inquiry is never downgraded by a delayed/out-of-order event.
       const inqRes = await pool.query(
         `UPDATE public.persona_inquiries
          SET status = $1,
@@ -129,19 +172,12 @@ export const personaWebhookService = {
              raw_payload = $3,
              updated_at = now()
          WHERE inquiry_id = $4
+           AND (status <> 'approved' OR $1 = 'approved')
          RETURNING user_id, subject_type, id`,
         [mappedStatus, JSON.stringify(mismatch), JSON.stringify(evt), inquiryId]
       );
 
-      let targetUserId: string | null = inqRes.rows[0]?.user_id || null;
-
-      // 2. If user_id wasn't in persona_inquiries, try matching reference_id
-      if (!targetUserId) {
-        const referenceId = attrs?.reference_id || attrs?.["reference-id"];
-        if (referenceId) {
-          targetUserId = referenceId;
-        }
-      }
+      const targetUserId: string | null = inqRes.rows[0]?.user_id || null;
 
       // 3. Update public.profiles if user resolved
       if (targetUserId) {
@@ -195,12 +231,15 @@ export const personaWebhookService = {
       };
     } catch (dbErr: any) {
       console.error("[PersonaWebhookService] Database update failed:", dbErr.message);
+      if (dedupeRowId) {
+        // Let Persona redeliver: drop the dedupe row so a retry is processed.
+        await pool
+          .query(`DELETE FROM public.payment_webhook_events WHERE id = $1`, [dedupeRowId])
+          .catch(() => undefined);
+      }
       return {
         status: 500,
-        body: {
-          error: "Failed to process persona verification state",
-          details: dbErr.message,
-        },
+        body: { error: "Failed to process persona verification state" },
       };
     }
   },

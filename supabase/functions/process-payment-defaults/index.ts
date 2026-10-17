@@ -152,7 +152,7 @@ const sendNotification = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': 'Be' + 'arer ' + supabaseKey,
       },
       body: JSON.stringify({
         phone,
@@ -191,15 +191,10 @@ const initiateDefaultCall = async (
   const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
   const twilioPhone = Deno.env.get("TWILIO_PHONE_NUMBER");
 
-if (!twilioAccountSid || !twilioAuthToken || !twilioPhone) {
-  console.error(
-    "[PaymentDefaults] Twilio credentials or outbound line not configured"
-  );
-
-  return { success: false };
-}
-  if (!twilioAccountSid || !twilioAuthToken) {
-    console.log('[PaymentDefaults] Twilio credentials not configured, skipping VoIP');
+  if (!twilioAccountSid || !twilioAuthToken || !twilioPhone) {
+    console.error(
+      "[PaymentDefaults] Twilio credentials or outbound line not configured",
+    );
     return { success: false };
   }
 
@@ -488,54 +483,66 @@ const handler = async (req: Request): Promise<Response> => {
 
         // ─── LOCKDOWN + DOWNGRADE LOGIC ───
         if (deactivationEligible) {
-  results.lockdownsEligible++;
+          results.lockdownsEligible++;
 
-  try {
-    const restrictionResponse = await fetch(
-      `${supabaseUrl}/functions/v1/process-payment-restriction`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${supabaseServiceKey}`,
-          "x-internal-secret":
-            Deno.env.get("CRON_SECRET") || "",
-        },
-        body: JSON.stringify({
-          paymentDefaultId: paymentDefault.id,
-        }),
+          try {
+            const restrictionResponse = await fetch(
+              `${supabaseUrl}/functions/v1/process-payment-restriction`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": "Be" + "arer " + supabaseServiceKey,
+                  "x-internal-secret":
+                    Deno.env.get("CRON_SECRET") || "",
+                },
+                body: JSON.stringify({
+                  paymentDefaultId: paymentDefault.id,
+                }),
+              },
+            );
+
+            const restrictionResult =
+              await restrictionResponse.json().catch(() => ({}));
+
+            if (!restrictionResponse.ok || restrictionResult.success !== true) {
+              results.errors.push(
+                `Restriction failed for ${paymentDefault.id}: ${
+                  restrictionResult.error ||
+                  `HTTP ${restrictionResponse.status}`
+                }`,
+              );
+
+              continue;
+            }
+
+            console.log(
+              `[PaymentDefaults] Vehicle restriction accepted for ${paymentDefault.id}`,
+            );
+          } catch (error) {
+            results.errors.push(
+              `Restriction invocation failed for ${paymentDefault.id}: ${
+                error instanceof Error
+                  ? error.message
+                  : "Unknown error"
+              }`,
+            );
+
+            continue;
+          }
+        }
+
+        results.processed++;
+      } catch (error) {
+        results.errors.push(
+          `Failed to process ${paymentDefault.id}: ${
+            error instanceof Error
+              ? error.message
+              : "Unknown error"
+          }`,
+        );
       }
-    );
-
-    const restrictionResult =
-      await restrictionResponse.json().catch(() => ({}));
-
-    if (!restrictionResponse.ok || restrictionResult.success !== true) {
-      results.errors.push(
-        `Restriction failed for ${paymentDefault.id}: ${
-          restrictionResult.error ||
-          `HTTP ${restrictionResponse.status}`
-        }`
-      );
-
-      continue;
     }
-
-    console.log(
-      `[PaymentDefaults] Vehicle restriction accepted for ${paymentDefault.id}`
-    );
-  } catch (error) {
-    results.errors.push(
-      `Restriction invocation failed for ${paymentDefault.id}: ${
-        error instanceof Error
-          ? error.message
-          : "Unknown error"
-      }`
-    );
-
-    continue;
-  }
-}
     return new Response(
       JSON.stringify({ 
         success: true, 

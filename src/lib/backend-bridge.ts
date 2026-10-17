@@ -1202,7 +1202,7 @@ private async executeCallWithRetry<T>(
       clearTimeout(timeout);
     }
   }
-  
+
 public async invokeEdgeFunction<T = any>(
   functionName: string,
   payload: any = {},

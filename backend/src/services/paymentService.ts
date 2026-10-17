@@ -1,14 +1,34 @@
+
 /**
  * Authoritative RentMaikar Payment, Ledger, and Settlement Service
- * 
- * Provides unified, production-grade payment execution for:
- * - USA: PayPal REST API (Order Creation, Capture, Webhook, Settlement)
- * - Nigeria: Paystack & OPay (Initialization, Verification, Webhook, Settlement)
- * - Platform Wallet Ledger & Owner Earnings Settlement
- * - Owner Payouts & Transfers
+ *
+ * Provides unified payment execution for:
+ * - USA: PayPal REST API
+ * - Nigeria: Paystack and OPay
+ * - Platform wallet ledger and owner earnings settlement
+ * - Owner payouts and transfers
  */
 
 import { getDbPool } from "./dbPool";
+import { providerAmountMatches } from "./paymentAuthority";
+import {
+  PayoutError,
+  PayoutProvider,
+  assertTwoDecimalAmount,
+  claimProviderAttempt,
+  claimWeeklyPayout,
+  classifyProviderFailure,
+  createSelfWithdrawal,
+  finalizePayout,
+  isUuid,
+  mapPayPalItemStatus,
+  mapPaystackTransferStatus,
+  markReconciliationRequired,
+  reconcileProviderOutcome,
+  recordSubmitted,
+  resolveIdempotencyKey,
+} from "./ownerPayoutWorkflow";
+
 export const PAYMENT_PURPOSES = [
   "rental",
   "security_deposit",
@@ -22,17 +42,22 @@ export const PAYMENT_PURPOSES = [
 
 export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
 
-function normalizePaymentPurpose(value?: string | null): PaymentPurpose {
+function normalizePaymentPurpose(
+  value?: string | null,
+): PaymentPurpose {
   const purpose = (value || "rental").trim();
 
-  if ((PAYMENT_PURPOSES as readonly string[]).includes(purpose)) {
+  if (
+    (PAYMENT_PURPOSES as readonly string[]).includes(purpose)
+  ) {
     return purpose as PaymentPurpose;
   }
 
   throw new Error(
-    `Invalid payment purpose "${purpose}". Allowed purposes: ${PAYMENT_PURPOSES.join(", ")}`
+    `Invalid payment purpose "${purpose}". Allowed purposes: ${PAYMENT_PURPOSES.join(", ")}`,
   );
 }
+
 export interface CreateOrderParams {
   amount: number;
   currency?: string;
@@ -65,6 +90,7 @@ export interface PaystackInitParams {
   callback_url?: string;
   metadata?: Record<string, unknown>;
 }
+
 export interface OPayInitParams {
   amount: number;
   currency?: string;
@@ -76,20 +102,62 @@ export interface OPayInitParams {
   return_url?: string;
 }
 
+/** Error raised before any payout request reached PayPal (no transfer can exist). */
+function notSentError(message: string): Error & { notSent: true } {
+  return Object.assign(new Error(message), { notSent: true as const });
+}
+
 class PaymentService {
-  private paypalTokenCache: { token: string; expiresAt: number } | null = null;
+  private paypalTokenCache: {
+    token: string;
+    expiresAt: number;
+  } | null = null;
+
   private resolvedPayPalBase: string | null = null;
 
   // ---------------------------------------------------------------------------
   // PayPal REST Helpers & Authentication
   // ---------------------------------------------------------------------------
 
-  private getPayPalConfig() {
-    const clientId = (process.env.PAYPAL_CLIENT_ID || process.env.VITE_PAYPAL_CLIENT_ID || "").trim();
-    const clientSecret = (process.env.PAYPAL_CLIENT_SECRET || "").trim();
-    const mode = (process.env.PAYPAL_MODE || process.env.PAYPAL_ENVIRONMENT || "sandbox").toLowerCase();
-    const isLive = mode === "live" || mode === "production";
-    const defaultBase = isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+  private getPayPalConfig(): {
+    clientId: string;
+    clientSecret: string;
+    mode: "live" | "sandbox";
+    baseUrl: string;
+    isConfigured: boolean;
+  } {
+    // Keep PayPal credentials server-side.
+    const clientId = (
+      process.env.PAYPAL_CLIENT_ID || ""
+    ).trim();
+
+    const clientSecret = (
+      process.env.PAYPAL_CLIENT_SECRET || ""
+    ).trim();
+
+    const configuredMode = (
+      process.env.PAYPAL_MODE ||
+      process.env.PAYPAL_ENVIRONMENT ||
+      ""
+    ).trim().toLowerCase();
+
+    if (
+      configuredMode !== "live" &&
+      configuredMode !== "production" &&
+      configuredMode !== "sandbox"
+    ) {
+      throw new Error(
+        "PayPal environment must be explicitly configured using PAYPAL_MODE=live or PAYPAL_MODE=sandbox.",
+      );
+    }
+
+    const isLive =
+      configuredMode === "live" ||
+      configuredMode === "production";
+
+    const defaultBase = isLive
+      ? "https://api-m.paypal.com"
+      : "https://api-m.sandbox.paypal.com";
 
     return {
       clientId,
@@ -102,59 +170,85 @@ class PaymentService {
 
   private async getPayPalAccessToken(): Promise<string> {
     const config = this.getPayPalConfig();
+
     if (!config.isConfigured) {
-      throw new Error("PayPal API credentials are not configured (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET).");
+      throw new Error(
+        "PayPal API credentials are not configured. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET.",
+      );
     }
 
-    if (this.paypalTokenCache && this.paypalTokenCache.expiresAt > Date.now() + 60000) {
+    // Reuse the token only while it has sufficient remaining validity.
+    if (
+      this.paypalTokenCache &&
+      this.paypalTokenCache.expiresAt > Date.now() + 60_000
+    ) {
       return this.paypalTokenCache.token;
     }
 
-    const auth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+    const auth = Buffer.from(
+      `${config.clientId}:${config.clientSecret}`,
+    ).toString("base64");
 
-    // Attempt request against current configured baseUrl
-    let res = await fetch(`${config.baseUrl}/v1/oauth2/token`, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: "grant_type=client_credentials",
-    });
-
-    // If live endpoint returned 401 invalid_client, fallback to sandbox
-    if (!res.ok && res.status === 401 && config.baseUrl.includes("api-m.paypal.com")) {
-      console.warn("[PayPal Service] Live endpoint returned 401 with provided credentials, falling back to Sandbox...");
-      const sandboxBase = "https://api-m.sandbox.paypal.com";
-      const sandboxRes = await fetch(`${sandboxBase}/v1/oauth2/token`, {
+    const response = await fetch(
+      `${config.baseUrl}/v1/oauth2/token`,
+      {
         method: "POST",
         headers: {
           Authorization: `Basic ${auth}`,
           "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
         },
         body: "grant_type=client_credentials",
-      });
+      },
+    );
 
-      if (sandboxRes.ok) {
-        this.resolvedPayPalBase = sandboxBase;
-        res = sandboxRes;
-      }
+    const responseText = await response.text();
+
+    let payload: {
+      access_token?: string;
+      expires_in?: number;
+      error_description?: string;
+    } = {};
+
+    try {
+      payload = responseText
+        ? JSON.parse(responseText)
+        : {};
+    } catch {
+      throw new Error(
+        `PayPal authentication returned an invalid response (HTTP ${response.status}).`,
+      );
     }
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("[PayPal Service] Failed to retrieve OAuth token:", res.status, errText);
-      throw new Error(`PayPal OAuth failure [${res.status}]: ${errText}`);
+    if (!response.ok) {
+      throw new Error(
+        `PayPal authentication failed (HTTP ${response.status}): ${payload.error_description || "Provider rejected the request."}`,
+      );
     }
 
-    const data = await res.json();
-    const expiresIn = Number(data.expires_in) || 32400; // default 9h
+    const token = payload.access_token;
+
+    if (typeof token !== "string" || !token.trim()) {
+      throw new Error(
+        "PayPal authentication response did not contain a valid access token.",
+      );
+    }
+
+    const expiresIn = Number(payload.expires_in);
+
+    // Avoid caching tokens with an invalid or missing lifetime.
+    if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
+      throw new Error(
+        "PayPal authentication response contained an invalid token lifetime.",
+      );
+    }
+
     this.paypalTokenCache = {
-      token: data.access_token,
+      token,
       expiresAt: Date.now() + expiresIn * 1000,
     };
 
-    return data.access_token;
+    return token;
   }
 
   // ---------------------------------------------------------------------------
@@ -165,7 +259,7 @@ class PaymentService {
     const amountVal = Number(params.amount);
     const purpose = normalizePaymentPurpose(params.purpose);
 
-    if (!amountVal || amountVal <= 0) {
+    if (!Number.isFinite(amountVal) || amountVal <= 0) {
       throw new Error("Payment amount must be greater than 0");
     }
 
@@ -276,7 +370,7 @@ class PaymentService {
   // PayPal Order Capture & Financial Settlement
   // ---------------------------------------------------------------------------
 
-  async capturePayPalOrder(params: CaptureOrderParams) {
+  async capturePayPalOrder(params: CaptureOrderParams, opts?: { isAdmin?: boolean }) {
     const { order_id, user_id } = params;
     if (!order_id) {
       throw new Error("Missing required order_id for capture");
@@ -284,14 +378,20 @@ class PaymentService {
 
     const pool = getDbPool();
 
-    // 1. Check existing transaction in DB
+    // 1. The order must be one we created, and the caller must own it.
     const txRes = await pool.query(
       `SELECT * FROM public.paypal_transactions WHERE order_id = $1`,
       [order_id]
     );
     const existingTx = txRes.rows[0];
+    if (!existingTx) {
+      throw new Error("PayPal order not found");
+    }
+    if (!opts?.isAdmin && (!user_id || existingTx.driver_id !== user_id)) {
+      throw new Error("Forbidden");
+    }
 
-    if (existingTx && (existingTx.status === "completed" || existingTx.status === "captured")) {
+    if (existingTx.status === "completed" || existingTx.status === "captured") {
       return {
         order_id,
         capture_id: existingTx.capture_id,
@@ -314,19 +414,53 @@ class PaymentService {
       body: JSON.stringify({}),
     });
 
-    const captureData = await res.json();
+    const captureData = await res.json().catch(() => null);
 
-    if (!res.ok && res.status !== 422) {
-      console.error("[PayPal Service] Capture error:", res.status, captureData);
-      throw new Error(captureData.message || `PayPal capture failed [${res.status}]`);
+    // Only an authentic 2xx capture response may complete a payment. A 422
+    // (e.g. ORDER_NOT_APPROVED / already captured) is NOT evidence of payment.
+    if (!res.ok || !captureData) {
+      console.error("[PayPal Service] Capture error:", res.status);
+      throw new Error(captureData?.message || `PayPal capture failed [${res.status}]`);
     }
 
     const captureUnit = captureData.purchase_units?.[0]?.payments?.captures?.[0];
-    const captureId = captureUnit?.id || (existingTx?.capture_id ?? `cap_${order_id}`);
+    if (captureData.status !== "COMPLETED" || !captureUnit?.id || captureUnit.status !== "COMPLETED") {
+      return {
+        order_id,
+        status: String(captureData.status || "PENDING"),
+        payment_id: existingTx.payment_id,
+        captured: false,
+      };
+    }
+
+    const captureId = String(captureUnit.id);
     const payerEmail = captureData.payer?.email_address || null;
     const payerId = captureData.payer?.payer_id || null;
+    const paymentId = existingTx.payment_id;
 
-    // 3. Update paypal_transactions
+    if (!paymentId) {
+      throw new Error("PayPal order is not linked to a payment");
+    }
+
+    // 3. Amount/currency must match what was ordered, then complete + settle
+    //    atomically (row lock; settlement is idempotent via settled_at).
+    const settled = await this.completeVerifiedPaymentAndSettle({
+      paymentId,
+      provider: "paypal",
+      providerReference: captureId,
+      providerAmount: Number(captureUnit.amount?.value),
+      providerCurrency: String(captureUnit.amount?.currency_code || ""),
+    });
+    if (!settled.ok) {
+      return {
+        order_id,
+        capture_id: captureId,
+        status: settled.reason || "settlement_rejected",
+        payment_id: paymentId,
+        captured: false,
+      };
+    }
+
     await pool.query(
       `UPDATE public.paypal_transactions
        SET status = 'completed',
@@ -338,42 +472,10 @@ class PaymentService {
        WHERE order_id = $5`,
       [captureId, payerEmail, payerId, JSON.stringify(captureData), order_id]
     );
-
-    const paymentId = existingTx?.payment_id;
-
-    // 4. Update payments record
-    if (paymentId) {
-      await pool.query(
-        `UPDATE public.payments
-         SET status = 'completed',
-             processed_at = now(),
-             transaction_id = $1,
-             updated_at = now()
-         WHERE id = $2`,
-        [captureId, paymentId]
-      );
-    }
-
-    // 5. Settle financials into wallet ledger & owner earnings
-    const driverId = existingTx?.driver_id || user_id;
-    const ownerId = existingTx?.owner_id;
-    const rentalId = existingTx?.rental_id;
-    const vehicleId = existingTx?.vehicle_id;
-    const amount = Number(existingTx?.amount || captureUnit?.amount?.value || 0);
-
-    if (amount > 0) {
-      await this.settlePaymentFinancials({
-        paymentId,
-        provider: "paypal",
-        providerReference: captureId,
-        driverId,
-        ownerId,
-        rentalId,
-        vehicleId,
-        amount,
-        currency: "USD",
-      });
-    }
+    await pool.query(
+      `UPDATE public.payments SET transaction_id = $1, updated_at = now() WHERE id = $2`,
+      [captureId, paymentId]
+    );
 
     return {
       order_id,
@@ -559,19 +661,10 @@ class PaymentService {
       e.message
     );
 
-    throw new Error(
-      `Failed to record Paystack transaction: ${e.message}`
-    );
-  }
-
-  return {
-    authorization_url:
-      payload.data.authorization_url,
-    access_code:
-      payload.data.access_code,
-    reference,
-    payment_id: paymentId,
-  };
+    
+throw new Error(
+  `Failed to record Paystack transaction: ${e.message}`
+);
 }
   async verifyPaystackTransaction(reference: string) {
   if (!reference) {
@@ -589,6 +682,20 @@ class PaymentService {
   }
 
   const pool = getDbPool();
+
+  const storedRes = await pool.query(
+    `SELECT * FROM public.paystack_transactions WHERE reference = $1 LIMIT 1`,
+    [reference]
+  );
+  const stored = storedRes.rows[0];
+  if (!stored) {
+    throw new Error(`Paystack transaction record not found for reference ${reference}`);
+  }
+  // User-initiated verification: caller must own the transaction (or be admin).
+  // Internal (webhook) callers omit opts after cryptographic signature checks.
+  if (opts && !opts.isAdmin && (!opts.callerId || stored.driver_id !== opts.callerId)) {
+    throw new Error("Forbidden");
+  }
 
   const res = await fetch(
     `https://api.paystack.co/transaction/verify/${encodeURIComponent(
@@ -643,59 +750,67 @@ class PaymentService {
     };
   }
 
+  if (String(payload.data.reference ?? "") !== reference) {
+    return {
+      success: false,
+      status: "reference_mismatch",
+      reference,
+      gateway_response: "Provider reference does not match",
+    };
+  }
+
+  const providerAmount = Number(payload.data.amount) / 100;
+  if (
+    !providerAmountMatches(
+      Number(stored.amount),
+      String(stored.currency || ""),
+      providerAmount,
+      payload.data.currency
+    )
+  ) {
+    console.error("[Paystack] amount/currency mismatch; refusing settlement", { reference });
+    return {
+      success: false,
+      status: "amount_mismatch",
+      reference,
+      gateway_response: "Provider amount or currency does not match the expected payment",
+    };
+  }
+
+  if (!stored.payment_id) {
+    return {
+      success: false,
+      status: "unassociated_payment",
+      reference,
+      gateway_response: "Transaction is not linked to a payment",
+    };
+  }
+
+  const settled = await this.completeVerifiedPaymentAndSettle({
+    paymentId: stored.payment_id,
+    provider: "paystack",
+    providerReference: reference,
+    providerAmount,
+    providerCurrency: String(payload.data.currency || ""),
+  });
+
+  if (!settled.ok) {
+    return {
+      success: false,
+      status: settled.reason || "settlement_rejected",
+      reference,
+      gateway_response: gatewayResponse,
+    };
+  }
+
   await pool.query(
     `UPDATE public.paystack_transactions
      SET status = 'success',
          gateway_response = $1,
          updated_at = now()
      WHERE reference = $2`,
-    [
-      gatewayResponse,
-      reference,
-    ]
+    [gatewayResponse, reference]
   );
-
-  const txRes = await pool.query(
-    `SELECT *
-     FROM public.paystack_transactions
-     WHERE reference = $1`,
-    [reference]
-  );
-
-  const tx = txRes.rows[0];
-
-  if (!tx) {
-    throw new Error(
-      `Paystack transaction record not found for reference ${reference}`
-    );
-  }
-
-  if (tx.payment_id) {
-    await pool.query(
-      `UPDATE public.payments
-       SET status = 'completed',
-           processed_at = now(),
-           updated_at = now()
-       WHERE id = $1`,
-      [tx.payment_id]
-    );
-  }
-
-  if (
-    tx.payment_id &&
-    Number(tx.amount) > 0
-  ) {
-    await this.settlePaymentFinancials({
-      paymentId: tx.payment_id,
-      provider: "paystack",
-      providerReference: reference,
-      driverId: tx.driver_id,
-      rentalId: tx.rental_id,
-      vehicleId: tx.vehicle_id,
-      amount: Number(tx.amount),
-      currency: tx.currency || "NGN",
-    });
-  }
 
   return {
     success: true,
@@ -724,25 +839,96 @@ class PaymentService {
     }
 
     const pool = getDbPool();
-
-    const result = await pool.query(
-      `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
-      [
-        opts.paymentId,
-        opts.provider,
-        opts.providerReference,
-      ]
-    );
-
-    const settlement = result.rows[0]?.result;
-
-    if (!settlement?.ok) {
-      throw new Error(
-        settlement?.reason || "Authoritative payment settlement failed"
+    const client = await pool.connect();
+    let settlement: any;
+    try {
+      await client.query("BEGIN");
+      // Serialise concurrent settlement attempts (webhook + verify + capture)
+      // on the payment row; the SQL function is idempotent via settled_at.
+      await client.query(`SELECT id FROM public.payments WHERE id = $1 FOR UPDATE`, [opts.paymentId]);
+      const result = await client.query(
+        `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
+        [opts.paymentId, opts.provider, opts.providerReference]
       );
+      settlement = result.rows[0]?.result;
+      if (!settlement?.ok) {
+        throw new Error(settlement?.reason || "Authoritative payment settlement failed");
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
 
     return settlement;
+  }
+
+  /**
+   * Mark a payment completed and settle it atomically after the provider has
+   * been authoritatively queried. Validates provider amount/currency against
+   * the stored payment row inside the lock. Never settles refunded payments.
+   */
+  async completeVerifiedPaymentAndSettle(opts: {
+    paymentId: string;
+    provider: string;
+    providerReference: string;
+    providerAmount: number;
+    providerCurrency: string;
+  }): Promise<{ ok: boolean; reason?: string; duplicate?: boolean }> {
+    const pool = getDbPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const pRes = await client.query(
+        `SELECT id, status, amount, currency FROM public.payments WHERE id = $1 FOR UPDATE`,
+        [opts.paymentId]
+      );
+      const payment = pRes.rows[0];
+      if (!payment) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "payment_not_found" };
+      }
+      if (
+        !providerAmountMatches(
+          Number(payment.amount),
+          String(payment.currency || ""),
+          opts.providerAmount,
+          opts.providerCurrency
+        )
+      ) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "amount_or_currency_mismatch" };
+      }
+      if (payment.status === "refunded") {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "payment_refunded" };
+      }
+      if (payment.status !== "completed") {
+        await client.query(
+          `UPDATE public.payments
+              SET status = 'completed', processed_at = now(), updated_at = now()
+            WHERE id = $1`,
+          [opts.paymentId]
+        );
+      }
+      const result = await client.query(
+        `SELECT public.settle_payment_financials($1, $2, $3) AS result`,
+        [opts.paymentId, opts.provider, opts.providerReference]
+      );
+      const settlement = result.rows[0]?.result;
+      if (!settlement?.ok) {
+        throw new Error(settlement?.reason || "Authoritative payment settlement failed");
+      }
+      await client.query("COMMIT");
+      return { ok: true, duplicate: Boolean(settlement.duplicate) };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -816,12 +1002,14 @@ async processPayPalOwnerPayout(opts: {
     throw new Error("PayPal owner payouts currently support USD only");
   }
 
-  if (!opts.payout_account_id) {
-    throw new Error("PayPal payout account is required");
-  }
+  const mode = (
+    process.env.PAYPAL_MODE ||
+    process.env.PAYPAL_ENVIRONMENT ||
+    ""
+  ).trim().toLowerCase();
 
-  if (!opts.authorization_id) {
-    throw new Error("withdrawal authorization required");
+  if (!clientId || !clientSecret) {
+    throw notSentError("PayPal payout credentials are not configured");
   }
   /*
    * 1. Idempotency.
@@ -837,473 +1025,6 @@ async processPayPalOwnerPayout(opts: {
        LIMIT 1`,
       [opts.owner_id, opts.idempotency_key],
     );
-
-    if (existing.rows[0]) {
-      return {
-        success: true,
-        duplicate: true,
-        payout: existing.rows[0],
-      };
-    }
-  }
-
-  /*
-   * 2. Verify payout destination.
-   */
-  const accountResult = await pool.query(
-    `SELECT id, owner_id, provider, currency, paypal_email
-     FROM public.owner_payout_accounts
-     WHERE id = $1
-       AND owner_id = $2
-     LIMIT 1`,
-    [opts.payout_account_id, opts.owner_id],
-  );
-
-  const account = accountResult.rows[0];
-
-  if (
-    !account ||
-    account.provider !== "paypal" ||
-    account.currency !== currency ||
-    !account.paypal_email
-  ) {
-    throw new Error("Invalid PayPal payout account");
-  }
-
-  /*
-   * 3. Verify withdrawal authorization.
-   */
-  const authorizationResult = await pool.query(
-    `SELECT *
-     FROM public.withdrawal_authorizations
-     WHERE id = $1
-     LIMIT 1`,
-    [opts.authorization_id],
-  );
-
-  const authorization = authorizationResult.rows[0];
-
-  if (!authorization) {
-    throw new Error("withdrawal authorization not found");
-  }
-
-  if (authorization.subject_user_id !== opts.owner_id) {
-    throw new Error("withdrawal authorization belongs to another user");
-  }
-
-  if (authorization.request_type !== "owner_payout") {
-    throw new Error("withdrawal authorization type mismatch");
-  }
-
-  if (Math.abs(Number(authorization.amount) - amount) > 0.009) {
-    throw new Error("withdrawal authorization amount mismatch");
-  }
-
-  if (String(authorization.currency).toUpperCase() !== currency) {
-    throw new Error("withdrawal authorization currency mismatch");
-  }
-
-  if (authorization.status !== "approved") {
-    throw new Error(
-      `withdrawal authorization is ${authorization.status}`,
-    );
-  }
-
-  if (new Date(authorization.expires_at).getTime() < Date.now()) {
-    throw new Error("withdrawal authorization expired");
-  }
-
-  /*
-   * 4. Prevent concurrent payouts.
-   */
-  const activePayout = await pool.query(
-    `SELECT id
-     FROM public.owner_payouts
-     WHERE owner_id = $1
-       AND status IN ('pending','authorized','captured','processing')
-     LIMIT 1`,
-    [opts.owner_id],
-  );
-
-  if (activePayout.rows.length > 0) {
-    throw new Error("A payout is already in progress");
-  }
-
-  /*
-   * 5. Check available ledger balance.
-   */
-  const balanceResult = await pool.query(
-    `SELECT public.get_owner_available_balance($1, $2) AS balance`,
-    [opts.owner_id, currency],
-  );
-
-  const available = Number(balanceResult.rows[0]?.balance || 0);
-
-  if (amount > available) {
-    throw new Error(
-      `Amount exceeds available balance (${available.toFixed(2)} available)`,
-    );
-  }
-
-  /*
-   * 6. Canonical payout reference.
-   *
-   * PayPal uses sender_batch_id to prevent duplicate disbursement.
-   * We therefore use one stable reference for the database and PayPal.
-   */
-  const reference =
-    opts.idempotency_key ||
-    `pyt_${crypto.randomUUID().replace(/-/g, "")}`;
-
-  /*
-   * 7. Create payout BEFORE touching PayPal.
-   */
-  const payoutResult = await pool.query(
-    `INSERT INTO public.owner_payouts (
-       owner_id,
-       payout_account_id,
-       provider,
-       amount,
-       currency,
-       status,
-       transfer_reference,
-       initiated_by,
-       scheduled_for
-     )
-     VALUES ($1,$2,'paypal',$3,$4,'pending',$5,'owner',now())
-     RETURNING *`,
-    [
-      opts.owner_id,
-      opts.payout_account_id,
-      amount,
-      currency,
-      reference,
-    ],
-  );
-
-  const payout = payoutResult.rows[0];
-
-  if (!payout?.id) {
-    throw new Error("Could not create PayPal payout record");
-  }
-
-  /*
-   * 8. Authorize payout.
-   */
-  const authorizationTransition = await pool.query(
-    `SELECT public.transition_payment_state(
-       'payout',
-       $1,
-       'authorized',
-       'withdrawal authorization approved',
-       $2::jsonb
-     ) AS result`,
-    [
-      payout.id,
-      JSON.stringify({
-        authorization_id: opts.authorization_id,
-      }),
-    ],
-  );
-
-  const authorizationTransitionResult =
-    authorizationTransition.rows[0]?.result;
-
-  if (!authorizationTransitionResult?.ok) {
-    throw new Error(
-      authorizationTransitionResult?.error ||
-      "Could not authorize payout",
-    );
-  }
-
-  /*
-   * 9. RESERVE OWNER WALLET BEFORE PAYPAL.
-   *
-   * This is the authoritative financial reservation.
-   *
-   * A posted debit is used intentionally: available balance is ledger-derived
-   * and therefore the reservation must immediately reduce available funds.
-   */
-  const reservation = await pool.query(
-    `SELECT public.post_wallet_entry(
-       $1,
-       'owner',
-       $2,
-       'debit',
-       $3,
-       'payout',
-       $4,
-       'owner_payouts',
-       $5,
-       'paypal',
-       $6,
-       $7
-     ) AS result`,
-    [
-      opts.owner_id,
-      currency,
-      amount,
-      `payout:${payout.id}:reserved`,
-      payout.id,
-      reference,
-      "Owner payout reserved before PayPal disbursement",
-    ],
-  );
-
-  const reservationResult = reservation.rows[0]?.result;
-
-  if (!reservationResult?.ok) {
-    await pool.query(
-      `SELECT public.transition_payment_state(
-         'payout',
-         $1,
-         'failed',
-         'Wallet reservation failed',
-         $2::jsonb
-       )`,
-      [
-        payout.id,
-        JSON.stringify({
-          error: reservationResult?.error || "ledger reservation failed",
-        }),
-      ],
-    );
-
-    throw new Error(
-      reservationResult?.error || "Wallet reservation failed",
-    );
-  }
-
-  /*
-   * 10. Consume the withdrawal authorization only after the reservation
-   * succeeds. This prevents an authorization from being consumed when
-   * the wallet could not actually reserve the money.
-   */
-  await pool.query(
-    `UPDATE public.withdrawal_authorizations
-     SET status = 'consumed',
-         consumed_at = now(),
-         consumed_reference = $1,
-         updated_at = now()
-     WHERE id = $2
-       AND status = 'approved'`,
-    [payout.id, opts.authorization_id],
-  );
-
-  /*
-   * 11. Execute PayPal.
-   *
-   * IMPORTANT:
-   * PENDING / PROCESSING is NOT success.
-   */
-  let paypalResult: any;
-
-  try {
-    paypalResult = await this.executePayPalPayout({
-      amount,
-      receiver: account.paypal_email,
-      reference,
-      note: opts.note || "Your RentMaikar owner earnings",
-    });
-  } catch (err: any) {
-    /*
-     * We only reverse the reservation for an explicit provider rejection.
-     *
-     * A transport/network ambiguity must NOT automatically reverse the
-     * reservation because PayPal may already have accepted the payout.
-     */
-    const message =
-      err instanceof Error
-        ? err.message
-        : "PayPal payout request failed";
-
-    const providerStatus = Number(err?.status || 0);
-
-    if (providerStatus >= 400 && providerStatus < 500) {
-      await pool.query(
-        `SELECT public.post_wallet_entry(
-           $1,
-           'owner',
-           $2,
-           'credit',
-           $3,
-           'payout_reversal',
-           $4,
-           'owner_payouts',
-           $5,
-           'paypal',
-           $6,
-           $7
-         )`,
-        [
-          opts.owner_id,
-          currency,
-          amount,
-          `payout:${payout.id}:reversal`,
-          payout.id,
-          reference,
-          "PayPal rejected payout; wallet reservation reversed",
-        ],
-      );
-
-      await pool.query(
-        `SELECT public.transition_payment_state(
-           'payout',
-           $1,
-           'failed',
-           $2,
-           '{}'::jsonb
-         )`,
-        [payout.id, message],
-      );
-    }
-
-    await pool.query(
-      `UPDATE public.owner_payouts
-       SET failure_reason = $1,
-           raw_payload = $2::jsonb,
-           updated_at = now()
-       WHERE id = $3`,
-      [
-        message,
-        JSON.stringify(
-          err?.body || {
-            error: message,
-            ambiguous_provider_result: !(providerStatus >= 400 && providerStatus < 500),
-          },
-        ),
-        payout.id,
-      ],
-    );
-
-    throw err;
-  }
-
-  /*
-   * 12. Save PayPal batch ID.
-   */
-  await pool.query(
-    `UPDATE public.owner_payouts
-     SET transfer_code = $1,
-         raw_payload = $2::jsonb,
-         updated_at = now()
-     WHERE id = $3`,
-    [
-      paypalResult.batchId || null,
-      JSON.stringify(paypalResult.raw || {}),
-      payout.id,
-    ],
-  );
-
-  /*
-   * 13. NEVER complete a payout merely because the POST succeeded.
-   *
-   * PayPal documents PENDING and PROCESSING as non-terminal.
-   * Only the verified PayPal webhook may settle and complete it.
-   */
-  const batchStatus =
-    String(paypalResult.batchStatus || "PENDING").toUpperCase();
-
-  if (batchStatus === "DENIED" || batchStatus === "CANCELED") {
-    await pool.query(
-      `SELECT public.post_wallet_entry(
-         $1,
-         'owner',
-         $2,
-         'credit',
-         $3,
-         'payout_reversal',
-         $4,
-         'owner_payouts',
-         $5,
-         'paypal',
-         $6,
-         $7
-       )`,
-      [
-        opts.owner_id,
-        currency,
-        amount,
-        `payout:${payout.id}:reversal`,
-        payout.id,
-        reference,
-        "PayPal denied/canceled payout; reservation reversed",
-      ],
-    );
-
-    await pool.query(
-      `SELECT public.transition_payment_state(
-         'payout',
-         $1,
-         'failed',
-         'PayPal denied or canceled payout',
-         $2::jsonb
-       )`,
-      [
-        payout.id,
-        JSON.stringify({
-          provider_status: batchStatus,
-        }),
-      ],
-    );
-  } else {
-    /*
-     * PENDING / PROCESSING remain non-terminal.
-     *
-     * Do NOT transition to settled/completed here.
-     */
-    await pool.query(
-      `SELECT public.transition_payment_state(
-         'payout',
-         $1,
-         'captured',
-         'PayPal payout submitted; awaiting provider confirmation',
-         $2::jsonb
-       )`,
-      [
-        payout.id,
-        JSON.stringify({
-          provider_status: batchStatus,
-          payout_batch_id: paypalResult.batchId,
-        }),
-      ],
-    );
-  }
-
-  const finalResult = await pool.query(
-    `SELECT *
-     FROM public.owner_payouts
-     WHERE id = $1`,
-    [payout.id],
-  );
-
-  return {
-    success: true,
-    payout: finalResult.rows[0],
-  };
-}
-  private async executePayPalPayout(opts: {
-  amount: number;
-  receiver: string;
-  reference: string;
-  note: string;
-}) {
-  const clientId =
-    (process.env.PAYPAL_CLIENT_ID || "").trim();
-
-  const clientSecret =
-    (process.env.PAYPAL_CLIENT_SECRET || "").trim();
-
-  const mode = (
-    process.env.PAYPAL_MODE ||
-    process.env.PAYPAL_ENVIRONMENT ||
-    "sandbox"
-  ).toLowerCase();
-
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "PayPal payout credentials are not configured",
-    );
   }
 
   const baseUrl =
@@ -1311,210 +1032,237 @@ async processPayPalOwnerPayout(opts: {
       ? "https://api-m.paypal.com"
       : "https://api-m.sandbox.paypal.com";
 
-  const basic =
-    Buffer.from(
-      `${clientId}:${clientSecret}`,
-    ).toString("base64");
+  if (
+    !Number.isFinite(opts.amount) ||
+    opts.amount < 1 ||
+    Math.round(opts.amount * 100) !== opts.amount * 100
+  ) {
+    throw notSentError(
+      "PayPal payout amount must be at least 1.00 and have at most two decimal places",
+    );
+  }
 
-  const tokenResponse =
-    await fetch(
+  const receiver = opts.receiver?.trim();
+  const reference = opts.reference?.trim();
+
+  if (!receiver) {
+    throw notSentError("PayPal payout receiver is required");
+  }
+
+  if (
+    !reference ||
+    reference.length > 50 ||
+    !/^[A-Za-z0-9._-]+$/.test(reference)
+  ) {
+    throw notSentError("PayPal payout reference is invalid");
+  }
+
+  const basic = Buffer.from(
+    `${clientId}:${clientSecret}`,
+  ).toString("base64");
+
+  let tokenResponse: Response;
+  try {
+    tokenResponse = await fetch(
       `${baseUrl}/v1/oauth2/token`,
       {
         method: "POST",
         headers: {
-          Authorization:
-            `Basic ${basic}`,
-          "Content-Type":
-            "application/x-www-form-urlencoded",
+          Authorization: `Basic ${basic}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
         },
-        body:
-          "grant_type=client_credentials",
+        body: "grant_type=client_credentials",
       },
     );
+  } catch (e) {
+    throw notSentError(
+      `PayPal authentication request failed: ${e instanceof Error ? e.message : "network error"}`,
+    );
+  }
+
+  const tokenText = await tokenResponse.text();
+
+  let tokenPayload: any;
+
+  try {
+    tokenPayload = tokenText ? JSON.parse(tokenText) : {};
+  } catch {
+    tokenPayload = {};
+  }
 
   if (!tokenResponse.ok) {
-    const errorText =
-      await tokenResponse.text();
-
-    throw new Error(
-      `PayPal authentication failed: ${errorText}`,
+    throw notSentError(
+      `PayPal authentication failed (HTTP ${tokenResponse.status})`,
     );
   }
 
-  const tokenPayload =
-    await tokenResponse.json();
+  const accessToken = tokenPayload?.access_token;
 
-  const accessToken =
-    tokenPayload.access_token;
-
-  if (!accessToken) {
-    throw new Error(
-      "PayPal access token missing",
-    );
+  if (
+    typeof accessToken !== "string" ||
+    !accessToken.trim()
+  ) {
+    throw notSentError("PayPal access token missing from response");
   }
 
-  const response =
-    await fetch(
-      `${baseUrl}/v1/payments/payouts`,
-      {
-        method: "POST",
-        headers: {
-          Authorization:
-            `Bearer ${accessToken}`,
-          "Content-Type":
-            "application/json",
-          Accept:
-            "application/json",
-          "PayPal-Request-Id":
-            `payout:${opts.reference}`,
-        },
-        body: JSON.stringify({
-          sender_batch_header: {
-            sender_batch_id:
-              opts.reference,
-            email_subject:
-              "RentMaikar payout",
-            email_message:
-              opts.note,
-          },
-          items: [
-            {
-              recipient_type:
-                "EMAIL",
-              amount: {
-                value:
-                  opts.amount.toFixed(2),
-                currency: "USD",
-              },
-              receiver:
-                opts.receiver,
-              note:
-                opts.note,
-              sender_item_id:
-                opts.reference,
-            },
-          ],
-        }),
+  const response = await fetch(
+    `${baseUrl}/v1/payments/payouts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "PayPal-Request-Id": reference,
       },
-    );
+      body: JSON.stringify({
+        sender_batch_header: {
+          sender_batch_id: reference,
+          email_subject: "RentMaikar payout",
+          email_message: opts.note,
+        },
+        items: [
+          {
+            recipient_type: "EMAIL",
+            receiver,
+            amount: {
+              value: opts.amount.toFixed(2),
+              currency: "USD",
+            },
+            sender_item_id: reference,
+            note: opts.note,
+          },
+        ],
+      }),
+    },
+  );
 
-  const payload =
-    await response.json();
+  const responseText = await response.text();
+
+  let payload: any;
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    payload = {
+      unparsed_response: responseText.slice(0, 2000),
+    };
+  }
 
   if (!response.ok) {
-  const error = new Error(
-    payload?.message ||
-    payload?.name ||
-    "PayPal payout request failed",
-  ) as Error & {
-    status?: number;
-    body?: unknown;
-  };
+    const error = new Error(
+      `PayPal payout request failed (HTTP ${response.status})`,
+    ) as Error & {
+      status?: number;
+      body?: unknown;
+    };
 
-  error.status = response.status;
-  error.body = payload;
+    error.status = response.status;
+    error.body = payload;
 
-  throw error;
-}
+    throw error;
+  }
+
+  const batchId = payload?.batch_header?.payout_batch_id;
+  const batchStatus = String(
+    payload?.batch_header?.batch_status || "PENDING",
+  ).toUpperCase();
+
+  if (typeof batchId !== "string" || !batchId.trim()) {
+    /*
+     * PayPal may have accepted the request even if its response
+     * does not contain the expected batch ID.
+     * Reconcile this reference before attempting another payout.
+     */
+    const error = new Error(
+      "PayPal returned no payout batch ID; reconcile before retrying",
+    ) as Error & {
+      status?: number;
+      body?: unknown;
+      ambiguous?: boolean;
+    };
+
+    error.status = response.status;
+    error.body = payload;
+    error.ambiguous = true;
+
+    throw error;
+  }
 
   return {
-    batchId:
-      payload?.batch_header
-        ?.payout_batch_id ||
-      null,
-    batchStatus:
-      payload?.batch_header
-        ?.batch_status ||
-      "PENDING",
+    batchId,
+    batchStatus,
     raw: payload,
   };
   }
-  async processOwnerPayout(opts: {
+  /**
+   * Creates a weekly bulk payout row and reserves funds in one transaction.
+   * The row is NOT executable until an administrator approves it
+   * (approve_weekly_owner_payout) and its scheduled_for time has passed.
+   */
+  async createWeeklyBulkPayout(opts: {
     owner_id: string;
     amount: number;
     currency?: string;
-    provider?: string;
-    payout_account_id?: string;
-    initiated_by?: string;
+    provider: PayoutProvider;
+    payout_account_id: string;
+    scheduled_for: Date;
+    initiated_by?: "cron" | "admin";
   }) {
-    const pool = getDbPool();
-    const currency = (opts.currency || "USD").toUpperCase();
-    const amountVal = Number(opts.amount);
-
-    if (!opts.owner_id || amountVal <= 0) {
-      throw new Error("Invalid owner_id or payout amount");
+    const ownerId = String(opts.owner_id || "").trim();
+    const currency = String(opts.currency || "USD").toUpperCase();
+    const amount = assertTwoDecimalAmount(opts.amount);
+    const initiatedBy = opts.initiated_by === "admin" ? "admin" : "cron";
+    if (!isUuid(ownerId) || !isUuid(opts.payout_account_id)) {
+      throw new PayoutError("invalid_request", "owner and payout account identifiers are required");
     }
 
+    const pool = getDbPool();
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`owner_payout:${ownerId}`]);
 
-      // Verify wallet balance with atomic FOR UPDATE row-level lock
-      const wRes = await client.query(
-        `SELECT id, available_balance FROM public.wallet_accounts
-         WHERE user_id = $1 AND currency = $2 AND account_type = 'owner'
-         FOR UPDATE`,
-        [opts.owner_id, currency]
+      const acct = await client.query(
+        `SELECT 1 FROM public.owner_payout_accounts
+         WHERE id = $1 AND owner_id = $2 AND provider = $3 AND upper(currency) = $4`,
+        [opts.payout_account_id, ownerId, opts.provider, currency],
       );
-      const balance = Number(wRes.rows[0]?.available_balance || 0);
+      if (!acct.rows[0]) throw new PayoutError("invalid_account", "Payout account does not match owner/provider/currency");
 
-      if (balance < amountVal) {
-        throw new Error(`Insufficient available balance ($${balance.toFixed(2)} available, requested $${amountVal.toFixed(2)})`);
+      await client.query(`SELECT public.ensure_wallet_account($1, 'owner', $2)`, [ownerId, currency]);
+      await client.query(
+        `SELECT 1 FROM public.wallet_accounts WHERE user_id = $1 AND account_type = 'owner' AND currency = $2 FOR UPDATE`,
+        [ownerId, currency],
+      );
+      const bal = await client.query(`SELECT public.get_owner_available_balance($1, $2) AS balance`, [ownerId, currency]);
+      if (!(Number(bal.rows[0]?.balance) >= amount)) {
+        throw new PayoutError("insufficient_balance", "Insufficient available balance");
       }
 
-      const transferRef = `payout_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-      const initiatedBy = ["owner", "cron", "admin"].includes(opts.initiated_by || "")
-        ? opts.initiated_by
-        : "owner";
-
-      // 1. Insert into owner_payouts
-      const pRes = await client.query(
+      const ins = await client.query(
         `INSERT INTO public.owner_payouts (
-          owner_id, payout_account_id, provider, amount, currency, status, transfer_reference, initiated_by, scheduled_for
-        ) VALUES ($1, $2, $3, $4, $5, 'processing', $6, $7, now())
-        RETURNING id`,
-        [
-          opts.owner_id,
-          opts.payout_account_id || null,
-          opts.provider || "paypal",
-          amountVal,
-          currency,
-          transferRef,
-          initiatedBy,
-        ]
+           owner_id, payout_account_id, provider, amount, currency, status,
+           transfer_reference, initiated_by, scheduled_for, workflow_type, reserved_at
+         ) VALUES ($1, $2, $3, $4, $5, 'pending', 'pyt_' || replace(gen_random_uuid()::text, '-', ''),
+                   $6, $7, 'weekly_bulk', now())
+         RETURNING id, transfer_reference`,
+        [ownerId, opts.payout_account_id, opts.provider, amount, currency, initiatedBy, opts.scheduled_for],
       );
-      const payoutId = pRes.rows[0]?.id;
+      const payout = ins.rows[0];
 
-      // 2. Post debit from owner wallet
-      await client.query(
-        `SELECT public.post_wallet_entry(
-          $1, 'owner', $2, 'debit', $3, 'payout', $4, 'owner_payouts', $5, $6, $7, $8
-        )`,
-        [
-          opts.owner_id,
-          currency,
-          amountVal,
-          `payout_debit_${transferRef}`,
-          payoutId || null,
-          opts.provider || "paypal",
-          transferRef,
-          `Withdrawal request via ${opts.provider || "PayPal"}`,
-        ]
+      const ledger = await client.query(
+        `SELECT public.post_wallet_entry($1, 'owner', $2, 'debit', $3, 'payout', $4,
+           'owner_payouts', $5, $6, $7, 'Weekly owner payout reserved') AS result`,
+        [ownerId, currency, amount, `payout:${payout.id}:reserved`, payout.id, opts.provider, payout.transfer_reference],
       );
+      if (!ledger.rows[0]?.result?.entry_id) throw new Error("Wallet reservation failed");
 
       await client.query("COMMIT");
-
-      return {
-        success: true,
-        payout_id: payoutId,
-        transfer_reference: transferRef,
-        status: "processing",
-        amount: amountVal,
-        currency,
-      };
-    } catch (err: any) {
-      await client.query("ROLLBACK").catch(() => {});
+      return { success: true, payout_id: payout.id, status: "pending", workflow_type: "weekly_bulk" };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
       throw err;
     } finally {
       client.release();
@@ -1525,22 +1273,24 @@ async processPayPalOwnerPayout(opts: {
   // Webhook Signature Verifiers & Processors
   // ---------------------------------------------------------------------------
 
-  async handlePayPalWebhook(headers: Record<string, any>, rawBody: string | any) {
-    const raw =
-  typeof rawBody === "string"
-    ? rawBody
-    : JSON.stringify(rawBody);
+  async handlePayPalWebhook(
+headers: Record<string, any>,
+rawBody: string | any,
+) {
+const raw =
+typeof rawBody === "string"
+? rawBody
+: JSON.stringify(rawBody);
+
+if (!raw) {
+  throw new Error("PayPal webhook body is required");
+}
 
 const signatureValid =
-  await this.verifyPayPalWebhookSignature(
-    headers,
-    raw,
-  );
+  await this.verifyPayPalWebhookSignature(headers, raw);
 
 if (!signatureValid) {
-  throw new Error(
-    "Invalid PayPal webhook signature",
-  );
+  throw new Error("Invalid PayPal webhook signature");
 }
 
 const event =
@@ -1571,29 +1321,33 @@ const event =
       [eventId]
     );
 
-    if (existingRes.rows.length > 0) {
-      return { received: true, duplicate: true };
-    }
+if (!event || typeof event !== "object") {
+  throw new Error("Invalid PayPal webhook event");
+}
 
-    await pool.query(
-      `INSERT INTO public.payment_webhook_events (
-        provider, event_type, external_event_id, reference, status, signature_valid, payload
-      ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
-      ["paypal", eventType, eventId, orderId || null, JSON.stringify(event)]
-    );
+const pool = getDbPool();
+const eventType = event.event_type || "";
+const eventId = event.id || "";
+const resource = event.resource || {};
+const orderId =
+  resource.supplementary_data?.related_ids?.order_id ||
+  resource.id ||
+  "";
 
-    if (eventType === "PAYMENT.CAPTURE.COMPLETED" || eventType === "CHECKOUT.ORDER.APPROVED") {
-      if (orderId) {
-        try {
-          await this.capturePayPalOrder({ order_id: orderId });
-        } catch (e: any) {
-          console.warn("[PayPal Webhook] Capture failed or already completed:", e.message);
-        }
-      }
-    }
+if (!eventId || !eventType) {
+  throw new Error("PayPal webhook event ID and type are required");
+}
 
-    return { received: true };
-  }
+const existingRes = await pool.query(
+  `SELECT id
+   FROM public.payment_webhook_events
+   WHERE external_event_id = $1`,
+  [eventId],
+);
+
+if (existingRes.rows.length > 0) {
+  return { received: true, duplicate: true };
+}
 
   async handlePaystackWebhook(headers: Record<string, any>, rawBody: string | any) {
     const pool = getDbPool();
@@ -1605,23 +1359,203 @@ const event =
       `SELECT id FROM public.payment_webhook_events WHERE external_event_id = $1`,
       [externalId]
     );
+    await reconcileProviderOutcome({
+      provider: "paypal",
+      references: [
+        item.sender_item_id,
+        resource.sender_batch_id,
+        resource.payout_batch_id,
+      ],
+      outcome,
+      reportedAmount:
+        item.amount?.value != null ? Number(item.amount.value) : null,
+      reportedCurrency: item.amount?.currency ?? null,
+      evidence: {
+        source: "paypal_webhook",
+        event_id: eventId,
+        event_type: eventType,
+        transaction_status: resource.transaction_status ?? null,
+        payout_item_id: resource.payout_item_id ?? null,
+        payout_batch_id: resource.payout_batch_id ?? null,
+      },
+    });
+  } catch (error) {
+    // Let PayPal redeliver: forget the dedupe row so the retry is processed.
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events WHERE external_event_id = $1`,
+        [eventId],
+      )
+      .catch(() => undefined);
+    throw error;
+  }
+  return { received: true };
+}
 
-    if (existingRes.rows.length > 0) {
-      return { received: true, duplicate: true };
+if (
+  eventType === "PAYMENT.CAPTURE.COMPLETED" ||
+  eventType === "CHECKOUT.ORDER.APPROVED"
+) {
+  if (orderId) {
+    try {
+      await this.capturePayPalOrder({ order_id: orderId });
+    } catch (error) {
+      console.error(
+        "[PayPal Webhook] Order processing failed:",
+        error,
+      );
+      throw error;
     }
+  }
+}
 
-    await pool.query(
-      `INSERT INTO public.payment_webhook_events (
-        provider, event_type, external_event_id, reference, status, signature_valid, payload
-      ) VALUES ($1, $2, $3, $4, 'received', true, $5)`,
-      ["paystack", eventType, externalId, reference || null, JSON.stringify(event)]
-    );
+return { received: true };
 
-    if (eventType === "charge.success" && reference) {
-      await this.verifyPaystackTransaction(reference);
+}
+
+async handlePaystackWebhook(
+headers: Record<string, any>,
+rawBody: string | any,
+) {
+// The signature is computed over the exact bytes Paystack sent; a
+// re-serialised object can never be verified, so only raw text is accepted.
+const raw = typeof rawBody === "string" ? rawBody : "";
+
+if (!raw) {
+  throw new Error("Paystack webhook body is required");
+}
+
+const config = this.getPaystackConfig();
+
+if (!config.secretKey) {
+  throw new Error(
+    "Paystack webhook verification is not configured",
+  );
+}
+
+const crypto = await import("node:crypto");
+const suppliedSignature =
+  headers["x-paystack-signature"] ??
+  headers["X-Paystack-Signature"];
+
+if (
+  typeof suppliedSignature !== "string" ||
+  !suppliedSignature.trim()
+) {
+  throw new Error("Missing Paystack webhook signature");
+}
+
+const expectedSignature = crypto
+  .createHmac("sha512", config.secretKey)
+  .update(raw)
+  .digest("hex");
+
+const supplied = Buffer.from(suppliedSignature, "hex");
+const expected = Buffer.from(expectedSignature, "hex");
+
+if (
+  supplied.length !== expected.length ||
+  !crypto.timingSafeEqual(supplied, expected)
+) {
+  throw new Error("Invalid Paystack webhook signature");
+}
+
+let event: any;
+try {
+  event = JSON.parse(raw);
+} catch {
+  throw new Error("Invalid Paystack webhook event");
+}
+
+if (!event || typeof event !== "object") {
+  throw new Error("Invalid Paystack webhook event");
+}
+
+const pool = getDbPool();
+const eventType = event.event || "";
+const reference = event.data?.reference || "";
+
+if (!eventType || !reference) {
+  throw new Error(
+    "Paystack webhook event type and transaction reference are required",
+  );
+}
+
+const externalId = `${eventType}:${reference}`;
+
+const insertRes = await pool.query(
+  `INSERT INTO public.payment_webhook_events (
+    provider,
+    event_type,
+    external_event_id,
+    reference,
+    status,
+    signature_valid,
+    payload
+  ) VALUES ($1, $2, $3, $4, 'received', true, $5)
+  ON CONFLICT (provider, external_event_id)
+    WHERE external_event_id IS NOT NULL DO NOTHING
+  RETURNING id`,
+  [
+    "paystack",
+    eventType,
+    externalId,
+    reference,
+    JSON.stringify(event),
+  ],
+);
+
+if (insertRes.rows.length === 0) {
+  return { received: true, duplicate: true };
+}
+
+if (
+  eventType === "transfer.success" ||
+  eventType === "transfer.failed" ||
+  eventType === "transfer.reversed"
+) {
+  try {
+    const data = event.data || {};
+    await reconcileProviderOutcome({
+      provider: "paystack",
+      references: [reference, data.transfer_code],
+      outcome: mapPaystackTransferStatus(eventType),
+      reportedAmount: data.amount != null ? Number(data.amount) / 100 : null,
+      reportedCurrency: data.currency ?? null,
+      evidence: {
+        source: "paystack_webhook",
+        event_type: eventType,
+        reason: data.reason ?? null,
+        transfer_code: data.transfer_code ?? null,
+      },
+    });
+  } catch (error) {
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events WHERE external_event_id = $1`,
+        [externalId],
+      )
+      .catch(() => undefined);
+    throw error;
+  }
+  return { received: true };
+}
+
+if (eventType === "charge.success") {
+  try {
+    await this.verifyPaystackTransaction(reference);
+  } catch (error: any) {
+    // Allow provider redelivery after a transient failure.
+    await pool
+      .query(
+        `DELETE FROM public.payment_webhook_events WHERE provider = 'paystack' AND external_event_id = $1`,
+        [externalId],
+      )
+      .catch(() => undefined);
+    if (/record not found/i.test(String(error?.message))) {
+      return { received: true, ignored: "unknown_reference" };
     }
-
-    return { received: true };
+    throw error;
   }
   private async verifyPayPalWebhookSignature(
   headers: Record<string, any>,
@@ -1831,6 +1765,9 @@ const event =
     const result = await response.json();
 
     return result?.verification_status === "SUCCESS";
+    const result = await response.json();
+
+  return result?.verification_status === "SUCCESS";
   }
 }
 

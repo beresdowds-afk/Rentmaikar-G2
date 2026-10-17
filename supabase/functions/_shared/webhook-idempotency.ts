@@ -15,6 +15,7 @@
 // deno-lint-ignore-file no-explicit-any
 
 import type { WebhookLogger } from "./webhook-logger.ts";
+import { classifyRefund } from "./amount-check.ts";
 
 export interface IdempotencyRecordInput {
   provider: "paystack" | "paypal" | "opay";
@@ -238,6 +239,16 @@ export async function applyRefund(
   },
 ): Promise<void> {
   const { paymentId, provider, providerReference, amount, reason, logger } = opts;
+
+  // Only a refund covering the whole payment may flip it to refunded and
+  // reverse its ledger entries; anything else needs manual review.
+  const { data: original } = await supabase.from("payments").select("amount").eq("id", paymentId).maybeSingle();
+  const kind = classifyRefund(original?.amount, amount);
+  if (kind !== "full") {
+    console.error(`[refund] ${kind} refund for payment ${paymentId} (${provider}) not applied automatically; manual review required`);
+    logger?.info("refund.manual_review", { payment_id: paymentId, kind });
+    return;
+  }
 
   await transitionState(
     supabase,
