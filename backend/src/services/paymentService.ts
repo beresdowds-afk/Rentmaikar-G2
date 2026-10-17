@@ -759,6 +759,29 @@ throw new Error(
     };
   }
 
+  const payerRes = await pool.query(
+    `SELECT p.payer_type, px.proxy_email
+       FROM public.payments p
+       LEFT JOIN public.driver_proxy_billing_accounts px ON px.id = p.proxy_account_id
+      WHERE p.id = $1`,
+    [stored.payment_id],
+  );
+  const payerRow = payerRes.rows[0];
+  if (
+    payerRow?.payer_type === "proxy" &&
+    (!payerRow.proxy_email ||
+      String(payload.data.customer?.email ?? "").toLowerCase() !==
+        String(payerRow.proxy_email).toLowerCase())
+  ) {
+    console.error("[Paystack] proxy payer mismatch; refusing settlement", { reference });
+    return {
+      success: false,
+      status: "payer_mismatch",
+      reference,
+      gateway_response: "Payer does not match the approved proxy",
+    };
+  }
+
   const providerAmount = Number(payload.data.amount) / 100;
   if (
     !providerAmountMatches(

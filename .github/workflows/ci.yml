@@ -31,6 +31,8 @@ jobs:
             sleep $((attempt * 10))
           done
           exit 1
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
       - name: Typecheck
         run: bun run typecheck
       - name: Vitest
