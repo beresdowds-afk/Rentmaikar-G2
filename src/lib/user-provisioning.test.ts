@@ -19,7 +19,8 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 
-import { assignRole, guardedPasswordSignIn } from './user-provisioning';
+import { assignRole } from './user-provisioning';
+import { guardedPasswordSignIn } from './auth-password-sign-in';
 
 describe('assignRole self-assignment guard', () => {
   beforeEach(() => {
@@ -61,16 +62,18 @@ describe('guardedPasswordSignIn', () => {
 
   it('does not attempt sign-in when rate limited', async () => {
     rpc.mockImplementation(async (name?: string) => (name === 'check_auth_rate_limit' ? { data: false, error: null } : { data: null, error: null }));
-    const res = await guardedPasswordSignIn('a@b.co', 'pw');
-    expect(res.error).toBeTruthy();
+    await expect(guardedPasswordSignIn('a@b.co', 'pw')).rejects.toMatchObject({
+      code: 'AUTH_RATE_LIMITED',
+    });
     expect(signInWithPassword).not.toHaveBeenCalled();
     expect(rpc).toHaveBeenCalledWith('log_auth_event', expect.objectContaining({ _event_type: 'sign_in_rate_limited' }));
   });
 
   it('fails closed when the limiter errors', async () => {
     rpc.mockImplementation(async (name?: string) => (name === 'check_auth_rate_limit' ? { data: null, error: { message: 'down' } } : { data: null, error: null }));
-    const res = await guardedPasswordSignIn('a@b.co', 'pw');
-    expect(res.error).toBeTruthy();
+    await expect(guardedPasswordSignIn('a@b.co', 'pw')).rejects.toMatchObject({
+      code: 'AUTH_RATE_LIMIT_UNAVAILABLE',
+    });
     expect(signInWithPassword).not.toHaveBeenCalled();
   });
 
