@@ -93,8 +93,22 @@ Deno.serve(async (req) => {
     const eventOk = expected?.payment_id
       && String(evt?.data?.status ?? "").toLowerCase() === "success"
       && amountsMatch(expected.amount, expected.currency, Number(evt?.data?.amount) / 100, evt?.data?.currency);
-    if (!eventOk) {
-      console.error("[paystack-webhook] rejected charge.success: unknown reference or status/amount/currency mismatch", reference);
+    // Proxy-funded payments: the payer must be the approved proxy for this driver.
+    let payerOk = true;
+    if (eventOk) {
+      const { data: pay } = await supabase.from("payments")
+        .select("payer_type, proxy_account_id, driver_id").eq("id", expected.payment_id).maybeSingle();
+      if (pay?.payer_type === "proxy") {
+        const { data: px } = await supabase.from("driver_proxy_billing_accounts")
+          .select("proxy_email, driver_id, status").eq("id", pay.proxy_account_id).maybeSingle();
+        const paidBy = String(evt?.data?.customer?.email ?? "").toLowerCase();
+        payerOk = !!px && px.driver_id === pay.driver_id && px.status === "active"
+          && paidBy === String(px.proxy_email).toLowerCase()
+          && (evt?.data?.metadata?.proxy_account_id ?? pay.proxy_account_id) === pay.proxy_account_id;
+      }
+    }
+    if (!eventOk || !payerOk) {
+      console.error("[paystack-webhook] rejected charge.success: unknown reference, status/amount/currency mismatch or proxy payer mismatch", reference);
       return new Response(JSON.stringify({ received: true, rejected: "mismatch" }), {
         headers: { ...corsHeaders, ...correlationHeaders(logger), "Content-Type": "application/json" },
       });
@@ -126,7 +140,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error("[paystack-webhook] settlement reconciliation failed", tx.payment_id, e);
       }
-      await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
+      await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) : undefined, tx.currency ?? undefined, reference);
 
       // Confirm IoT hardware orders if payment was for IoT device
       await supabase
@@ -163,7 +177,7 @@ Deno.serve(async (req) => {
       await supabase.from("payments").update({
         status: "failed", failure_reason: evt.data.gateway_response ?? "failed",
       }).eq("id", tx.payment_id).neq("status", "completed");
-      await notifyPush(tx.payment_id, tx.rental_id ?? null, "failed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
+      await notifyPush(tx.payment_id, tx.rental_id ?? null, "failed", tx.amount ? Number(tx.amount) : undefined, tx.currency ?? undefined, reference);
     }
   } else if (evt.event === "refund.processed" || evt.event === "refund.failed") {
     // Paystack refunds carry the original transaction reference.

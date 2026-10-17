@@ -48,16 +48,8 @@ function getOpayConfig(): OpayConfig {
       "OPay credentials are not configured: OPAY_MERCHANT_ID, OPAY_PUBLIC_KEY, OPAY_SECRET_KEY"
     );
   }
-async function opaySignature(
-  body: string,
-  secretKey: string,
-): Promise<string> {
-  return crypto
-    .createHmac("sha512", secretKey)
-    .update(body)
-    .digest("hex");
-}
-const environment =
+  const rawEnvironment = (process.env.OPAY_ENVIRONMENT || "").trim().toLowerCase();
+  const environment =
     rawEnvironment === "live" ||
     rawEnvironment === "production" ||
     rawEnvironment === "prod"
@@ -89,7 +81,7 @@ async function opayRequest<T = Record<string, unknown>>(
   raw: unknown;
 }> {
   const body = JSON.stringify(payload);
-  const signature = await opaySignature(body, cfg.secretKey);
+  const signature = opaySignature(body, cfg.secretKey);
 
   const url = `${cfg.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -321,6 +313,7 @@ export async function createOpayOrder(params: {
   iotDeviceId?: string;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string | null;
+  proxyAccountId?: string | null;
 }) {
   if (!params.driverId) {
     throw new Error("Authenticated driver ID is required");
@@ -424,12 +417,14 @@ export async function createOpayOrder(params: {
        payment_method,
        payment_frequency,
        transaction_id,
-       purpose
+       purpose,
+       payer_type,
+       proxy_account_id
      )
      VALUES (
        $1, $2, $3, $4, $5,
        'NGN', 'pending', 'opay',
-       $6, $7, $8
+       $6, $7, $8, $9, $10
      )
      RETURNING id`,
     [
@@ -441,6 +436,8 @@ export async function createOpayOrder(params: {
       params.paymentFrequency || "weekly",
       reference,
       params.purpose || "rental",
+      params.proxyAccountId ? "proxy" : "driver",
+      params.proxyAccountId || null,
     ],
   );
 
@@ -681,7 +678,7 @@ export async function createOpayOrder(params: {
   }
 
   const expected =
-    await opaySignature(
+    opaySignature(
       rawBody,
       cfg.secretKey,
     );

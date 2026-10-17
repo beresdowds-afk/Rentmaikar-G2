@@ -55,8 +55,15 @@ export function useOnboardingMachine() {
   // the machine so the checklist recomputes the next incomplete step live.
   useEffect(() => {
     if (!user?.id) return;
-    const invalidate = () =>
-      qc.invalidateQueries({ queryKey: ['onboarding-machine', user.id] });
+    // Debounce: a single save can emit several realtime events across tables.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const invalidate = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        qc.invalidateQueries({ queryKey: ['onboarding-machine', user.id] });
+      }, 500);
+    };
 
     const channel = supabase
       .channel(`onboarding-machine:${user.id}`)
@@ -90,6 +97,7 @@ export function useOnboardingMachine() {
     document.addEventListener('visibilitychange', onVis);
 
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', onVis);
     };
@@ -98,7 +106,7 @@ export function useOnboardingMachine() {
   return useQuery({
     queryKey: ['onboarding-machine', user?.id ?? null],
     enabled: !!user,
-    staleTime: 0,
+    staleTime: 15_000,
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<OnboardingMachineState> => {
       const { data, error } = await (supabase.rpc as any)('get_onboarding_next_step');

@@ -1,6 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { AppRole } from '@/lib/role-home';
 
+/** Roles a user may legitimately hold on their own account via the client fallback. */
+export const SELF_SERVICE_ROLES: AppRole[] = ['owner', 'driver'];
+
 /**
  * Single client-side entry point for role assignment.
  *
@@ -49,8 +52,16 @@ export async function assignRole(
     lastError = err;
   }
 
-  // 3. Fallback to direct table upsert
+  // 3. Fallback to direct table upsert. A user provisioning THEIR OWN account may
+  // only ever receive a self-service role; elevated roles must come from the
+  // server-side RPC or an admin acting on another user (enforced by RLS).
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData?.session?.user?.id === userId && !SELF_SERVICE_ROLES.includes(role)) {
+      const denied = new Error(`Role "${role}" cannot be self-assigned.`);
+      (denied as any).code = 'ROLE_SELF_ASSIGN_DENIED';
+      throw denied;
+    }
     const { error: upsertErr } = await supabase.from('user_roles').upsert(
       { user_id: userId, role: role as any },
       { onConflict: 'user_id' }
@@ -162,6 +173,49 @@ export interface EnsureAuthUserArgs {
 }
 
 /**
+ * Password sign-in used by the registration flow when the applicant already has
+ * an account. Mirrors AuthContext.signIn: shares its rate-limit bucket (so
+ * registration cannot be used to bypass the 5/5min limit), fails closed when the
+ * limiter is unavailable, and writes the same audit events.
+ */
+export async function guardedPasswordSignIn(email: string, password: string) {
+  const log = async (eventType: string, success: boolean, errorCode?: string) => {
+    try {
+      await supabase.rpc('log_auth_event', {
+        _event_type: eventType,
+        _email: email,
+        _provider: 'email',
+        _success: success,
+        _error_code: errorCode ?? null,
+        _metadata: { source: 'registration' },
+      } as never);
+    } catch {
+      // Never let logging failures break auth.
+    }
+  };
+
+  const { data: allowed, error: rlError } = await supabase.rpc('check_auth_rate_limit', {
+    _identifier: `signin:${email}`,
+    _endpoint: 'auth.signin',
+    _max_requests: 5,
+    _window_seconds: 300,
+  });
+  if (rlError) {
+    await log('sign_in_rate_limit_unavailable', false, rlError.message);
+    return { data: { user: null, session: null }, error: new Error('Sign-in is temporarily unavailable. Please try again shortly.') as any };
+  }
+  if (allowed === false) {
+    await log('sign_in_rate_limited', false);
+    return { data: { user: null, session: null }, error: new Error('Too many sign-in attempts. Please wait a few minutes and try again.') as any };
+  }
+
+  const result = await supabase.auth.signInWithPassword({ email, password });
+  if (result.error) await log('sign_in_failure', false, result.error.message);
+  else await log('sign_in_success', true);
+  return result;
+}
+
+/**
  * Ensures an auth user exists for an applicant and returns their id.
  * Shared by the driver and owner registration flows.
  *
@@ -208,10 +262,7 @@ export async function ensureAuthUserForApplicant({
     });
     if (statusData && typeof statusData === 'object' && (statusData as any).registered === true) {
       // Email is already registered. Attempt sign-in with the password provided.
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      const { data: signInData, error: signInError } = await guardedPasswordSignIn(normalizedEmail, password);
 
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
@@ -257,10 +308,7 @@ export async function ensureAuthUserForApplicant({
       signUpError.status === 422
     ) {
       // Attempt sign-in with password in case account was already created
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      const { data: signInData, error: signInError } = await guardedPasswordSignIn(normalizedEmail, password);
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
         await verifyProfileExists(userId, requestedRole, normalizedEmail);
@@ -288,10 +336,7 @@ export async function ensureAuthUserForApplicant({
     signUpData.user.identities.length === 0
   ) {
     // Attempt sign-in with password
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
+    const { data: signInData, error: signInError } = await guardedPasswordSignIn(normalizedEmail, password);
     if (!signInError && signInData?.user?.id) {
       const userId = signInData.user.id;
       await verifyProfileExists(userId, requestedRole, normalizedEmail);
