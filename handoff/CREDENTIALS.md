@@ -18,13 +18,6 @@ This document defines the strict segregation between client-safe variables (pref
   ├── SENT_API_KEY & SENT_WEBHOOK_SECRET
   ├── PAYPAL_CLIENT_SECRET
   ├── PAYSTACK_SECRET_KEY
-  ├── OPAY_MERCHANT_ID & OPAY_PUBLIC_KEY & OPAY_SECRET_KEY
-  ├── EMQX_API_URL & EMQX_API_KEY & EMQX_API_SECRET
-  ├── TRACCAR_API_URL / TRACCAR_BASE_URL & TRACCAR_API_TOKEN / TRACCAR_API_KEY
-  ├── ELEVENLABS_API_KEY
-  ├── GEMINI_API_KEY
-  ├── GOOGLE_APPLICATION_CREDENTIALS / GCP_PROJECT_ID / GCP_CLIENT_ID / GCP_CLIENT_SECRET
-  ├── VAPID_PUBLIC_KEY & VAPID_PRIVATE_KEY & VAPID_SUBJECT
   ├── PERSONA_API_KEY
   └── RESEND_API_KEY
 ```
@@ -49,6 +42,7 @@ This document defines the strict segregation between client-safe variables (pref
 | `PAYPAL_CLIENT_ID` | Backend | Medium | PayPal application client ID |
 | `PAYPAL_CLIENT_SECRET` | Backend | **CRITICAL** | PayPal transaction authorization secret |
 | `PAYSTACK_SECRET_KEY` | Backend | **CRITICAL** | Paystack payment secret (Nigeria gateway) |
+| `PAYSTACK_WEBHOOK_SECRET` | Backend / Edge | **CRITICAL** | Paystack webhook verification secret |
 | `OPAY_MERCHANT_ID` | Backend | **CRITICAL** | OPay merchant identifier required for cashier and payout configuration |
 | `OPAY_PUBLIC_KEY` | Backend | **CRITICAL** | OPay public key used for cashier/order requests |
 | `OPAY_SECRET_KEY` | Backend | **CRITICAL** | OPay secret key used for signed OPay requests and webhook verification |
@@ -79,9 +73,21 @@ This document defines the strict segregation between client-safe variables (pref
 
 ### 2.1 Runtime authentication paths that are not equivalent to a single env-var check
 
-- **EMQX:** runtime credential resolution prefers an active vault-backed rotation credential when present, then falls back to `EMQX_API_KEY` / `EMQX_API_SECRET`. A missing env var alone does not prove EMQX is unavailable.
-- **Google Cloud:** some Google integrations may use Application Default Credentials (ADC) rather than a static JSON key. Presence of `GOOGLE_APPLICATION_CREDENTIALS` or related vars should be interpreted according to the specific code path, not as universal proof of readiness.
+- **EMQX management configuration:** `EMQX_API_URL`, `EMQX_MQTT_HOST`, and `EMQX_MQTT_PORT` shape the management endpoint, but they are not secrets. The runtime config resolver prefers a deployed `platform_kv_settings.emqx_management_config` value when present, then falls back to env vars, then defaults.
+- **EMQX management credentials:** runtime credential resolution prefers an active vault-backed rotation credential when present, then falls back to `EMQX_API_KEY` / `EMQX_API_SECRET`. A missing env var alone does not prove EMQX is unavailable.
+- **Google Cloud ADC:** some Google integrations may use Application Default Credentials (ADC) rather than a static JSON key. Presence of `GOOGLE_APPLICATION_CREDENTIALS` or related vars should be interpreted according to the specific code path, not as universal proof of readiness.
+- **Google Ads OAuth:** the Google Ads adapter uses OAuth client credentials and refresh tokens (`GOOGLE_ADS_*`) and is separate from ADC-based Google Cloud authentication.
 - **Provider readiness:** credential presence only confirms configuration. It does not prove the provider account is active, a live transaction succeeds, or webhook verification is working.
+
+### 2.2 Provider-specific runtime authentication matrix
+
+| Provider / subsystem | Configuration source | Secret material | Runtime verification path | Notes |
+|---|---|---|---|---|
+| EMQX management endpoint | `platform_kv_settings.emqx_management_config`, then `EMQX_API_URL` / `EMQX_MQTT_HOST` / `EMQX_MQTT_PORT` | No | Dashboard probes management API through `resolveEmqxClient()` / `probeEmqx()` | Endpoint config is separate from credentials |
+| EMQX management credentials | Vault rotation via `emqx_read_credentials`, then env fallback | Yes | `supabase/functions/_shared/emqx-credentials.ts` | Vault-backed credentials take precedence |
+| Google Cloud ADC | Local `gcloud auth application-default login`, GitHub Actions Workload Identity Federation, Cloud Run / Cloud Build metadata server | Depends on ADC source | Google client libraries resolve ADC automatically | Do not treat `GOOGLE_APPLICATION_CREDENTIALS` as the only path |
+| Google Ads OAuth | `GOOGLE_ADS_*` env vars | Yes | OAuth token exchange and refresh in `googleAdsAdapter.ts` | Distinct from ADC-based Google Cloud auth |
+| Web Push | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Private key only | Web Push signing and subscription delivery flows | `VAPID_PUBLIC_KEY` is public by design |
 
 ---
 
