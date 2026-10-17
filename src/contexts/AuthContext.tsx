@@ -3,8 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 import { useAuthTabSync } from '@/hooks/useAuthTabSync';
-
-type AppRole = 'admin' | 'admin_assistant' | 'owner' | 'driver' | 'legal_support' | 'iot_support' | 'vehicle_support';
+import type { AppRole } from '@/lib/role-home';
 
 export interface RetryOptions {
   maxAttempts?: number;
@@ -291,13 +290,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               .delete()
               .eq('user_id', userId)
               .neq('role', predefined.role as any)
-              .catch(() => {});
+              .then(() => undefined, () => undefined);
           }
           assignRole(userId, predefined.role, normalizedEmail).catch(() => {
             supabase
               .from('user_roles')
               .upsert({ user_id: userId, role: predefined.role as any }, { onConflict: 'user_id' })
-              .catch(() => {});
+              .then(() => undefined, () => undefined);
           });
         }
 
@@ -325,10 +324,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     can_view_audit_log: true,
                     notes: 'Default Admin Assistant baseline permissions',
                   })
-                  .catch(() => {});
+                  .then(() => undefined, () => undefined);
               }
             })
-            .catch(() => {});
+            .then(() => undefined, () => undefined);
         }
 
         if (predefined.fullName) {
@@ -343,7 +342,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               },
               { onConflict: 'user_id' }
             )
-            .catch(() => {});
+            .then(() => undefined, () => undefined);
         }
 
         if (predefined.phone) {
@@ -358,7 +357,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               },
               { onConflict: 'user_id' }
             )
-            .catch(() => {});
+            .then(() => undefined, () => undefined);
         }
 
         if (typeof window !== 'undefined') {
@@ -705,7 +704,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return () => subscription.unsubscribe();
   }, [broadcastSession, broadcastSignOut]);
-  const signUp = async (email: string, password: string, fullName: string, role: AppRole) => {
+  const signUp: AuthContextType['signUp'] = async (email, password, fullName, role) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       const normalizedEmail = email.trim().toLowerCase();
@@ -757,10 +756,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return {
             error: new Error('This email is already registered. Please sign in instead.'),
             emailExists: true,
-            status: 'rejected',
+            status: 'rejected' as const,
           };
         }
-        return { error, status: 'rejected' };
+        return { error, status: 'rejected' as const };
       }
 
       // Supabase obfuscates duplicate sign-ups when email confirmation is on:

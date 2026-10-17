@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import ConsentSection, { type MessagingChannel } from "@/components/registration/ConsentSection";
+import { toE164, optionalE164 } from "@/lib/phone-e164";
 import { recordSmsConsentPair } from "@/lib/sms-consent";
 import { toast } from "sonner";
 import Header from "@/components/layout/Header";
@@ -38,19 +39,6 @@ import {
   addressHint as buildAddressHint,
   requiredAddressSchema,
 } from "@/lib/address-validation";
-
-/** Phone field that must parse to a valid international (E.164) number. */
-const toE164 = (v: string) => {
-  const t = (v || "").trim();
-  return t.startsWith("+") ? t.replace(/\s+/g, "") : `+${t.replace(/[^\d]/g, "")}`;
-};
-
-/** E.164 for supplied values, null when the (optional) field was left blank. */
-const optionalE164 = (v?: string) => {
-  const t = (v || "").trim();
-  return t ? toE164(t) : null;
-};
-
 
 const refereePhone = (label: string) =>
   z
@@ -412,6 +400,7 @@ const DriverRegistration = () => {
 
       // A2P 10DLC: persist the exact SMS opt-in decisions with disclosure text.
       void recordSmsConsentPair({
+        userId,
         phoneNumber: toE164(data.phoneNumber),
         serviceConsent: !!data.smsServiceConsent,
         marketingConsent: !!data.smsMarketingConsent,

@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import ConsentSection, { type MessagingChannel } from "@/components/registration/ConsentSection";
+import { toE164 } from "@/lib/phone-e164";
 import { recordSmsConsentPair } from "@/lib/sms-consent";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -235,8 +236,8 @@ const OwnerRegistration = () => {
         first_name: data.firstName,
         last_name: data.lastName,
         email: data.email,
-        phone_country: data.phoneCountry ?? (parsePhoneNumberFromString(data.phoneNumber)?.country === 'NG' ? 'ng' : 'us'),
-        phone_number: data.phoneNumber,
+        phone_country: data.phoneCountry ?? (parsePhoneNumberFromString(toE164(data.phoneNumber))?.country === 'NG' ? 'ng' : 'us'),
+        phone_number: toE164(data.phoneNumber),
         country: data.country,
         city: data.city,
         zip_code: data.zipCode,
@@ -336,7 +337,8 @@ const OwnerRegistration = () => {
 
       // A2P 10DLC: persist the exact SMS opt-in decisions with disclosure text.
       void recordSmsConsentPair({
-        phoneNumber: data.phoneNumber,
+        userId,
+        phoneNumber: toE164(data.phoneNumber),
         serviceConsent: !!data.smsServiceConsent,
         marketingConsent: !!data.smsMarketingConsent,
         source: "owner-registration",
