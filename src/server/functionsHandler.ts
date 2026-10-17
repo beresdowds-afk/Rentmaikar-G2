@@ -1166,7 +1166,6 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         throw err;
       }
     }
-
     case "create-paystack-transaction": {
       try {
         if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
@@ -1218,6 +1217,75 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         if (/signature/i.test(msg)) return { status: 401, data: { received: false, error: "Invalid webhook signature" } };
         if (/required|invalid paystack webhook/i.test(msg)) return { status: 400, data: { received: false, error: "Invalid webhook" } };
         throw err;
+      }
+    }
+
+    case "proxy-create-payment": {
+      let reservedProxyId: string | null = null;
+      try {
+        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
+        const provider = String(body.provider || "paystack");
+        const method = String(body.method || "");
+        if (!["paystack", "paypal", "opay"].includes(provider)) return { status: 400, data: { ok: false, error: "Unsupported provider" } };
+        if (!["card", "bank"].includes(method)) return { status: 400, data: { ok: false, error: "method must be card or bank" } };
+        if (provider === "paypal" && method === "bank") return { status: 400, data: { ok: false, error: "PayPal proxy payments support card only" } };
+        if (!body.proxy_account_id) return { status: 400, data: { ok: false, error: "proxy_account_id is required" } };
+
+        const pool = getDbPool();
+        const { reserveProxyUse, releaseProxyUse, markPaymentProxyFunded, ProxyPaymentError } =
+          await import("../../backend/src/services/proxyPaymentService");
+        const authority = await resolveCheckoutAuthority(pool, { caller: gatedCaller, provider: provider as any, body });
+        try {
+          const proxy = await reserveProxyUse(pool, authority.driverId, String(body.proxy_account_id));
+          reservedProxyId = proxy.id;
+          const result: any = await createWithAuthoritativeAmount(pool, {
+            driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+            invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+          }, async (auth) => {
+            if (provider === "paypal") {
+              return paymentService.createPayPalOrder({
+                amount: auth.amount, currency: auth.currency,
+                rental_id: authority.rentalId ?? undefined, vehicle_id: authority.vehicleId ?? undefined,
+                driver_id: authority.driverId, owner_id: authority.ownerId ?? undefined,
+                payment_frequency: body.payment_frequency, description: "Rentmaikar proxy payment", purpose: body.purpose,
+              });
+            }
+            if (provider === "opay") {
+              const { createOpayOrder } = await import("../../backend/src/services/opayService");
+              return createOpayOrder({
+                amount: auth.amount, rentalId: authority.rentalId ?? undefined, vehicleId: authority.vehicleId ?? undefined,
+                ownerId: authority.ownerId ?? undefined, driverId: authority.driverId, purpose: body.purpose,
+                returnUrl: body.return_url, proxyAccountId: proxy.id,
+              });
+            }
+            return paymentService.createPaystackTransaction({
+              amount: auth.amount, email: proxy.proxy_email, currency: auth.currency, purpose: body.purpose,
+              rental_id: authority.rentalId ?? undefined, vehicle_id: authority.vehicleId ?? undefined,
+              driver_id: authority.driverId, owner_id: authority.ownerId ?? undefined,
+              callback_url: body.callback_url,
+              metadata: { proxy_account_id: proxy.id, payer_type: "proxy", payment_method_type: method },
+            } as any);
+          });
+          const paymentId = result?.payment_id ?? result?.paymentId;
+          if (paymentId) {
+            try {
+              await markPaymentProxyFunded(pool, paymentId, proxy.id);
+            } catch (markErr) {
+              await pool.query(`UPDATE public.payments SET status = 'failed' WHERE id = $1 AND status = 'pending'`, [paymentId]).catch(() => undefined);
+              throw markErr;
+            }
+          }
+          reservedProxyId = null;
+          return { status: 200, data: { ...result, provider, method } };
+        } catch (inner) {
+          if (reservedProxyId) await releaseProxyUse(pool, reservedProxyId).catch(() => undefined);
+          if (inner instanceof ProxyPaymentError) return { status: inner.status, data: { ok: false, error: inner.message } };
+          throw inner;
+        }
+      } catch (err: any) {
+        if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
+        console.error("[proxy-create-payment] failed:", err);
+        return { status: 502, data: { ok: false, error: "Proxy payment failed" } };
       }
     }
 

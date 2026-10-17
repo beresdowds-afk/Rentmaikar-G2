@@ -1,5 +1,12 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { AppRole } from '@/lib/role-home';
+import {
+  guardedPasswordSignIn,
+  isAuthSignInGuardError,
+} from '@/lib/auth-password-sign-in';
+
+/** Roles a user may legitimately hold on their own account via the client fallback. */
+export const SELF_SERVICE_ROLES: AppRole[] = ['owner', 'driver'];
 
 /**
  * Single client-side entry point for role assignment.
@@ -49,8 +56,16 @@ export async function assignRole(
     lastError = err;
   }
 
-  // 3. Fallback to direct table upsert
+  // 3. Fallback to direct table upsert. A user provisioning THEIR OWN account may
+  // only ever receive a self-service role; elevated roles must come from the
+  // server-side RPC or an admin acting on another user (enforced by RLS).
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData?.session?.user?.id === userId && !SELF_SERVICE_ROLES.includes(role)) {
+      const denied = new Error(`Role "${role}" cannot be self-assigned.`);
+      (denied as any).code = 'ROLE_SELF_ASSIGN_DENIED';
+      throw denied;
+    }
     const { error: upsertErr } = await supabase.from('user_roles').upsert(
       { user_id: userId, role: role as any },
       { onConflict: 'user_id' }
@@ -208,10 +223,8 @@ export async function ensureAuthUserForApplicant({
     });
     if (statusData && typeof statusData === 'object' && (statusData as any).registered === true) {
       // Email is already registered. Attempt sign-in with the password provided.
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      const { data: signInData, error: signInError } =
+        await guardedPasswordSignIn(normalizedEmail, password, 'registration');
 
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
@@ -230,7 +243,11 @@ export async function ensureAuthUserForApplicant({
       throw duplicateError;
     }
   } catch (rpcErr: any) {
-    if (rpcErr?.code === 'EMAIL_ALREADY_EXISTS' || rpcErr?.message?.includes('already exists')) {
+    if (
+      rpcErr?.code === 'EMAIL_ALREADY_EXISTS' ||
+      rpcErr?.message?.includes('already exists') ||
+      isAuthSignInGuardError(rpcErr)
+    ) {
       throw rpcErr;
     }
     // Rate limited or RPC unavailable, continue to signUp attempt
@@ -257,10 +274,8 @@ export async function ensureAuthUserForApplicant({
       signUpError.status === 422
     ) {
       // Attempt sign-in with password in case account was already created
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      const { data: signInData, error: signInError } =
+        await guardedPasswordSignIn(normalizedEmail, password, 'registration');
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
         await verifyProfileExists(userId, requestedRole, normalizedEmail);
@@ -288,10 +303,8 @@ export async function ensureAuthUserForApplicant({
     signUpData.user.identities.length === 0
   ) {
     // Attempt sign-in with password
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
+    const { data: signInData, error: signInError } =
+      await guardedPasswordSignIn(normalizedEmail, password, 'registration');
     if (!signInError && signInData?.user?.id) {
       const userId = signInData.user.id;
       await verifyProfileExists(userId, requestedRole, normalizedEmail);

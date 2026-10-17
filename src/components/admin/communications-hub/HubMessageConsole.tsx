@@ -185,10 +185,6 @@ export const HubMessageConsole: React.FC = () => {
             .eq('conversation_id', selectedConversationId)
             .eq('is_read', false);
 
-          await supabase
-            .from('inbox_conversations')
-            .update({ unread_count: 0 })
-            .eq('id', selectedConversationId);
         }
       } catch (err) {
         console.error('Failed to load thread messages:', err);

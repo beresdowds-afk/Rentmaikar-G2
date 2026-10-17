@@ -216,11 +216,13 @@ export const HubBulkMessaging: React.FC = () => {
 
       // Generic Role or verified status lookup
       if (roleKey === 'verified' || roleKey === 'unverified') {
-        const { data: profs } = await supabase
+        const profileQuery = supabase
           .from('profiles')
-          .select('user_id, full_name, email, phone, is_verified')
-          .eq('is_verified', roleKey === 'verified')
-          .limit(500);
+          .select('user_id, full_name, email, phone');
+        const { data: profs } = await (roleKey === 'verified'
+          ? profileQuery.not('identity_verified_at', 'is', null)
+          : profileQuery.is('identity_verified_at', null)
+        ).limit(500);
 
         const mapped: BulkContact[] = ((profs || []) as any[]).map((p) => ({
           user_id: p.user_id,

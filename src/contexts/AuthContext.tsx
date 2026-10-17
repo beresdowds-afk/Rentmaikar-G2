@@ -3,8 +3,9 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 import { useAuthTabSync } from '@/hooks/useAuthTabSync';
+import type { AppRole } from '@/lib/role-home';
+import { guardedPasswordSignIn } from '@/lib/auth-password-sign-in';
 
-type AppRole = 'admin' | 'admin_assistant' | 'owner' | 'driver' | 'legal_support' | 'iot_support' | 'vehicle_support';
 
 export interface RetryOptions {
   maxAttempts?: number;
@@ -84,6 +85,8 @@ interface TwoFactorStatus {
   has_phone: boolean;
   preferred_channel: string;
   phone?: string;
+  /** True when the status lookup failed and we are failing closed. */
+  check_failed?: boolean;
 }
 
 interface AuthContextType {
@@ -289,13 +292,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               .delete()
               .eq('user_id', userId)
               .neq('role', predefined.role as any)
-              .catch(() => {});
+              .then(() => undefined, () => undefined);
           }
           assignRole(userId, predefined.role, normalizedEmail).catch(() => {
             supabase
               .from('user_roles')
               .upsert({ user_id: userId, role: predefined.role as any }, { onConflict: 'user_id' })
-              .catch(() => {});
+              .then(() => undefined, () => undefined);
           });
         }
 
@@ -323,10 +326,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     can_view_audit_log: true,
                     notes: 'Default Admin Assistant baseline permissions',
                   })
-                  .catch(() => {});
+                  .then(() => undefined, () => undefined);
               }
             })
-            .catch(() => {});
+            .then(() => undefined, () => undefined);
         }
 
         if (predefined.fullName) {
@@ -341,7 +344,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               },
               { onConflict: 'user_id' }
             )
-            .catch(() => {});
+            .then(() => undefined, () => undefined);
         }
 
         if (predefined.phone) {
@@ -356,7 +359,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               },
               { onConflict: 'user_id' }
             )
-            .catch(() => {});
+            .then(() => undefined, () => undefined);
         }
 
         if (typeof window !== 'undefined') {
@@ -450,9 +453,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setTwoFactorVerified(true);
       }
       return status;
-    } catch {
-      setTwoFactorVerified(true);
-      return null;
+    } catch (err) {
+      // Fail closed: if we cannot determine whether 2FA applies, do not grant
+      // the session a verified state. The user is routed to the 2FA challenge
+      // (or can sign out / retry) instead of silently bypassing it.
+      console.error('[AuthContext] 2FA status check failed; failing closed:', err);
+      const failed: TwoFactorStatus = {
+        requires_2fa: true,
+        is_setup: true,
+        is_mandatory: false,
+        has_phone: false,
+        preferred_channel: 'sms',
+        check_failed: true,
+      };
+      setTwoFactorStatus(failed);
+      setTwoFactorVerified(false);
+      return failed;
     }
   };
 
@@ -495,7 +511,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setTwoFactorVerified(true);
             }
           })
-          .catch(() => setTwoFactorVerified(true));
+          .catch(() => setTwoFactorVerified(false));
       }
     },
     onSignedOut: () => {
@@ -548,7 +564,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setTwoFactorVerified(true);
             }
           }).catch(() => {
-            setTwoFactorVerified(true);
+            setTwoFactorVerified(false);
           });
         } else {
           setUserRole(null);
@@ -679,7 +695,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setTwoFactorVerified(true);
           }
         }).catch(() => {
-          setTwoFactorVerified(true);
+          setTwoFactorVerified(false);
         });
       } else {
         setIsRoleLoading(false);
@@ -690,7 +706,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return () => subscription.unsubscribe();
   }, [broadcastSession, broadcastSignOut]);
-  const signUp = async (email: string, password: string, fullName: string, role: AppRole) => {
+  const signUp: AuthContextType['signUp'] = async (email, password, fullName, role) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       const normalizedEmail = email.trim().toLowerCase();
@@ -742,10 +758,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return {
             error: new Error('This email is already registered. Please sign in instead.'),
             emailExists: true,
-            status: 'rejected',
+            status: 'rejected' as const,
           };
         }
-        return { error, status: 'rejected' };
+        return { error, status: 'rejected' as const };
       }
 
       // Supabase obfuscates duplicate sign-ups when email confirmation is on:
@@ -794,31 +810,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (email: string, password: string) => {
     try {
-      const normalized = email.trim().toLowerCase();
-
-      // Server-side rate limit: 5 attempts / 5 minutes per email.
-      const { data: allowed, error: rlError } = await supabase.rpc('check_auth_rate_limit', {
-        _identifier: `signin:${normalized}`,
-        _endpoint: 'auth.signin',
-        _max_requests: 5,
-        _window_seconds: 300,
-      });
-      if (!rlError && allowed === false) {
-        await logAuthEvent('sign_in_rate_limited', { email: normalized, success: false });
-        return { error: new Error('Too many sign-in attempts. Please wait a few minutes and try again.') };
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalized,
-        password,
-      });
+      const { data, error } = await guardedPasswordSignIn(email, password);
 
       if (error) {
-        await logAuthEvent('sign_in_failure', {
-          email: normalized,
-          success: false,
-          errorCode: error.message,
-        });
         const msg = error.message || '';
         const code = (error as any).code || '';
         if (/email.*not.*confirm/i.test(msg) || code === 'email_not_confirmed') {

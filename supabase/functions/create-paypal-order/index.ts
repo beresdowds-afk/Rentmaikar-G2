@@ -204,6 +204,11 @@ Deno.serve(async (req) => {
     const { error: txError } = await supa.from("paypal_transactions").insert(txInsert);
     if (txError) {
       console.error("[create-paypal-order] paypal transaction insert error:", txError);
+      await completeIdempotencyKey(supa, idemKey, "failed");
+      return new Response(JSON.stringify({ error: "Failed to record payment" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     if (data.iot_device_order_id) {
@@ -226,7 +231,7 @@ Deno.serve(async (req) => {
 
   } catch (e) {
     console.error("[create-paypal-order] error:", e);
-    return new Response(JSON.stringify({ error: String(e) }), {
+    return new Response(JSON.stringify({ error: "Could not create PayPal order" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

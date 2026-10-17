@@ -47,9 +47,9 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
       try {
         const { data: paymentRecord, error } = await supabase
           .from('payments')
-          .select('id, amount, currency, status, payment_method, created_at, reference')
-          .eq('user_id', user.id)
-          .eq('type', 'security_deposit')
+          .select('id, amount, currency, status, payment_method, created_at, transaction_id')
+          .eq('driver_id', user.id)
+          .eq('purpose', 'security_deposit')
           .eq('status', 'completed')
           .order('created_at', { ascending: false })
           .limit(1)
@@ -60,7 +60,7 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
             isPaid: true,
             paidAt: paymentRecord.created_at,
             paymentMethod: paymentRecord.payment_method || 'Online Payment',
-            transactionReference: paymentRecord.reference || paymentRecord.id,
+            transactionReference: paymentRecord.transaction_id || paymentRecord.id,
             amount: Number(paymentRecord.amount),
             currency: paymentRecord.currency,
             receiptNumber: `SEC-DEP-${paymentRecord.id.slice(0, 8).toUpperCase()}`,
@@ -73,8 +73,8 @@ export function useDriverSecurityDepositStatus(region?: string | null) {
         const { data: receiptRecord } = await supabase
           .from('receipts')
           .select('id, amount, currency, created_at, receipt_number')
-          .eq('user_id', user.id)
-          .ilike('notes', '%security deposit%')
+          .eq('driver_id', user.id)
+          .ilike('description', '%security deposit%')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
