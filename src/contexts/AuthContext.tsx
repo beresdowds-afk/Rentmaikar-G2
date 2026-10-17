@@ -3,13 +3,9 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 import { useAuthTabSync } from '@/hooks/useAuthTabSync';
-<<<<<<< HEAD
 import type { AppRole } from '@/lib/role-home';
-=======
 import { guardedPasswordSignIn } from '@/lib/auth-password-sign-in';
 
-type AppRole = 'admin' | 'admin_assistant' | 'owner' | 'driver' | 'legal_support' | 'iot_support' | 'vehicle_support';
->>>>>>> origin/copilot/compare-open-branches
 
 export interface RetryOptions {
   maxAttempts?: number;
@@ -814,34 +810,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (email: string, password: string) => {
     try {
-<<<<<<< HEAD
-      const normalized = email.trim().toLowerCase();
-
-      // Server-side rate limit: 5 attempts / 5 minutes per email.
-      const { data: allowed, error: rlError } = await supabase.rpc('check_auth_rate_limit', {
-        _identifier: `signin:${normalized}`,
-        _endpoint: 'auth.signin',
-        _max_requests: 5,
-        _window_seconds: 300,
-      });
-      if (rlError) {
-        // Fail closed: an unavailable limiter must not disable brute-force protection.
-        console.error('[AuthContext] check_auth_rate_limit failed:', rlError);
-        await logAuthEvent('sign_in_rate_limit_unavailable', { email: normalized, success: false, errorCode: rlError.message });
-        return { error: new Error('Sign-in is temporarily unavailable. Please try again shortly.') };
-      }
-      if (allowed === false) {
-        await logAuthEvent('sign_in_rate_limited', { email: normalized, success: false });
-        return { error: new Error('Too many sign-in attempts. Please wait a few minutes and try again.') };
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalized,
-        password,
-      });
-=======
       const { data, error } = await guardedPasswordSignIn(email, password);
->>>>>>> origin/copilot/compare-open-branches
 
       if (error) {
         const msg = error.message || '';
