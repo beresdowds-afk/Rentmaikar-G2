@@ -62,6 +62,8 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        // Portal UI uses inline onclick/onsubmit handlers; helmet defaults to 'none'
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
         connectSrc: ["'self'", "https://rentmaikar.com", "https://staging.rentmaikar.com", "*"],

@@ -1087,7 +1087,7 @@ Loading latest diagnostic report...
         headers
       });
 
-      if (res.status === 401) {
+      if (res.status === 401 && endpoint.indexOf("/auth/login") !== 0 && endpoint.indexOf("/auth/accept-invite") !== 0) {
         state.token = "";
         localStorage.removeItem("rm_portal_token");
         renderAuthView();
