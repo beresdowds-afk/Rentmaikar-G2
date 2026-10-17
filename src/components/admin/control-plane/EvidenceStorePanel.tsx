@@ -140,8 +140,8 @@ export const EvidenceStorePanel: React.FC = () => {
       // 3. Fetch Inspection Reports / Photos
       try {
         const { data: inspections } = await supabase
-          .from("admin_weekly_reports")
-          .select("id, created_at, vehicle_id, mileage, fuel_level, status, admin_decision")
+          .from("weekly_inspection_reports")
+          .select("id, created_at, vehicle_id, report_type, status, admin_decision")
           .order("created_at", { ascending: false })
           .limit(50);
 
@@ -152,14 +152,14 @@ export const EvidenceStorePanel: React.FC = () => {
               created_at: insp.created_at,
               category: "inspection_bundle",
               title: `Weekly Vehicle Inspection Bundle (#${insp.vehicle_id?.slice(0, 6) || "VEH"})`,
-              source_table: "admin_weekly_reports",
+              source_table: "weekly_inspection_reports",
               reference_id: insp.id,
-              sha256_hash: insp.report_hash || `insp:${insp.id.slice(0, 16)}`,
+              sha256_hash: `insp:${insp.id.slice(0, 16)}`,
               tamper_status: "verified",
               metadata: {
                 vehicle_id: insp.vehicle_id,
-                mileage: insp.mileage,
-                fuel_level: insp.fuel_level,
+                report_type: insp.report_type,
+                status: insp.status,
                 admin_decision: insp.admin_decision,
               },
             });

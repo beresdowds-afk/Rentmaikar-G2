@@ -201,7 +201,7 @@ export const DeviceRegistry = () => {
           device_model: nd.device_model || 'GPS-01',
           firmware_version: nd.firmware_version.trim() || 'v1.0.0',
           notes: nd.notes || null,
-          status: 'inventory' as const,
+          status: 'inactive' as const,
           provider: 'traccar',
           health_status: 'healthy',
           installation_status: 'pending',
