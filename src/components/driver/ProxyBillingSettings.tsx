@@ -87,6 +87,40 @@ export function ProxyBillingSettings({ userId }: Props) {
     load();
   };
 
+  const [pay, setPay] = useState({
+    provider: "paystack" as "paystack" | "paypal" | "opay",
+    method: "card" as "card" | "bank",
+    amount: "",
+    invoice_id: "",
+  });
+
+  const payWithProxy = async () => {
+    if (!proxy) return;
+    const amount = Number(pay.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return toast.error("Enter a valid amount");
+    setLoading(true);
+    const { data, error } = await supabase.functions.invoke("proxy-create-payment", {
+      body: {
+        proxyAccountId: proxy.id,
+        proxy_account_id: proxy.id,
+        provider: pay.provider,
+        method: pay.provider === "paypal" ? "card" : pay.method,
+        amount,
+        currency: pay.provider === "paypal" ? "USD" : country === "Nigeria" ? "NGN" : "USD", // OPay is NGN-only; server re-validates against the invoice
+        invoiceId: pay.invoice_id || undefined,
+        invoice_id: pay.invoice_id || undefined,
+      },
+      headers: { "x-idempotency-key": crypto.randomUUID() } as any,
+    });
+    setLoading(false);
+    const url = data?.authorization_url ?? data?.approve_url ?? data?.cashier_url;
+    if (error || !url) return toast.error(typeof data?.error === "string" ? data.error : "Could not start proxy payment");
+    let copied = false;
+    try { await navigator.clipboard?.writeText(url); copied = true; } catch { /* clipboard optional */ }
+    toast.success(copied ? "Payment link copied. Send it to your proxy to complete payment." : `Send this link to your proxy: ${url}`);
+    load();
+  };
+
   const statusColor = (s: string) => ({
     pending: "secondary", awaiting_consent: "secondary", awaiting_card: "secondary",
     active: "default", revoked: "destructive", disabled: "outline",
@@ -151,6 +185,45 @@ export function ProxyBillingSettings({ userId }: Props) {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Resend consent link
               </Button>
             </div>
+
+            {proxy.status === "active" && (
+              <div className="rounded-lg border p-4 space-y-3">
+                <p className="text-sm font-medium flex items-center gap-2"><CreditCard className="h-4 w-4" /> Pay with proxy</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <Label>Provider</Label>
+                    <Select value={pay.provider} onValueChange={(v: any) => setPay({ ...pay, provider: v, method: v === "paypal" ? "card" : pay.method })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="paystack">Paystack</SelectItem>
+                        {country === "Nigeria" && <SelectItem value="opay">OPay</SelectItem>}
+                        <SelectItem value="paypal">PayPal</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Method</Label>
+                    <Select value={pay.method} onValueChange={(v: any) => setPay({ ...pay, method: v })} disabled={pay.provider === "paypal"}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="card">Card</SelectItem>
+                        <SelectItem value="bank">Bank debit / transfer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Amount</Label>
+                    <Input type="number" min={0} value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The amount is confirmed against your invoice on the server. Your proxy completes the payment from the link; your account updates automatically once it clears.
+                </p>
+                <Button onClick={payWithProxy} disabled={loading} size="sm">
+                  {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />} Start proxy payment
+                </Button>
+              </div>
+            )}
 
             <ProxyNotificationPrefs
               proxyId={proxy.id}

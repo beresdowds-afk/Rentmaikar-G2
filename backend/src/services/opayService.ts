@@ -313,6 +313,7 @@ export async function createOpayOrder(params: {
   iotDeviceId?: string;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string | null;
+  proxyAccountId?: string | null;
 }) {
   if (!params.driverId) {
     throw new Error("Authenticated driver ID is required");
@@ -416,12 +417,14 @@ export async function createOpayOrder(params: {
        payment_method,
        payment_frequency,
        transaction_id,
-       purpose
+       purpose,
+       payer_type,
+       proxy_account_id
      )
      VALUES (
        $1, $2, $3, $4, $5,
        'NGN', 'pending', 'opay',
-       $6, $7, $8
+       $6, $7, $8, $9, $10
      )
      RETURNING id`,
     [
@@ -433,6 +436,8 @@ export async function createOpayOrder(params: {
       params.paymentFrequency || "weekly",
       reference,
       params.purpose || "rental",
+      params.proxyAccountId ? "proxy" : "driver",
+      params.proxyAccountId || null,
     ],
   );
 
