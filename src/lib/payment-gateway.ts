@@ -504,30 +504,42 @@ export class PaymentGateway {
   /**
    * Verify Paystack payment through the backend bridge.
    */
-  private async verifyPaystackPayment(
-    reference: string,
-  ): Promise<PaymentResult> {
-    try {
-      const result = await backendBridge.invokeEdgeFunction(
-        'verify-paystack-transaction',
-        { reference },
-        {
-          method: 'POST',
-          idempotencyKey: `verify.paystack:${reference}`,
-        },
-      );
+  private async verifyPaystackPayment(reference: string): Promise<PaymentResult> {
+try {
+const result = await backendBridge.invokeEdgeFunction(
+"verify-paystack-transaction",
+{ reference },
+{
+method: "POST",
+idempotencyKey: "verify.paystack:${reference}",
+},
+);
 
-      if (result.error || !result.data) {
-        throw (
-          result.error ??
-          new Error('Paystack payment verification failed.')
-        );
-      }
+  if (result.error || !result.data) {
+    throw result.error || new Error("Paystack payment verification failed");
+  }
 
-      const data = result.data;
+  const data = result.data;
 
-      // The Edge Function returns the provider transaction status.
-      const success = data.status === 'success';
+  return {
+    success: data?.status === "completed",
+    transactionId: reference,
+    gatewayResponse: data,
+  };
+} catch (error) {
+  console.error("[Paystack] Payment verification failed:", error);
+
+  return {
+    success: false,
+    error:
+      error instanceof Error
+        ? error.message
+        : "Paystack payment verification failed",
+  };
+}
+
+}
+const data = result.data;
 
       return {
         success,
@@ -717,8 +729,138 @@ export class PaymentGateway {
       };
     }
   }
-
   /**
+
+* Process Paystack transfer to owner via the authoritative backend.
+  */
+  private async processPaystackTransfer(
+  _ownerId: string,
+  amount: number,
+  payoutDetails: {
+  payoutAccountId?: string;
+  note?: string;
+  authorizationId?: string;
+  },
+  ): Promise<PaymentResult> {
+  try {
+  if (!payoutDetails.payoutAccountId) {
+  return { success: false, error: "Missing payoutAccountId" };
+  }
+  
+  if (!payoutDetails.authorizationId) {
+  return {
+  success: false,
+  error: "Withdrawal authorization required before payout",
+  };
+  }
+  
+  const result = await backendBridge.invokeEdgeFunction(
+  "initiate-paystack-transfer",
+  {
+  amount,
+  payout_account_id: payoutDetails.payoutAccountId,
+  note: payoutDetails.note,
+  authorization_id: payoutDetails.authorizationId,
+  },
+  {
+  method: "POST",
+  idempotencyKey:
+  "payout.paystack:${payoutDetails.payoutAccountId}:${amount}",
+  },
+  );
+  
+  if (result.error || !result.data) {
+  throw result.error || new Error("Paystack transfer failed");
+  }
+  
+  return {
+  success: true,
+  transactionId:
+  result.data?.payout?.transfer_reference ||
+  result.data?.payout?.transfer_code,
+  gatewayResponse: result.data,
+  };
+  } catch (error) {
+  console.error("[Paystack] Transfer failed:", error);
+  
+  return {
+  success: false,
+  error:
+  error instanceof Error
+  ? error.message
+  : "Paystack transfer failed",
+  };
+  }
+  }
+
+/**
+
+* Process a refund through the authoritative backend.
+  */
+  async processRefund(
+  originalTransactionId: string,
+  amount: number,
+  reason: string,
+  ): Promise<PaymentResult> {
+  if (!originalTransactionId?.trim()) {
+  return {
+  success: false,
+  error: "Original transaction ID is required",
+  };
+  }
+
+if (!Number.isFinite(amount) || amount <= 0) {
+  return {
+    success: false,
+    error: "Refund amount must be greater than zero",
+  };
+}
+
+try {
+  const result = await backendBridge.invokeEdgeFunction(
+    "process-refund",
+    {
+      provider: this.gateway,
+      originalTransactionId,
+      amount,
+      reason,
+    },
+    {
+      method: "POST",
+      idempotencyKey:
+        `refund:${this.gateway}:${originalTransactionId}:${amount}`,
+    },
+  );
+
+  if (result.error || !result.data) {
+    return {
+      success: false,
+      error: result.error?.message || "Refund execution failed",
+    };
+  }
+
+  return {
+    success: result.data.success === true,
+    transactionId:
+      result.data.transactionId || result.data.refund_id,
+    gatewayResponse: result.data,
+    error:
+      result.data.success === true
+        ? undefined
+        : result.data.error || "Refund was not confirmed by provider",
+  };
+} catch (error) {
+  console.error("[PaymentGateway] Refund failed:", error);
+
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : "Refund failed",
+  };
+}
+
+}
+}
+/**
    * Initiate a Paystack transfer through the authoritative backend.
    */
   private async processPaystackTransfer(
@@ -820,6 +962,19 @@ export class PaymentGateway {
     }
   }
 
+* Process refund
+  */
+  async processRefund(
+  originalTransactionId: string,
+  amount: number,
+  reason: string
+  ): Promise<PaymentResult> {
+  try {
+  console.log("[${this.gateway}] Processing refund:", {
+  originalTransactionId,
+  amount,
+  reason,
+  });
   /**
    * Process a refund through the authoritative backend.
    */
@@ -851,7 +1006,7 @@ export class PaymentGateway {
 
     try {
       const result = await backendBridge.invokeEdgeFunction(
-        'process-refund',
+        "process-refund",
         {
           provider: this.gateway,
           originalTransactionId,

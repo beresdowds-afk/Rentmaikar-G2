@@ -1166,7 +1166,6 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         throw err;
       }
     }
-
     case "create-paystack-transaction": {
       try {
         if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };

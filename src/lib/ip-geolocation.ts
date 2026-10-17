@@ -19,6 +19,10 @@ export const normalizeCountryCodeToRegion = (
   const code = (rawCode || "").trim().toUpperCase();
 
   if (code === "NG" || code === "NGA" || code === "NIGERIA") {
+    return { country: "Nigeria", countryCode: "NG" };
+  }
+
+  // Unknown or unsupported country: never silently default to USA.
     return {
       country: "Nigeria",
       countryCode: "NG",
@@ -38,11 +42,9 @@ export const normalizeCountryCodeToRegion = (
   };
 };
 
-// Provider 1: ipwho.is
-const fetchFromIpWhoIs = async (): Promise<{
-  countryCode: string;
-  ip?: string;
-}> => {
+
+// Provider 1: ipwho.is (Free, HTTPS, CORS-friendly, no API key required)
+const fetchFromIpWhoIs = async (): Promise<{ countryCode: string; ip?: string }> => {
   const res = await fetch("https://ipwho.is/", { method: "GET" });
 
   if (!res.ok) {
