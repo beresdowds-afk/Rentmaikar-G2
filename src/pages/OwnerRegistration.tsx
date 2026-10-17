@@ -346,11 +346,11 @@ const OwnerRegistration = () => {
       if (sessionNow?.session) {
         toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
         setSubmitError(null);
-        navigate("/owner/dashboard");
+        navigate("/onboarding-redirect");
       } else {
         toast.success("Application submitted! Please sign in or check your email to confirm your account.");
         setSubmitError(null);
-        navigate("/auth?returnTo=/owner/dashboard");
+        navigate("/auth?returnTo=/onboarding-redirect");
       }
     } catch (error) {
       console.error("Owner registration error:", error);
