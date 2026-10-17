@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error("[paystack-webhook] settlement reconciliation failed", tx.payment_id, e);
       }
-      await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
+      await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) : undefined, tx.currency ?? undefined, reference);
 
       // Confirm IoT hardware orders if payment was for IoT device
       await supabase
@@ -163,7 +163,7 @@ Deno.serve(async (req) => {
       await supabase.from("payments").update({
         status: "failed", failure_reason: evt.data.gateway_response ?? "failed",
       }).eq("id", tx.payment_id).neq("status", "completed");
-      await notifyPush(tx.payment_id, tx.rental_id ?? null, "failed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
+      await notifyPush(tx.payment_id, tx.rental_id ?? null, "failed", tx.amount ? Number(tx.amount) : undefined, tx.currency ?? undefined, reference);
     }
   } else if (evt.event === "refund.processed" || evt.event === "refund.failed") {
     // Paystack refunds carry the original transaction reference.

@@ -48,16 +48,8 @@ function getOpayConfig(): OpayConfig {
       "OPay credentials are not configured: OPAY_MERCHANT_ID, OPAY_PUBLIC_KEY, OPAY_SECRET_KEY"
     );
   }
-async function opaySignature(
-  body: string,
-  secretKey: string,
-): Promise<string> {
-  return crypto
-    .createHmac("sha512", secretKey)
-    .update(body)
-    .digest("hex");
-}
-const environment =
+  const rawEnvironment = (process.env.OPAY_ENVIRONMENT || "").trim().toLowerCase();
+  const environment =
     rawEnvironment === "live" ||
     rawEnvironment === "production" ||
     rawEnvironment === "prod"
@@ -89,7 +81,7 @@ async function opayRequest<T = Record<string, unknown>>(
   raw: unknown;
 }> {
   const body = JSON.stringify(payload);
-  const signature = await opaySignature(body, cfg.secretKey);
+  const signature = opaySignature(body, cfg.secretKey);
 
   const url = `${cfg.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -681,7 +673,7 @@ export async function createOpayOrder(params: {
   }
 
   const expected =
-    await opaySignature(
+    opaySignature(
       rawBody,
       cfg.secretKey,
     );
