@@ -1,6 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { AppRole } from '@/lib/role-home';
 
+/** Roles a user may legitimately hold on their own account via the client fallback. */
+export const SELF_SERVICE_ROLES: AppRole[] = ['owner', 'driver'];
+
 /**
  * Single client-side entry point for role assignment.
  *
@@ -49,8 +52,16 @@ export async function assignRole(
     lastError = err;
   }
 
-  // 3. Fallback to direct table upsert
+  // 3. Fallback to direct table upsert. A user provisioning THEIR OWN account may
+  // only ever receive a self-service role; elevated roles must come from the
+  // server-side RPC or an admin acting on another user (enforced by RLS).
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData?.session?.user?.id === userId && !SELF_SERVICE_ROLES.includes(role)) {
+      const denied = new Error(`Role "${role}" cannot be self-assigned.`);
+      (denied as any).code = 'ROLE_SELF_ASSIGN_DENIED';
+      throw denied;
+    }
     const { error: upsertErr } = await supabase.from('user_roles').upsert(
       { user_id: userId, role: role as any },
       { onConflict: 'user_id' }

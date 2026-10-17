@@ -84,6 +84,8 @@ interface TwoFactorStatus {
   has_phone: boolean;
   preferred_channel: string;
   phone?: string;
+  /** True when the status lookup failed and we are failing closed. */
+  check_failed?: boolean;
 }
 
 interface AuthContextType {
@@ -450,9 +452,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setTwoFactorVerified(true);
       }
       return status;
-    } catch {
-      setTwoFactorVerified(true);
-      return null;
+    } catch (err) {
+      // Fail closed: if we cannot determine whether 2FA applies, do not grant
+      // the session a verified state. The user is routed to the 2FA challenge
+      // (or can sign out / retry) instead of silently bypassing it.
+      console.error('[AuthContext] 2FA status check failed; failing closed:', err);
+      const failed: TwoFactorStatus = {
+        requires_2fa: true,
+        is_setup: true,
+        is_mandatory: false,
+        has_phone: false,
+        preferred_channel: 'sms',
+        check_failed: true,
+      };
+      setTwoFactorStatus(failed);
+      setTwoFactorVerified(false);
+      return failed;
     }
   };
 
@@ -495,7 +510,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setTwoFactorVerified(true);
             }
           })
-          .catch(() => setTwoFactorVerified(true));
+          .catch(() => setTwoFactorVerified(false));
       }
     },
     onSignedOut: () => {
@@ -548,7 +563,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setTwoFactorVerified(true);
             }
           }).catch(() => {
-            setTwoFactorVerified(true);
+            setTwoFactorVerified(false);
           });
         } else {
           setUserRole(null);
@@ -679,7 +694,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setTwoFactorVerified(true);
           }
         }).catch(() => {
-          setTwoFactorVerified(true);
+          setTwoFactorVerified(false);
         });
       } else {
         setIsRoleLoading(false);
@@ -803,7 +818,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         _max_requests: 5,
         _window_seconds: 300,
       });
-      if (!rlError && allowed === false) {
+      if (rlError) {
+        // Fail closed: an unavailable limiter must not disable brute-force protection.
+        console.error('[AuthContext] check_auth_rate_limit failed:', rlError);
+        await logAuthEvent('sign_in_rate_limit_unavailable', { email: normalized, success: false, errorCode: rlError.message });
+        return { error: new Error('Sign-in is temporarily unavailable. Please try again shortly.') };
+      }
+      if (allowed === false) {
         await logAuthEvent('sign_in_rate_limited', { email: normalized, success: false });
         return { error: new Error('Too many sign-in attempts. Please wait a few minutes and try again.') };
       }

@@ -27,7 +27,10 @@ const BodySchema = z.object({
   paymentFrequency: z.enum(["daily", "weekly"]).optional(),
   purpose: z.string().optional(),
   invoiceId: z.string().uuid().optional(),
-  callbackUrl: z.string().url().optional(),
+  callbackUrl: z.string().url().refine((u) => {
+    const base = Deno.env.get("APP_URL") ?? "https://rentmaikar.com";
+    try { return new URL(u).origin === new URL(base).origin; } catch { return false; }
+  }, "callbackUrl must be on the app origin").optional(),
 });
 
 const CHANNELS = { card: ["card"], bank: ["bank", "bank_transfer"] } as const;

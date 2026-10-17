@@ -5,8 +5,9 @@ ALTER TABLE public.payments
   ADD COLUMN IF NOT EXISTS payer_type TEXT NOT NULL DEFAULT 'driver'
     CHECK (payer_type IN ('driver','proxy')),
   ADD COLUMN IF NOT EXISTS proxy_account_id UUID
-    REFERENCES public.driver_proxy_billing_accounts(id) ON DELETE SET NULL;
+    REFERENCES public.driver_proxy_billing_accounts(id) ON DELETE RESTRICT;
 
+ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS payments_proxy_payer_requires_account;
 ALTER TABLE public.payments
   ADD CONSTRAINT payments_proxy_payer_requires_account
   CHECK (payer_type <> 'proxy' OR proxy_account_id IS NOT NULL);
