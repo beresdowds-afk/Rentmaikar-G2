@@ -2,7 +2,7 @@
  * End-to-end regression tests for the registration flows.
  *
  * Covers the two behaviours we keep breaking:
- *  1. Driver registration submits and redirects to the driver dashboard, and
+ *  1. Driver registration submits and delegates the next step to onboarding, and
  *     refuses to submit when the (mandatory) home address is blank/too short.
  *  2. Owner registration submits successfully with a BLANK address and writes
  *     `street_address: null` to the database.

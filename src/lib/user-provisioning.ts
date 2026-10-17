@@ -1,5 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { AppRole } from '@/lib/role-home';
+import {
+  guardedPasswordSignIn,
+  isAuthSignInGuardError,
+} from '@/lib/auth-password-sign-in';
 
 /** Roles a user may legitimately hold on their own account via the client fallback. */
 export const SELF_SERVICE_ROLES: AppRole[] = ['owner', 'driver'];
@@ -262,7 +266,12 @@ export async function ensureAuthUserForApplicant({
     });
     if (statusData && typeof statusData === 'object' && (statusData as any).registered === true) {
       // Email is already registered. Attempt sign-in with the password provided.
+<<<<<<< HEAD
       const { data: signInData, error: signInError } = await guardedPasswordSignIn(normalizedEmail, password);
+=======
+      const { data: signInData, error: signInError } =
+        await guardedPasswordSignIn(normalizedEmail, password, 'registration');
+>>>>>>> origin/copilot/compare-open-branches
 
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
@@ -281,7 +290,11 @@ export async function ensureAuthUserForApplicant({
       throw duplicateError;
     }
   } catch (rpcErr: any) {
-    if (rpcErr?.code === 'EMAIL_ALREADY_EXISTS' || rpcErr?.message?.includes('already exists')) {
+    if (
+      rpcErr?.code === 'EMAIL_ALREADY_EXISTS' ||
+      rpcErr?.message?.includes('already exists') ||
+      isAuthSignInGuardError(rpcErr)
+    ) {
       throw rpcErr;
     }
     // Rate limited or RPC unavailable, continue to signUp attempt
@@ -308,7 +321,12 @@ export async function ensureAuthUserForApplicant({
       signUpError.status === 422
     ) {
       // Attempt sign-in with password in case account was already created
+<<<<<<< HEAD
       const { data: signInData, error: signInError } = await guardedPasswordSignIn(normalizedEmail, password);
+=======
+      const { data: signInData, error: signInError } =
+        await guardedPasswordSignIn(normalizedEmail, password, 'registration');
+>>>>>>> origin/copilot/compare-open-branches
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
         await verifyProfileExists(userId, requestedRole, normalizedEmail);
@@ -336,7 +354,12 @@ export async function ensureAuthUserForApplicant({
     signUpData.user.identities.length === 0
   ) {
     // Attempt sign-in with password
+<<<<<<< HEAD
     const { data: signInData, error: signInError } = await guardedPasswordSignIn(normalizedEmail, password);
+=======
+    const { data: signInData, error: signInError } =
+      await guardedPasswordSignIn(normalizedEmail, password, 'registration');
+>>>>>>> origin/copilot/compare-open-branches
     if (!signInError && signInData?.user?.id) {
       const userId = signInData.user.id;
       await verifyProfileExists(userId, requestedRole, normalizedEmail);
