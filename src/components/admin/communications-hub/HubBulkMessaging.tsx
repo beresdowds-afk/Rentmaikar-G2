@@ -600,9 +600,6 @@ export const HubBulkMessaging: React.FC = () => {
       }
       }
     for (let i = 0; i < usableContacts.length; i++) {
-  if (channel === 'email') {
-    break;
-  }
       if (abortRef.current) {
         toast.info('Bulk dispatch paused by admin.');
         break;
@@ -643,125 +640,7 @@ export const HubBulkMessaging: React.FC = () => {
       );
 
       try {
-        if (channel === 'email' && contact.email) {
-          const emailTarget = contact.email.trim();
-          const uniqueId = crypto.randomUUID();
-
-          const emailPayload = {
-            id: uniqueId,
-            messageId: uniqueId,
-            action: 'send',
-            to: emailTarget,
-            from: 'Rentmaikar Notifications <noreply@notify.rentmaikar.com>',
-            subject: renderedSubj,
-            body: renderedMsg,
-            recipientName: fullName !== 'Customer' ? fullName : undefined,
-            category: 'general',
-            headers: {
-              'Message-ID': `<${uniqueId}@notify.rentmaikar.com>`,
-              'X-Entity-Ref-ID': uniqueId,
-            },
-            tags: [
-              { name: 'message_id', value: uniqueId },
-              { name: 'platform_source', value: 'hub_bulk_messaging' },
-            ],
-            templateData: {
-              subject: renderedSubj,
-              body: renderedMsg,
-              recipientName: fullName !== 'Customer' ? fullName : undefined,
-            },
-          };
-
-          // AUTHORITATIVE: frontend -> backend bridge -> Cloud Run.
-// The bridge preserves the authenticated user's JWT and handles
-// same-origin -> staging.rentmaikar.com failover.
-let emailDelivered = false;
-let emailErrorMsg = '';
-let responseStatus = 502;
-
-try {
-  const bridgeRes = await backendBridge.invokeEdgeFunction(
-    'send-outbound-email',
-    emailPayload,
-    {
-      method: 'POST',
-      timeoutMs: 15000,
-      skipRetry: true,
-    },
-  );
-
-  responseStatus = bridgeRes.status;
-
-  console.group(
-    `[HubBulkMessaging] Backend Email Response: send-outbound-email -> ${emailTarget}`
-  );
-  console.log('Handled by:', bridgeRes.handledBy);
-  console.log('HTTP Status:', responseStatus);
-  console.log('Response:', bridgeRes.data);
-  console.groupEnd();
-
-  if (
-    !bridgeRes.error &&
-    bridgeRes.data?.ok !== false &&
-    bridgeRes.data?.success !== false
-  ) {
-    emailDelivered = true;
-    emailErrorMsg = '';
-  } else {
-    emailErrorMsg =
-      bridgeRes.data?.error ||
-      bridgeRes.data?.message ||
-      bridgeRes.error?.message ||
-      `Email delivery failed with HTTP ${responseStatus}`;
-  }
-} catch (invokeErr: any) {
-  responseStatus = invokeErr?.status || 502;
-  emailErrorMsg =
-    invokeErr?.message ||
-    `Cloud Run email gateway request failed (HTTP ${responseStatus})`;
-}
-          // Strict verification: delivery must be confirmed by a successful
-          // Cloud Run gateway response. The backend itself owns the
-          // Supabase fallback.
-          if (
-            !emailDelivered ||
-            responseStatus < 200 ||
-            responseStatus >= 300
-          ) {
-            const formattedError =
-              emailErrorMsg ||
-              `Email delivery failed with HTTP ${responseStatus}`;
-
-            console.error(
-              `🚨 [HubBulkMessaging] Delivery failed for ${emailTarget}: ${formattedError} (Status: ${responseStatus})`
-            );
-
-            const err = new Error(formattedError);
-            (err as any).status = responseStatus;
-            throw err;
-          }             
-          setRecipientStatuses((prev) => ({
-            ...prev,
-            [recipientKey]: {
-              status: 'success',
-              httpStatus: responseStatus,
-            },
-          }));
-
-          // Non-blocking conversation logging for history
-          try {
-            await supabase.from('inbox_messages' as never).insert({
-              sender_type: 'admin',
-              sender_name: 'Rentmaikar Admin',
-              content: renderedMsg,
-              channel: 'email',
-              is_read: true,
-              metadata: { bulk: true, subject: renderedSubj, recipient_email: emailTarget },
-            } as never);
-          } catch {
-            /* non-fatal history log */
-          }
-        } else if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
+        if ((channel === 'sms' || channel === 'whatsapp') && contact.phone) {
           const phoneTarget = contact.phone.trim();
           const isWhatsApp = channel === 'whatsapp';
           const finalSmsBody = channel === 'sms' && smsOptOut && !renderedMsg.toLowerCase().includes('stop')
@@ -956,8 +835,8 @@ try {
         failures: [...failures],
       });
 
-      // Channel-specific safety throttle: 550ms for email to strictly honor Resend 2 req/s limit, 150ms for SMS/in-app
-      const throttleMs = channel === 'email' ? 550 : 150;
+      // Safety throttle for SMS/WhatsApp/in-app (email is dispatched server-side above)
+      const throttleMs = 150;
       await new Promise((resolve) => setTimeout(resolve, throttleMs));
     }
 
