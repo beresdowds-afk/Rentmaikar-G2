@@ -22,6 +22,12 @@ const uniqueEmail = () =>
 
 test.describe('Signup → verification → onboarding → dashboard', () => {
   test('driver signup surfaces verification gate and cooldown', async ({ page }) => {
+    test.skip(
+      !process.env.VITE_SUPABASE_URL ||
+        !(process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY),
+      'Requires an explicitly configured Supabase project.',
+    );
+
     const email = uniqueEmail();
 
     await page.goto('/auth');
