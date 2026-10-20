@@ -2,10 +2,19 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
-import { resolveIdempotencyKey } from "../_shared/payment-idempotency.ts";
-import { describeError, getPayPalConfig, PayPalError, payPalRequest, ensurePayPalConfig } from "../_shared/paypal-client.ts";
+import { claimIdempotencyKey, completeIdempotencyKey, duplicateResponse, resolveIdempotencyKey } from "../_shared/payment-idempotency.ts";
+import { postLedgerEntry } from "../_shared/wallet-ledger.ts";
+import { describeError, getPayPalConfig, PayPalError, payPalRequest,
+  ensurePayPalConfig,
+} from "../_shared/paypal-client.ts";
+import {
+  consumeWithdrawalAuthorization,
+  requireWithdrawalAuthorization,
+  transitionState,
+} from "../_shared/withdrawal-authorization.ts";
 import { notifyWithdrawalEvent } from "../_shared/withdrawal-notify.ts";
 import { requireVerifiedPhone } from "../_shared/verified-phone.ts";
+
 
 const BodySchema = z.object({
   amount: z.number().positive(),
@@ -14,37 +23,14 @@ const BodySchema = z.object({
   authorizationId: z.string().uuid(),
 });
 
-const CODE_STATUS: Record<string, number> = {
-  invalid_request: 400,
-  invalid_amount: 400,
-  invalid_provider: 400,
-  invalid_idempotency_key: 400,
-  invalid_account: 400,
-  authorization_not_found: 403,
-  authorization_wrong_owner: 403,
-  authorization_type_mismatch: 403,
-  authorization_not_approved: 403,
-  authorization_expired: 403,
-  authorization_amount_mismatch: 403,
-  authorization_currency_mismatch: 403,
-  insufficient_balance: 400,
-  payout_in_progress: 409,
-  idempotency_conflict: 409,
-};
 
-/*
- * Same lifecycle and invariants as initiate-paystack-transfer and
- * paymentService.processPayPalOwnerPayout: atomic authorization consumption +
- * reservation, exactly one provider attempt, submission != settlement.
- * PayPal-Request-Id and sender_batch_id both carry the payout's persisted
- * transfer_reference, so PayPal itself de-duplicates repeated submissions.
- */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     await ensurePayPalConfig();
     const cfg = getPayPalConfig();
     if (!cfg) return json({ error: "PayPal not configured" }, 503);
+
 
     const auth = req.headers.get("Authorization") ?? "";
     if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
@@ -57,61 +43,90 @@ Deno.serve(async (req) => {
     const owner = u?.user;
     if (!owner) return json({ error: "Unauthenticated" }, 401);
 
+    // Compulsory for withdrawals (but never for SMS/WhatsApp messaging).
     const phoneCheck = await requireVerifiedPhone(supabase, owner.id);
     if (!phoneCheck.ok) return json({ error: phoneCheck.error }, phoneCheck.status ?? 428);
 
-    const rawBody = await req.json().catch(() => ({}));
+    const rawBody = await req.json();
     const parsed = BodySchema.safeParse(rawBody);
     if (!parsed.success) return json({ error: parsed.error.flatten() }, 400);
     const b = parsed.data;
 
     const idemKey = resolveIdempotencyKey(req, rawBody ?? {});
-    if (!idemKey) return json({ error: "Idempotency-Key is required" }, 400);
+    const claim = await claimIdempotencyKey(supabase, idemKey, "payout.paypal", owner.id, {
+      amount: b.amount, payoutAccountId: b.payoutAccountId,
+    });
+    if (!claim.claimed) return duplicateResponse(claim, corsHeaders);
 
     const { data: acc } = await supabase.from("owner_payout_accounts")
-      .select("id, provider, currency, paypal_email")
-      .eq("id", b.payoutAccountId).eq("owner_id", owner.id).maybeSingle();
+      .select("*").eq("id", b.payoutAccountId).eq("owner_id", owner.id).maybeSingle();
     if (!acc || acc.provider !== "paypal" || !acc.paypal_email) {
       return json({ error: "Invalid PayPal payout account" }, 400);
     }
+
+    // Enforce minimum, precision, and available-balance guardrails.
     if (b.amount < 1) return json({ error: "Amount below minimum payout" }, 400);
+    if (Math.round(b.amount * 100) !== b.amount * 100) {
+      return json({ error: "Amount must have at most 2 decimals" }, 400);
+    }
 
-    const { data: created, error: createErr } = await supabase.rpc("create_owner_self_withdrawal", {
-      _owner_id: owner.id,
-      _authorization_id: b.authorizationId,
-      _payout_account_id: acc.id,
-      _amount: b.amount,
-      _currency: "USD",
-      _provider: "paypal",
-      _idempotency_key: idemKey,
+    const { data: balanceRow, error: balanceErr } = await supabase.rpc(
+      "get_owner_available_balance",
+      { _owner_id: owner.id, _currency: "USD" },
+    );
+    if (balanceErr) {
+      console.error("[initiate-paypal-payout] balance rpc error:", balanceErr);
+      return json({ error: "Failed to verify balance" }, 500);
+    }
+    const available = Number(balanceRow ?? 0);
+    if (b.amount > available) {
+      return json({ error: "Amount exceeds available balance", available }, 400);
+    }
+
+    // Dual authorization + velocity/device-risk gate.
+    const authz = await requireWithdrawalAuthorization(supabase, {
+      authorizationId: b.authorizationId,
+      subjectUserId: owner.id,
+      amount: b.amount,
+      currency: "USD",
+      requestType: "owner_payout",
     });
-    if (createErr) {
-      console.error("[initiate-paypal-payout] create rpc error:", createErr.message);
-      return json({ error: "Could not create payout" }, 500);
-    }
-    if (!created?.ok) {
-      return json({ error: created?.error ?? "Withdrawal rejected", code: created?.code },
-        CODE_STATUS[created?.code] ?? 400);
+    if (!authz.ok) {
+      await completeIdempotencyKey(supabase, idemKey, "failed", { error: authz.error });
+      return json({ error: authz.error }, authz.status ?? 403);
     }
 
-    const payoutId: string = created.payout_id;
-    const reference: string = created.transfer_reference;
+    const { count } = await supabase.from("owner_payouts")
+      .select("*", { count: "exact", head: true })
+      .eq("owner_id", owner.id).in("status", ["pending", "authorized", "captured", "processing"]);
+    if ((count ?? 0) > 0) return json({ error: "A payout is already in progress" }, 409);
 
-    if (created.duplicate) {
-      return json({ payout: await loadPayout(supabase, payoutId), duplicate: true });
+    const reference = `pyt_${crypto.randomUUID().replace(/-/g, "")}`;
+
+    // Create the payout in the canonical Pending state before touching the PSP.
+    const { data: payout } = await supabase.from("owner_payouts").insert({
+      owner_id: owner.id, payout_account_id: acc.id, provider: "paypal",
+      amount: b.amount, currency: "USD", status: "pending",
+      transfer_reference: reference, initiated_by: "owner",
+    }).select("*").maybeSingle();
+
+    if (!payout?.id) {
+      await completeIdempotencyKey(supabase, idemKey, "failed");
+      return json({ error: "Could not create payout record" }, 500);
     }
 
-    const { data: claim } = await supabase.rpc("claim_owner_payout_provider_attempt", { _payout_id: payoutId });
-    if (!claim?.claimed) {
-      return json({ payout: await loadPayout(supabase, payoutId), duplicate: true });
-    }
-
+    await transitionState(supabase, "payout", payout.id, "authorized", "dual authorization approved", {
+      authorization_id: authz.authorizationId,
+    });
+    await consumeWithdrawalAuthorization(supabase, authz.authorizationId!, payout.id);
     await notifyWithdrawalEvent(supabase, {
       event: "approved", ownerId: owner.id, amount: b.amount, currency: "USD",
-      provider: "paypal", payoutId, authorizationId: b.authorizationId,
+      provider: "paypal", payoutId: payout.id, authorizationId: authz.authorizationId,
       destination: acc.paypal_email,
-    }).catch(() => undefined);
+    });
 
+    // `sender_batch_id` plus `PayPal-Request-Id` both carry the same unique
+    // reference, so a retried request can never disburse the money twice.
     let payoutBody: any;
     try {
       payoutBody = await payPalRequest<any>(cfg, "/v1/payments/payouts", {
@@ -134,74 +149,84 @@ Deno.serve(async (req) => {
         },
       });
     } catch (e) {
-      // Only a PayPal 4xx response proves the batch was not created.
-      const definitive = e instanceof PayPalError && e.status >= 400 && e.status < 500 && e.status !== 408;
+      const isAuth = e instanceof PayPalError && (e.status === 401 || e.status === 403);
       const message = e instanceof PayPalError
         ? (describeError(e.body) ?? e.message)
         : "Could not reach PayPal";
-      if (!definitive) {
-        await supabase.rpc("mark_owner_payout_reconciliation_required", {
-          _payout_id: payoutId,
-          _reason: "PayPal request outcome unknown",
-          _payload: { error: message },
-        });
-        return json({ payout: await loadPayout(supabase, payoutId), reconciliation_required: true }, 202);
-      }
-      const { data: fin } = await supabase.rpc("finalize_owner_payout", {
-        _payout_id: payoutId,
-        _outcome: "failed",
-        _provider: "paypal",
-        _evidence: { source: "initiate", http_status: (e as PayPalError).status, message },
-      });
-      if (!fin?.ok) {
-        await supabase.rpc("mark_owner_payout_reconciliation_required", {
-          _payout_id: payoutId, _reason: "Failed to release reservation after rejection",
-          _payload: { message },
-        });
-      }
+      await transitionState(
+        supabase, "payout", payout.id, "failed",
+        isAuth ? "PayPal auth failed" : message,
+      );
+      await supabase.from("owner_payouts")
+        .update({
+          failure_reason: message,
+          raw_payload: e instanceof PayPalError ? e.body : { error: message },
+        })
+        .eq("id", payout.id);
+      await completeIdempotencyKey(supabase, idemKey, "failed");
       await notifyWithdrawalEvent(supabase, {
         event: "failed", ownerId: owner.id, amount: b.amount, currency: "USD",
-        provider: "paypal", payoutId, reason: message,
-      }).catch(() => undefined);
-      return json({ error: message, payout: await loadPayout(supabase, payoutId) }, 502);
-    }
-
-    const batchId = payoutBody?.batch_header?.payout_batch_id;
-    const batchStatus = payoutBody?.batch_header?.batch_status ?? null;
-    if (!batchId) {
-      await supabase.rpc("mark_owner_payout_reconciliation_required", {
-        _payout_id: payoutId,
-        _reason: "PayPal response did not include a payout batch id",
-        _payload: payoutBody ?? null,
+        provider: "paypal", payoutId: payout.id, reason: message,
       });
-      return json({ payout: await loadPayout(supabase, payoutId), reconciliation_required: true }, 202);
+      return json({ error: message }, 502);
     }
 
-    // A batch id is a submission, not settlement. Final status comes from the
-    // verified PAYMENT.PAYOUTS-ITEM.* webhook or an authenticated status lookup.
-    await supabase.rpc("record_owner_payout_submitted", {
-      _payout_id: payoutId,
-      _transfer_code: batchId,
-      _provider_status: batchStatus,
-      _payload: payoutBody,
+
+    const batchStatus = payoutBody?.batch_header?.batch_status ?? "PENDING";
+
+    await supabase.from("owner_payouts").update({
+      transfer_code: payoutBody?.batch_header?.payout_batch_id,
+      raw_payload: payoutBody,
+    }).eq("id", payout.id);
+
+    await transitionState(supabase, "payout", payout.id, "captured", "payout batch submitted to PayPal");
+    if (batchStatus === "SUCCESS") {
+      await transitionState(supabase, "payout", payout.id, "settled", "PayPal batch success");
+      await transitionState(supabase, "payout", payout.id, "completed", "payout complete");
+      await notifyWithdrawalEvent(supabase, {
+        event: "completed", ownerId: owner.id, amount: b.amount, currency: "USD",
+        provider: "paypal", payoutId: payout.id, destination: acc.paypal_email,
+      });
+    } else if (batchStatus === "DENIED") {
+      await transitionState(supabase, "payout", payout.id, "failed", "PayPal denied the batch");
+      await notifyWithdrawalEvent(supabase, {
+        event: "failed", ownerId: owner.id, amount: b.amount, currency: "USD",
+        provider: "paypal", payoutId: payout.id, reason: "PayPal denied the payout batch",
+      });
+    } else {
+      await notifyWithdrawalEvent(supabase, {
+        event: "submitted", ownerId: owner.id, amount: b.amount, currency: "USD",
+        provider: "paypal", payoutId: payout.id, destination: acc.paypal_email,
+      });
+    }
+
+    const led = await postLedgerEntry(supabase, {
+      userId: owner.id,
+      accountType: "owner",
+      currency: "USD",
+      direction: "debit",
+      amount: b.amount,
+      entryType: "payout",
+      idempotencyKey: `payout:${payout.id}:requested`,
+      referenceTable: "owner_payouts",
+      referenceId: payout.id,
+      provider: "paypal",
+      providerReference: reference,
+      description: "Owner payout requested",
+      status: batchStatus === "SUCCESS" ? "posted" : "pending",
     });
-    await notifyWithdrawalEvent(supabase, {
-      event: "submitted", ownerId: owner.id, amount: b.amount, currency: "USD",
-      provider: "paypal", payoutId, destination: acc.paypal_email,
-    }).catch(() => undefined);
-    return json({ payout: await loadPayout(supabase, payoutId) });
+    if (!led.ok) console.error("[initiate-paypal-payout] ledger error:", led.error);
+
+    const { data: finalPayout } = await supabase.from("owner_payouts")
+      .select("*").eq("id", payout.id).maybeSingle();
+
+    await completeIdempotencyKey(supabase, idemKey, "succeeded", { payout: finalPayout });
+    return json({ payout: finalPayout });
+
   } catch (err) {
-    console.error("[initiate-paypal-payout] unexpected error:", err);
-    return json({ error: "unknown" }, 500);
+    return json({ error: err instanceof Error ? err.message : "unknown" }, 500);
   }
 });
-
-async function loadPayout(supabase: any, id: string) {
-  const { data } = await supabase.from("owner_payouts")
-    .select("id, status, workflow_type, amount, currency, provider, transfer_reference, transfer_code, reconciliation_required, reconciliation_reason, created_at")
-    .eq("id", id).maybeSingle();
-  return data;
-}
 
 function json(b: unknown, status = 200) {
   return new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });

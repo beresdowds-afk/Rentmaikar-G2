@@ -1,9 +1,8 @@
 // deno-lint-ignore-file no-explicit-any
 import { corsHeaders } from "../_shared/cors.ts";
-import { amountsMatch } from "../_shared/amount-check.ts";
 import { settlePaymentFinancials } from "../_shared/wallet-ledger.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { getOpayConfig, mapOpayStatus, opayFailureReason, queryCashierStatus, toMinorUnits, verifyOpayWebhook } from "../_shared/opay-client.ts";
+import { mapOpayStatus, opayFailureReason, verifyOpayWebhook } from "../_shared/opay-client.ts";
 import {
   recordWebhookEvent,
   markPaymentCompletedIdempotent,
@@ -88,35 +87,6 @@ Deno.serve(async (req) => {
   }
 
   const status = mapOpayStatus(opayStatus);
-  if (status === "completed") {
-    // Never trust the callback body for success: re-query OPay's authoritative
-    // status endpoint and compare status, amount (minor units) and currency
-    // with the stored order before anything is updated or settled.
-    const { data: expected } = await supabase.from("opay_transactions")
-      .select("payment_id, amount, currency").eq("reference", reference).maybeSingle();
-    const cfg = getOpayConfig();
-    let confirmed = false;
-    if (cfg && expected?.payment_id) {
-      try {
-        const q = await queryCashierStatus(reference, cfg);
-        const d: any = q.ok ? q.data : null;
-        confirmed = Boolean(d)
-          && mapOpayStatus(d.status) === "completed"
-          && amountsMatch(toMinorUnits(Number(expected.amount)), expected.currency, d?.amount?.total, d?.amount?.currency);
-      } catch (e) {
-        console.error("[opay-webhook] authoritative re-query failed", reference, e);
-      }
-    }
-    if (!confirmed) {
-      console.error("[opay-webhook] success not confirmed by provider re-query; not settling", reference);
-      // Release the dedupe record so a later (or retried) delivery can be processed.
-      await supabase.from("payment_webhook_events").delete()
-        .eq("provider", "opay").eq("external_event_id", String(externalEventId));
-      return new Response(JSON.stringify({ received: true, rejected: "unconfirmed" }), {
-        status: 202, headers: { ...corsHeaders, ...correlationHeaders(logger), "Content-Type": "application/json" },
-      });
-    }
-  }
   const failure = status === "failed"
     ? opayFailureReason(opayStatus, p?.failureReason ?? p?.errorMsg ?? null)
     : null;

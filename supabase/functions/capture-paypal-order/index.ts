@@ -1,7 +1,6 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://esm.sh/zod@3.23.8";
-import { amountsMatch } from "../_shared/amount-check.ts";
 import { requireAuthenticatedUser } from "../_shared/auth-guards.ts";
 import { syncPaymentStatus } from "../_shared/payment-status-sync.ts";
 import { describeError, getPayPalConfig, PayPalError, payPalRequest,
@@ -16,7 +15,7 @@ interface CaptureResponse {
   status?: string;
   payer?: { email_address?: string; payer_id?: string };
   purchase_units?: Array<{
-    payments?: { captures?: Array<{ id?: string; status?: string; amount?: { value?: string; currency_code?: string } }> };
+    payments?: { captures?: Array<{ id?: string; status?: string }> };
   }>;
 }
 
@@ -49,7 +48,7 @@ Deno.serve(async (req) => {
     // user could capture (and be credited for) somebody else's PayPal order.
     const { data: existingTx, error: txLookupError } = await supa
       .from("paypal_transactions")
-      .select("payment_id, driver_id, status, capture_id, amount, currency")
+      .select("payment_id, driver_id, status, capture_id")
       .eq("order_id", order_id)
       .maybeSingle();
 
@@ -107,17 +106,6 @@ Deno.serve(async (req) => {
     const captureId = captureRecord?.id ?? null;
     const captureStatus = captureRecord?.status ?? capture.status ?? "UNKNOWN";
     const payer = capture.payer;
-
-    if (
-      captureStatus === "COMPLETED" &&
-      !amountsMatch(existingTx.amount, existingTx.currency, captureRecord?.amount?.value, captureRecord?.amount?.currency_code)
-    ) {
-      console.error("[capture-paypal-order] amount/currency mismatch; refusing settlement", order_id);
-      await supa.from("paypal_transactions")
-        .update({ status: "amount_mismatch", capture_id: captureId, raw_capture_response: capture })
-        .eq("order_id", order_id);
-      return json({ error: "Provider amount or currency does not match the expected payment" }, 422);
-    }
 
     if (paymentId) {
       // Keep the provider reference on the row, then let the shared writer

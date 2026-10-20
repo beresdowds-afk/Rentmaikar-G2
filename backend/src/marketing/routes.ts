@@ -140,7 +140,7 @@ marketingApiRouter.post('/campaigns', requireCampaignManagers, async (req: Reque
  */
 marketingApiRouter.patch('/campaigns/:id', requireCampaignManagers, async (req: Request, res: Response) => {
   try {
-    const externalId = req.params.id;
+    const externalId = req.params.id as string;
     const { platform, action, status, ...patch } = req.body;
 
     if (!platform) {
@@ -173,7 +173,7 @@ marketingApiRouter.patch('/campaigns/:id', requireCampaignManagers, async (req: 
  */
 marketingApiRouter.post('/campaigns/:id/duplicate', requireCampaignManagers, async (req: Request, res: Response) => {
   try {
-    const externalId = req.params.id;
+    const externalId = req.params.id as string;
     const { platform, newName } = req.body;
 
     if (!platform) {
@@ -329,7 +329,7 @@ marketingApiRouter.get('/oauth/:platform/callback', async (req: Request, res: Re
  * Supports Meta App Dashboard challenge verification and ping checks
  */
 marketingApiRouter.get('/webhooks/:platform', (req: Request, res: Response) => {
-  const platform = req.params.platform;
+  const platform = req.params.platform as string;
 
   if (platform === 'meta') {
     const mode = req.query['hub.mode'];
@@ -356,7 +356,7 @@ marketingApiRouter.get('/webhooks/:platform', (req: Request, res: Response) => {
  * Hardened with durable database deduplication, signature verification, and safe error handling.
  */
 marketingApiRouter.post('/webhooks/:platform', async (req: Request, res: Response) => {
-  const platform = req.params.platform;
+  const platform = req.params.platform as string;
   const headers = req.headers as Record<string, string>;
   const startTime = Date.now();
 
@@ -551,11 +551,12 @@ marketingApiRouter.post('/leads', async (req: Request, res: Response) => {
 
 marketingApiRouter.get('/leads/:id', requireMarketingStaff, async (req: Request, res: Response) => {
   try {
-    const lead = await marketingEngineServer.leads.getLeadById(req.params.id);
+    const leadId = req.params.id as string;
+    const lead = await marketingEngineServer.leads.getLeadById(leadId);
     if (!lead) {
       return res.status(404).json({ ok: false, error: 'Lead not found' });
     }
-    const activities = await marketingEngineServer.leads.getLeadActivities(req.params.id);
+    const activities = await marketingEngineServer.leads.getLeadActivities(leadId);
     res.json({ ok: true, lead, activities });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
@@ -569,7 +570,8 @@ marketingApiRouter.patch('/leads/:id/stage', requireMarketingStaff, async (req: 
   }
 
   try {
-    const result = await marketingEngineServer.leads.advanceStage(req.params.id, stage, note);
+    const leadId = req.params.id as string;
+    const result = await marketingEngineServer.leads.advanceStage(leadId, stage, note);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
@@ -583,9 +585,10 @@ marketingApiRouter.post('/leads/:id/note', requireMarketingStaff, async (req: Re
   }
 
   try {
-    await marketingEngineServer.leads.logActivity(req.params.id, {
+    const leadId = req.params.id as string;
+    await marketingEngineServer.leads.logActivity(leadId, {
       id: `act-${Date.now()}`,
-      lead_id: req.params.id,
+      lead_id: leadId,
       activity_type: 'note',
       channel: 'Admin Note',
       provider: 'internal',
@@ -602,7 +605,8 @@ marketingApiRouter.post('/leads/:id/note', requireMarketingStaff, async (req: Re
 
 marketingApiRouter.get('/leads/:id/activities', requireMarketingStaff, async (req: Request, res: Response) => {
   try {
-    const activities = await marketingEngineServer.leads.getLeadActivities(req.params.id);
+    const leadId = req.params.id as string;
+    const activities = await marketingEngineServer.leads.getLeadActivities(leadId);
     res.json({ ok: true, activities });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });

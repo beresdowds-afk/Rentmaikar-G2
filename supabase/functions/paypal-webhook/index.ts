@@ -17,10 +17,8 @@ import {
   deriveCorrelationId,
   correlationHeaders,
 } from "../_shared/webhook-logger.ts";
-import { postLedgerEntry, settlePaymentFinancials } from "../_shared/wallet-ledger.ts";
-import {
-  getPayPalConfig,
-  verifyWebhookSignature,
+import { settlePaymentFinancials } from "../_shared/wallet-ledger.ts";
+import { getPayPalConfig, verifyWebhookSignature,
   ensurePayPalConfig,
 } from "../_shared/paypal-client.ts";
 
@@ -202,103 +200,9 @@ Deno.serve(async (req) => {
         });
       }
     }
-  } else if (
-    eventType === "PAYMENT.PAYOUTSBATCH.PROCESSING" ||
-    eventType === "PAYMENT.PAYOUTSBATCH.SUCCESS" ||
-    eventType === "PAYMENT.PAYOUTSBATCH.DENIED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.FAILED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.BLOCKED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.CANCELED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.RETURNED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.REFUNDED" ||
-    eventType === "PAYMENT.PAYOUTS-ITEM.UNCLAIMED"
-  ) {
-    const batchId =
-      resource?.payout_batch_id ??
-      resource?.payout_batch_header?.payout_batch_id ??
-      resource?.batch_header?.payout_batch_id;
-
-    const senderItemId =
-      resource?.payout_item?.sender_item_id ??
-      resource?.sender_item_id ??
-      resource?.payout_item?.sender_item_id;
-
-    const providerReference = senderItemId || batchId;
-
-    if (!providerReference && !batchId) {
-      logger.warn("payout.webhook.missing_reference");
-    } else {
-      let payoutQuery = supabase
-        .from("owner_payouts")
-        .select("id, owner_id, amount, currency, status, transfer_reference, transfer_code")
-        .eq("provider", "paypal")
-        .limit(1);
-
-      if (senderItemId) {
-        payoutQuery = payoutQuery.eq("transfer_reference", senderItemId);
-      } else {
-        payoutQuery = payoutQuery.eq("transfer_code", batchId);
-      }
-
-      const { data: payout } = await payoutQuery.maybeSingle();
-
-      if (!payout) {
-        logger.warn("payout.webhook.unmatched", {
-          batch_id: batchId ?? null,
-          sender_item_id: senderItemId ?? null,
-          event_type: eventType,
-        });
-      } else {
-        // Batch-level events carry no per-item amount; only item events and
-        // batch DENIED can settle or release funds. Everything else is
-        // informational (submission is not settlement).
-        const outcome =
-          eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" ? "settled"
-          : (eventType === "PAYMENT.PAYOUTSBATCH.DENIED" ||
-             eventType === "PAYMENT.PAYOUTS-ITEM.FAILED" ||
-             eventType === "PAYMENT.PAYOUTS-ITEM.BLOCKED" ||
-             eventType === "PAYMENT.PAYOUTS-ITEM.CANCELED") ? "failed"
-          : (eventType === "PAYMENT.PAYOUTS-ITEM.RETURNED" ||
-             eventType === "PAYMENT.PAYOUTS-ITEM.REFUNDED") ? "reversed"
-          : null;
-
-        if (eventType === "PAYMENT.PAYOUTS-ITEM.UNCLAIMED") {
-          // Funds are held by PayPal and may be returned later: not a failure.
-          await supabase.rpc("mark_owner_payout_reconciliation_required", {
-            _payout_id: payout.id,
-            _reason: "PayPal reported the payout item as UNCLAIMED",
-            _payload: evt,
-          });
-        } else if (outcome) {
-          const itemAmount = resource?.payout_item?.amount;
-          const { data: fin, error: finErr } = await supabase.rpc("finalize_owner_payout", {
-            _payout_id: payout.id,
-            _outcome: outcome,
-            _provider: "paypal",
-            _evidence: { event: eventType, batch_id: batchId ?? null, sender_item_id: senderItemId ?? null },
-            _expected_amount: itemAmount?.value != null ? Number(itemAmount.value) : null,
-            _expected_currency: itemAmount?.currency ?? null,
-          });
-          if (finErr) {
-            logger.error("payout.finalize.failed", { payout_id: payout.id, error: finErr.message });
-            if (idem.eventRowId) {
-              await supabase.from("payment_webhook_events").delete().eq("id", idem.eventRowId);
-            }
-            return new Response("payout reconciliation failed", { status: 500 });
-          }
-          if (!fin?.ok) {
-            // Mismatch / invalid transition: never settle, keep reserved.
-            await supabase.rpc("mark_owner_payout_reconciliation_required", {
-              _payout_id: payout.id,
-              _reason: `PayPal ${eventType} could not be applied: ${fin?.error ?? "unknown"}`,
-              _payload: evt,
-            });
-          }
-        }
-      }
-    }
   }
+
+
   logger.info("completed", { duration_ms: logger.elapsedMs() });
   return new Response(
     JSON.stringify({ received: true, event: eventType, amount: amountValue, correlation_id: logger.ctx.correlationId }),

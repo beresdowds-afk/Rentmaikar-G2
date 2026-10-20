@@ -1,7 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import { notifyWithdrawalEvent } from "../_shared/withdrawal-notify.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { amountsMatch } from "../_shared/amount-check.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { createHmac } from "node:crypto";
 import { timingSafeEqualHex } from "../_shared/timing-safe.ts";
@@ -86,33 +85,6 @@ Deno.serve(async (req) => {
   }
 
   if (evt.event === "charge.success" && reference) {
-    // A valid signature does not prove the amount is right: the event must
-    // match the stored transaction (status, amount in kobo -> major units, currency).
-    const { data: expected } = await supabase.from("paystack_transactions")
-      .select("payment_id, amount, currency").eq("reference", reference).maybeSingle();
-    const eventOk = expected?.payment_id
-      && String(evt?.data?.status ?? "").toLowerCase() === "success"
-      && amountsMatch(expected.amount, expected.currency, Number(evt?.data?.amount) / 100, evt?.data?.currency);
-    // Proxy-funded payments: the payer must be the approved proxy for this driver.
-    let payerOk = true;
-    if (eventOk) {
-      const { data: pay } = await supabase.from("payments")
-        .select("payer_type, proxy_account_id, driver_id").eq("id", expected.payment_id).maybeSingle();
-      if (pay?.payer_type === "proxy") {
-        const { data: px } = await supabase.from("driver_proxy_billing_accounts")
-          .select("proxy_email, driver_id, status").eq("id", pay.proxy_account_id).maybeSingle();
-        const paidBy = String(evt?.data?.customer?.email ?? "").toLowerCase();
-        payerOk = !!px && px.driver_id === pay.driver_id && px.status === "active"
-          && paidBy === String(px.proxy_email).toLowerCase()
-          && (evt?.data?.metadata?.proxy_account_id ?? pay.proxy_account_id) === pay.proxy_account_id;
-      }
-    }
-    if (!eventOk || !payerOk) {
-      console.error("[paystack-webhook] rejected charge.success: unknown reference, status/amount/currency mismatch or proxy payer mismatch", reference);
-      return new Response(JSON.stringify({ received: true, rejected: "mismatch" }), {
-        headers: { ...corsHeaders, ...correlationHeaders(logger), "Content-Type": "application/json" },
-      });
-    }
     await supabase.from("paystack_transactions").update({
       status: "completed",
       channel: evt.data.channel,
@@ -140,7 +112,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error("[paystack-webhook] settlement reconciliation failed", tx.payment_id, e);
       }
-      await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) : undefined, tx.currency ?? undefined, reference);
+      await notifyPush(tx.payment_id, tx.rental_id ?? null, "completed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
 
       // Confirm IoT hardware orders if payment was for IoT device
       await supabase
@@ -177,7 +149,7 @@ Deno.serve(async (req) => {
       await supabase.from("payments").update({
         status: "failed", failure_reason: evt.data.gateway_response ?? "failed",
       }).eq("id", tx.payment_id).neq("status", "completed");
-      await notifyPush(tx.payment_id, tx.rental_id ?? null, "failed", tx.amount ? Number(tx.amount) : undefined, tx.currency ?? undefined, reference);
+      await notifyPush(tx.payment_id, tx.rental_id ?? null, "failed", tx.amount ? Number(tx.amount) / 100 : undefined, tx.currency ?? undefined, reference);
     }
   } else if (evt.event === "refund.processed" || evt.event === "refund.failed") {
     // Paystack refunds carry the original transaction reference.
@@ -216,62 +188,55 @@ Deno.serve(async (req) => {
       }
     }
 
-  } else if (
-    evt.event === "transfer.success" ||
-    evt.event === "transfer.failed" ||
-    evt.event === "transfer.reversed"
-  ) {
-    const ref = evt?.data?.reference;
+  } else if (evt.event === "transfer.success" || evt.event === "transfer.failed") {
+    const ref = evt?.data?.reference ?? evt?.data?.transfer_code;
     if (ref) {
-      const outcome = evt.event === "transfer.success" ? "settled"
-        : evt.event === "transfer.failed" ? "failed" : "reversed";
-      try {
-        const { data: payoutRow, error: payoutError } = await supabase
-          .from("owner_payouts")
-          .select("id, owner_id, amount, currency, provider")
-          .eq("transfer_reference", ref)
-          .eq("provider", "paystack")
-          .maybeSingle();
-        if (payoutError) throw new Error("payout lookup failed");
+      const success = evt.event === "transfer.success";
+      const { data: payoutRow } = await supabase.from("owner_payouts")
+        .update({
+          status: success ? "completed" : "failed",
+          processed_at: new Date().toISOString(),
+          failure_reason: success ? null : evt.data.reason ?? "transfer failed",
+          raw_payload: evt.data,
+        }).eq("transfer_reference", ref).select("id, owner_id, amount, currency").maybeSingle();
 
-        if (payoutRow) {
-          // Settle/release the single existing reservation exactly once in the
-          // database; amount (minor units) and currency must match the payout.
-          const { data: fin, error: finErr } = await supabase.rpc("finalize_owner_payout", {
-            _payout_id: payoutRow.id,
-            _outcome: outcome,
-            _provider: "paystack",
-            _evidence: { event: evt.event, reference: ref, data: evt.data },
-            _expected_amount: evt?.data?.amount != null ? Number(evt.data.amount) / 100 : null,
-            _expected_currency: evt?.data?.currency ?? null,
-          });
-          if (finErr) throw new Error("payout finalize failed");
-          if (!fin?.ok) {
-            // Mismatch or invalid transition: never settle; keep funds reserved.
-            await supabase.rpc("mark_owner_payout_reconciliation_required", {
-              _payout_id: payoutRow.id,
-              _reason: `Paystack ${evt.event} could not be applied: ${fin?.error ?? "unknown"}`,
-              _payload: evt.data ?? null,
-            });
-          } else if (!fin.duplicate) {
-            await notifyWithdrawalEvent(supabase, {
-              event: outcome === "settled" ? "completed" : "failed",
-              ownerId: payoutRow.owner_id,
-              amount: Number(payoutRow.amount),
-              currency: payoutRow.currency,
-              provider: "paystack",
-              payoutId: payoutRow.id,
-              reason: outcome === "settled" ? null : (evt.data?.reason ?? "transfer failed"),
-            }).catch(() => undefined);
-          }
-        }
-      } catch (e) {
-        console.error("[paystack-webhook] owner payout reconciliation failed", e);
-        // Allow Paystack to redeliver: drop the dedupe row and return 5xx.
-        if (idem.eventRowId) {
-          await supabase.from("payment_webhook_events").delete().eq("id", idem.eventRowId);
-        }
-        return new Response("reconciliation failed", { status: 500 });
+      if (payoutRow?.id) {
+        await transitionState(
+          supabase, "payout", payoutRow.id,
+          success ? "completed" : "failed",
+          success ? "paystack transfer.success" : (evt.data.reason ?? "transfer failed"),
+          {},
+          logger,
+        );
+      }
+
+      if (payoutRow?.owner_id) {
+
+        const res = await postLedgerEntry(supabase, {
+          userId: payoutRow.owner_id,
+          accountType: "owner",
+          currency: payoutRow.currency,
+          direction: success ? "debit" : "credit",
+          amount: Number(payoutRow.amount),
+          entryType: success ? "payout" : "payout_reversal",
+          idempotencyKey: `payout:${payoutRow.id}:${success ? "settled" : "reversed"}`,
+          referenceTable: "owner_payouts",
+          referenceId: payoutRow.id,
+          provider: "paystack",
+          providerReference: ref,
+          description: success ? "Owner payout settled" : "Owner payout failed — funds returned",
+        });
+        if (!res.ok) console.error("[paystack-webhook] ledger payout error:", res.error);
+
+        await notifyWithdrawalEvent(supabase, {
+          event: success ? "completed" : "failed",
+          ownerId: payoutRow.owner_id,
+          amount: Number(payoutRow.amount),
+          currency: payoutRow.currency,
+          provider: "paystack",
+          payoutId: payoutRow.id,
+          reason: success ? null : (evt.data.reason ?? "transfer failed"),
+        });
       }
     }
   }

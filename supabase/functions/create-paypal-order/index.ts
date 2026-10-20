@@ -1,7 +1,6 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://esm.sh/zod@3.23.8";
-import { authorizeAmount, claimInvoice } from "../_shared/payment-obligation.ts";
 import { requireAuthenticatedUser } from "../_shared/auth-guards.ts";
 import { appPath } from "../_shared/app-url.ts";
 import { resolvePaymentContext } from "../_shared/resolve-payment-context.ts";
@@ -20,7 +19,6 @@ const Body = z.object({
   payment_frequency: z.enum(["daily", "weekly"]).default("weekly"),
   description: z.string().max(200).optional(),
   purpose: z.string().optional(),
-  invoice_id: z.string().uuid().optional(),
   iot_device_order_id: z.string().uuid().optional(),
 });
 
@@ -77,18 +75,6 @@ Deno.serve(async (req) => {
 
     // Service client used for idempotency bookkeeping and persistence.
     const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-
-    // Authoritative amount from the database rule; client amount is only compared.
-    const obl = await authorizeAmount(supa, {
-      driverId, purpose: data.purpose, rentalId: data.rental_id, invoiceId: data.invoice_id,
-      amount: data.amount, currency: "USD",
-    });
-    if (!obl.ok) {
-      return new Response(JSON.stringify({ error: obl.error }), {
-        status: obl.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    data.amount = obl.amount;
 
     // Rental/vehicle/owner must resolve before we create anything at PayPal.
     const ctx = await resolvePaymentContext({
@@ -181,13 +167,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!(await claimInvoice(supa, obl.invoiceId, payment.id))) {
-      await completeIdempotencyKey(supa, idemKey, "failed");
-      return new Response(JSON.stringify({ error: "Payment already in progress for this invoice" }), {
-        status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const txInsert: Record<string, unknown> = {
       payment_id: payment.id,
       rental_id: ctx.rentalId ?? null,
@@ -204,11 +183,6 @@ Deno.serve(async (req) => {
     const { error: txError } = await supa.from("paypal_transactions").insert(txInsert);
     if (txError) {
       console.error("[create-paypal-order] paypal transaction insert error:", txError);
-      await completeIdempotencyKey(supa, idemKey, "failed");
-      return new Response(JSON.stringify({ error: "Failed to record payment" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
 
     if (data.iot_device_order_id) {
@@ -231,7 +205,7 @@ Deno.serve(async (req) => {
 
   } catch (e) {
     console.error("[create-paypal-order] error:", e);
-    return new Response(JSON.stringify({ error: "Could not create PayPal order" }), {
+    return new Response(JSON.stringify({ error: String(e) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -101,8 +101,12 @@ BEGIN
   SELECT full_name INTO owner_name FROM public.profiles WHERE user_id = NEW.owner_id;
 
   SELECT * INTO authz
-FROM public.withdrawal_authorizations
-WHERE id = NEW.authorization_id;
+    FROM public.withdrawal_authorizations
+   WHERE subject_user_id = NEW.owner_id
+     AND request_type = 'owner_payout'
+     AND amount = NEW.amount
+   ORDER BY created_at DESC
+   LIMIT 1;
 
   risky := COALESCE(authz.risk_score, 0) >= 40;
 

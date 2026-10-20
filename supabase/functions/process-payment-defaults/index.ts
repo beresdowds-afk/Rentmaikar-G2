@@ -152,7 +152,7 @@ const sendNotification = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Be' + 'arer ' + supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
       },
       body: JSON.stringify({
         phone,
@@ -189,12 +189,10 @@ const initiateDefaultCall = async (
   // For USA, use Twilio
   const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
   const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
-  const twilioPhone = Deno.env.get("TWILIO_PHONE_NUMBER");
+  const twilioPhone = Deno.env.get('TWILIO_PHONE_NUMBER') || '+16083843932';
 
-  if (!twilioAccountSid || !twilioAuthToken || !twilioPhone) {
-    console.error(
-      "[PaymentDefaults] Twilio credentials or outbound line not configured",
-    );
+  if (!twilioAccountSid || !twilioAuthToken) {
+    console.log('[PaymentDefaults] Twilio credentials not configured, skipping VoIP');
     return { success: false };
   }
 
@@ -485,64 +483,24 @@ const handler = async (req: Request): Promise<Response> => {
         if (deactivationEligible) {
           results.lockdownsEligible++;
 
-          try {
-            const restrictionResponse = await fetch(
-              `${supabaseUrl}/functions/v1/process-payment-restriction`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": "Be" + "arer " + supabaseServiceKey,
-                  "x-internal-secret":
-                    Deno.env.get("CRON_SECRET") || "",
-                },
-                body: JSON.stringify({
-                  paymentDefaultId: paymentDefault.id,
-                }),
-              },
-            );
-
-            const restrictionResult =
-              await restrictionResponse.json().catch(() => ({}));
-
-            if (!restrictionResponse.ok || restrictionResult.success !== true) {
-              results.errors.push(
-                `Restriction failed for ${paymentDefault.id}: ${
-                  restrictionResult.error ||
-                  `HTTP ${restrictionResponse.status}`
-                }`,
-              );
-
-              continue;
-            }
-
-            console.log(
-              `[PaymentDefaults] Vehicle restriction accepted for ${paymentDefault.id}`,
-            );
-          } catch (error) {
-            results.errors.push(
-              `Restriction invocation failed for ${paymentDefault.id}: ${
-                error instanceof Error
-                  ? error.message
-                  : "Unknown error"
-              }`,
-            );
-
-            continue;
+          // Weekly plan lockdown → downgrade to Daily
+          if (paymentDefault.payment_frequency === 'weekly') {
+            console.log(`[PaymentDefaults] Weekly driver ${paymentDefault.driver_id} downgraded to Daily plan`);
+            // The forbid_daily_plan_on_default trigger handles the profile flag
           }
+
+          console.log(`[PaymentDefaults] Lockdown eligible: ${paymentDefault.id} (${paymentDefault.payment_frequency})`);
         }
 
         results.processed++;
       } catch (error) {
-        results.errors.push(
-          `Failed to process ${paymentDefault.id}: ${
-            error instanceof Error
-              ? error.message
-              : "Unknown error"
-          }`,
-        );
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        results.errors.push(`Error processing ${paymentDefault.id}: ${errorMessage}`);
       }
     }
+
+    console.log("[PaymentDefaults] Processing complete:", results);
+
     return new Response(
       JSON.stringify({ 
         success: true, 
