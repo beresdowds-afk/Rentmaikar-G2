@@ -71,6 +71,9 @@ else
 fi
 echo "==> Remote target: $REPO_URL"
 
+# Set upstream tracking so standard 'git push' works seamlessly without arguments
+git branch --set-upstream-to=origin/main main 2>/dev/null || true
+
 # 5. Fetch and reconcile remote history (Prevents non-fast-forward rejections)
 echo "==> [Pre-Push] Checking remote origin status..."
 if git ls-remote --exit-code origin &>/dev/null; then
@@ -116,7 +119,7 @@ push_with_retry() {
 
   while [ $attempt -le $max_attempts ]; do
     echo "==> Pushing $phase_name to origin/main (Attempt $attempt of $max_attempts)..."
-    if git push --no-verify origin main; then
+    if git push --set-upstream --no-verify origin main; then
       echo "✓ $phase_name pushed successfully."
       success=1
       break
@@ -155,41 +158,51 @@ push_with_retry() {
 # ------------------------------------------------------------------------------
 echo ""
 echo "==> [Phase 1/3] Staging core configuration, public assets, docs & tooling..."
-git add -A \
-  .gitignore \
-  .dockerignore \
-  .env.example \
-  CNAME \
-  Dockerfile \
-  cloudbuild.yaml \
-  components.json \
-  docker-compose.yml \
-  eslint.config.js \
-  index.html \
-  metadata.json \
-  nginx.conf \
-  package.json \
-  package-lock.json \
-  bun.lock \
-  playwright.config.ts \
-  postcss.config.js \
-  tailwind.config.ts \
-  tsconfig*.json \
-  vite.config.ts \
-  vitest.config.ts \
-  server.ts \
-  public/ \
-  docs/ \
-  architecture/ \
-  scripts/ \
-  .github/ \
-  tests/ \
-  cloudflare/ \
-  frontend/ \
-  handoff/ \
-  capacitor.config.ts \
-  RENTMAIKAR_UI_NAVIGATION_ARCHITECTURE.md \
-  README.md || true
+PHASE1_ITEMS=(
+  .gitignore
+  .dockerignore
+  .env.example
+  CNAME
+  Dockerfile
+  cloudbuild.yaml
+  cloudbuild-backend.yaml
+  components.json
+  docker-compose.yml
+  eslint.config.js
+  index.html
+  metadata.json
+  nginx.conf
+  nginx.conf.template
+  package.json
+  package-lock.json
+  bun.lock
+  playwright.config.ts
+  postcss.config.js
+  tailwind.config.ts
+  tsconfig.json
+  tsconfig.app.json
+  tsconfig.node.json
+  vite.config.ts
+  vitest.config.ts
+  server.ts
+  public/
+  docs/
+  architecture/
+  scripts/
+  .github/
+  tests/
+  cloudflare/
+  frontend/
+  handoff/
+  capacitor.config.ts
+  README.md
+)
+
+for item in "${PHASE1_ITEMS[@]}"; do
+  if [ -e "$item" ]; then
+    git add -A "$item" 2>/dev/null || true
+  fi
+done
 
 if ! git diff --cached --quiet; then
   git commit --no-verify -m "chore(config): [Phase 1/3] root configs, public assets, docs and tooling"

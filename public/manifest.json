@@ -1,7 +1,7 @@
 {
-  "name": "Rentmaikar - Rideshare Rentals",
-  "short_name": "Rentmaikar",
-  "description": "Rideshare vehicle rentals for drivers, owners and platform staff with telematics.",
+  "name": "RentMaikar - Rideshare Rentals & Fleet Telematics",
+  "short_name": "RentMaikar",
+  "description": "Peer-to-peer and fleet vehicle leasing platform with verified driver onboarding, owner management, live IoT telemetry, and VoIP call center.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -9,10 +9,54 @@
   "orientation": "portrait-primary",
   "background_color": "#0A1628",
   "theme_color": "#0A1628",
+  "categories": ["business", "travel", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "/favicon.png",
       "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-152.png",
+      "sizes": "152x152",
       "type": "image/png",
       "purpose": "any"
     },
@@ -23,8 +67,20 @@
       "purpose": "any"
     },
     {
+      "src": "/pwa-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "/pwa-icon-192.png",
       "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-256.png",
+      "sizes": "256x256",
       "type": "image/png",
       "purpose": "any"
     },
@@ -41,8 +97,32 @@
       "purpose": "any"
     },
     {
+      "src": "/pwa-icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-maskable-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-icon-maskable-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "/pwa-icon-maskable-192.png",
       "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-icon-maskable-256.png",
+      "sizes": "256x256",
       "type": "image/png",
       "purpose": "maskable"
     },
@@ -57,6 +137,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-icon-maskable-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [
@@ -65,32 +151,36 @@
       "sizes": "1200x630",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Rentmaikar — rideshare vehicle rentals"
+      "label": "RentMaikar — Rideshare vehicle rentals and fleet telematics"
     }
   ],
   "shortcuts": [
     {
-      "name": "Sign in",
-      "short_name": "Sign in",
+      "name": "Sign In",
+      "short_name": "Sign In",
+      "description": "Access your driver, owner, or partner portal",
       "url": "/auth",
       "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Admin dashboard",
+      "name": "Vehicle Catalogue",
+      "short_name": "Vehicles",
+      "description": "Browse rideshare-ready rental vehicles",
+      "url": "/catalogue",
+      "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Driver Onboarding",
+      "short_name": "Drive",
+      "description": "Register and verify your rideshare driver profile",
+      "url": "/driver/register",
+      "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Admin Dashboard",
       "short_name": "Admin",
+      "description": "Control plane, fleet management & telematics",
       "url": "/admin",
-      "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Assistant dashboard",
-      "short_name": "Assistant",
-      "url": "/admin-assistant",
-      "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Support dashboard",
-      "short_name": "Support",
-      "url": "/support",
       "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
