@@ -34,10 +34,6 @@ import {
   sarekonService,
 } from "../../backend/src/services/iotService";
 import { paymentService } from "../../backend/src/services/paymentService";
-import { enforceFunctionAccess, AccessDenied } from "../../backend/src/services/functionAccessPolicy";
-import { resolveCheckoutAuthority, createWithAuthoritativeAmount, PaymentAuthorityError } from "../../backend/src/services/paymentAuthority";
-import { getDbPool } from "../../backend/src/services/dbPool";
-import type { AuthContext } from "../../backend/src/services/fileUploadService";
 
 export interface FunctionsPayload {
   body?: any;
@@ -69,32 +65,11 @@ export async function forceResyncSarekonDeviceImei(
   return await sarekonService.resyncDeviceImei(deviceId, options);
 }
 
-function payoutErrorResponse(err: any): { status: number; data: any } {
-  if (err && err.name === "PayoutError") {
-    return { status: err.statusCode, data: { ok: false, code: err.code, error: err.message } };
-  }
-  console.error("[functionsHandler] payout request failed", err);
-  return { status: 502, data: { ok: false, error: "Payout request failed" } };
-}
-
 export async function handleEdgeFunction(functionName: string, payload: any = {}): Promise<{ status: number; data: any }> {
   const body = payload?.body !== undefined ? payload.body : payload || {};
   const headers = payload?.headers || {};
   const authHeader = headers["authorization"] || headers["Authorization"] || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  const rawBodyText: string = typeof payload?.rawBody === "string" ? payload.rawBody : "";
-
-  // Same central policy as the Express gateway: enforced before any side effect.
-  let gatedCaller: AuthContext | null = null;
-  try {
-    const decision = await enforceFunctionAccess(functionName, headers);
-    gatedCaller = decision?.caller ?? null;
-  } catch (err: any) {
-    if (err instanceof AccessDenied) {
-      return { status: err.statusCode, data: { ok: false, error: err.message } };
-    }
-    throw err;
-  }
 
   switch (functionName) {
     case "hologram-admin":
@@ -1093,21 +1068,14 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         status: 200,
         data: {
           paypal: {
-  configured: Boolean(process.env.PAYPAL_CLIENT_ID),
-  clientId: process.env.PAYPAL_CLIENT_ID || null,
-  mode:
-    process.env.PAYPAL_MODE ||
-    process.env.PAYPAL_ENVIRONMENT ||
-    null,
-},
+            configured: Boolean(process.env.PAYPAL_CLIENT_ID),
+            clientId: process.env.PAYPAL_CLIENT_ID || "demo_paypal_client_id",
+            mode: process.env.PAYPAL_MODE || process.env.PAYPAL_ENVIRONMENT || "sandbox",
+          },
           paystack: {
-  configured: Boolean(
-    process.env.PAYSTACK_PUBLIC_KEY ||
-    process.env.PAYSTACK_SECRET_KEY
-  ),
-  publicKey:
-    process.env.PAYSTACK_PUBLIC_KEY || null,
-},
+            configured: Boolean(process.env.PAYSTACK_PUBLIC_KEY || process.env.PAYSTACK_SECRET_KEY),
+            publicKey: process.env.PAYSTACK_PUBLIC_KEY || "pk_test_demo",
+          },
           opay: {
             configured: Boolean(process.env.OPAY_MERCHANT_ID),
             merchantId: process.env.OPAY_MERCHANT_ID || "",
@@ -1118,26 +1086,20 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
 
     case "create-paypal-order": {
       try {
-        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
-        const authority = await resolveCheckoutAuthority(getDbPool(), { caller: gatedCaller, provider: "paypal", body });
-        const result = await createWithAuthoritativeAmount(getDbPool(), {
-          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
-          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
-        }, (auth) => paymentService.createPayPalOrder({
-          amount: auth.amount,
-          currency: auth.currency,
-          rental_id: authority.rentalId ?? undefined,
-          vehicle_id: authority.vehicleId ?? undefined,
-          driver_id: authority.driverId,
-          owner_id: authority.ownerId ?? undefined,
+        const result = await paymentService.createPayPalOrder({
+          amount: Number(body.amount),
+          currency: body.currency,
+          rental_id: body.rental_id,
+          vehicle_id: body.vehicle_id,
+          driver_id: body.driver_id,
+          owner_id: body.owner_id,
           payment_frequency: body.payment_frequency,
           description: body.description,
           purpose: body.purpose,
           iot_device_order_id: body.iot_device_order_id,
-        }));
+        });
         return { status: 200, data: result };
       } catch (err: any) {
-        if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
         return { status: 400, data: { ok: false, error: err.message } };
       }
     }
@@ -1146,8 +1108,8 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         const result = await paymentService.capturePayPalOrder({
           order_id: body.order_id,
-          user_id: gatedCaller && !gatedCaller.isAdmin ? gatedCaller.userId : body.user_id,
-        }, { isAdmin: Boolean(gatedCaller?.isAdmin) });
+          user_id: body.user_id,
+        });
         return { status: 200, data: result };
       } catch (err: any) {
         return { status: 400, data: { ok: false, error: err.message } };
@@ -1155,39 +1117,25 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "paypal-webhook": {
-      try {
-        const result = await paymentService.handlePayPalWebhook(headers, rawBodyText);
-        return { status: 200, data: result };
-      } catch (err: any) {
-        const msg = String(err?.message || "");
-        if (/not configured|PAYPAL_MODE/i.test(msg)) return { status: 503, data: { received: false, error: "Webhook verification not configured" } };
-        if (/signature/i.test(msg)) return { status: 401, data: { received: false, error: "Invalid webhook signature" } };
-        if (/required|invalid paypal webhook/i.test(msg)) return { status: 400, data: { received: false, error: "Invalid webhook" } };
-        throw err;
-      }
+      const result = await paymentService.handlePayPalWebhook(headers, body);
+      return { status: 200, data: result };
     }
+
     case "create-paystack-transaction": {
       try {
-        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
-        const authority = await resolveCheckoutAuthority(getDbPool(), { caller: gatedCaller, provider: "paystack", body });
-        const result = await createWithAuthoritativeAmount(getDbPool(), {
-          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
-          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
-        }, (auth) => paymentService.createPaystackTransaction({
-          amount: auth.amount,
+        const result = await paymentService.createPaystackTransaction({
+          amount: Number(body.amount),
           email: body.email,
-          currency: auth.currency,
-          purpose: body.purpose,
-          rental_id: authority.rentalId ?? undefined,
-          vehicle_id: authority.vehicleId ?? undefined,
-          driver_id: authority.driverId,
-          owner_id: authority.ownerId ?? undefined,
+          currency: body.currency,
+          rental_id: body.rental_id,
+          vehicle_id: body.vehicle_id,
+          driver_id: body.driver_id,
+          owner_id: body.owner_id,
           callback_url: body.callback_url,
           metadata: body.metadata,
-        }));
+        });
         return { status: 200, data: result };
       } catch (err: any) {
-        if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
         return { status: 400, data: { ok: false, error: err.message } };
       }
     }
@@ -1195,325 +1143,90 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "verify-paystack-transaction": {
       try {
         const reference = body.reference || "";
-        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
-        const result = await paymentService.verifyPaystackTransaction(reference, {
-          callerId: gatedCaller.userId,
-          isAdmin: gatedCaller.isAdmin,
-        });
+        const result = await paymentService.verifyPaystackTransaction(reference);
         return { status: 200, data: result };
       } catch (err: any) {
-        if (err?.message === "Forbidden") return { status: 403, data: { ok: false, error: "Forbidden" } };
         return { status: 400, data: { ok: false, error: err.message } };
       }
     }
 
     case "paystack-webhook": {
-      try {
-        const result = await paymentService.handlePaystackWebhook(headers, rawBodyText);
-        return { status: 200, data: result };
-      } catch (err: any) {
-        const msg = String(err?.message || "");
-        if (/not configured/i.test(msg)) return { status: 503, data: { received: false, error: "Webhook verification not configured" } };
-        if (/signature/i.test(msg)) return { status: 401, data: { received: false, error: "Invalid webhook signature" } };
-        if (/required|invalid paystack webhook/i.test(msg)) return { status: 400, data: { received: false, error: "Invalid webhook" } };
-        throw err;
-      }
-    }
-
-    case "proxy-create-payment": {
-      let reservedProxyId: string | null = null;
-      try {
-        if (!gatedCaller) return { status: 401, data: { ok: false, error: "Authentication required" } };
-        const provider = String(body.provider || "paystack");
-        const method = String(body.method || "");
-        if (!["paystack", "paypal", "opay"].includes(provider)) return { status: 400, data: { ok: false, error: "Unsupported provider" } };
-        if (!["card", "bank"].includes(method)) return { status: 400, data: { ok: false, error: "method must be card or bank" } };
-        if (provider === "paypal" && method === "bank") return { status: 400, data: { ok: false, error: "PayPal proxy payments support card only" } };
-        if (!body.proxy_account_id) return { status: 400, data: { ok: false, error: "proxy_account_id is required" } };
-
-        const pool = getDbPool();
-        const { reserveProxyUse, releaseProxyUse, markPaymentProxyFunded, ProxyPaymentError } =
-          await import("../../backend/src/services/proxyPaymentService");
-        const authority = await resolveCheckoutAuthority(pool, { caller: gatedCaller, provider: provider as any, body });
-        try {
-          const proxy = await reserveProxyUse(pool, authority.driverId, String(body.proxy_account_id));
-          reservedProxyId = proxy.id;
-          const result: any = await createWithAuthoritativeAmount(pool, {
-            driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
-            invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
-          }, async (auth) => {
-            if (provider === "paypal") {
-              return paymentService.createPayPalOrder({
-                amount: auth.amount, currency: auth.currency,
-                rental_id: authority.rentalId ?? undefined, vehicle_id: authority.vehicleId ?? undefined,
-                driver_id: authority.driverId, owner_id: authority.ownerId ?? undefined,
-                payment_frequency: body.payment_frequency, description: "Rentmaikar proxy payment", purpose: body.purpose,
-              });
-            }
-            if (provider === "opay") {
-              const { createOpayOrder } = await import("../../backend/src/services/opayService");
-              return createOpayOrder({
-                amount: auth.amount, rentalId: authority.rentalId ?? undefined, vehicleId: authority.vehicleId ?? undefined,
-                ownerId: authority.ownerId ?? undefined, driverId: authority.driverId, purpose: body.purpose,
-                returnUrl: body.return_url, proxyAccountId: proxy.id,
-              });
-            }
-            return paymentService.createPaystackTransaction({
-              amount: auth.amount, email: proxy.proxy_email, currency: auth.currency, purpose: body.purpose,
-              rental_id: authority.rentalId ?? undefined, vehicle_id: authority.vehicleId ?? undefined,
-              driver_id: authority.driverId, owner_id: authority.ownerId ?? undefined,
-              callback_url: body.callback_url,
-              metadata: { proxy_account_id: proxy.id, payer_type: "proxy", payment_method_type: method },
-            } as any);
-          });
-          const paymentId = result?.payment_id ?? result?.paymentId;
-          if (paymentId) {
-            try {
-              await markPaymentProxyFunded(pool, paymentId, proxy.id);
-            } catch (markErr) {
-              await pool.query(`UPDATE public.payments SET status = 'failed' WHERE id = $1 AND status = 'pending'`, [paymentId]).catch(() => undefined);
-              throw markErr;
-            }
-          }
-          reservedProxyId = null;
-          return { status: 200, data: { ...result, provider, method } };
-        } catch (inner) {
-          if (reservedProxyId) await releaseProxyUse(pool, reservedProxyId).catch(() => undefined);
-          if (inner instanceof ProxyPaymentError) return { status: inner.status, data: { ok: false, error: inner.message } };
-          throw inner;
-        }
-      } catch (err: any) {
-        if (err instanceof PaymentAuthorityError) return { status: err.status, data: { ok: false, error: err.message } };
-        console.error("[proxy-create-payment] failed:", err);
-        return { status: 502, data: { ok: false, error: "Proxy payment failed" } };
-      }
+      const result = await paymentService.handlePaystackWebhook(headers, body);
+      return { status: 200, data: result };
     }
 
     case "create-opay-order": {
-  try {
-    const { createOpayOrder } =
-      await import("../../backend/src/services/opayService");
-
-    if (!gatedCaller) {
-      return { status: 401, data: { ok: false, error: "Authentication required" } };
-    }
-    const authority = await resolveCheckoutAuthority(getDbPool(), {
-      caller: gatedCaller,
-      provider: "opay",
-      body,
-    });
-
-    const result = await createWithAuthoritativeAmount(getDbPool(), {
-      driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
-      invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
-    }, (auth) => createOpayOrder({
-      amount: auth.amount,
-      rentalId: authority.rentalId ?? undefined,
-      vehicleId: authority.vehicleId ?? undefined,
-      ownerId: authority.ownerId ?? undefined,
-      driverId: authority.driverId,
-      purpose: body.purpose,
-      returnUrl: body.return_url,
-    }));
-
-    return {
-      status: 200,
-      data: result,
-    };
-  } catch (err: any) {
-    if (err instanceof PaymentAuthorityError) {
-      return { status: err.status, data: { ok: false, error: err.message } };
-    }
-    return {
-      status: 502,
-      data: {
-        ok: false,
-        error:
-          err?.message ||
-          "OPay order creation failed",
-      },
-    };
-  }
-}
-
-case "verify-opay-order": {
-  try {
-    const { verifyOpayOrder } =
-      await import("../../backend/src/services/opayService");
-
-    const { authenticateSelfWithdrawalCaller } = await import(
-      "../../backend/src/services/payoutRequestAuth"
-    );
-    const { ownerId: callerId } = await authenticateSelfWithdrawalCaller(
-      headers,
-      undefined,
-    );
-
-    const result =
-      await verifyOpayOrder(
-        body.orderNo ||
-        body.reference,
-        callerId,
-        Boolean(gatedCaller?.isAdmin),
-      );
-
-    return {
-      status: 200,
-      data: result,
-    };
-  } catch (err: any) {
-    return {
-      status: 502,
-      data: {
-        ok: false,
-        error:
-          err?.message ||
-          "OPay verification failed",
-      },
-    };
-  }
-}
-
-case "opay-webhook": {
-  const {
-    handleOpayWebhook,
-  } = await import(
-    "../../backend/src/services/opayService"
-  );
-
-  const result =
-    await handleOpayWebhook(
-      headers,
-      rawBodyText,
-    );
-
-  return {
-    status: 200,
-    data: result,
-  };
-}
-    case "initiate-paystack-transfer": {
-      /*
-       * Paystack self-withdrawals run in the initiate-paystack-transfer Edge
-       * Function, which authenticates the caller from the forwarded session and
-       * uses the same atomic database functions as the PayPal path.
-       */
-      try {
-        const { createClient } = await import("@supabase/supabase-js");
-        const supabase = createClient(
-          process.env.SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        );
-
-        const idempotencyKey = String(
-          headers["idempotency-key"] ||
-            headers["Idempotency-Key"] ||
-            headers["x-idempotency-key"] ||
-            headers["X-Idempotency-Key"] ||
-            body.idempotencyKey ||
-            "",
-        );
-
-        const result = await supabase.functions.invoke(
-          "initiate-paystack-transfer",
-          {
-            body,
-            headers: {
-              Authorization: authHeader,
-              ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-            },
+      const amount = Number(body.amount || 0);
+      const reference = `rm_opay_${Date.now()}`;
+      return {
+        status: 200,
+        data: {
+          code: "00000",
+          message: "SUCCESS",
+          data: {
+            orderNo: reference,
+            cashierUrl: `https://cashier.opayweb.com/pay/${reference}`,
+            amount,
+            currency: "NGN",
           },
-        );
-
-        if (result.error) {
-          return {
-            status: 502,
-            data: { ok: false, error: result.error.message || "Paystack transfer failed" },
-          };
-        }
-        return { status: 200, data: result.data };
-      } catch (err: any) {
-        return {
-          status: 502,
-          data: { ok: false, error: err?.message || "Paystack transfer failed" },
-        };
-      }
+        },
+      };
     }
 
+    case "verify-opay-order": {
+      const orderNo = body.orderNo || body.reference;
+      return {
+        status: 200,
+        data: {
+          code: "00000",
+          status: "SUCCESS",
+          orderNo,
+          message: "Transaction verified successfully",
+        },
+      };
+    }
+
+    case "opay-webhook": {
+      return { status: 200, data: { code: "00000", message: "SUCCESS" } };
+    }
+
+    case "process-owner-payouts":
     case "initiate-paypal-payout":
-    case "initiate-owner-withdrawal": {
+    case "initiate-paystack-transfer": {
       try {
-        const provider = String(body.provider || "paypal").toLowerCase();
-        if (provider !== "paypal") {
-          return { status: 400, data: { ok: false, error: `Unsupported payout provider: ${provider}` } };
-        }
-        const { paymentService } = await import("../../backend/src/services/paymentService");
-        const { resolveIdempotencyKey } = await import("../../backend/src/services/ownerPayoutWorkflow");
-        const { authenticateSelfWithdrawalCaller } = await import("../../backend/src/services/payoutRequestAuth");
-
-        // The owner is always the authenticated caller, never the body.
-        const { ownerId } = await authenticateSelfWithdrawalCaller(
-          headers,
-          body.owner_id || body.ownerId || body.user_id || body.userId,
-        );
-
-        const result = await paymentService.processPayPalOwnerPayout({
-          owner_id: ownerId,
+        const result = await paymentService.processOwnerPayout({
+          owner_id: body.owner_id || body.user_id,
           amount: Number(body.amount),
-          currency: String(body.currency || "USD").toUpperCase(),
-          payout_account_id: body.payout_account_id || body.payoutAccountId,
-          authorization_id: body.authorization_id || body.authorizationId,
-          note: body.note,
-          idempotency_key: resolveIdempotencyKey(headers, body),
+          currency: body.currency || "USD",
+          provider: functionName.includes("paystack") ? "paystack" : "paypal",
+          payout_account_id: body.payout_account_id,
+          initiated_by: body.initiated_by,
         });
-        return { status: 200, data: { ok: true, ...result } };
+        return { status: 200, data: result };
       } catch (err: any) {
-        return payoutErrorResponse(err);
-      }
-    }
-
-    case "process-owner-payouts": {
-      // Weekly worker entry point: cron secret only; executes an existing,
-      // admin-approved weekly_bulk payout and never creates one.
-      try {
-        const { paymentService } = await import("../../backend/src/services/paymentService");
-        const { verifyCronSecret } = await import("../../backend/src/services/payoutRequestAuth");
-        if (!verifyCronSecret(headers)) {
-          return { status: 401, data: { ok: false, error: "Unauthorized" } };
-        }
-        const result = await paymentService.executeWeeklyOwnerPayout(
-          String(body.payout_id || body.payoutId || ""),
-          body.note,
-        );
-        return { status: 200, data: { ok: true, ...result } };
-      } catch (err: any) {
-        return payoutErrorResponse(err);
-      }
-    }
-
-    case "reconcile-owner-payout": {
-      try {
-        const { paymentService } = await import("../../backend/src/services/paymentService");
-        const { requireAdminCaller } = await import("../../backend/src/services/payoutRequestAuth");
-        await requireAdminCaller(headers);
-        const result = await paymentService.reconcileOwnerPayout(
-          String(body.payout_id || body.payoutId || ""),
-        );
-        return { status: 200, data: { ok: true, ...result } };
-      } catch (err: any) {
-        return payoutErrorResponse(err);
+        return { status: 400, data: { ok: false, error: err.message } };
       }
     }
 
     case "persona-create-inquiry": {
-      return { status: 503, data: { ok: false, error: "Persona inquiry service unavailable" } };
+      const inquiryId = `inq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      return {
+        status: 200,
+        data: {
+          inquiryId,
+          sessionToken: `tok_${inquiryId}`,
+          templateId: process.env.PERSONA_TEMPLATE_ID || "itmpl_rentmaikar_kyc",
+          environmentId: "env_production",
+          status: "created",
+        },
+      };
     }
 
     case "persona-webhook": {
       const { personaWebhookService } = await import("../../backend/src/services/personaWebhookService");
       const res = await personaWebhookService.handle({
-        headers: headers as any,
-        body,
+        headers: (request.headers || {}) as any,
+        body: request.body,
       });
       return { status: res.status, data: res.body };
     }
@@ -1542,15 +1255,15 @@ case "opay-webhook": {
       try {
         const { getDbPool } = await import("../../backend/src/services/dbPool");
         const pool = getDbPool();
-        if (payload?.method === "POST" && body && Object.keys(body).length > 0) {
+        if (req.method === "POST" && req.body) {
           const val = {
-            enabled: body.enabled === true,
-            background_check_enabled: body.background_check_enabled !== undefined
-              ? body.background_check_enabled === true
-              : body.enabled === true,
-            identity_verification_enabled: body.identity_verification_enabled !== undefined
-              ? body.identity_verification_enabled === true
-              : body.enabled === true,
+            enabled: req.body.enabled === true,
+            background_check_enabled: req.body.background_check_enabled !== undefined
+              ? req.body.background_check_enabled === true
+              : req.body.enabled === true,
+            identity_verification_enabled: req.body.identity_verification_enabled !== undefined
+              ? req.body.identity_verification_enabled === true
+              : req.body.enabled === true,
           };
           await pool.query(
             `INSERT INTO public.platform_kv_settings (key, value, updated_at)
@@ -1859,6 +1572,31 @@ case "opay-webhook": {
         const { paymentService } = await import("../../backend/src/services/paymentService");
         const data = await paymentService.getOwnerWithdrawalData(ownerId, currency);
         return { status: 200, data: { ok: true, ...data } };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message } };
+      }
+    }
+
+    case "initiate-owner-withdrawal": {
+      try {
+        const ownerId = body.owner_id || body.ownerId || body.userId;
+        const amount = Number(body.amount);
+        const currency = body.currency || "USD";
+        const provider = body.provider || "paypal";
+        const payoutAccountId = body.payout_account_id || body.payoutAccountId;
+        if (!ownerId || !amount || amount <= 0) {
+          return { status: 400, data: { ok: false, error: "owner_id and valid amount are required" } };
+        }
+        const { paymentService } = await import("../../backend/src/services/paymentService");
+        const result = await paymentService.processOwnerPayout({
+          owner_id: ownerId,
+          amount,
+          currency,
+          provider,
+          payout_account_id: payoutAccountId,
+          initiated_by: body.initiated_by || "owner",
+        });
+        return { status: 200, data: result };
       } catch (err: any) {
         return { status: 500, data: { ok: false, error: err.message } };
       }

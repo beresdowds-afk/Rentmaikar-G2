@@ -65,7 +65,7 @@ const PROTECTED_ROUTES = [
   '/driver/onboarding',
   '/owner/onboarding',
   '/driver/portal/payments',
-  '/owner/portal/payouts',
+  '/owner/portal/payments',
 ];
 
 async function expectNoNotFound(page: Page, path: string) {

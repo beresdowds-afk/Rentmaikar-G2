@@ -41,8 +41,6 @@ async function stubOpay(page: Page, opts: { outcome: "success" | "failure" }) {
 }
 
 test.describe("Opay checkout", () => {
-  test.skip(!process.env.E2E_RENTAL_URL, "Needs an authenticated session; set E2E_RENTAL_URL to a route rendering the checkout.");
-
   test("successful payment updates status panel and shows Receipt", async ({ page }) => {
     await stubOpay(page, { outcome: "success" });
     await page.goto(RENTAL_URL);

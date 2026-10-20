@@ -49,7 +49,7 @@ import { CallSupportButton } from '@/components/support/CallSupportButton';
 
 import { VoiceCallHistory } from '@/components/voice/VoiceCallHistory';
 import { useVoiceCall } from '@/hooks/useVoiceCall';
-import { backendBridge } from "@/lib/backend-bridge";
+
 import { AdminViewBanner } from '@/components/admin/AdminViewBanner';
 import { AdminNotificationsBell as NotificationsBell } from "@/components/admin/AdminNotificationsBell";
 import { useAuth } from '@/contexts/AuthContext';
@@ -222,55 +222,22 @@ export default function OwnerDashboard() {
         return;
       }
 
-      const fnName =
-        account.provider === "paypal"
-          ? "initiate-paypal-payout"
-          : account.provider === "paystack"
-            ? "initiate-paystack-transfer"
-            : null;
+      const fnName = account.provider === 'paypal'
+        ? 'initiate-paypal-payout'
+        : 'initiate-paystack-transfer';
 
-      if (!fnName) {
-        throw new Error(
-          `Unsupported payout provider: ${account.provider}`
-        );
-      }
+      const { data, error } = await supabase.functions.invoke(fnName, {
+        body: {
+          amount,
+          payoutAccountId: account.id,
+          authorizationId,
+          note: 'RentMaikar owner withdrawal',
+          reason: 'RentMaikar owner withdrawal',
+        },
+      });
 
-      const idempotencyKey = `owner-payout:${authorizationId}`;
-
-      const result =
-        await backendBridge.invokeEdgeFunction(
-          fnName,
-          {
-            owner_id: targetId,
-            user_id: targetId,
-            amount,
-            currency: String(account.currency || currency).toUpperCase(),
-            payout_account_id: account.id,
-            payoutAccountId: account.id,
-            authorization_id: authorizationId,
-            authorizationId,
-            note: "RentMaikar owner withdrawal",
-            reason: "RentMaikar owner withdrawal",
-            idempotencyKey,
-          },
-          {
-            method: "POST",
-            idempotencyKey,
-          }
-        );
-
-      if (result.error || !result.data) {
-        throw (
-          result.error ||
-          new Error("Owner payout failed")
-        );
-      }
-
-      const data = result.data;
-
-      if (data?.error) {
-        throw new Error(String(data.error));
-      }
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
 
       toast.success(`Withdrawal of ${formatCurrency(amount, currency)} submitted for processing.`);
       setIsWithdrawOpen(false);

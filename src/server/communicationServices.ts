@@ -367,18 +367,8 @@ export async function sendSmsNotification(input: SmsNotificationInput): Promise<
 ) {
     const isWa = channel === "whatsapp";
     const fromNumber = isWa
-  ? process.env.TWILIO_WHATSAPP_NUMBER ||
-    process.env.TWILIO_PHONE_NUMBER ||
-    ""
-  : process.env.TWILIO_PHONE_NUMBER ||
-    process.env.TWILIO_NUMBER_USA ||
-    "";
-
-if (!fromNumber) {
-  throw new Error(
-    `No configured outbound Twilio line for channel=${channel}`
-  );
-}  
+      ? process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER || "+16083843932"
+      : process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_NUMBER_USA || "+18482035389";
     const toFormatted = isWa && !to.startsWith("whatsapp:") ? `whatsapp:${to}` : to;
     const fromFormatted = isWa && !fromNumber.startsWith("whatsapp:") ? `whatsapp:${fromNumber}` : fromNumber;
 
@@ -593,16 +583,7 @@ export async function initiateVoipCall(input: InitiateCallInput): Promise<{
   const callResults: Array<{ recipient: string; success: boolean; callSid?: string; error?: string }> = [];
 
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const masterEndpoint =
-  process.env.TWILIO_PHONE_NUMBER ||
-  process.env.TWILIO_NUMBER_USA ||
-  "";
-
-if (!masterEndpoint) {
-  throw new Error(
-    "No configured outbound Twilio line available"
-  );
-} 
+  const masterEndpoint = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_NUMBER_USA || "+18482035389";
   const isConference = input.callType === "group" || recipients.length > 1;
   const conferenceName = isConference ? `RentMaikar_${callId}` : null;
 

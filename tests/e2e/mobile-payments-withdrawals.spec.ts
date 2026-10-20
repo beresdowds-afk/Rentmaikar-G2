@@ -113,7 +113,6 @@ for (const profile of MOBILE_PROFILES) {
      delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
 
      test.use({ ...mobileDevice });
-    test.skip(!process.env.E2E_DRIVER_URL, "Needs an authenticated session; set E2E_DRIVER_URL.");
     test("PSP edge function completes and dashboard updates without reload", async ({ page }) => {
       await stubDriverCheckout(page, "success");
       await page.goto(DRIVER_URL);
@@ -156,7 +155,6 @@ for (const profile of MOBILE_PROFILES) {
       delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
 
      test.use({ ...mobileDevice });
-    test.skip(!process.env.E2E_OWNER_URL, "Needs an authenticated session; set E2E_OWNER_URL.");
     test("payout edge function succeeds and available balance refreshes", async ({ page }) => {
       await stubOwnerPayouts(page, "success");
       await page.goto(OWNER_URL);

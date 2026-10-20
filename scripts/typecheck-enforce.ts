@@ -43,8 +43,14 @@ function run(cwd: string, args: string[]) {
   return r;
 }
 
+const backendDir = resolve(projectRoot, "backend");
+if (!existsSync(resolve(backendDir, "node_modules"))) {
+  console.log("[typecheck-enforce] Installing backend dependencies...");
+  spawnSync("npm", ["install"], { cwd: backendDir, stdio: "inherit" });
+}
+
 console.log("[typecheck-enforce] backend: tsc --noEmit");
-const backend = run(resolve(projectRoot, "backend"), ["--noEmit"]);
+const backend = run(backendDir, ["--noEmit"]);
 process.stdout.write(backend.stdout);
 process.stderr.write(backend.stderr);
 if (backend.status !== 0) fail("backend typecheck failed.");

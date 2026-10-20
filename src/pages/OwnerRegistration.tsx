@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import ConsentSection, { type MessagingChannel } from "@/components/registration/ConsentSection";
-import { toE164 } from "@/lib/phone-e164";
 import { recordSmsConsentPair } from "@/lib/sms-consent";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -236,8 +235,8 @@ const OwnerRegistration = () => {
         first_name: data.firstName,
         last_name: data.lastName,
         email: data.email,
-        phone_country: data.phoneCountry ?? (parsePhoneNumberFromString(toE164(data.phoneNumber))?.country === 'NG' ? 'ng' : 'us'),
-        phone_number: toE164(data.phoneNumber),
+        phone_country: data.phoneCountry ?? (parsePhoneNumberFromString(data.phoneNumber)?.country === 'NG' ? 'ng' : 'us'),
+        phone_number: data.phoneNumber,
         country: data.country,
         city: data.city,
         zip_code: data.zipCode,
@@ -337,8 +336,7 @@ const OwnerRegistration = () => {
 
       // A2P 10DLC: persist the exact SMS opt-in decisions with disclosure text.
       void recordSmsConsentPair({
-        userId,
-        phoneNumber: toE164(data.phoneNumber),
+        phoneNumber: data.phoneNumber,
         serviceConsent: !!data.smsServiceConsent,
         marketingConsent: !!data.smsMarketingConsent,
         source: "owner-registration",
@@ -348,11 +346,11 @@ const OwnerRegistration = () => {
       if (sessionNow?.session) {
         toast.success("Account created! You now have view-only access. Complete verification to unlock full features.");
         setSubmitError(null);
-        navigate("/onboarding-redirect");
+        navigate("/owner/dashboard");
       } else {
         toast.success("Application submitted! Please sign in or check your email to confirm your account.");
         setSubmitError(null);
-        navigate("/auth?returnTo=/onboarding-redirect");
+        navigate("/auth?returnTo=/owner/dashboard");
       }
     } catch (error) {
       console.error("Owner registration error:", error);

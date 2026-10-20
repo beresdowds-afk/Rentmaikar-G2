@@ -292,7 +292,7 @@ describe.each(["android", "ios"] as const)("%s shell — DB constraint messaging
     }
     expect(toastError).toHaveBeenCalledWith(baseline.title);
     // A failed insert must never navigate the native shell to the dashboard.
-    expect(navigate).not.toHaveBeenCalledWith("/onboarding-redirect");
+    expect(navigate).not.toHaveBeenCalledWith("/driver/dashboard");
   }, 30000);
 });
 

@@ -2,7 +2,7 @@
  * End-to-end regression tests for the registration flows.
  *
  * Covers the two behaviours we keep breaking:
- *  1. Driver registration submits and delegates the next step to onboarding, and
+ *  1. Driver registration submits and redirects to the driver dashboard, and
  *     refuses to submit when the (mandatory) home address is blank/too short.
  *  2. Owner registration submits successfully with a BLANK address and writes
  *     `street_address: null` to the database.
@@ -285,7 +285,7 @@ describe("driver registration (e2e)", () => {
       street_address: "24 Ademola Street, Ikeja",
       email: "john.driver@example.com",
     });
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/onboarding-redirect"));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/driver/dashboard"));
   });
 
   it("blocks submission and shows an inline error when the home address is blank", async () => {
@@ -299,7 +299,7 @@ describe("driver registration (e2e)", () => {
       expect(screen.getAllByText(/home address is required/i).length).toBeGreaterThan(0),
     );
     expect(insert).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalledWith("/onboarding-redirect");
+    expect(navigate).not.toHaveBeenCalledWith("/driver/dashboard");
   });
 
   it("rejects an address shorter than five characters", async () => {
@@ -385,6 +385,6 @@ describe("owner registration (e2e)", () => {
       street_address: null,
       email: "ada.owner@example.com",
     });
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/onboarding-redirect"));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/owner/dashboard"));
   });
 });

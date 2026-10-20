@@ -15,24 +15,22 @@ export async function resolvePostLoginDestination(
     if (role === 'driver') {
       // Check if agreement is pending
       const { data: driver } = await supabase
-        .from('legal_agreements')
-        .select('driver_signed_at')
-        .eq('driver_id', userId)
-        .is('driver_signed_at', null)
-        .limit(1);
+        .from('driver_profiles')
+        .select('agreement_signed')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (driver?.length) {
+      if (driver && !driver.agreement_signed) {
         return '/driver-agreement';
       }
     } else if (role === 'owner') {
       const { data: owner } = await supabase
-        .from('legal_agreements')
-        .select('owner_signed_at')
-        .eq('owner_id', userId)
-        .is('owner_signed_at', null)
-        .limit(1);
+        .from('owner_profiles')
+        .select('agreement_signed')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (owner?.length) {
+      if (owner && !owner.agreement_signed) {
         return '/owner-agreement';
       }
     }
