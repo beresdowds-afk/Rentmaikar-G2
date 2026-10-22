@@ -322,6 +322,14 @@ const VehicleTrackingMap = () => {
     else toast.error('Sync failed', { description: res.message });
   };
 
+  // Automatic 30-second polling to update vehicle positions from Traccar and GPSANDTRACK
+  useEffect(() => {
+    const pollTimer = setInterval(() => {
+      void syncNow().catch((err) => console.warn('Automatic 30s vehicle tracking poll failed:', err));
+    }, 30000);
+    return () => clearInterval(pollTimer);
+  }, [syncNow]);
+
   const activeVehicles = vehicles.filter(v => v.ignitionStatus && !v.isParked).length;
   const parkedVehicles = vehicles.filter(v => v.isParked && v.ignitionStatus).length;
   const disabledVehicles = vehicles.filter(v => !v.ignitionStatus).length;

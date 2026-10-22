@@ -229,12 +229,14 @@ if (answeredSid) {
     });
     call.on("disconnect", () => {
       callRef.current = null;
+      setIncomingCall(null);
       setStatus(deviceRef.current ? "ready" : "idle");
       logAudioEvent("call", "Call disconnected");
       setDiagnosticsCallId(null);
     });
     call.on("cancel", () => {
       callRef.current = null;
+      setIncomingCall(null);
       setStatus(deviceRef.current ? "ready" : "idle");
       logAudioEvent("call", "Call cancelled");
       setDiagnosticsCallId(null);
@@ -242,6 +244,7 @@ if (answeredSid) {
     call.on("error", (e: { message?: string }) => {
       setError(e?.message ?? "Call failed");
       callRef.current = null;
+      setIncomingCall(null);
       setStatus(deviceRef.current ? "ready" : "idle");
       logAudioEvent("call", e?.message ?? "Call failed", { level: "error" });
       setDiagnosticsCallId(null);
@@ -363,22 +366,15 @@ if (answeredSid) {
   );
 
     const hangUp = useCallback(async (_reconcile = false) => {
-  // IMPORTANT:
-  // This function is LOCAL SDK cleanup only.
-  // Authoritative Twilio termination MUST happen through useVoIPCalls.endCall()
-  // before this function is called by an End Call UI.
-
   const call = callRef.current;
-
+  const sid = callSidRef.current;
   try {
     call?.disconnect();
   } catch {
     // The browser call was already disconnected.
   }
-
   callRef.current = null;
   callSidRef.current = null;
-
   if (incomingCall) {
     try {
       incomingCall.reject();
@@ -387,10 +383,17 @@ if (answeredSid) {
     }
     setIncomingCall(null);
   }
-
   setStatus(deviceRef.current ? "ready" : "idle");
   setDiagnosticsCallId(null);
   logAudioEvent("call", "Local Twilio SDK call cleanup completed");
+
+  if (sid) {
+    try {
+      await backendBridge.invokeEdgeFunction("end-voip-call", { callSid: sid });
+    } catch (err) {
+      console.warn("[VoIP] Failed authoritative end-voip-call on hangUp:", err);
+    }
+  }
 }, [incomingCall]);
 
   const setMuted = useCallback((muted: boolean) => {
