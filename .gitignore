@@ -52,3 +52,7 @@ playwright/.cache/
 .aistudio/
 build-diagnosis-report.json
 
+# Large generated archive downloads
+public/downloads/*.zip
+*.zip
+

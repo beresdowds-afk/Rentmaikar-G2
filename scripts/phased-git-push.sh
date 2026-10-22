@@ -10,23 +10,24 @@ set -euo pipefail
 
 REPO_URL="${1:-https://github.com/beresdowds-afk/Rentmaikar-G2.git}"
 GITHUB_TOKEN="${2:-${GITHUB_TOKEN:-}}"
+TARGET_BRANCH="${3:-${BRANCH:-main}}"
 
 echo "=================================================================="
-echo "  RentMaikar Phased Git Repository Push"
+echo "  RentMaikar Phased Git Repository Push [Branch: $TARGET_BRANCH]"
 echo "=================================================================="
 
-# 1. Ensure repository is initialized and aligned on main branch
+# 1. Ensure repository is initialized and aligned on target branch
 if [ ! -d ".git" ]; then
   echo "==> Initializing git repository..."
-  git init -b main 2>/dev/null || (git init && git branch -M main)
+  git init -b "$TARGET_BRANCH" 2>/dev/null || (git init && git branch -M "$TARGET_BRANCH")
 fi
 
-# Ensure branch is explicitly main (handles default 'master' or detached HEAD)
+# Ensure branch is explicitly $TARGET_BRANCH (handles default 'master' or detached HEAD)
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
 if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" = "HEAD" ]; then
-  git checkout -B main 2>/dev/null || git branch -M main 2>/dev/null || true
-elif [ "$CURRENT_BRANCH" != "main" ]; then
-  git branch -M main 2>/dev/null || git checkout -B main 2>/dev/null || true
+  git checkout -B "$TARGET_BRANCH" 2>/dev/null || git branch -M "$TARGET_BRANCH" 2>/dev/null || true
+elif [ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]; then
+  git branch -M "$TARGET_BRANCH" 2>/dev/null || git checkout -B "$TARGET_BRANCH" 2>/dev/null || true
 fi
 
 # 2. Ensure Git author information is configured
@@ -72,26 +73,31 @@ fi
 echo "==> Remote target: $REPO_URL"
 
 # Set upstream tracking so standard 'git push' works seamlessly without arguments
-git branch --set-upstream-to=origin/main main 2>/dev/null || true
+git branch --set-upstream-to="origin/$TARGET_BRANCH" "$TARGET_BRANCH" 2>/dev/null || true
+
+# Untrack any large blobs previously cached in git index that match .gitignore
+echo "==> Untracking any cached large archives from git index..."
+git rm -r --cached public/downloads/*.zip 2>/dev/null || true
+git rm -r --cached *.zip 2>/dev/null || true
 
 # 5. Fetch and reconcile remote history (Prevents non-fast-forward rejections)
 echo "==> [Pre-Push] Checking remote origin status..."
 if git ls-remote --exit-code origin &>/dev/null; then
-  echo "==> Fetching commits from origin/main..."
-  git fetch origin main --depth=100 || git fetch origin main || true
+  echo "==> Fetching commits from origin/$TARGET_BRANCH..."
+  git fetch origin "$TARGET_BRANCH" --depth=100 || git fetch origin "$TARGET_BRANCH" || true
 
-  if git rev-parse --verify origin/main >/dev/null 2>&1; then
-    # If local branch has no commits yet (brand new git init), align HEAD to origin/main
+  if git rev-parse --verify "origin/$TARGET_BRANCH" >/dev/null 2>&1; then
+    # If local branch has no commits yet (brand new git init), align HEAD to origin
     if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
-      echo "==> Aligning working tree with origin/main to guarantee fast-forward commits..."
-      git reset --mixed origin/main
+      echo "==> Aligning working tree with origin/$TARGET_BRANCH to guarantee fast-forward commits..."
+      git reset --mixed "origin/$TARGET_BRANCH"
     else
-      # If local has commits, ensure we are based on origin/main safely
-      MERGE_BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
-      REMOTE_HEAD="$(git rev-parse origin/main 2>/dev/null || true)"
+      # If local has commits, ensure we are based on origin/$TARGET_BRANCH safely
+      MERGE_BASE="$(git merge-base HEAD "origin/$TARGET_BRANCH" 2>/dev/null || true)"
+      REMOTE_HEAD="$(git rev-parse "origin/$TARGET_BRANCH" 2>/dev/null || true)"
       if [ -n "$REMOTE_HEAD" ] && [ "$MERGE_BASE" != "$REMOTE_HEAD" ]; then
-        echo "==> Aligning branch delta with origin/main..."
-        git pull --rebase --autostash origin main 2>/dev/null || {
+        echo "==> Aligning branch delta with origin/$TARGET_BRANCH..."
+        git pull --rebase --autostash origin "$TARGET_BRANCH" 2>/dev/null || {
           echo "⚠ Rebase conflict, safely falling back to merge with autostash..."
           git rebase --abort 2>/dev/null || true
           STASH_SAVED=0
@@ -99,7 +105,7 @@ if git ls-remote --exit-code origin &>/dev/null; then
             git stash push -u -m "phased-push-autostash" 2>/dev/null || true
             STASH_SAVED=1
           fi
-          git merge origin/main --no-edit -m "merge: sync remote origin/main" --allow-unrelated-histories 2>/dev/null || true
+          git merge "origin/$TARGET_BRANCH" --no-edit -m "merge: sync remote origin/$TARGET_BRANCH" --allow-unrelated-histories 2>/dev/null || true
           if [ "$STASH_SAVED" -eq 1 ]; then
             git stash pop 2>/dev/null || true
           fi
@@ -118,14 +124,14 @@ push_with_retry() {
   local success=0
 
   while [ $attempt -le $max_attempts ]; do
-    echo "==> Pushing $phase_name to origin/main (Attempt $attempt of $max_attempts)..."
-    if git push --set-upstream --no-verify origin main; then
+    echo "==> Pushing $phase_name to origin/$TARGET_BRANCH (Attempt $attempt of $max_attempts)..."
+    if git push --set-upstream --no-verify origin "$TARGET_BRANCH"; then
       echo "✓ $phase_name pushed successfully."
       success=1
       break
     else
       echo "⚠ Push attempt $attempt failed. Synchronizing with remote before retry..."
-      git fetch origin main || true
+      git fetch origin "$TARGET_BRANCH" || true
 
       # Stash any dirty uncommitted changes in working tree before reconciling
       # so git merge or pull --rebase does not abort due to dirty working tree
@@ -135,8 +141,8 @@ push_with_retry() {
         STASHED=1
       fi
 
-      git pull --rebase origin main 2>/dev/null || \
-        git merge origin/main --no-edit -m "merge: sync remote before retry" --allow-unrelated-histories 2>/dev/null || true
+      git pull --rebase origin "$TARGET_BRANCH" 2>/dev/null || \
+        git merge "origin/$TARGET_BRANCH" --no-edit -m "merge: sync remote before retry" --allow-unrelated-histories 2>/dev/null || true
 
       if [ "$STASHED" -eq 1 ]; then
         git stash pop 2>/dev/null || true
@@ -245,5 +251,5 @@ fi
 
 echo ""
 echo "=================================================================="
-echo "🎉 All changes committed and pushed to origin/main successfully!"
+echo "🎉 All changes committed and pushed to origin/$TARGET_BRANCH successfully!"
 echo "=================================================================="
