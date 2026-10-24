@@ -56,3 +56,7 @@ build-diagnosis-report.json
 public/downloads/*.zip
 *.zip
 
+
+# Backend portal runtime state (users/invites); bridge-config.json is tracked
+backend/data/*.json
+!backend/data/bridge-config.json
