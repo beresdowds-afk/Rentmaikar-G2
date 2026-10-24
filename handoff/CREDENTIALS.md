@@ -10,7 +10,8 @@ This document defines the strict segregation between client-safe variables (pref
 [ BROWSER CLIENT (Public) ]
   ├── VITE_SUPABASE_URL (https://jrsydiofzceoeddjogov.supabase.co)
   ├── VITE_SUPABASE_PUBLISHABLE_KEY (Anon JWT)
-  └── VITE_API_BASE_URL (https://staging.rentmaikar.com/api)
+  ├── VITE_API_BASE_URL (configured per frontend deployment)
+  └── VITE_STAGING_API_BASE_URL (https://staging.rentmaikar.com/api)
 
 [ EXPRESS BACKEND / EDGE FUNCTIONS (Strict Secrets) ]
   ├── SUPABASE_SERVICE_ROLE_KEY (Bypasses RLS - NEVER expose to frontend)
@@ -30,7 +31,13 @@ This document defines the strict segregation between client-safe variables (pref
 |---|---|---|---|
 | `VITE_SUPABASE_URL` | Frontend `.env` | Public | Target Supabase URL (`https://jrsydiofzceoeddjogov.supabase.co`) |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Frontend `.env` | Public | Public anonymous key for client RLS queries |
-| `VITE_API_BASE_URL` | Frontend `.env` | Public | Backend gateway endpoint (`https://staging.rentmaikar.com/api`) |
+| `VITE_API_BASE_URL` | Frontend build | Public | Primary API base; staging builds use `https://staging.rentmaikar.com/api`, production keeps the `rentmaikar-g2` API gateway |
+| `VITE_STAGING_API_BASE_URL` | Frontend build | Public | Staging fallback API base used by the bridge |
+| `BACKEND_URL` | Frontend Cloud Run | Public | Cloud Run upstream origin for `/api` and `/portal`; Nginx Host and TLS SNI follow this URL |
+| `PORTAL_ADMIN_EMAIL` | Backend Cloud Run | Sensitive | Initial admin account email; required to enable portal auth |
+| `PORTAL_ADMIN_PASSWORD` | Backend Cloud Run Secret | **CRITICAL** | Initial admin password; required to enable portal auth |
+| `PORTAL_MASTER_KEY` | Backend Cloud Run Secret | **CRITICAL** | Portal admin master-key login credential |
+| `PORTAL_SECRET_KEY` | Backend Cloud Run Secret | **CRITICAL** | HMAC key for signing and verifying portal sessions |
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend / Edge | **CRITICAL** | Full administrative database privileges |
 | `TWILIO_ACCOUNT_SID` | Backend / Edge | High | Twilio Account identifier |
 | `TWILIO_AUTH_TOKEN` | Backend / Edge | **CRITICAL** | Twilio authentication token for webhooks and REST |
@@ -88,6 +95,16 @@ This document defines the strict segregation between client-safe variables (pref
 | Google Cloud ADC | Local `gcloud auth application-default login`, GitHub Actions Workload Identity Federation, Cloud Run / Cloud Build metadata server | Depends on ADC source | Google client libraries resolve ADC automatically | Do not treat `GOOGLE_APPLICATION_CREDENTIALS` as the only path |
 | Google Ads OAuth | `GOOGLE_ADS_*` env vars | Yes | OAuth token exchange and refresh in `googleAdsAdapter.ts` | Distinct from ADC-based Google Cloud auth |
 | Web Push | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Private key only | Web Push signing and subscription delivery flows | `VAPID_PUBLIC_KEY` is public by design |
+
+---
+
+### 2.3 Staging backend portal deployment
+
+Build the admin-only staging frontend with `VITE_API_BASE_URL=https://staging.rentmaikar.com/api` and `VITE_STAGING_API_BASE_URL=https://staging.rentmaikar.com/api`. The frontend Nginx service must set `BACKEND_URL` to the `rentmaikar-backend` Cloud Run service origin (for example, `https://rentmaikar-backend-<service-id>-<region>.run.app`); Nginx derives proxy `Host` and TLS SNI from that upstream.
+
+Set `PUBLIC_BACKEND_URL=https://staging.rentmaikar.com` and `PORTAL_ADMIN_EMAIL` on `rentmaikar-backend`. Bind `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY`, and `PORTAL_SECRET_KEY` from Secret Manager at deploy time. Production backend startup fails if any of the four `PORTAL_*` variables is missing or empty. Backend deployment commands update ordinary env vars so existing Secret Manager bindings are retained. Do not reuse `SUPABASE_SERVICE_ROLE_KEY` for portal signing.
+
+The production frontend retains its `rentmaikar-g2` API gateway base; configure its staging fallback separately with `VITE_STAGING_API_BASE_URL`.
 
 ---
 
