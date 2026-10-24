@@ -28,6 +28,11 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "iot-scheduled-sync": "cron_or_admin",
   "process-inspection-reminders": "cron_or_admin",
   "sarekon-location-worker": "cron_or_admin",
+  // Email / provisioning (no supabase/functions directory; backend-only)
+  "email-health": "admin",
+  "send-email-notification": "admin",
+  "google-sso-auth-email": "authenticated",
+  "provision-user-account": "authenticated",
   // User-initiated operations
   "create-paypal-order": "authenticated",
   "capture-paypal-order": "authenticated",
