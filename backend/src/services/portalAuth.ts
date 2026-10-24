@@ -42,16 +42,36 @@ export interface PortalSession {
   expiresAt: number;
 }
 
-const DATA_DIR = path.resolve(__dirname, "../../data");
+const DATA_DIR = process.env.PORTAL_DATA_DIR
+  ? path.resolve(process.env.PORTAL_DATA_DIR)
+  : path.resolve(__dirname, "../../data");
 const USERS_FILE = path.join(DATA_DIR, "portal-users.json");
 const INVITES_FILE = path.join(DATA_DIR, "portal-invites.json");
 
-const PORTAL_SECRET = process.env.PORTAL_SECRET_KEY;
-const DEFAULT_ADMIN_EMAIL = process.env.PORTAL_ADMIN_EMAIL?.trim().toLowerCase();
-const DEFAULT_ADMIN_PASS = process.env.PORTAL_ADMIN_PASSWORD;
-const MASTER_ADMIN_KEY = process.env.PORTAL_MASTER_KEY;
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function envValue(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
+function resolvePortalSecret(): string {
+  const configured = envValue("PORTAL_SECRET_KEY");
+  if (configured) return configured;
+  if (IS_PRODUCTION) {
+    throw new Error(
+      "[PortalAuth] PORTAL_SECRET_KEY is required in production. Refusing to start without a dedicated portal signing secret."
+    );
+  }
+  console.warn("[PortalAuth] PORTAL_SECRET_KEY is not set; using a random per-process secret (sessions reset on restart).");
+  return crypto.randomBytes(32).toString("hex");
+}
+
+const PORTAL_SECRET = resolvePortalSecret();
+const DEFAULT_ADMIN_EMAIL = envValue("PORTAL_ADMIN_EMAIL").toLowerCase();
+const DEFAULT_ADMIN_PASS = envValue("PORTAL_ADMIN_PASSWORD");
+const MASTER_ADMIN_KEY = envValue("PORTAL_MASTER_KEY");
 const requiredPortalEnv = {
-  PORTAL_SECRET_KEY: PORTAL_SECRET,
+  PORTAL_SECRET_KEY: envValue("PORTAL_SECRET_KEY"),
   PORTAL_ADMIN_EMAIL: DEFAULT_ADMIN_EMAIL,
   PORTAL_ADMIN_PASSWORD: DEFAULT_ADMIN_PASS,
   PORTAL_MASTER_KEY: MASTER_ADMIN_KEY,
@@ -63,6 +83,14 @@ const portalAuthConfigured = missingPortalEnv.length === 0;
 
 if (process.env.NODE_ENV === "production" && !portalAuthConfigured) {
   throw new Error(`Portal auth requires environment variables: ${missingPortalEnv.join(", ")}`);
+}
+
+/** Constant-time string comparison; empty values never match. */
+function safeEqual(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const ha = crypto.createHash("sha256").update(a).digest();
+  const hb = crypto.createHash("sha256").update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
 }
 
 class PortalAuthService {
@@ -117,25 +145,34 @@ class PortalAuthService {
   }
 
   private seedDefaultAdmin(): void {
-    if (!portalAuthConfigured || !DEFAULT_ADMIN_EMAIL || !DEFAULT_ADMIN_PASS) return;
+    if (!DEFAULT_ADMIN_EMAIL) return;
 
-    if (!this.users.has(DEFAULT_ADMIN_EMAIL)) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      const hash = this.hashPassword(DEFAULT_ADMIN_PASS, salt);
-      const admin: PortalUser = {
-        id: "usr-admin-root",
-        email: DEFAULT_ADMIN_EMAIL,
-        name: "Platform Administrator",
-        role: "admin",
-        passwordHash: hash,
-        passwordSalt: salt,
-        createdAt: new Date().toISOString(),
-        isActive: true,
-      };
-      this.users.set(DEFAULT_ADMIN_EMAIL, admin);
-      this.saveState();
-      console.info(`[PortalAuth] Seeded primary Admin account (${DEFAULT_ADMIN_EMAIL})`);
+    const existing = this.users.get(DEFAULT_ADMIN_EMAIL);
+    if (!DEFAULT_ADMIN_PASS) {
+      // No env password: make sure no stale persisted hash can authenticate the admin
+      if (existing && (existing.passwordHash || existing.passwordSalt)) {
+        delete existing.passwordHash;
+        delete existing.passwordSalt;
+        this.saveState();
+      }
+      return;
     }
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hash = this.hashPassword(DEFAULT_ADMIN_PASS, salt);
+    const admin: PortalUser = {
+      id: existing?.id || "usr-admin-root",
+      email: DEFAULT_ADMIN_EMAIL,
+      name: existing?.name || "Platform Administrator",
+      role: "admin",
+      passwordHash: hash,
+      passwordSalt: salt,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      lastLoginAt: existing?.lastLoginAt,
+      isActive: true,
+    };
+    this.users.set(DEFAULT_ADMIN_EMAIL, admin);
+    this.saveState();
+    console.info(`[PortalAuth] Seeded primary Admin account (${DEFAULT_ADMIN_EMAIL}) from environment`);
   }
 
   /**
@@ -155,7 +192,7 @@ class PortalAuthService {
     const trimmed = (emailOrKey || "").trim();
 
     // 1. Direct Master Key Login
-    if (trimmed === MASTER_ADMIN_KEY || (password && password === MASTER_ADMIN_KEY)) {
+    if (MASTER_ADMIN_KEY && (safeEqual(trimmed, MASTER_ADMIN_KEY) || safeEqual(password || "", MASTER_ADMIN_KEY))) {
       const adminUser: PortalUser = this.users.get(DEFAULT_ADMIN_EMAIL) || {
         id: "usr-master",
         email: DEFAULT_ADMIN_EMAIL,
@@ -196,7 +233,7 @@ class PortalAuthService {
     }
 
     const testHash = this.hashPassword(password, user.passwordSalt);
-    if (testHash !== user.passwordHash) {
+    if (!safeEqual(testHash, user.passwordHash)) {
       return { success: false, error: "Invalid email or password" };
     }
 
@@ -376,7 +413,7 @@ class PortalAuthService {
     name: string;
     role: PortalRole;
   }): string {
-    if (!portalAuthConfigured || !PORTAL_SECRET) {
+    if (!PORTAL_SECRET) {
       throw new Error("Portal session signing is not configured");
     }
 
@@ -403,7 +440,7 @@ class PortalAuthService {
     const [, encoded, signature] = parts;
     const expected = crypto.createHmac("sha256", PORTAL_SECRET).update(encoded).digest("base64url");
 
-    if (signature !== expected) return null;
+    if (!safeEqual(signature, expected)) return null;
 
     try {
       const session: PortalSession = JSON.parse(Buffer.from(encoded, "base64url").toString("utf-8"));

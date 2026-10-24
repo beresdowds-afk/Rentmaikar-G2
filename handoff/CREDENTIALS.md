@@ -113,3 +113,18 @@ The production frontend retains its `rentmaikar-g2` API gateway base; configure 
 1. **Immediate Revocation**: If any service role key or API secret is committed to a client repository or exposed in browser bundles, regenerate it immediately via the provider console.
 2. **Zero In-Code Secrets**: No production keys may be hardcoded into TypeScript files. All secrets are read via `process.env` in backend microservices.
 3. **Configuration vs readiness**: treat secret presence, runtime authentication, live request success, and webhook verification as separate checks in operational runbooks.
+
+---
+
+## 4. Backend Portal Credentials (`rentmaikar-backend`)
+
+The admin-only backend portal (served at `staging.rentmaikar.com`) reads its fallback admin credentials solely from environment variables. No defaults exist in source.
+
+| Variable | Purpose | Behavior when unset |
+|---|---|---|
+| `PORTAL_ADMIN_EMAIL` | Admin login email (defaults to the non-secret `admin@rentmaikar.com`) | Default email used |
+| `PORTAL_ADMIN_PASSWORD` | Admin email/password login (seeded and hashed at startup) | Password login disabled (warning logged) |
+| `PORTAL_MASTER_KEY` | Master key login | Master key login disabled (warning logged) |
+| `PORTAL_SECRET_KEY` | Dedicated session-signing secret (never `SUPABASE_SERVICE_ROLE_KEY`) | Production: startup fails. Non-production: random per-process secret |
+
+Inject these into the `rentmaikar-backend` Cloud Run service via Secret Manager (`--set-secrets`) or `--update-env-vars`. Use placeholder-free, newly generated values; any previously committed or default values are compromised and must be rotated.
