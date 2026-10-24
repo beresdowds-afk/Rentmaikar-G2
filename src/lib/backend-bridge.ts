@@ -144,7 +144,7 @@ type StateChangeListener = (state: ConnectionState, info: BridgeStatusInfo) => v
 class BackendBridge {
   private readonly primaryBaseUrl: string;
   private readonly publicGatewayUrl: string =
-  "https://rentmaikar-g2-672260445879.europe-west1.run.app/api";
+    "https://staging.rentmaikar.com/api";
   private readonly stagingBackendUrl: string = normalizeBackendApiBase(
     import.meta.env.VITE_STAGING_API_BASE_URL || import.meta.env.VITE_API_BASE_URL,
     "https://staging.rentmaikar.com/api",

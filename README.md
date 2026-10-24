@@ -43,7 +43,7 @@ The application runs on `http://localhost:3000`.
 
 ## Deployment surfaces
 
-RentMaikar is deployed as three surfaces: the public `rentmaikar.com` nginx frontend, the admin-only `staging.rentmaikar.com` portal on the `rentmaikar-backend` Cloud Run service, and the `rentmaikar-g2` Cloud Run service (backend per the owner; the repo currently deploys the nginx frontend there). Ownership, deploy targets, ports, health checks, secrets and open discrepancies are in [`handoff/DEPLOYMENT-SURFACES.md`](handoff/DEPLOYMENT-SURFACES.md).
+RentMaikar is deployed as two Cloud Run surfaces: the public `rentmaikar.com` nginx frontend on `rentmaikar-g2`, and the backend API gateway/admin portal on `rentmaikar-backend`, mapped to `staging.rentmaikar.com`. The portal is host-gated and is not proxied through the public nginx service. See [`handoff/DEPLOYMENT-SURFACES.md`](handoff/DEPLOYMENT-SURFACES.md).
 
 ### Building for Production
 

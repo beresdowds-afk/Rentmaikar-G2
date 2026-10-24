@@ -91,6 +91,8 @@ jobs:
           docker build \
             --build-arg VITE_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL || 'https://jrsydiofzceoeddjogov.supabase.co' }}" \
             --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p' }}" \
+            --build-arg VITE_API_BASE_URL=https://staging.rentmaikar.com/api \
+            --build-arg VITE_STAGING_API_BASE_URL=https://staging.rentmaikar.com/api \
             -t gcr.io/${PROJECT_ID}/rentmaikar:${{ github.sha }} \
             -t gcr.io/${PROJECT_ID}/rentmaikar:latest .
           docker push gcr.io/${PROJECT_ID}/rentmaikar:${{ github.sha }}

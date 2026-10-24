@@ -55,6 +55,10 @@ export const DOMAIN_MAPPING = {
   outgoingMailDomain: "notify.rentmaikar.com",
 } as const;
 
+function isStagingPortalHost(req: Request): boolean {
+  return req.hostname.toLowerCase() === DOMAIN_MAPPING.backendDomain;
+}
+
 /** Exact host match (rentmaikar.com or a subdomain) - never a substring match. */
 function isRentmaikarUrl(value: string): boolean {
   try {
@@ -301,6 +305,10 @@ app.get(["/sitemap.xml", "/sitemap", "/api/sitemap"], async (req: Request, res: 
 
 // Root handler for staging.rentmaikar.com
 app.get("/", (req: Request, res: Response) => {
+  if (!isStagingPortalHost(req)) {
+    return res.status(404).json({ error: "NOT_FOUND" });
+  }
+
   if (req.accepts("html") && !req.xhr) {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(renderPortalHtml());
@@ -321,6 +329,10 @@ app.get("/", (req: Request, res: Response) => {
 
 // Visual Portal UI (Accessible via /portal or /admin on staging.rentmaikar.com)
 app.get(["/portal", "/portal/*", "/admin", "/admin/*"], (req: Request, res: Response) => {
+  if (!isStagingPortalHost(req)) {
+    return res.status(404).json({ error: "NOT_FOUND" });
+  }
+
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(renderPortalHtml());
 });

@@ -47,10 +47,9 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
   ├── VITE_API_BASE_URL (configured per frontend deployment)
   └── VITE_STAGING_API_BASE_URL (https://staging.rentmaikar.com/api)
 
-[ SURFACE 2: staging.rentmaikar.com — rentmaikar-backend admin-only portal (PORTAL_* + backend secrets) ]
+[ SURFACE 2: staging.rentmaikar.com — rentmaikar-backend API and admin portal (PORTAL_* + backend secrets) ]
   ├── PORTAL_SECRET_KEY, PORTAL_ADMIN_EMAIL, PORTAL_ADMIN_PASSWORD, PORTAL_MASTER_KEY
-[ SURFACE 3: rentmaikar-g2 — backend (owner's intent; see DEPLOYMENT-SURFACES.md) ]
-[ SURFACES 2 & 3 / EDGE FUNCTIONS (Strict Secrets) ]
+[ BACKEND / EDGE FUNCTIONS (Strict Secrets) ]
   ├── SUPABASE_SERVICE_ROLE_KEY (Bypasses RLS - NEVER expose to frontend)
   ├── TWILIO_AUTH_TOKEN & TWILIO_API_KEY_SECRET
   ├── SENT_API_KEY & SENT_WEBHOOK_SECRET
@@ -66,14 +65,14 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
 
 See [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md) for ownership and deploy targets.
 
-| Variable group | 1. `rentmaikar.com` (nginx) | 2. `staging.rentmaikar.com` (`rentmaikar-backend`) | 3. `rentmaikar-g2` (backend, intended) |
-|---|---|---|---|
-| `VITE_*` (public client config) | Yes (build-time) | No | No |
-| `BACKEND_URL`, `SUPABASE_URL` (non-secret runtime URLs) | Yes | `SUPABASE_URL` only | `SUPABASE_URL` only |
-| `PORTAL_SECRET_KEY`, `PORTAL_ADMIN_EMAIL`, `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY` | **Never** | Yes (env / Secret Manager) | Only if it serves portal routes |
-| `SUPABASE_SERVICE_ROLE_KEY` and all provider secrets (Twilio, Sent.dm, PayPal, Paystack, OPay, Persona, Resend, ...) | **Never** | Yes | Yes |
+| Variable group | 1. `rentmaikar.com` (nginx) | 2. `staging.rentmaikar.com` (`rentmaikar-backend`) |
+|---|---|---|
+| `VITE_*` (public client config) | Yes (build-time) | No |
+| `BACKEND_URL`, `SUPABASE_URL` (non-secret runtime URLs) | Yes | Yes |
+| `PORTAL_SECRET_KEY`, `PORTAL_ADMIN_EMAIL`, `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY` | **Never** | Yes (env / Secret Manager) |
+| `SUPABASE_SERVICE_ROLE_KEY` and all provider secrets (Twilio, Sent.dm, PayPal, Paystack, OPay, Persona, Resend, ...) | **Never** | Yes |
 
-Templates: [`handoff/env/public-frontend.env.template`](./env/public-frontend.env.template) (surface 1) and [`handoff/env/admin-backend.env.template`](./env/admin-backend.env.template) (surfaces 2 and 3) are the source of truth. `handoff/backend.env.template` is only a pointer to them, and `.env.example` (local development) carries per-variable surface headers. Compliance is enforced by `npm run check:env-surfaces`.
+Templates: [`handoff/env/public-frontend.env.template`](./env/public-frontend.env.template) (surface 1) and [`handoff/env/admin-backend.env.template`](./env/admin-backend.env.template) (surface 2) are the source of truth. `handoff/backend.env.template` is only a pointer to them, and `.env.example` (local development) carries per-variable surface headers. Compliance is enforced by `npm run check:env-surfaces`.
 
 ---
 
@@ -83,9 +82,9 @@ Templates: [`handoff/env/public-frontend.env.template`](./env/public-frontend.en
 |---|---|---|---|
 | `VITE_SUPABASE_URL` | Frontend `.env` | Public | Target Supabase URL (`https://jrsydiofzceoeddjogov.supabase.co`) |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Frontend `.env` | Public | Public anonymous key for client RLS queries |
-| `VITE_API_BASE_URL` | Frontend build | Public | Primary API base; staging builds use `https://staging.rentmaikar.com/api`, production keeps the `rentmaikar-g2` API gateway |
+| `VITE_API_BASE_URL` | Frontend build | Public | Primary API base: `https://staging.rentmaikar.com/api` |
 | `VITE_STAGING_API_BASE_URL` | Frontend build | Public | Staging fallback API base used by the bridge |
-| `BACKEND_URL` | Frontend Cloud Run | Public | Cloud Run upstream origin for `/api` and `/portal`; Nginx Host and TLS SNI follow this URL |
+| `BACKEND_URL` | Frontend Cloud Run | Public | Cloud Run upstream origin for `/api` and sitemap; nginx does not proxy portal paths |
 | `PORTAL_ADMIN_EMAIL` | Surface 2 backend (Cloud Run) | Sensitive | Initial admin account email; required to enable portal auth (no hardcoded fallback) |
 | `PORTAL_ADMIN_PASSWORD` | Surface 2 backend (Cloud Run Secret) | **CRITICAL** | Initial admin password; required to enable portal auth (no hardcoded fallback) |
 | `PORTAL_MASTER_KEY` | Surface 2 backend (Cloud Run Secret) | **CRITICAL** | Portal admin master-key login credential |
@@ -152,11 +151,11 @@ Templates: [`handoff/env/public-frontend.env.template`](./env/public-frontend.en
 
 ### 2.3 Staging backend portal deployment
 
-Build the admin-only staging frontend with `VITE_API_BASE_URL=https://staging.rentmaikar.com/api` and `VITE_STAGING_API_BASE_URL=https://staging.rentmaikar.com/api`. The frontend Nginx service must set `BACKEND_URL` to the `rentmaikar-backend` Cloud Run service origin (for example, `https://rentmaikar-backend-<service-id>-<region>.run.app`); Nginx derives proxy `Host` and TLS SNI from that upstream.
+Build the public frontend with both `VITE_API_BASE_URL` and `VITE_STAGING_API_BASE_URL` set to `https://staging.rentmaikar.com/api`. The frontend nginx service uses `BACKEND_URL` for its `/api` and sitemap upstream; it does not proxy portal routes.
 
 Set `PUBLIC_BACKEND_URL=https://staging.rentmaikar.com` and `PORTAL_ADMIN_EMAIL` on `rentmaikar-backend`. Bind `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY`, and `PORTAL_SECRET_KEY` from Secret Manager at deploy time. Production backend startup fails if any of the four `PORTAL_*` variables is missing or empty. Backend deployment commands update ordinary env vars so existing Secret Manager bindings are retained. Do not reuse `SUPABASE_SERVICE_ROLE_KEY` for portal signing.
 
-The production frontend retains its `rentmaikar-g2` API gateway base; configure its staging fallback separately with `VITE_STAGING_API_BASE_URL`.
+The admin portal is served by the backend only on `staging.rentmaikar.com`; frontend nginx returns 404 for `/portal` and `/admin`.
 
 ---
 

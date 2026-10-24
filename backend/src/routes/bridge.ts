@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { exec } from "child_process";
 import crypto from "crypto";
 import path from "path";
@@ -6,15 +6,25 @@ import fs from "fs";
 import { bridgeManager, BridgeEventPacket } from "../services/bridgeManager";
 import { platformHealthService } from "../services/platformHealth";
 import { supabaseBackendService } from "../services/supabaseService";
+import { requireAdminRole, requirePortalAuth } from "./portal";
 
 export const bridgeRouter = Router();
+
+function requireAdminForDiagnostics(req: Request, res: Response, next: NextFunction): void {
+  if (!["diagnostics", "status", "get_status"].includes(req.body?.action)) {
+    next();
+    return;
+  }
+
+  requirePortalAuth(req, res, () => requireAdminRole(req, res, next));
+}
 
 /**
  * 1. CALL:
  * General-purpose RPC endpoint allowing frontend files to invoke backend
  * actions through staging.rentmaikar.com when direct contact is severed.
  */
-bridgeRouter.post("/call", async (req: Request, res: Response) => {
+bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res: Response) => {
   const startTime = Date.now();
   const incomingCorrelationId =
     (req.headers["x-correlation-id"] as string) ||
@@ -549,7 +559,7 @@ bridgeRouter.get("/health", (req: Request, res: Response) => {
 /**
  * Get Bridge Status & Telemetry
  */
-bridgeRouter.get("/status", (req: Request, res: Response) => {
+bridgeRouter.get("/status", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const config = bridgeManager.getConfig();
   res.json({
     status: "ok",
@@ -569,7 +579,7 @@ bridgeRouter.get("/status", (req: Request, res: Response) => {
 /**
  * Telemetry endpoint for recent frontend responses
  */
-bridgeRouter.get("/telemetry", (req: Request, res: Response) => {
+bridgeRouter.get("/telemetry", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   res.json({
     status: "ok",
     activeListeners: bridgeManager.getActiveListenersCount(),
@@ -581,7 +591,7 @@ bridgeRouter.get("/telemetry", (req: Request, res: Response) => {
 /**
  * Broadcast event from backend to all listening frontend files
  */
-bridgeRouter.post("/broadcast", (req: Request, res: Response) => {
+bridgeRouter.post("/broadcast", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const { type = "backend_notice", message, data = {} } = req.body || {};
 
   const packet: BridgeEventPacket = {
@@ -610,7 +620,7 @@ bridgeRouter.post("/broadcast", (req: Request, res: Response) => {
  * Allows the Admin Dashboard to connect or disconnect the front end files
  * from the backend files.
  */
-bridgeRouter.post("/toggle", (req: Request, res: Response) => {
+bridgeRouter.post("/toggle", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const { enabled, reason, toggledBy, mode } = req.body || {};
   if (typeof enabled !== "boolean") {
     res.status(400).json({ error: "Field 'enabled' (boolean) is required" });
@@ -661,7 +671,7 @@ bridgeRouter.post("/toggle", (req: Request, res: Response) => {
  * Executes scripts/package-frontend-zip.py to regenerate all frontend archives
  * on demand.
  */
-bridgeRouter.post("/package-frontend", (req: Request, res: Response) => {
+bridgeRouter.post("/package-frontend", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const scriptPath = path.resolve(process.cwd(), "..", "scripts", "package-frontend-zip.py");
   const localScriptPath = path.resolve(process.cwd(), "scripts", "package-frontend-zip.py");
   const pathToRun = fs.existsSync(scriptPath) ? scriptPath : localScriptPath;
@@ -697,7 +707,7 @@ bridgeRouter.post("/package-frontend", (req: Request, res: Response) => {
  * immediately when calls are detected from the rentmaikar.com frontend,
  * making the fallback bridge active.
  */
-bridgeRouter.get("/auto-disconnect", (req: Request, res: Response) => {
+bridgeRouter.get("/auto-disconnect", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const config = bridgeManager.getConfig();
   res.json({
     status: "ok",
@@ -711,7 +721,7 @@ bridgeRouter.get("/auto-disconnect", (req: Request, res: Response) => {
   });
 });
 
-bridgeRouter.post("/auto-disconnect", (req: Request, res: Response) => {
+bridgeRouter.post("/auto-disconnect", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const { enabled, toggledBy } = req.body || {};
   if (typeof enabled !== "boolean") {
     const config = bridgeManager.getConfig();
@@ -746,7 +756,7 @@ bridgeRouter.post("/auto-disconnect", (req: Request, res: Response) => {
  * Allows administrators to trigger the auto-disconnect immediately to verify
  * that calls from rentmaikar.com sever direct contact and activate the bridge.
  */
-bridgeRouter.post("/simulate-frontend-call", (req: Request, res: Response) => {
+bridgeRouter.post("/simulate-frontend-call", requirePortalAuth, requireAdminRole, (req: Request, res: Response) => {
   const {
     origin = "https://rentmaikar.com",
     path = "/api/vehicles",
@@ -776,5 +786,3 @@ bridgeRouter.post("/simulate-frontend-call", (req: Request, res: Response) => {
     fallback_url: "https://staging.rentmaikar.com/api/bridge/call",
   });
 });
-
-
