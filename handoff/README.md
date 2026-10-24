@@ -11,7 +11,9 @@ This directory contains the production handoff specifications, API contracts, cr
 | [`API-CONTRACT.md`](./API-CONTRACT.md) | Frontend-to-Backend HTTP REST, WebSocket, and Webhook interfaces |
 | [`CREDENTIALS.md`](./CREDENTIALS.md) | Secret isolation policy, credential catalog, and environment variable matrix |
 | [`CUTOVER.md`](./CUTOVER.md) | Operational procedure for cutting over database and APIs to private infrastructure |
-| [`backend.env.template`](./backend.env.template) | Production environment variable template for backend containers |
+| [`env/public-frontend.env.template`](./env/public-frontend.env.template) | Public frontend (rentmaikar.com, `rentmaikar-g2`) public/runtime values only; no secrets |
+| [`env/admin-backend.env.template`](./env/admin-backend.env.template) | Admin backend (staging.rentmaikar.com, `rentmaikar-backend`): `PORTAL_*` and other backend secrets |
+| [`backend.env.template`](./backend.env.template) | Pointer to the two per-surface templates above |
 | [`openapi.yaml`](./openapi.yaml) | OpenAPI 3.0 specification for backend endpoints |
 
 ---

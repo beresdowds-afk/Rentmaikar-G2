@@ -33,6 +33,8 @@ jobs:
           exit 1
       - name: Install backend dependencies
         run: npm ci --prefix backend
+      - name: Env surface guardrail
+        run: bun run check:env-surfaces
       - name: Typecheck
         run: bun run typecheck
       - name: Vitest

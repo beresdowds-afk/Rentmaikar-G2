@@ -4,6 +4,40 @@ This document defines the strict segregation between client-safe variables (pref
 
 ---
 
+## 0. Surface Separation (Public Frontend vs Admin Backend)
+
+Credentials are split by deployment surface. Templates: `handoff/env/public-frontend.env.template` and `handoff/env/admin-backend.env.template`. Enforced by `npm run check:env-surfaces`.
+
+| Surface | Domain | Cloud Run service | May hold |
+|---|---|---|---|
+| Public frontend (nginx) | rentmaikar.com | `rentmaikar-g2` | Public `VITE_*`, `BACKEND_URL`, `SUPABASE_URL`, `PUBLIC_APP_URL` only |
+| Admin backend | staging.rentmaikar.com | `rentmaikar-backend` | `PORTAL_*` group and all other backend secrets |
+
+### 0.1 Surface-to-variable matrix
+
+| Variable | Surface | Secret / Public | Where to set | Rotation notes |
+|---|---|---|---|---|
+| `VITE_SUPABASE_URL`, `VITE_SUPABASE_PROJECT_ID`, `VITE_API_BASE_URL`, `VITE_GOOGLE_CLIENT_ID` | Public frontend | Public | Docker build arg | Change on redeploy |
+| `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_ANON_KEY` | Public frontend | Public (publishable) | Docker build arg | Rotate in Supabase; rebuild image |
+| `BACKEND_URL`, `SUPABASE_URL` | Public frontend | Public | Cloud Run env (nginx envsubst) | Update if upstream changes |
+| `PUBLIC_APP_URL` | Public frontend | Public | Cloud Run env | n/a |
+| `PORTAL_SECRET_KEY` | Admin backend | **Secret** | Secret Manager (`--set-secrets`) | Rotation invalidates all portal sessions |
+| `PORTAL_ADMIN_EMAIL` | Admin backend | Sensitive config | Cloud Run env (`--update-env-vars`) or Secret Manager | Change with password |
+| `PORTAL_ADMIN_PASSWORD` | Admin backend | **Secret** | Secret Manager | Rotate on operator change / suspected exposure |
+| `PORTAL_MASTER_KEY` | Admin backend | **Secret** | Secret Manager | Rotate on suspected exposure |
+| `SUPABASE_SERVICE_ROLE_KEY` | Admin backend | **Secret** | Secret Manager | Rotate in Supabase; redeploy |
+| `TWILIO_*`, `SENT_*`, `RESEND_*`, `PAYSTACK_*`, `PAYPAL_*`, `OPAY_*`, `PERSONA_API_KEY`, `ELEVENLABS_API_KEY`, `TERMII_API_KEY` | Admin backend | **Secret** (IDs/modes are config) | Secret Manager (see Section 2 and admin template) | Rotate at provider console |
+| `PORT`, `NODE_ENV`, `PUBLIC_BACKEND_URL`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | Admin backend | Public config | Cloud Run env | n/a |
+
+### 0.2 Never do
+
+- Never put `PORTAL_*` or service-role keys in `VITE_*` variables, Docker build args, nginx env, or the public frontend service (`rentmaikar-g2`).
+- Never place payment/CPaaS secrets (Twilio, Paystack, PayPal, OPay, Sent, Resend) on the public frontend.
+- Never use `--set-env-vars` on `rentmaikar-backend`: it replaces all existing vars. Use `--update-env-vars` or `--set-secrets`.
+- Never commit real values to templates; placeholders only.
+
+---
+
 ## 1. Security Isolation Hierarchy
 
 ```
