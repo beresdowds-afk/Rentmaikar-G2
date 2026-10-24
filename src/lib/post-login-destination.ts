@@ -12,9 +12,20 @@ export async function resolvePostLoginDestination(
   }
 
   try {
+    // driver_profiles / owner_profiles are not in the generated Supabase types;
+    // query through an untyped handle (errors are caught below).
+    const db = supabase as unknown as {
+      from: (table: string) => {
+        select: (cols: string) => {
+          eq: (col: string, val: string) => {
+            maybeSingle: () => Promise<{ data: { agreement_signed?: boolean } | null }>;
+          };
+        };
+      };
+    };
     if (role === 'driver') {
       // Check if agreement is pending
-      const { data: driver } = await supabase
+      const { data: driver } = await db
         .from('driver_profiles')
         .select('agreement_signed')
         .eq('user_id', userId)
@@ -24,7 +35,7 @@ export async function resolvePostLoginDestination(
         return '/driver-agreement';
       }
     } else if (role === 'owner') {
-      const { data: owner } = await supabase
+      const { data: owner } = await db
         .from('owner_profiles')
         .select('agreement_signed')
         .eq('user_id', userId)

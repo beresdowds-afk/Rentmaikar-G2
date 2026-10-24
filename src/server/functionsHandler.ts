@@ -1193,19 +1193,13 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "process-owner-payouts":
     case "initiate-paypal-payout":
     case "initiate-paystack-transfer": {
-      try {
-        const result = await paymentService.processOwnerPayout({
-          owner_id: body.owner_id || body.user_id,
-          amount: Number(body.amount),
-          currency: body.currency || "USD",
-          provider: functionName.includes("paystack") ? "paystack" : "paypal",
-          payout_account_id: body.payout_account_id,
-          initiated_by: body.initiated_by,
-        });
-        return { status: 200, data: result };
-      } catch (err: any) {
-        return { status: 400, data: { ok: false, error: err.message } };
-      }
+      // Owner payouts are authoritative in the backend gateway
+      // (backend/src/routes/functions.ts), which enforces withdrawal
+      // authorization and idempotency. Never execute them from this handler.
+      return {
+        status: 501,
+        data: { ok: false, error: `${functionName} is only available through the backend gateway` },
+      };
     }
 
     case "persona-create-inquiry": {
@@ -1225,8 +1219,9 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "persona-webhook": {
       const { personaWebhookService } = await import("../../backend/src/services/personaWebhookService");
       const res = await personaWebhookService.handle({
-        headers: (request.headers || {}) as any,
-        body: request.body,
+        headers: headers as any,
+        body,
+        rawBody: typeof payload?.rawBody === "string" ? payload.rawBody : undefined,
       });
       return { status: res.status, data: res.body };
     }
@@ -1255,15 +1250,15 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         const { getDbPool } = await import("../../backend/src/services/dbPool");
         const pool = getDbPool();
-        if (req.method === "POST" && req.body) {
+        if (payload?.method === "POST" && payload?.body) {
           const val = {
-            enabled: req.body.enabled === true,
-            background_check_enabled: req.body.background_check_enabled !== undefined
-              ? req.body.background_check_enabled === true
-              : req.body.enabled === true,
-            identity_verification_enabled: req.body.identity_verification_enabled !== undefined
-              ? req.body.identity_verification_enabled === true
-              : req.body.enabled === true,
+            enabled: body.enabled === true,
+            background_check_enabled: body.background_check_enabled !== undefined
+              ? body.background_check_enabled === true
+              : body.enabled === true,
+            identity_verification_enabled: body.identity_verification_enabled !== undefined
+              ? body.identity_verification_enabled === true
+              : body.enabled === true,
           };
           await pool.query(
             `INSERT INTO public.platform_kv_settings (key, value, updated_at)
@@ -1587,16 +1582,10 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         if (!ownerId || !amount || amount <= 0) {
           return { status: 400, data: { ok: false, error: "owner_id and valid amount are required" } };
         }
-        const { paymentService } = await import("../../backend/src/services/paymentService");
-        const result = await paymentService.processOwnerPayout({
-          owner_id: ownerId,
-          amount,
-          currency,
-          provider,
-          payout_account_id: payoutAccountId,
-          initiated_by: body.initiated_by || "owner",
-        });
-        return { status: 200, data: result };
+        return {
+          status: 501,
+          data: { ok: false, error: "initiate-owner-withdrawal is only available through the backend gateway" },
+        };
       } catch (err: any) {
         return { status: 500, data: { ok: false, error: err.message } };
       }

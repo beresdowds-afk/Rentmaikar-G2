@@ -43,16 +43,30 @@ const DATA_DIR = path.resolve(__dirname, "../../data");
 const USERS_FILE = path.join(DATA_DIR, "portal-users.json");
 const INVITES_FILE = path.join(DATA_DIR, "portal-invites.json");
 
-// Secret used for signing session tokens
-const PORTAL_SECRET =
-  process.env.PORTAL_SECRET_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "rentmaikar-backend-portal-auth-secret-key-2026-secure-salt";
+/**
+ * Portal credentials come exclusively from environment variables:
+ *   PORTAL_SECRET_KEY      - HMAC key used to sign portal session tokens
+ *   PORTAL_ADMIN_PASSWORD  - password for the seeded primary admin account
+ *   PORTAL_MASTER_KEY      - break-glass master key for portal login
+ * In production all three are required and the process refuses to start
+ * without them. Outside production, missing values are replaced by random
+ * per-process values (sessions/logins do not survive a restart).
+ */
+function requirePortalEnv(name: string): string {
+  const value = (process.env[name] || "").trim();
+  if (value) return value;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`[PortalAuth] Required environment variable ${name} is not set`);
+  }
+  console.warn(`[PortalAuth] ${name} is not set; using a random per-process value (non-production only)`);
+  return crypto.randomBytes(32).toString("hex");
+}
 
-// Configurable master admin credentials
+const PORTAL_SECRET = requirePortalEnv("PORTAL_SECRET_KEY");
+
 const DEFAULT_ADMIN_EMAIL = (process.env.PORTAL_ADMIN_EMAIL || "admin@rentmaikar.com").toLowerCase();
-const DEFAULT_ADMIN_PASS = process.env.PORTAL_ADMIN_PASSWORD || "RentmaikarAdmin2026!#";
-const MASTER_ADMIN_KEY = process.env.PORTAL_MASTER_KEY || "rm-master-admin-key-2026";
+const DEFAULT_ADMIN_PASS = requirePortalEnv("PORTAL_ADMIN_PASSWORD");
+const MASTER_ADMIN_KEY = requirePortalEnv("PORTAL_MASTER_KEY");
 
 class PortalAuthService {
   private users: Map<string, PortalUser> = new Map();
