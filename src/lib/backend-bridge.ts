@@ -125,15 +125,31 @@ export interface BidirectionalLinkTestResult {
   details: string;
 }
 
+export function normalizeBackendApiBase(configuredBaseUrl: string | undefined, fallbackBaseUrl: string): string {
+  return (configuredBaseUrl?.trim() || fallbackBaseUrl).replace(/\/+$/, "");
+}
+
+export function buildBackendApiUrl(baseUrl: string, endpoint: string): string {
+  const base = normalizeBackendApiBase(baseUrl, baseUrl);
+  const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const normalizedPath = /\/api$/.test(base) && /^\/api(?:\/|$)/.test(path)
+    ? path.slice(4) || "/"
+    : path;
+  return `${base}${normalizedPath}`;
+}
+
 type EventListener = (event: BridgeEventPacket) => void;
 type StateChangeListener = (state: ConnectionState, info: BridgeStatusInfo) => void;
 
 class BackendBridge {
-  private primaryBaseUrl: string;
+  private readonly primaryBaseUrl: string;
   private readonly publicGatewayUrl: string =
   "https://rentmaikar-g2-672260445879.europe-west1.run.app/api";
-  private readonly stagingBackendUrl: string = "https://staging.rentmaikar.com/api";
-  private readonly stagingHost: string = "https://staging.rentmaikar.com";
+  private readonly stagingBackendUrl: string = normalizeBackendApiBase(
+    import.meta.env.VITE_STAGING_API_BASE_URL || import.meta.env.VITE_API_BASE_URL,
+    "https://staging.rentmaikar.com/api",
+  );
+  private readonly stagingHost: string = this.stagingBackendUrl.replace(/\/api\/?$/, "");
   private connectionState: ConnectionState = "DIRECT";
   private isSimulatedLossOfContact = false;
   private isManuallyDisconnected = false;
@@ -174,25 +190,10 @@ class BackendBridge {
   }> = [];
 
   constructor() {
-    // Canonical production operational backend.
-    // Browser operational requests must never depend on the static
-    // rentmaikar.com origin or an accidental same-origin proxy.
-    const configuredBase = String(
-      import.meta.env.VITE_API_BASE_URL || ""
-    ).trim().replace(/\/+$/, "");
-
-    const isProduction =
-      typeof import.meta !== "undefined" &&
-      import.meta.env?.MODE === "production";
-
-    if (isProduction) {
-  // Public production traffic MUST enter through rentmaikar-g2.
-  // staging.rentmaikar.com remains the admin-only backend surface.
-  this.primaryBaseUrl = this.publicGatewayUrl;
-} else {
-  this.primaryBaseUrl =
-    configuredBase || this.publicGatewayUrl;
-    }
+    this.primaryBaseUrl = normalizeBackendApiBase(
+      import.meta.env.VITE_API_BASE_URL,
+      this.publicGatewayUrl,
+    );
 
     if (typeof window !== "undefined") {
       try {
@@ -640,7 +641,7 @@ class BackendBridge {
 
     if (useStagingFallback) {
       return this.executeCallWithRetry<T>(
-        `${this.stagingBackendUrl}${cleanEndpoint}`,
+        buildBackendApiUrl(this.stagingBackendUrl, cleanEndpoint),
         options,
         correlationId,
         true,
@@ -650,7 +651,7 @@ class BackendBridge {
 
 // Attempt primary call first
    try {
-   const primaryUrl = `${this.primaryBaseUrl}${cleanEndpoint}`;
+   const primaryUrl = buildBackendApiUrl(this.primaryBaseUrl, cleanEndpoint);
    return await this.executeSingleCall<T>(
     primaryUrl,
     options,
@@ -683,7 +684,7 @@ class BackendBridge {
   );
 
  // Immediately failover and execute via staging.rentmaikar.com
-  const stagingUrl = `${this.stagingBackendUrl}${cleanEndpoint}`;
+  const stagingUrl = buildBackendApiUrl(this.stagingBackendUrl, cleanEndpoint);
   return this.executeCallWithRetry<T>(
     stagingUrl,
     options,

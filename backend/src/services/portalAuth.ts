@@ -1,6 +1,9 @@
 import crypto from "crypto";
+import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+
+dotenv.config();
 
 export type PortalRole = "admin" | "invited_user" | "auditor";
 
@@ -63,19 +66,23 @@ function resolvePortalSecret(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-// Secret used for signing session tokens (never shared with other credentials)
 const PORTAL_SECRET = resolvePortalSecret();
-
-// Admin credentials are read solely from the environment
-const DEFAULT_ADMIN_EMAIL = (envValue("PORTAL_ADMIN_EMAIL") || "admin@rentmaikar.com").toLowerCase();
+const DEFAULT_ADMIN_EMAIL = envValue("PORTAL_ADMIN_EMAIL").toLowerCase();
 const DEFAULT_ADMIN_PASS = envValue("PORTAL_ADMIN_PASSWORD");
 const MASTER_ADMIN_KEY = envValue("PORTAL_MASTER_KEY");
+const requiredPortalEnv = {
+  PORTAL_SECRET_KEY: envValue("PORTAL_SECRET_KEY"),
+  PORTAL_ADMIN_EMAIL: DEFAULT_ADMIN_EMAIL,
+  PORTAL_ADMIN_PASSWORD: DEFAULT_ADMIN_PASS,
+  PORTAL_MASTER_KEY: MASTER_ADMIN_KEY,
+};
+const missingPortalEnv = Object.entries(requiredPortalEnv)
+  .filter(([, value]) => !value?.trim())
+  .map(([name]) => name);
+const portalAuthConfigured = missingPortalEnv.length === 0;
 
-if (!DEFAULT_ADMIN_PASS) {
-  console.warn("[PortalAuth] PORTAL_ADMIN_PASSWORD is not set; admin email/password login is disabled.");
-}
-if (!MASTER_ADMIN_KEY) {
-  console.warn("[PortalAuth] PORTAL_MASTER_KEY is not set; master key login is disabled.");
+if (process.env.NODE_ENV === "production" && !portalAuthConfigured) {
+  throw new Error(`Portal auth requires environment variables: ${missingPortalEnv.join(", ")}`);
 }
 
 /** Constant-time string comparison; empty values never match. */
@@ -138,6 +145,8 @@ class PortalAuthService {
   }
 
   private seedDefaultAdmin(): void {
+    if (!DEFAULT_ADMIN_EMAIL) return;
+
     const existing = this.users.get(DEFAULT_ADMIN_EMAIL);
     if (!DEFAULT_ADMIN_PASS) {
       // No env password: make sure no stale persisted hash can authenticate the admin
@@ -173,6 +182,13 @@ class PortalAuthService {
     emailOrKey: string,
     password?: string
   ): { success: boolean; token?: string; user?: Omit<PortalUser, "passwordHash" | "passwordSalt">; error?: string } {
+    if (!portalAuthConfigured) {
+      return {
+        success: false,
+        error: `Portal authentication is disabled; configure: ${missingPortalEnv.join(", ")}`,
+      };
+    }
+
     const trimmed = (emailOrKey || "").trim();
 
     // 1. Direct Master Key Login
@@ -245,6 +261,10 @@ class PortalAuthService {
     expiresInHours?: number;
     note?: string;
   }): { success: boolean; invitation?: PortalInvitation; error?: string } {
+    if (!portalAuthConfigured) {
+      return { success: false, error: "Portal authentication is not configured" };
+    }
+
     const email = params.email.trim().toLowerCase();
     if (!email || !email.includes("@")) {
       return { success: false, error: "Valid email address is required" };
@@ -280,6 +300,10 @@ class PortalAuthService {
     name: string;
     password?: string;
   }): { success: boolean; token?: string; user?: Omit<PortalUser, "passwordHash" | "passwordSalt">; error?: string } {
+    if (!portalAuthConfigured) {
+      return { success: false, error: "Portal authentication is not configured" };
+    }
+
     const invite = this.invites.get(params.token.trim());
     if (!invite) {
       return { success: false, error: "Invitation not found or invalid" };
@@ -389,6 +413,10 @@ class PortalAuthService {
     name: string;
     role: PortalRole;
   }): string {
+    if (!PORTAL_SECRET) {
+      throw new Error("Portal session signing is not configured");
+    }
+
     const session: PortalSession = {
       ...payload,
       issuedAt: Date.now(),
@@ -404,7 +432,7 @@ class PortalAuthService {
    * Verify and decode a session token
    */
   public verifySessionToken(token: string): PortalSession | null {
-    if (!token || !token.startsWith("rm_portal.")) return null;
+    if (!portalAuthConfigured || !PORTAL_SECRET || !token || !token.startsWith("rm_portal.")) return null;
 
     const parts = token.split(".");
     if (parts.length !== 3) return null;

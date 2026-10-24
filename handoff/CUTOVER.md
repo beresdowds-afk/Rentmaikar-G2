@@ -60,14 +60,14 @@
      `https://jrsydiofzceoeddjogov.supabase.co/functions/v1/voip-status-callback`
 2. **Sent.dm**:
    - Update delivery webhook destination to:
-     `https://staging.rentmaikar.com/api/webhooks/sent`
+     `https://staging.rentmaikar.com/api/webhooks/sent` (served by `rentmaikar-backend`)
 
 ### Phase 5: Client Application Cutover
 1. Verify `src/integrations/supabase/client.ts` uses the new project URL:
    ```typescript
    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co";
    ```
-2. Update production environment variables on Cloud Run / hosting provider:
+2. Update production environment variables on Cloud Run / hosting provider, per surface (see [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md)): public `VITE_*` values on the `rentmaikar.com` nginx frontend only; `PORTAL_*` and server secrets on `rentmaikar-backend` (`staging.rentmaikar.com`) only:
    - `VITE_SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co`
    - `VITE_SUPABASE_PUBLISHABLE_KEY=<target_anon_key>`
 
@@ -120,8 +120,8 @@
    - Daily automated logical schema and data dumps via `pg_dump` targeting encrypted object storage.
    - Non-destructive cross-reference loader verification (`scripts/load-new-supabase.sh` and `scripts/load.sql`) enforcing schema non-duplication during restore drills.
 2. **High-Availability Gateway & Backend Failover Topology**:
-   - Primary domain: `rentmaikar.com` (Vercel / Cloud Run edge distribution).
-   - Authoritative API Gateway: `staging.rentmaikar.com/api` with health watchdog `/api/health`.
+   - Primary domain: `rentmaikar.com` (nginx public frontend; currently deployed as Cloud Run service `rentmaikar-g2`, see `DEPLOYMENT-SURFACES.md` D1).
+   - Authoritative API Gateway and admin-only portal: `staging.rentmaikar.com` (Cloud Run service `rentmaikar-backend`), API at `/api` with health watchdog `/api/health`.
    - Client Bridge Automatic Loss-of-Contact failover: Frontend `useBackendBridge` and `backend-bridge.ts` automatically switch endpoints and retry idempotently upon network or gateway degradation.
    - CPaaS multi-channel failover: Primary Sent.dm SMS/WhatsApp with automatic channel fallback ensuring OTP and mission-critical alerts deliver with zero message loss.
 3. **Incident Response & Triage Playbook**:
