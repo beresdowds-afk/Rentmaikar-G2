@@ -147,7 +147,7 @@ class BackendBridge {
   "https://rentmaikar-g2-672260445879.europe-west1.run.app/api";
   private readonly stagingBackendUrl: string = normalizeBackendApiBase(
     import.meta.env.VITE_STAGING_API_BASE_URL || import.meta.env.VITE_API_BASE_URL,
-    this.publicGatewayUrl,
+    "https://staging.rentmaikar.com/api",
   );
   private readonly stagingHost: string = this.stagingBackendUrl.replace(/\/api\/?$/, "");
   private connectionState: ConnectionState = "DIRECT";
