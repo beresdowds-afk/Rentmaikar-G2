@@ -33,8 +33,10 @@ steps:
       - '8080'
       - '--no-use-http2'
       - '--allow-unauthenticated'
-      - '--set-env-vars'
+      - '--update-env-vars'
       - 'NODE_ENV=production,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
+      - '--set-secrets'
+      - 'PORTAL_SECRET_KEY=portal-secret-key:latest,PORTAL_ADMIN_PASSWORD=portal-admin-password:latest,PORTAL_MASTER_KEY=portal-master-key:latest,SENT_WEBHOOK_SECRET=sent-webhook-secret:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/rentmaikar-backend:$COMMIT_SHA'

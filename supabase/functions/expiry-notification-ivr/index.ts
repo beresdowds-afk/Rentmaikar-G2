@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveOutboundCallerId, callerIdAttr } from "../_shared/outbound-caller-id.ts";
 import { verifyTwilioRequest } from "../_shared/twilio-signature.ts";
 
 const corsHeaders = {
@@ -27,6 +28,7 @@ const handler = async (req: Request): Promise<Response> => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const outboundCallerId = await resolveOutboundCallerId(supabase);
 
     // Parse Twilio form data
     const formData = await req.formData();
@@ -113,7 +115,7 @@ const handler = async (req: Request): Promise<Response> => {
           <Say voice="alice">
             Connecting you to a support agent now. Please hold.
           </Say>
-          <Dial callerId="${SUPPORT_NUMBER}" timeout="30">
+          <Dial${callerIdAttr(outboundCallerId)} timeout="30">
             <Number>${SUPPORT_NUMBER}</Number>
           </Dial>
           <Say voice="alice">

@@ -33,6 +33,8 @@ jobs:
           exit 1
       - name: Install backend dependencies
         run: npm ci --prefix backend
+      - name: Lint
+        run: bun run lint
       - name: Typecheck
         run: bun run typecheck
       - name: Vitest

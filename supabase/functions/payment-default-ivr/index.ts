@@ -111,7 +111,13 @@ const handler = async (req: Request): Promise<Response> => {
       }
 
       // Transfer to support number
-      const supportNumber = Deno.env.get('TWILIO_PHONE_NUMBER') || '+16083843932';
+      const supportNumber = Deno.env.get('SUPPORT_PHONE_NUMBER') ?? Deno.env.get('TWILIO_PHONE_NUMBER') ?? '';
+      if (!supportNumber) {
+        return new Response(
+          `<Response><Say voice="alice">We are unable to connect you right now. A support agent will call you back shortly. Goodbye.</Say></Response>`,
+          { status: 200, headers: { 'Content-Type': 'text/xml', ...corsHeaders } }
+        );
+      }
       return new Response(
         `<Response>
           <Say voice="alice">Connecting you to a support agent now. Please hold.</Say>

@@ -40,6 +40,10 @@ services:
       - PORT=8080
       - NODE_ENV=production
       - RESEND_SENDING_DOMAIN=notify.rentmaikar.com
+      # Admin portal credentials (required when NODE_ENV=production)
+      - PORTAL_SECRET_KEY=${PORTAL_SECRET_KEY:?set PORTAL_SECRET_KEY}
+      - PORTAL_ADMIN_PASSWORD=${PORTAL_ADMIN_PASSWORD:?set PORTAL_ADMIN_PASSWORD}
+      - PORTAL_MASTER_KEY=${PORTAL_MASTER_KEY:?set PORTAL_MASTER_KEY}
       - PUBLIC_BACKEND_URL=https://staging.rentmaikar.com
       # CPaaS Gateway Secrets
       - SENT_API_KEY=${SENT_API_KEY:-}

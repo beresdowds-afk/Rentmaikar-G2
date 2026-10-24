@@ -18,7 +18,8 @@ const PUBLIC_BACKEND_URL = process.env.PUBLIC_BACKEND_URL || "https://staging.re
  * 2. Header is a hex HMAC-SHA256 of the raw request body
  * 3. Stripe-style `t=<timestamp>,v1=<hex>` where v1 is HMAC-SHA256 of body
  *
- * If no secret is configured, the request is accepted but logged as unverified.
+ * If no secret is configured, the request is rejected in production (fail closed) and
+ * accepted but logged as unverified elsewhere.
  */
 function verifySentSignature(req: Request): { ok: boolean; reason?: string } {
   const signature =
@@ -26,7 +27,10 @@ function verifySentSignature(req: Request): { ok: boolean; reason?: string } {
     (req.headers["x-webhook-signature"] as string | undefined);
 
   if (!SENT_WEBHOOK_SECRET) {
-    return { ok: true, reason: "SENT_WEBHOOK_SECRET not configured; accepting unverified" };
+    if (process.env.NODE_ENV === "production") {
+      return { ok: false, reason: "SENT_WEBHOOK_SECRET not configured; rejecting unverified webhook" };
+    }
+    return { ok: true, reason: "SENT_WEBHOOK_SECRET not configured; accepting unverified (non-production only)" };
   }
 
   if (!signature) {
