@@ -1,6 +1,9 @@
 import crypto from "crypto";
+import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+
+dotenv.config();
 
 export type PortalRole = "admin" | "invited_user" | "auditor";
 
@@ -43,16 +46,24 @@ const DATA_DIR = path.resolve(__dirname, "../../data");
 const USERS_FILE = path.join(DATA_DIR, "portal-users.json");
 const INVITES_FILE = path.join(DATA_DIR, "portal-invites.json");
 
-// Secret used for signing session tokens
-const PORTAL_SECRET =
-  process.env.PORTAL_SECRET_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "rentmaikar-backend-portal-auth-secret-key-2026-secure-salt";
+const PORTAL_SECRET = process.env.PORTAL_SECRET_KEY;
+const DEFAULT_ADMIN_EMAIL = process.env.PORTAL_ADMIN_EMAIL?.trim().toLowerCase();
+const DEFAULT_ADMIN_PASS = process.env.PORTAL_ADMIN_PASSWORD;
+const MASTER_ADMIN_KEY = process.env.PORTAL_MASTER_KEY;
+const requiredPortalEnv = {
+  PORTAL_SECRET_KEY: PORTAL_SECRET,
+  PORTAL_ADMIN_EMAIL: DEFAULT_ADMIN_EMAIL,
+  PORTAL_ADMIN_PASSWORD: DEFAULT_ADMIN_PASS,
+  PORTAL_MASTER_KEY: MASTER_ADMIN_KEY,
+};
+const missingPortalEnv = Object.entries(requiredPortalEnv)
+  .filter(([, value]) => !value?.trim())
+  .map(([name]) => name);
+const portalAuthConfigured = missingPortalEnv.length === 0;
 
-// Configurable master admin credentials
-const DEFAULT_ADMIN_EMAIL = (process.env.PORTAL_ADMIN_EMAIL || "admin@rentmaikar.com").toLowerCase();
-const DEFAULT_ADMIN_PASS = process.env.PORTAL_ADMIN_PASSWORD || "RentmaikarAdmin2026!#";
-const MASTER_ADMIN_KEY = process.env.PORTAL_MASTER_KEY || "rm-master-admin-key-2026";
+if (process.env.NODE_ENV === "production" && !portalAuthConfigured) {
+  throw new Error(`Portal auth requires environment variables: ${missingPortalEnv.join(", ")}`);
+}
 
 class PortalAuthService {
   private users: Map<string, PortalUser> = new Map();
@@ -106,6 +117,8 @@ class PortalAuthService {
   }
 
   private seedDefaultAdmin(): void {
+    if (!portalAuthConfigured || !DEFAULT_ADMIN_EMAIL || !DEFAULT_ADMIN_PASS) return;
+
     if (!this.users.has(DEFAULT_ADMIN_EMAIL)) {
       const salt = crypto.randomBytes(16).toString("hex");
       const hash = this.hashPassword(DEFAULT_ADMIN_PASS, salt);
@@ -132,6 +145,13 @@ class PortalAuthService {
     emailOrKey: string,
     password?: string
   ): { success: boolean; token?: string; user?: Omit<PortalUser, "passwordHash" | "passwordSalt">; error?: string } {
+    if (!portalAuthConfigured) {
+      return {
+        success: false,
+        error: `Portal authentication is disabled; configure: ${missingPortalEnv.join(", ")}`,
+      };
+    }
+
     const trimmed = (emailOrKey || "").trim();
 
     // 1. Direct Master Key Login
@@ -204,6 +224,10 @@ class PortalAuthService {
     expiresInHours?: number;
     note?: string;
   }): { success: boolean; invitation?: PortalInvitation; error?: string } {
+    if (!portalAuthConfigured) {
+      return { success: false, error: "Portal authentication is not configured" };
+    }
+
     const email = params.email.trim().toLowerCase();
     if (!email || !email.includes("@")) {
       return { success: false, error: "Valid email address is required" };
@@ -239,6 +263,10 @@ class PortalAuthService {
     name: string;
     password?: string;
   }): { success: boolean; token?: string; user?: Omit<PortalUser, "passwordHash" | "passwordSalt">; error?: string } {
+    if (!portalAuthConfigured) {
+      return { success: false, error: "Portal authentication is not configured" };
+    }
+
     const invite = this.invites.get(params.token.trim());
     if (!invite) {
       return { success: false, error: "Invitation not found or invalid" };
@@ -348,6 +376,10 @@ class PortalAuthService {
     name: string;
     role: PortalRole;
   }): string {
+    if (!portalAuthConfigured || !PORTAL_SECRET) {
+      throw new Error("Portal session signing is not configured");
+    }
+
     const session: PortalSession = {
       ...payload,
       issuedAt: Date.now(),
@@ -363,7 +395,7 @@ class PortalAuthService {
    * Verify and decode a session token
    */
   public verifySessionToken(token: string): PortalSession | null {
-    if (!token || !token.startsWith("rm_portal.")) return null;
+    if (!portalAuthConfigured || !PORTAL_SECRET || !token || !token.startsWith("rm_portal.")) return null;
 
     const parts = token.split(".");
     if (parts.length !== 3) return null;
