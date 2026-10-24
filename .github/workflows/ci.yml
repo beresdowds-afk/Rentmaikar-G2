@@ -35,6 +35,8 @@ jobs:
         run: npm ci --prefix backend
       - name: Lint
         run: bun run lint
+      - name: Env surface guardrail
+        run: bun run check:env-surfaces
       - name: Typecheck
         run: bun run typecheck
       - name: Vitest

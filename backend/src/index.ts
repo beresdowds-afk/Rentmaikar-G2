@@ -197,8 +197,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       "Content-Length, Content-Range, Content-Type, X-Entity-Ref-ID, Message-ID, Date, X-RentMaikar-Bridge-Status, X-RentMaikar-Fallback-Active, X-RentMaikar-Direct-Connection, X-RentMaikar-Channel"
     );
     res.setHeader("Access-Control-Max-Age", "86400");
+  } else if (!origin) {
+    // Direct or server-to-server calls
+    res.removeHeader("Access-Control-Allow-Origin");
+    res.removeHeader("Access-Control-Allow-Credentials");
   }
-  // Requests without an Origin (server-to-server / same-origin) need no CORS headers.
 
   res.setHeader(
     "X-RentMaikar-Bridge-Status",

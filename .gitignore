@@ -57,6 +57,6 @@ public/downloads/*.zip
 *.zip
 
 
-# Runtime portal state (users/invites); never commit
-backend/data/portal-users.json
-backend/data/portal-invites.json
+# Backend portal runtime state (users/invites); bridge-config.json is tracked
+backend/data/*.json
+!backend/data/bridge-config.json

@@ -34,7 +34,7 @@ test.describe('Driver registration → onboarding', () => {
     await page.getByLabel(/last name/i).fill('Driver');
     const emailField = page.getByLabel(/^email/i).first();
     await emailField.fill(uniqueEmail());
-    const phone = page.getByLabel(/phone/i).first();
+    const phone = page.locator('input[type="tel"]').first();
     if (await phone.isVisible().catch(() => false)) await phone.fill('+15555550100');
     const pwd = page.getByLabel(/^password$/i).first();
     if (await pwd.isVisible().catch(() => false)) await pwd.fill('SuperSecret123!');

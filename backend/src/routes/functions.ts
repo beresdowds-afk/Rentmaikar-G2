@@ -84,6 +84,12 @@ function sendPayoutError(res: Response, fn: string, err: any) {
  */
 const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "send-outbound-email",
+  // Functions with no supabase/functions/<name> directory; implemented only here.
+  "google-sso-auth-email",
+  "provision-user-account",
+  "proxy-create-payment",
+  "email-health",
+  "send-email-notification",
   "email-lifecycle-test",
   "test-email-lifecycle",
   "phone-otp-custom",
@@ -2152,15 +2158,14 @@ case "reconcile-owner-payout": {
       }
 
       case "google-sso-auth-email": {
-        // Authenticated callers may only trigger the alert for their own address.
-        const callerEmail = String(gatedCaller?.email || "").trim().toLowerCase();
-        const targetEmail = String(body.email || "").trim().toLowerCase();
-        if (!callerEmail || callerEmail !== targetEmail) {
-          return res.status(403).json({ ok: false, success: false, error: "Email does not match the authenticated user" });
-        }
+        if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
         const { handleGoogleSsoAuthEmail } = await import("../services/emailService");
-        const result = await handleGoogleSsoAuthEmail(body);
-        return res.status(result.ok ? 200 : 502).json(result);
+        // The email may only be sent to the verified session owner.
+        const result = await handleGoogleSsoAuthEmail({
+          ...body,
+          email: gatedCaller.email || "",
+        });
+        return res.status(result.ok ? 200 : 400).json(result);
       }
 
       case "email-health":
@@ -2169,26 +2174,117 @@ case "reconcile-owner-payout": {
         return res.status(200).json(await checkEmailProviderHealth());
       }
 
+      case "send-email-notification": {
+        const { handleSendOutboundEmail } = await import("../services/emailService");
+        const result = await handleSendOutboundEmail(body);
+        return res.status(result.ok ? 200 : 400).json(result);
+      }
+
+      case "provision-user-account": {
+        if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
+        const targetUserId = String(body._user_id || body.userId || gatedCaller.userId);
+        const targetRole = body._role || body.role || "driver";
+        const targetEmail = body._email || body.email;
+        const selfService = targetUserId === gatedCaller.userId && ["driver", "owner"].includes(String(targetRole));
+        if (!gatedCaller.isAdmin && !selfService) {
+          return res.status(403).json({ ok: false, error: "Forbidden" });
+        }
+        // Invoke with the caller's JWT so database-level authorization also applies.
+        const userToken = String(clientAuth).replace(/^Bearer\s+/i, "").trim();
+        const { error: rpcErr } = await supabaseBackendService.getClient(userToken).rpc("provision_user_account", {
+          _user_id: targetUserId,
+          _role: targetRole,
+          _email: targetEmail,
+        });
+        if (rpcErr) {
+          const denied = rpcErr.code === "42501";
+          return res.status(denied ? 403 : 500).json({ ok: false, error: denied ? "Forbidden" : rpcErr.message });
+        }
+        return res.status(200).json({ ok: true, role: targetRole });
+      }
+
+      case "proxy-create-payment": {
+        if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
+        const proxyId = body.proxyAccountId ?? body.proxy_account_id;
+        if (!proxyId) return res.status(400).json({ ok: false, error: "proxyAccountId required" });
+        const provider = String(body.provider || "");
+        if (!["paystack", "paypal", "opay"].includes(provider)) {
+          return res.status(400).json({ ok: false, error: "Unsupported provider" });
+        }
+        const pool = getDbPool();
+        const proxyRes = await pool.query(
+          `SELECT id, driver_id, proxy_email, status, consent_status, identity_status
+             FROM public.driver_proxy_billing_accounts WHERE id = $1 LIMIT 1`,
+          [proxyId]
+        );
+        const proxy = proxyRes.rows[0];
+        if (!proxy || proxy.driver_id !== gatedCaller.userId) {
+          return res.status(404).json({ ok: false, error: "Proxy account not found" });
+        }
+        if (proxy.status !== "active" && proxy.status !== "awaiting_card") {
+          return res.status(409).json({ ok: false, error: "Proxy account is not active" });
+        }
+        if (proxy.consent_status !== "signed" || proxy.identity_status !== "verified") {
+          return res.status(409).json({ ok: false, error: "Proxy consent and identity verification required" });
+        }
+        const authority = await resolveCheckoutAuthority(pool, {
+          caller: { userId: gatedCaller.userId, isAdmin: false },
+          provider: provider as any,
+          body: { rental_id: body.rentalId ?? body.rental_id, currency: body.currency },
+        });
+        const metadata = { ...(body.metadata || {}), proxy_account_id: proxy.id, paid_by_proxy: true };
+        const result: any = await createWithAuthoritativeAmount(pool, {
+          driverId: authority.driverId, purpose: body.purpose, rentalId: authority.rentalId,
+          invoiceId: body.invoiceId ?? body.invoice_id, clientAmount: body.amount, clientCurrency: body.currency,
+        }, async (auth) => {
+          if (provider === "paystack") {
+            return paymentService.createPaystackTransaction({
+              amount: auth.amount,
+              email: proxy.proxy_email,
+              currency: auth.currency,
+              rental_id: authority.rentalId ?? undefined,
+              vehicle_id: authority.vehicleId ?? undefined,
+              driver_id: authority.driverId,
+              owner_id: authority.ownerId ?? undefined,
+              purpose: body.purpose,
+              callback_url: body.callback_url,
+              metadata,
+            });
+          }
+          if (provider === "paypal") {
+            return paymentService.createPayPalOrder({
+              amount: auth.amount,
+              currency: auth.currency,
+              rental_id: authority.rentalId ?? undefined,
+              vehicle_id: authority.vehicleId ?? undefined,
+              driver_id: authority.driverId,
+              owner_id: authority.ownerId ?? undefined,
+              description: body.description,
+              purpose: body.purpose,
+            });
+          }
+          const { createOpayOrder } = await import("../services/opayService");
+          return createOpayOrder({
+            amount: auth.amount,
+            rentalId: authority.rentalId ?? undefined,
+            vehicleId: authority.vehicleId ?? undefined,
+            ownerId: authority.ownerId ?? undefined,
+            driverId: authority.driverId,
+            description: body.description,
+            callbackUrl: body.callbackUrl,
+            returnUrl: body.returnUrl,
+            purpose: body.purpose,
+            metadata,
+            idempotencyKey: (req.headers["x-idempotency-key"] || req.headers["idempotency-key"]) as string | undefined,
+          });
+        });
+        return res.status(200).json(result);
+      }
+
       case "test-email-delivery":
       case "test-email-forward": {
         const { testEmailDelivery } = await import("../services/emailService");
         return res.status(200).json(await testEmailDelivery(body));
-      }
-
-      case "send-email-notification": {
-        const to = String(body.to || "").trim();
-        if (!to || !body.subject || !(body.body || body.html || body.message)) {
-          return res.status(400).json({ ok: false, success: false, error: "to, subject and body are required" });
-        }
-        const { handleSendOutboundEmail } = await import("../services/emailService");
-        const result = await handleSendOutboundEmail({
-          to,
-          name: body.name,
-          subject: body.subject,
-          message: body.body || body.message,
-          html: body.html,
-        });
-        return res.status(result?.ok && result?.success ? 200 : 502).json(result);
       }
 
       default: {

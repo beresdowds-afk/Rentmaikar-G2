@@ -11,7 +11,10 @@ This directory contains the production handoff specifications, API contracts, cr
 | [`API-CONTRACT.md`](./API-CONTRACT.md) | Frontend-to-Backend HTTP REST, WebSocket, and Webhook interfaces |
 | [`CREDENTIALS.md`](./CREDENTIALS.md) | Secret isolation policy, credential catalog, and environment variable matrix |
 | [`CUTOVER.md`](./CUTOVER.md) | Operational procedure for cutting over database and APIs to private infrastructure |
-| [`backend.env.template`](./backend.env.template) | Production environment variable template for backend containers |
+| [`env/public-frontend.env.template`](./env/public-frontend.env.template) | Public frontend (rentmaikar.com, `rentmaikar-g2`) public/runtime values only; no secrets |
+| [`env/admin-backend.env.template`](./env/admin-backend.env.template) | Admin backend (staging.rentmaikar.com, `rentmaikar-backend`): `PORTAL_*` and other backend secrets |
+| [`backend.env.template`](./backend.env.template) | Pointer to the two per-surface templates above |
+| [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md) | The three deployment surfaces: ownership, Cloud Run service, domain, ports, health checks, and current-vs-intended discrepancies |
 | [`openapi.yaml`](./openapi.yaml) | OpenAPI 3.0 specification for backend endpoints |
 
 ---
@@ -19,14 +22,17 @@ This directory contains the production handoff specifications, API contracts, cr
 ## Infrastructure Topology
 
 ```
-+---------------------------+             +-------------------------------+
-|     Frontend Client       |             |     Backend API Gateway       |
-|    (React 18 / Vite)      |             |   (Express / Node.js 20)      |
-|    rentmaikar.com         |             |   staging.rentmaikar.com      |
-+-------------+-------------+             +---------------+---------------+
-              |                                           |
-              | Bearer JWT (Supabase Auth)                | Service Role / API Keys
-              v                                           v
++-------------------------+  +-----------------------------+  +----------------------------+
+| 1. Public frontend      |  | 2. Admin-only portal        |  | 3. Backend                 |
+|    rentmaikar.com       |  |    staging.rentmaikar.com   |  |    Cloud Run: rentmaikar-g2|
+|    nginx (root          |  |    Cloud Run:               |  |    (owner's intent; repo   |
+|    Dockerfile, port 80) |  |    rentmaikar-backend       |  |    currently deploys the   |
+|    public VITE_* only   |  |    backend/Dockerfile, 8080 |  |    nginx image here: see   |
+|                         |  |    PORTAL_* + secrets       |  |    DEPLOYMENT-SURFACES.md) |
++------------+------------+  +--------------+--------------+  +-------------+--------------+
+             |                              |                               |
+             | Supabase Auth (anon key)     | Service Role / API Keys       | Service Role / API Keys
+             v                              v                               v
 +-------------------------------------------------------------------------+
 |                  Private Supabase Database & Auth                       |
 |             https://jrsydiofzceoeddjogov.supabase.co                    |
@@ -40,6 +46,8 @@ This directory contains the production handoff specifications, API contracts, cr
 |    Inbound Call Queue     |             |    WhatsApp & Notifications   |
 +---------------------------+             +-------------------------------+
 ```
+
+> Today the repo deploys the nginx frontend to `rentmaikar-g2` and the backend to `rentmaikar-backend`. See [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md#current-state-vs-intended-state).
 
 ---
 
