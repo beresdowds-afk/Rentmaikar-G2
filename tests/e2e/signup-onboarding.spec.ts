@@ -22,6 +22,7 @@ const uniqueEmail = () =>
 
 test.describe('Signup → verification → onboarding → dashboard', () => {
   test('driver signup surfaces verification gate and cooldown', async ({ page }) => {
+    test.skip(!process.env.E2E_SUPABASE_BACKEND, 'Requires a live auth backend; set E2E_SUPABASE_BACKEND to run.');
     const email = uniqueEmail();
 
     await page.goto('/auth');
@@ -37,7 +38,7 @@ test.describe('Signup → verification → onboarding → dashboard', () => {
     // to sign in. Attempt sign-in — should be rejected until email verified.
     await page.getByRole('tab', { name: /log in/i }).click();
     await page.getByLabel('Email').fill(email);
-    await page.getByLabel(/password/i).fill('SuperSecret123!');
+    await page.locator('#login-password').fill('SuperSecret123!');
     await page.getByRole('button', { name: /sign in/i }).click();
 
     await expect(page.getByText(/verify your email/i)).toBeVisible({ timeout: 8000 });

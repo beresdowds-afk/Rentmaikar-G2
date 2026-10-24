@@ -189,7 +189,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     res.setHeader("Access-Control-Max-Age", "86400");
   } else if (!origin) {
     // Direct or server-to-server calls
-    res.setHeader("Access-Control-Allow-Origin",);
+    res.removeHeader("Access-Control-Allow-Origin");
     res.removeHeader("Access-Control-Allow-Credentials");
   }
 
