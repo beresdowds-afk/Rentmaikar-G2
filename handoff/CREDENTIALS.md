@@ -41,13 +41,16 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
 ## 1. Security Isolation Hierarchy
 
 ```
-[ BROWSER CLIENT (Public) ]
+[ SURFACE 1: rentmaikar.com — nginx public frontend (NO secrets; never PORTAL_*, service-role keys) ]
   ├── VITE_SUPABASE_URL (https://jrsydiofzceoeddjogov.supabase.co)
   ├── VITE_SUPABASE_PUBLISHABLE_KEY (Anon JWT)
   ├── VITE_API_BASE_URL (configured per frontend deployment)
   └── VITE_STAGING_API_BASE_URL (https://staging.rentmaikar.com/api)
 
-[ EXPRESS BACKEND / EDGE FUNCTIONS (Strict Secrets) ]
+[ SURFACE 2: staging.rentmaikar.com — rentmaikar-backend admin-only portal (PORTAL_* + backend secrets) ]
+  ├── PORTAL_SECRET_KEY, PORTAL_ADMIN_EMAIL, PORTAL_ADMIN_PASSWORD, PORTAL_MASTER_KEY
+[ SURFACE 3: rentmaikar-g2 — backend (owner's intent; see DEPLOYMENT-SURFACES.md) ]
+[ SURFACES 2 & 3 / EDGE FUNCTIONS (Strict Secrets) ]
   ├── SUPABASE_SERVICE_ROLE_KEY (Bypasses RLS - NEVER expose to frontend)
   ├── TWILIO_AUTH_TOKEN & TWILIO_API_KEY_SECRET
   ├── SENT_API_KEY & SENT_WEBHOOK_SECRET
@@ -56,6 +59,21 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
   ├── PERSONA_API_KEY
   └── RESEND_API_KEY
 ```
+
+---
+
+## 1.1 Variable matrix by deployment surface
+
+See [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md) for ownership and deploy targets.
+
+| Variable group | 1. `rentmaikar.com` (nginx) | 2. `staging.rentmaikar.com` (`rentmaikar-backend`) | 3. `rentmaikar-g2` (backend, intended) |
+|---|---|---|---|
+| `VITE_*` (public client config) | Yes (build-time) | No | No |
+| `BACKEND_URL`, `SUPABASE_URL` (non-secret runtime URLs) | Yes | `SUPABASE_URL` only | `SUPABASE_URL` only |
+| `PORTAL_SECRET_KEY`, `PORTAL_ADMIN_EMAIL`, `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY` | **Never** | Yes (env / Secret Manager) | Only if it serves portal routes |
+| `SUPABASE_SERVICE_ROLE_KEY` and all provider secrets (Twilio, Sent.dm, PayPal, Paystack, OPay, Persona, Resend, ...) | **Never** | Yes | Yes |
+
+Templates: [`handoff/env/public-frontend.env.template`](./env/public-frontend.env.template) (surface 1) and [`handoff/env/admin-backend.env.template`](./env/admin-backend.env.template) (surfaces 2 and 3) are the source of truth. `handoff/backend.env.template` is only a pointer to them, and `.env.example` (local development) carries per-variable surface headers. Compliance is enforced by `npm run check:env-surfaces`.
 
 ---
 
@@ -68,10 +86,10 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
 | `VITE_API_BASE_URL` | Frontend build | Public | Primary API base; staging builds use `https://staging.rentmaikar.com/api`, production keeps the `rentmaikar-g2` API gateway |
 | `VITE_STAGING_API_BASE_URL` | Frontend build | Public | Staging fallback API base used by the bridge |
 | `BACKEND_URL` | Frontend Cloud Run | Public | Cloud Run upstream origin for `/api` and `/portal`; Nginx Host and TLS SNI follow this URL |
-| `PORTAL_ADMIN_EMAIL` | Backend Cloud Run | Sensitive | Initial admin account email; required to enable portal auth |
-| `PORTAL_ADMIN_PASSWORD` | Backend Cloud Run Secret | **CRITICAL** | Initial admin password; required to enable portal auth |
-| `PORTAL_MASTER_KEY` | Backend Cloud Run Secret | **CRITICAL** | Portal admin master-key login credential |
-| `PORTAL_SECRET_KEY` | Backend Cloud Run Secret | **CRITICAL** | HMAC key for signing and verifying portal sessions |
+| `PORTAL_ADMIN_EMAIL` | Surface 2 backend (Cloud Run) | Sensitive | Initial admin account email; required to enable portal auth (no hardcoded fallback) |
+| `PORTAL_ADMIN_PASSWORD` | Surface 2 backend (Cloud Run Secret) | **CRITICAL** | Initial admin password; required to enable portal auth (no hardcoded fallback) |
+| `PORTAL_MASTER_KEY` | Surface 2 backend (Cloud Run Secret) | **CRITICAL** | Portal admin master-key login credential |
+| `PORTAL_SECRET_KEY` | Surface 2 backend (Cloud Run Secret) | **CRITICAL** | HMAC key for signing and verifying portal sessions; no hardcoded fallback |
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend / Edge | **CRITICAL** | Full administrative database privileges |
 | `TWILIO_ACCOUNT_SID` | Backend / Edge | High | Twilio Account identifier |
 | `TWILIO_AUTH_TOKEN` | Backend / Edge | **CRITICAL** | Twilio authentication token for webhooks and REST |
@@ -156,9 +174,9 @@ The admin-only backend portal (served at `staging.rentmaikar.com`) reads its fal
 
 | Variable | Purpose | Behavior when unset |
 |---|---|---|
-| `PORTAL_ADMIN_EMAIL` | Admin login email (defaults to the non-secret `admin@rentmaikar.com`) | Default email used |
-| `PORTAL_ADMIN_PASSWORD` | Admin email/password login (seeded and hashed at startup) | Password login disabled (warning logged) |
-| `PORTAL_MASTER_KEY` | Master key login | Master key login disabled (warning logged) |
+| `PORTAL_ADMIN_EMAIL` | Admin login email (no default) | Production: startup fails |
+| `PORTAL_ADMIN_PASSWORD` | Admin email/password login (seeded and hashed at startup) | Production: startup fails |
+| `PORTAL_MASTER_KEY` | Master key login | Production: startup fails |
 | `PORTAL_SECRET_KEY` | Dedicated session-signing secret (never `SUPABASE_SERVICE_ROLE_KEY`) | Production: startup fails. Non-production: random per-process secret |
 
 Inject these into the `rentmaikar-backend` Cloud Run service via Secret Manager (`--set-secrets`) or `--update-env-vars`. Use placeholder-free, newly generated values; any previously committed or default values are compromised and must be rotated.
