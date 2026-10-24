@@ -22,6 +22,7 @@ const uniqueEmail = () =>
 
 test.describe('Signup → verification → onboarding → dashboard', () => {
   test('driver signup surfaces verification gate and cooldown', async ({ page }) => {
+    test.skip(!process.env.E2E_SUPABASE_BACKEND, 'Requires a live auth backend; set E2E_SUPABASE_BACKEND to run.');
     const email = uniqueEmail();
 
     await page.goto('/auth');
