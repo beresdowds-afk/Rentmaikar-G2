@@ -7,12 +7,15 @@ This document defines the strict segregation between client-safe variables (pref
 ## 1. Security Isolation Hierarchy
 
 ```
-[ BROWSER CLIENT (Public) ]
+[ SURFACE 1: rentmaikar.com — nginx public frontend (NO secrets; never PORTAL_*, service-role keys) ]
   ├── VITE_SUPABASE_URL (https://jrsydiofzceoeddjogov.supabase.co)
   ├── VITE_SUPABASE_PUBLISHABLE_KEY (Anon JWT)
   └── VITE_API_BASE_URL (https://staging.rentmaikar.com/api)
 
-[ EXPRESS BACKEND / EDGE FUNCTIONS (Strict Secrets) ]
+[ SURFACE 2: staging.rentmaikar.com — rentmaikar-backend admin-only portal (PORTAL_* + backend secrets) ]
+  ├── PORTAL_SECRET_KEY, PORTAL_ADMIN_EMAIL, PORTAL_ADMIN_PASSWORD, PORTAL_MASTER_KEY
+[ SURFACE 3: rentmaikar-g2 — backend (owner's intent; see DEPLOYMENT-SURFACES.md) ]
+[ SURFACES 2 & 3 / EDGE FUNCTIONS (Strict Secrets) ]
   ├── SUPABASE_SERVICE_ROLE_KEY (Bypasses RLS - NEVER expose to frontend)
   ├── TWILIO_AUTH_TOKEN & TWILIO_API_KEY_SECRET
   ├── SENT_API_KEY & SENT_WEBHOOK_SECRET
@@ -24,6 +27,21 @@ This document defines the strict segregation between client-safe variables (pref
 
 ---
 
+## 1.1 Variable matrix by deployment surface
+
+See [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md) for ownership and deploy targets.
+
+| Variable group | 1. `rentmaikar.com` (nginx) | 2. `staging.rentmaikar.com` (`rentmaikar-backend`) | 3. `rentmaikar-g2` (backend, intended) |
+|---|---|---|---|
+| `VITE_*` (public client config) | Yes (build-time) | No | No |
+| `BACKEND_URL`, `SUPABASE_URL` (non-secret runtime URLs) | Yes | `SUPABASE_URL` only | `SUPABASE_URL` only |
+| `PORTAL_SECRET_KEY`, `PORTAL_ADMIN_EMAIL`, `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY` | **Never** | Yes (env / Secret Manager) | Only if it serves portal routes |
+| `SUPABASE_SERVICE_ROLE_KEY` and all provider secrets (Twilio, Sent.dm, PayPal, Paystack, OPay, Persona, Resend, ...) | **Never** | Yes | Yes |
+
+Templates: `.env.example` and `handoff/backend.env.template` carry per-variable surface headers. The dedicated `handoff/env/public-frontend.env.template` and `handoff/env/admin-backend.env.template` do not exist on `main` yet; when a related PR adds them, they should become the source of truth for surfaces 1 and 2 and this section should link to them.
+
+---
+
 ## 2. Platform Credential Inventory
 
 | Key Name | Location | Sensitivity | Description |
@@ -31,6 +49,10 @@ This document defines the strict segregation between client-safe variables (pref
 | `VITE_SUPABASE_URL` | Frontend `.env` | Public | Target Supabase URL (`https://jrsydiofzceoeddjogov.supabase.co`) |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Frontend `.env` | Public | Public anonymous key for client RLS queries |
 | `VITE_API_BASE_URL` | Frontend `.env` | Public | Backend gateway endpoint (`https://staging.rentmaikar.com/api`) |
+| `PORTAL_SECRET_KEY` | Surface 2 backend | **CRITICAL** | Signing secret for portal sessions; must be set via env, no hardcoded fallback |
+| `PORTAL_ADMIN_EMAIL` | Surface 2 backend | Medium | Admin portal login email |
+| `PORTAL_ADMIN_PASSWORD` | Surface 2 backend | **CRITICAL** | Admin portal password |
+| `PORTAL_MASTER_KEY` | Surface 2 backend | **CRITICAL** | Portal master admin key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend / Edge | **CRITICAL** | Full administrative database privileges |
 | `TWILIO_ACCOUNT_SID` | Backend / Edge | High | Twilio Account identifier |
 | `TWILIO_AUTH_TOKEN` | Backend / Edge | **CRITICAL** | Twilio authentication token for webhooks and REST |
