@@ -26,7 +26,7 @@ export function isOriginAllowed(origin?: string): boolean {
   const normalized = origin.trim().toLowerCase();
 
   // 1. Check production domains
-  if (PRODUCTION_ORIGINS.some((allowed) => normalized === allowed || normalized.endsWith('.rentmaikar.com'))) {
+  if (PRODUCTION_ORIGINS.some((allowed) => normalized === allowed || /^https:\/\/([a-z0-9-]+\.)+rentmaikar\.com$/.test(normalized))) {
     return true;
   }
 
@@ -46,9 +46,14 @@ export function isOriginAllowed(origin?: string): boolean {
     return true;
   }
 
-  // 4. Cloud Run preview domains (*.run.app)
-  if (normalized.endsWith('.run.app')) {
-    return true;
+  // 4. Exact Cloud Run gateway host (no *.run.app wildcard)
+  try {
+    const host = new URL(normalized).hostname;
+    const extra = ['rentmaikar-g2-672260445879.europe-west1.run.app',
+      ...(process.env.ALLOWED_ORIGIN_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)];
+    if (extra.includes(host)) return true;
+  } catch {
+    // invalid origin
   }
 
   return false;

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --define:import.meta.env={} --sourcemap --outfile=dist/server.mjs",
     "build:dev": "vite build --mode development",
     "start": "node dist/server.mjs",
     "preview": "vite preview",

@@ -63,6 +63,16 @@ const PAYMENT_AUTHORITY_FUNCTIONS = new Set([
   "opay-webhook",
   "process-owner-payouts",
 ]);
+/**
+ * Read-only informational widgets that may render a placeholder when the gateway is
+ * unreachable. Everything else (writes, provisioning, auth, messaging, payments)
+ * must surface the network error.
+ */
+const NON_CRITICAL_SIMULATION_FALLBACK_FUNCTIONS = new Set<string>([
+  "get-vapid-public-key",
+  "get-psp-config",
+  "get-paypal-config",
+]);
 const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "accident-emergency-dispatch",
   "activate-subscription",
@@ -415,23 +425,14 @@ async function callLocalGateway(functionName: string, options?: any) {
       // Ignore secondary bridge error
     }
 
-    const isCritical =
-      functionName.includes("password") ||
-      functionName.includes("email") ||
-      functionName.includes("auth") ||
-      functionName.includes("otp") ||
-      functionName.includes("sms") ||
-      functionName.includes("message") ||
-      functionName.includes("bulk") ||
-      functionName.includes("inbox") ||
-      functionName.includes("notification");
-    if (isCritical) {
+    // Fail closed: a network failure is never reported as success. Only functions
+    // explicitly listed as non-critical informational widgets may degrade gracefully.
+    if (!NON_CRITICAL_SIMULATION_FALLBACK_FUNCTIONS.has(functionName)) {
       return {
         data: null,
         error: new Error(netErr?.message || `Network error connecting to function '${functionName}'`),
       };
     }
-    // Return safe fallback for non-critical informational widgets
     return {
       data: { ok: true, simulated: true, fallback: true, functionName },
       error: null,

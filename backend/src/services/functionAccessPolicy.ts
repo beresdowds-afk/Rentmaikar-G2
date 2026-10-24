@@ -45,6 +45,10 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "verify-opay-order": "authenticated",
   "generate-vehicle-mqtt-token": "authenticated",
   "submit-vehicle-for-review": "authenticated",
+  // Email operations (authoritative Cloud Run -> Resend path)
+  "check-email-health": "admin",
+  "test-email-delivery": "admin",
+  "test-email-forward": "admin",
 };
 
 export class AccessDenied extends Error {

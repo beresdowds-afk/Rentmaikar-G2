@@ -41,7 +41,7 @@ steps:
       - '--port'
       - '80'
       - '--allow-unauthenticated'
-      - '--set-env-vars'
+      - '--update-env-vars'
       - 'BACKEND_URL=https://rentmaikar-backend-672260445879.europe-west1.run.app,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
 
   # 4. Build the self-contained backend container image using backend/Dockerfile
@@ -82,6 +82,8 @@ steps:
       - '--allow-unauthenticated'
       - '--update-env-vars'
       - 'NODE_ENV=production,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co'
+      - '--set-secrets'
+      - 'PORTAL_SECRET_KEY=portal-secret-key:latest,PORTAL_ADMIN_PASSWORD=portal-admin-password:latest,PORTAL_MASTER_KEY=portal-master-key:latest,SENT_WEBHOOK_SECRET=sent-webhook-secret:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/rentmaikar:$COMMIT_SHA'

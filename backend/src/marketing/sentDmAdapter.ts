@@ -36,7 +36,7 @@ export class SentDmAdapter {
     this.apiKey = process.env.SENT_API_KEY || '';
     this.baseUrl = SENT_API_BASE;
     this.senderId = process.env.SENT_SENDER_ID || 'Rentmaikar';
-    this.whatsappNumber = process.env.SENT_WHATSAPP_NUMBER || '+16085489220';
+    this.whatsappNumber = process.env.SENT_WHATSAPP_NUMBER || '';
   }
 
   isConnected(): boolean {
@@ -144,6 +144,9 @@ export class SentDmAdapter {
     try {
       const channel = params.channel === 'whatsapp' ? 'whatsapp' : 'sms';
       const from = channel === 'whatsapp' ? this.whatsappNumber : this.senderId;
+      if (!from) {
+        return { ok: false, error: `No ${channel} sender configured (set SENT_WHATSAPP_NUMBER / SENT_SENDER_ID)` };
+      }
 
       // TCPA & WhatsApp compliance: ensure opt-out instruction is present
       const lowerText = (params.text || '').toLowerCase();

@@ -67,6 +67,20 @@ export interface BridgeConfig {
   history: BridgeToggleEvent[];
 }
 
+/**
+ * Exact additional hostnames (besides the configured allowedOrigins) allowed to make
+ * credentialed cross-origin calls: the public g2 gateway and any hosts listed in
+ * ALLOWED_ORIGIN_HOSTS (comma-separated).
+ */
+const EXTRA_ALLOWED_HOSTS = new Set<string>(
+  [
+    "rentmaikar-g2-672260445879.europe-west1.run.app",
+    ...(process.env.ALLOWED_ORIGIN_HOSTS || "").split(","),
+  ]
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 const DATA_DIR = path.resolve(__dirname, "../../data");
 const CONFIG_FILE = path.join(DATA_DIR, "bridge-config.json");
 
@@ -175,18 +189,22 @@ class BridgeManager extends EventEmitter {
     ) {
       return true;
     }
-    if (
-      normalized.endsWith(".rentmaikar.com") ||
-      normalized.endsWith(".run.app") ||
-      normalized.endsWith(".preview.app")
-    ) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(normalized);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol === "https:" && parsed.hostname.endsWith(".rentmaikar.com")) {
+      return true;
+    }
+    // Exact Cloud Run hostnames only (no *.run.app / *.preview.app wildcard).
+    if (parsed.protocol === "https:" && EXTRA_ALLOWED_HOSTS.has(parsed.hostname)) {
       return true;
     }
     if (
-      normalized.startsWith("http://localhost:") ||
-      normalized.startsWith("http://127.0.0.1:") ||
-      normalized.startsWith("https://localhost:") ||
-      normalized.startsWith("https://127.0.0.1:")
+      process.env.NODE_ENV !== "production" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
     ) {
       return true;
     }

@@ -4,7 +4,7 @@ import { sendInboxReply } from "../services/inboxReplyService";
 import { sentBackendClient } from "../services/sentClient";
 import { sendApplicationMessage } from "../services/smsService";
 import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
-import { supabaseBackendService } from "../services/supabaseService";
+import { supabaseBackendService, EDGE_FUNCTIONS_SET } from "../services/supabaseService";
 import { getDbPool } from "../services/dbPool";
 import {
   mintVoiceAccessToken,
@@ -2168,7 +2168,8 @@ case "reconcile-owner-payout": {
         return res.status(result.ok ? 200 : 400).json(result);
       }
 
-      case "email-health": {
+      case "email-health":
+      case "check-email-health": {
         const { checkEmailProviderHealth } = await import("../services/emailService");
         return res.status(200).json(await checkEmailProviderHealth());
       }
@@ -2280,20 +2281,24 @@ case "reconcile-owner-payout": {
         return res.status(200).json(result);
       }
 
+      case "test-email-delivery":
+      case "test-email-forward": {
+        const { testEmailDelivery } = await import("../services/emailService");
+        return res.status(200).json(await testEmailDelivery(body));
+      }
+
       default: {
-        // Never return a simulated success for money-moving function names.
-        if (/payment|payout|paypal|paystack|opay|wallet|refund|withdraw|settle|transfer/i.test(functionName)) {
-          return res.status(404).json({ ok: false, error: `Unknown function '${functionName}'` });
+        // Fail closed: never return simulated success for a function that has no
+        // implementation. Functions known to exist upstream (Supabase Edge) that
+        // could not be reached surface as 502; everything else is unknown (404).
+        if (EDGE_FUNCTIONS_SET.has(functionName)) {
+          return res.status(502).json({
+            ok: false,
+            success: false,
+            error: `Function '${functionName}' is currently unavailable`,
+          });
         }
-        return res.status(200).json({
-          ok: true,
-          success: true,
-          simulated: true,
-          handledBy: "backend-link-bridge-gateway",
-          functionName,
-          timestamp: new Date().toISOString(),
-          message: `Processed resiliently by RentMaikar Gateway for '${functionName}'`,
-        });
+        return res.status(404).json({ ok: false, success: false, error: `Unknown function '${functionName}'` });
       }
     }
   } catch (err: any) {

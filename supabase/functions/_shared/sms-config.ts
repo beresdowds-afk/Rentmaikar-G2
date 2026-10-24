@@ -30,7 +30,7 @@ export const smsConfig: SMSConfig = {
       emergency: "+16083843932",
       shortCode: null, // Apply when approved
       provider: "twilio",
-      senderId: "+16083843932",
+      senderId: Deno.env.get("TWILIO_PHONE_NUMBER") || "",
       messagingServiceSid: Deno.env.get("TWILIO_MS_USA") || null,
       rateLimit: 10,
     },

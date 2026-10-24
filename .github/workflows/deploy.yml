@@ -26,6 +26,12 @@ jobs:
       - name: Run Linter
         run: npm run lint
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
       - name: Frontend Build Test
         run: npm run build
         env:
@@ -42,28 +48,44 @@ jobs:
     needs: validate
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Require GCP credentials
+        run: |
+          if [ -z "$GCP_SA_KEY" ] && [ -z "$GCP_WIF_PROVIDER" ]; then
+            echo "::error::No GCP credentials configured (set vars GCP_WORKLOAD_IDENTITY_PROVIDER/GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT, or secret GCP_SA_KEY). Refusing to report a green deploy without deploying."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        if: env.GCP_WIF_PROVIDER != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
-        if: env.GCP_SA_KEY != ''
+        if: env.GCP_SA_KEY != '' && env.GCP_WIF_PROVIDER == ''
         with:
           credentials_json: ${{ env.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-        if: env.GCP_SA_KEY != ''
 
       - name: Authorize Docker with GCP
-        if: env.GCP_SA_KEY != ''
         run: gcloud auth configure-docker --quiet
 
       - name: Build and Push Frontend Docker Image
-        if: env.GCP_SA_KEY != ''
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}"
           docker build \
@@ -77,42 +99,57 @@ jobs:
       # Deploy Frontend SPA container (Nginx on Port 80) serving rentmaikar.com
       # Proxies /api/* requests to the backend service rentmaikar-backend
       - name: Deploy Frontend to Cloud Run (rentmaikar-g2)
-        if: env.GCP_SA_KEY != ''
         run: |
           gcloud run deploy rentmaikar-g2 \
             --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar:${{ github.sha }} \
             --region europe-west1 \
             --port 80 \
             --allow-unauthenticated \
-            --set-env-vars BACKEND_URL=https://rentmaikar-backend-672260445879.europe-west1.run.app,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
+            --update-env-vars BACKEND_URL=https://rentmaikar-backend-672260445879.europe-west1.run.app,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
 
   deploy-backend:
     name: Deploy Backend (rentmaikar-backend)
     needs: validate
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Require GCP credentials
+        run: |
+          if [ -z "$GCP_SA_KEY" ] && [ -z "$GCP_WIF_PROVIDER" ]; then
+            echo "::error::No GCP credentials configured (set vars GCP_WORKLOAD_IDENTITY_PROVIDER/GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT, or secret GCP_SA_KEY). Refusing to report a green deploy without deploying."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        if: env.GCP_WIF_PROVIDER != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
-        if: env.GCP_SA_KEY != ''
+        if: env.GCP_SA_KEY != '' && env.GCP_WIF_PROVIDER == ''
         with:
           credentials_json: ${{ env.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-        if: env.GCP_SA_KEY != ''
 
       - name: Authorize Docker with GCP
-        if: env.GCP_SA_KEY != ''
         run: gcloud auth configure-docker --quiet
 
       - name: Build and Push Backend Docker Image
-        if: env.GCP_SA_KEY != ''
         run: |
           PROJECT_ID="${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}"
           docker build \
@@ -124,11 +161,11 @@ jobs:
       # Deploy Backend Gateway container (Express/Node.js on Port 8080) serving staging.rentmaikar.com
       # Authoritative for send-outbound-email, Resend integration, telematics, and payments
       - name: Deploy Backend to Cloud Run (rentmaikar-backend)
-        if: env.GCP_SA_KEY != ''
         run: |
           gcloud run deploy rentmaikar-backend \
             --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar-backend:${{ github.sha }} \
             --region europe-west1 \
             --port 8080 \
             --allow-unauthenticated \
-            --update-env-vars NODE_ENV=production,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co
+            --update-env-vars NODE_ENV=production,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co \
+            --set-secrets PORTAL_SECRET_KEY=portal-secret-key:latest,PORTAL_ADMIN_PASSWORD=portal-admin-password:latest,PORTAL_MASTER_KEY=portal-master-key:latest,SENT_WEBHOOK_SECRET=sent-webhook-secret:latest

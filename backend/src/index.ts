@@ -55,6 +55,16 @@ export const DOMAIN_MAPPING = {
   outgoingMailDomain: "notify.rentmaikar.com",
 } as const;
 
+/** Exact host match (rentmaikar.com or a subdomain) - never a substring match. */
+function isRentmaikarUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "rentmaikar.com" || host.endsWith(".rentmaikar.com");
+  } catch {
+    return false;
+  }
+}
+
 // 1. Security Headers configured for both API and embedded Admin Portal
 app.use(
   helmet({
@@ -64,7 +74,7 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "https://rentmaikar.com", "https://staging.rentmaikar.com"],
+        connectSrc: ["'self'", "https://rentmaikar.com", "https://www.rentmaikar.com", "https://staging.rentmaikar.com", "https://*.supabase.co"],
       },
     },
     crossOriginEmbedderPolicy: false,
@@ -115,8 +125,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   // Detect if request originates from the frontend (rentmaikar.com)
   const isFrontendTraffic =
     (origin && config.allowedOrigins.some((o) => origin.toLowerCase().startsWith(o.toLowerCase()))) ||
-    (origin && origin.toLowerCase().includes("rentmaikar.com")) ||
-    (referer && referer.toLowerCase().includes("rentmaikar.com")) ||
+    (origin && isRentmaikarUrl(origin)) ||
+    (referer && isRentmaikarUrl(referer)) ||
     req.headers["x-rentmaikar-client"] === "frontend" ||
     req.headers["x-rentmaikar-client"] === "rentmaikar.com";
 
