@@ -8,23 +8,41 @@ import {
   resendFrom,
   resendHeaders,
   resendSendEmail,
-  sendEmailViaSent,
 } from "./resend-gateway.ts";
+import { resolveBusinessReplyTo, validateApprovedBusinessSender } from "./email-sender-policy.ts";
 
 Deno.env.set("RESEND_SENDING_DOMAIN", "notify.rentmaikar.com");
-Deno.env.delete("RESEND_FALLBACK_FROM");
+Deno.env.set("DEFAULT_BUSINESS_FROM", "support@rentmaikar.com");
+Deno.env.set("APPROVED_BUSINESS_SENDERS", "support@rentmaikar.com,custom-replies@rentmaikar.com");
 
-Deno.test("rewrites unverified senders onto the verified domain", () => {
-  assertEquals(
-    resendFrom("Rentmaikar <noreply@rentmaikar.com>"),
-    "Rentmaikar <noreply@notify.rentmaikar.com>",
-  );
-  assertEquals(resendFrom("support@mail.rentmaikar.com"), "support@notify.rentmaikar.com");
+Deno.test("uses one configured exact-domain sender and ignores caller sender values", () => {
+  assertEquals(resendFrom("Rentmaikar <arbitrary@attacker.example>"), "RentMaikar <support@rentmaikar.com>");
 });
 
-Deno.test("leaves already-verified senders untouched", () => {
-  const from = "Rentmaikar <noreply@notify.rentmaikar.com>";
-  assertEquals(resendFrom(from), from);
+Deno.test("sender allowlist rejects subdomains and lookalike domains", () => {
+  const approved = ["support@rentmaikar.com"];
+  assertEquals(validateApprovedBusinessSender("support@RENTMAIKAR.COM", approved), "support@rentmaikar.com");
+  for (const rejected of [
+    "support@notify.rentmaikar.com",
+    "support@backend.rentmaikar.com",
+    "support@staging.rentmaikar.com",
+    "support@rentmaikar.com.attacker.example",
+    "support@otherdomain.example",
+    "unapproved@rentmaikar.com",
+  ]) {
+    let rejectedSender = false;
+    try {
+      validateApprovedBusinessSender(rejected, approved);
+    } catch {
+      rejectedSender = true;
+    }
+    assert(rejectedSender, `expected sender to be rejected: ${rejected}`);
+  }
+});
+
+Deno.test("unapproved Reply-To is constrained to the configured sender", () => {
+  assertEquals(resolveBusinessReplyTo("custom-replies@rentmaikar.com"), "custom-replies@rentmaikar.com");
+  assertEquals(resolveBusinessReplyTo("person@example.com"), "support@rentmaikar.com");
 });
 
 Deno.test("establishes and maintains the Direct Resend connector", () => {
@@ -38,7 +56,7 @@ Deno.test("establishes and maintains the Direct Resend connector", () => {
   assertEquals("X-Connection-Api-Key" in headers, false);
 });
 
-Deno.test("send rewrites the sender and keeps the original as reply_to", async () => {
+Deno.test("send uses the configured sender and does not derive reply_to from caller From", async () => {
   const original = globalThis.fetch;
   let captured: Record<string, unknown> = {};
   globalThis.fetch = ((_url: string | URL | Request, init?: RequestInit) => {
@@ -59,9 +77,61 @@ Deno.test("send rewrites the sender and keeps the original as reply_to", async (
     globalThis.fetch = original;
   }
 
-  assertEquals(captured.from, "Rentmaikar <noreply@notify.rentmaikar.com>");
-  assertEquals(captured.reply_to, "Rentmaikar <noreply@rentmaikar.com>");
+  assertEquals(captured.from, "RentMaikar <support@rentmaikar.com>");
+  assertEquals("reply_to" in captured, false);
   assertEquals(captured.subject, "Booking confirmed");
+});
+
+Deno.test("rejects malformed recipients and caller-supplied CC/BCC before sending", async () => {
+  const original = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = (() => {
+    called = true;
+    return Promise.resolve(new Response("unexpected send", { status: 200 }));
+  }) as typeof fetch;
+
+  try {
+    for (const overrides of [
+      { to: ["not-an-email"] },
+      { to: ["driver@example.com"], cc: ["copy@example.com"] },
+      { to: ["driver@example.com"], bcc: ["copy@example.com"] },
+    ]) {
+      const response = await resendSendEmail({
+        from: "support@rentmaikar.com",
+        to: ["driver@example.com"],
+        subject: "Test",
+        html: "<p>x</p>",
+        ...overrides,
+      }, "re_test");
+      assertEquals(response.status, 400);
+    }
+  } finally {
+    globalThis.fetch = original;
+  }
+  assertEquals(called, false);
+});
+
+Deno.test("missing sender configuration fails closed without contacting Resend", async () => {
+  const original = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = (() => {
+    called = true;
+    return Promise.resolve(new Response("should not send", { status: 200 }));
+  }) as typeof fetch;
+  Deno.env.delete("DEFAULT_BUSINESS_FROM");
+  try {
+    const response = await resendSendEmail({
+      from: "support@notify.rentmaikar.com",
+      to: ["driver@example.com"],
+      subject: "Test",
+      html: "<p>x</p>",
+    }, "re_test");
+    assertEquals(response.status, 503);
+    assertEquals(called, false);
+  } finally {
+    Deno.env.set("DEFAULT_BUSINESS_FROM", "support@rentmaikar.com");
+    globalThis.fetch = original;
+  }
 });
 
 Deno.test("a 401 raises a provider alert and still returns the response", async () => {
@@ -87,7 +157,7 @@ Deno.test("a 401 raises a provider alert and still returns the response", async 
       html: "<p>x</p>",
     }, "re_bad");
     assertEquals(res.status, 401);
-    assertEquals(await res.text(), "API key is invalid");
+    assertEquals(await res.text(), '{"error":"Resend delivery failed"}');
   } finally {
     globalThis.fetch = original;
     Deno.env.delete("SUPABASE_URL");
@@ -100,7 +170,7 @@ Deno.test("a 401 raises a provider alert and still returns the response", async 
   );
 });
 
-Deno.test("falls back to SENT.DM when Resend fails", async () => {
+Deno.test("does not fall back to a second email provider when Resend fails", async () => {
   const original = globalThis.fetch;
   const calls: { url: string; body?: Record<string, unknown> }[] = [];
   globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
@@ -109,11 +179,6 @@ Deno.test("falls back to SENT.DM when Resend fails", async () => {
     calls.push({ url: href, body });
     if (href.includes("/emails")) {
       return Promise.resolve(new Response("Resend error", { status: 500 }));
-    }
-    if (href.includes("api.sent.dm/v3/messages")) {
-      return Promise.resolve(new Response(JSON.stringify({
-        data: { status: "sent", recipients: [{ message_id: "sent_msg_123" }] },
-      }), { status: 200 }));
     }
     return Promise.resolve(new Response("ok", { status: 200 }));
   }) as typeof fetch;
@@ -129,12 +194,11 @@ Deno.test("falls back to SENT.DM when Resend fails", async () => {
       html: "<p>fallback body</p>",
     }, "re_test");
 
-    assertEquals(res.status, 200);
-    assert(calls.some((c) => c.url.includes("api.sent.dm/v3/messages")));
+    assertEquals(res.status, 500);
+    assertEquals(calls.some((c) => c.url.includes("api.sent.dm/v3/messages")), false);
   } finally {
     globalThis.fetch = original;
     Deno.env.delete("SENT_API_KEY");
     Deno.env.delete("SENT_ENABLED");
   }
 });
-

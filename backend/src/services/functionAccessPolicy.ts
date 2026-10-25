@@ -31,6 +31,8 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "sarekon-location-worker": "cron_or_admin",
   // Email / provisioning (no supabase/functions directory; backend-only)
   "email-health": "admin",
+  "send-email-reply": "admin",
+  "send-outbound-email": "admin",
   // Also invoked server-to-server (e.g. persona-send-reverification) with the service-role key.
   "send-email-notification": "service_or_admin",
   "google-sso-auth-email": "authenticated",

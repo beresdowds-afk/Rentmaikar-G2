@@ -3,12 +3,17 @@
  * Handles Password Reset, Google SSO Auth Emails, Account Verification,
  * and Transactional Outbound Emails via Resend.
  * 
- * Senders use the verified domain: notify.rentmaikar.com
+ * Resend's transport domain is separate from the recipient-visible sender.
  */
 
 import crypto from "crypto";
 import pg from "pg";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import {
+  getConfiguredBusinessSender,
+  resolveBusinessEmailSender,
+  resolveBusinessReplyTo,
+} from "./emailSenderPolicy";
 
 let supaAdminClient: SupabaseClient | null = null;
 function getSupabaseAdmin(): SupabaseClient {
@@ -78,78 +83,9 @@ export function parseEmailAddress(value: string): { name?: string; local: string
   return { local: bare[1], domain: bare[2] };
 }
 
-/**
- * Normalizes sender onto a verified domain preserving display name and original email as reply-to.
- * Respects both rentmaikar.com and notify.rentmaikar.com.
- */
+/** Resolves a sender from server configuration; caller-provided identities are ignored. */
 export function rewriteSenderAddress(from?: string): { from: string; preservedReplyTo?: string } {
-  const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
-
-  if (!from || !from.trim()) {
-    return { from: SENDERS.support, preservedReplyTo: `support@${defaultDomain}` };
-  }
-
-  const trimmed = from.trim();
-
-  // Handle bare aliases such as "support", "admin", "documents", "payments", etc.
-  const aliasMatch = trimmed.match(/^(?:Rentmaikar\s+)?([a-zA-Z0-9._-]+)$/i);
-  if (aliasMatch && !trimmed.includes("@")) {
-    const alias = aliasMatch[1].toLowerCase();
-    const capitalized = alias.charAt(0).toUpperCase() + alias.slice(1);
-    return {
-      from: `RentMaikar ${capitalized} <${alias}@${defaultDomain}>`,
-      preservedReplyTo: `${alias}@rentmaikar.com`,
-    };
-  }
-
-  const parsed = parseEmailAddress(trimmed);
-  if (!parsed) {
-    return { from: SENDERS.support, preservedReplyTo: `support@${defaultDomain}` };
-  }
-
-  // Helper to derive a valid sender name attribute if missing
-  const getFallbackSenderName = (local: string): string => {
-    const localLower = local.toLowerCase();
-    const map: Record<string, string> = {
-      support: "RentMaikar Support",
-      noreply: "RentMaikar Notifications",
-      security: "RentMaikar Security",
-      forwarder: "RentMaikar Forwarder",
-      admin: "RentMaikar Admin",
-      payments: "RentMaikar Billing & Payments",
-      documents: "RentMaikar Document Verification",
-      legal: "RentMaikar Legal",
-      privacy: "RentMaikar Privacy",
-      dpo: "RentMaikar Data Protection",
-      notifications: "RentMaikar Notifications",
-      verify: "RentMaikar Verification",
-      negotiations: "RentMaikar Pricing",
-      nigeria: "RentMaikar Nigeria Operations",
-      usa: "RentMaikar USA Operations",
-    };
-    return map[localLower] || `RentMaikar ${local.charAt(0).toUpperCase() + local.slice(1)}`;
-  };
-
-  const senderName = parsed.name || getFallbackSenderName(parsed.local);
-
-  // If already on an accepted sending domain (rentmaikar.com or notify.rentmaikar.com or defaultDomain), keep it intact!
-  const parsedDomain = parsed.domain.toLowerCase();
-  if (
-    parsedDomain === "rentmaikar.com" ||
-    parsedDomain === "notify.rentmaikar.com" ||
-    parsedDomain === defaultDomain.toLowerCase()
-  ) {
-    const formattedWithSenderName = `${senderName} <${parsed.local}@${parsedDomain}>`;
-    const originalFull = `${senderName} <${parsed.local}@${parsedDomain}>`;
-    return { from: formattedWithSenderName, preservedReplyTo: originalFull };
-  }
-
-  // Rewrite unverified 3rd-party domain to the default verified sending domain
-  const rewrittenAddress = `${parsed.local}@${defaultDomain}`;
-  const rewrittenFrom = `${senderName} <${rewrittenAddress}>`;
-  const originalFullAddress = `${senderName} <${parsed.local}@${parsed.domain}>`;
-
-  return { from: rewrittenFrom, preservedReplyTo: originalFullAddress };
+  return { from: resolveBusinessEmailSender(from) };
 }
 
 export interface SendEmailOptions {
@@ -171,12 +107,19 @@ export interface SendEmailResult {
 }
 
 /**
- * Low-level Resend email dispatcher with automatic domain enforcement,
- * reply-to retention, and DB logging.
+ * Low-level Resend dispatcher with approved sender policy and DB logging.
  */
 export async function sendEmailViaResend(options: SendEmailOptions): Promise<SendEmailResult> {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
   const recipient = Array.isArray(options.to) ? options.to[0] : options.to;
+  const recipients = Array.isArray(options.to) ? options.to : [options.to];
+  if (
+    recipients.length === 0 ||
+    recipients.length > 50 ||
+    recipients.some((address) => !parseEmailAddress(address))
+  ) {
+    return { ok: false, error: "A valid recipient address is required" };
+  }
 
   if (!apiKey) {
     const msg = "RESEND_API_KEY is not configured";
@@ -191,9 +134,16 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     return { ok: false, error: msg };
   }
 
-  // Ensure 'from' always uses the verified domain with name and reply-to preservation
-  const { from: fromAddress, preservedReplyTo } = rewriteSenderAddress(options.from);
-  const replyToAddress = options.replyTo || options.reply_to || preservedReplyTo || (fromAddress.includes("support") ? "support@rentmaikar.com" : undefined);
+  let fromAddress: string;
+  let replyToAddress: string | string[] | undefined;
+  try {
+    fromAddress = resolveBusinessEmailSender(options.from);
+    replyToAddress = resolveBusinessReplyTo(options.replyTo || options.reply_to);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Outbound email sender configuration is invalid";
+    console.error("[EmailService] Outbound sender configuration is invalid");
+    return { ok: false, error: message };
+  }
 
   // Resend strictly blocks RFC reserved dummy domains (@example.com, @example.org, @test.com) with HTTP 422.
   // For automated tests, demo seed data, or diagnostic test messages, route safely to Resend's official delivery sink.
@@ -250,8 +200,8 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      const errMsg = data?.message || data?.error || `Resend returned HTTP ${res.status}`;
-      console.error(`[EmailService] Resend send failure:`, errMsg);
+      const errMsg = `Provider rejected request (HTTP ${res.status})`;
+      console.warn("[EmailService] Resend send failed", { status: res.status });
       await logEmailSend({
         recipient,
         templateName: options.templateName || "raw_email",
@@ -260,7 +210,7 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
         metadata: options.metadata,
       });
 
-      return { ok: false, error: errMsg };
+      return { ok: false, error: "Email provider rejected the message" };
     }
 
     const messageId = data?.id || `msg_${Date.now()}`;
@@ -276,16 +226,16 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
 
     return { ok: true, messageId };
   } catch (err: any) {
-    console.error(`[EmailService] Unexpected error sending email:`, err.message);
+    console.error("[EmailService] Unexpected email delivery failure");
     await logEmailSend({
       recipient,
       templateName: options.templateName || "raw_email",
       status: "failed",
-      errorMessage: err.message,
+      errorMessage: "Email delivery request failed",
       metadata: options.metadata,
     });
 
-    return { ok: false, error: err.message };
+    return { ok: false, error: "Email delivery request failed" };
   }
 }
 
@@ -1496,7 +1446,7 @@ export async function getPlatformEmailSettingsReview(): Promise<{
   outgoing: {
     status: "healthy" | "warning" | "error";
     provider: string;
-    verifiedDomain: string;
+    transportDomain: string;
     domainVerified: boolean;
     senders: typeof SENDERS;
     apiKeyConfigured: boolean;
@@ -1529,14 +1479,14 @@ export async function getPlatformEmailSettingsReview(): Promise<{
 
   const supportedMailboxes = routingTable.rules.map((r) => r.mailbox);
 
-  let summary = `Platform email engine is ${outgoingStatus}. Outgoing domain "${VERIFIED_DOMAIN}" is configured. Inbound domain "${INBOUND_DOMAIN}" forwarding is ${forwardingEnabled ? "ACTIVE" : "PAUSED"} with ${routingTable.rules.length} routing rules.`;
+  let summary = `Platform email engine is ${outgoingStatus}. Resend transport domain "${VERIFIED_DOMAIN}" is configured. The recipient-visible sender must be configured separately. Inbound domain "${INBOUND_DOMAIN}" forwarding is ${forwardingEnabled ? "ACTIVE" : "PAUSED"} with ${routingTable.rules.length} routing rules.`;
 
   return {
     ok: health.ok,
     outgoing: {
       status: outgoingStatus,
       provider: health.provider,
-      verifiedDomain: VERIFIED_DOMAIN,
+      transportDomain: VERIFIED_DOMAIN,
       domainVerified: health.domainVerified,
       senders: SENDERS,
       apiKeyConfigured: health.apiKeyConfigured,
@@ -1596,17 +1546,17 @@ export async function testEmailDelivery(options: {
   const recipient = options.to || "support@rentmaikar.com";
   const subject = options.subject || "RentMaikar Email Delivery Test";
   const fromAddress = options.from || SENDERS.support;
-  const content = options.content || `This is a verification email to confirm that RentMaikar outbound email delivery is operating correctly: dispatched as ${fromAddress} via the verified domain ${VERIFIED_DOMAIN}.`;
+  const content = options.content || `This is a verification email to confirm that RentMaikar outbound email delivery is operating through the configured Resend transport domain ${VERIFIED_DOMAIN}.`;
 
   const html = emailLayout(`
     <p>Hello,</p>
     <p>${content}</p>
     <div class="info-box">
       <strong>Verification Details:</strong><br/>
-      Sender: <code>${fromAddress}</code><br/>
-      Outgoing Domain: <code>${VERIFIED_DOMAIN}</code><br/>
+      Sender: enforced by the delivery service<br/>
+      Resend transport domain: <code>${VERIFIED_DOMAIN}</code><br/>
       Dispatched: <code>${new Date().toUTCString()}</code><br/>
-      Security: TLS 1.3 / DKIM / SPF Verified
+      SPF, DKIM, and DMARC: external verification required
     </div>
   `, subject);
 
@@ -1623,8 +1573,7 @@ export async function testEmailDelivery(options: {
 
 /**
  * 10. Platform Email Domain Routing Verifier
- * Verifies that emails are delivered as *@rentmaikar.com through notify.rentmaikar.com,
- * and inbound emails are received through backend.rentmaikar.com as *@rentmaikar.com.
+ * Reports provider and inbound-routing checks; DNS authentication records require external verification.
  */
 export async function verifyPlatformEmailDomainRouting(options?: {
   mailbox?: string;
@@ -1648,21 +1597,29 @@ export async function verifyPlatformEmailDomainRouting(options?: {
     });
   }
 
+  let senderConfigured = false;
+  try {
+    getConfiguredBusinessSender();
+    senderConfigured = true;
+  } catch {
+    senderConfigured = false;
+  }
+
   return {
-    ok: review.ok,
-    verifiedAt: new Date().toISOString(),
+    ok: review.ok && senderConfigured,
+    checkedAt: new Date().toISOString(),
     outgoing: {
       status: review.outgoing.status,
-      publicSenderIdentity: "*@rentmaikar.com",
-      verifiedDomain: VERIFIED_DOMAIN,
+      publicSenderIdentity: senderConfigured ? "Configured sender allowlist" : "Not configured; outbound sending disabled",
+      transportDomain: VERIFIED_DOMAIN,
       provider: review.outgoing.provider,
       apiKeyConfigured: review.outgoing.apiKeyConfigured,
       domainVerified: review.outgoing.domainVerified,
-      protocol: "Resend API / SMTP over TLS 1.3",
-      spf: "v=spf1 include:resend.com ~all (Aligned)",
-      dkim: "2048-bit RSA active (resend._domainkey.notify.rentmaikar.com)",
-      dmarc: "v=DMARC1; p=none; sp=none (Aligned with rentmaikar.com)",
-      envelopeRewriting: "Outbound emails sent as *@rentmaikar.com are dispatched through notify.rentmaikar.com with SPF/DKIM authentication and Return-Path envelope alignment",
+      protocol: "Resend API; transport TLS is provider-managed",
+      spf: "Not checked; verify provider instructions and current DNS",
+      dkim: "Not checked; verify provider instructions and current DNS",
+      dmarc: "Not checked; preserve existing DNS policy",
+      envelopeRewriting: "Return-Path and bounce handling are provider-managed and not rewritten by this application",
     },
     incoming: {
       status: review.incoming.status,
@@ -1749,4 +1706,3 @@ export async function getEmailSendLogs(filter?: {
     };
   }
 }
-

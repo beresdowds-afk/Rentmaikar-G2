@@ -10,7 +10,7 @@
  */
 
 import { reportResendAuthFailure } from "./email-alerts.ts";
-import { sentApiKey, sentEnabled } from "./sent-client.ts";
+import { getConfiguredBusinessSender, resolveBusinessReplyTo } from "./email-sender-policy.ts";
 
 export const RESEND_DIRECT_URL = "https://api.resend.com";
 
@@ -82,12 +82,7 @@ export async function verifyDirectResendConnection(apiKey?: string | null): Prom
   }
 }
 
-/**
- * The only domain verified for sending in Resend. Anything sent from an
- * unverified domain (e.g. `@rentmaikar.com`, `@mail.rentmaikar.com`) is
- * rejected with `403 domain is not verified`, which is why outbound email was
- * failing. Overridable with `RESEND_SENDING_DOMAIN`.
- */
+/** Transport domain for provider DNS and bounce handling; not the visible From identity. */
 export function resendSendingDomain(): string {
   return Deno.env.get("RESEND_SENDING_DOMAIN") || "notify.rentmaikar.com";
 }
@@ -104,19 +99,9 @@ function parseAddress(value: string): { name?: string; local: string; domain: st
 }
 
 
-/**
- * Rewrites a sender onto the verified sending domain, preserving the display
- * name and mailbox. `RESEND_FALLBACK_FROM` still wins when explicitly set.
- */
-export function resendFrom(from: string): string {
-  const override = Deno.env.get("RESEND_FALLBACK_FROM");
-  const candidate = override || from;
-  const parsed = parseAddress(candidate);
-  if (!parsed) return candidate;
-  const domain = resendSendingDomain();
-  if (parsed.domain.toLowerCase() === domain.toLowerCase()) return candidate;
-  const address = `${parsed.local}@${domain}`;
-  return parsed.name ? `${parsed.name} <${address}>` : address;
+/** Resolves the single server-configured visible From identity. */
+export function resendFrom(_from: string): string {
+  return getConfiguredBusinessSender();
 }
 
 type ResendBody = Record<string, unknown> & { from?: string; reply_to?: string | string[] };
@@ -126,52 +111,6 @@ function callerFunctionName(): string {
   const stack = new Error().stack ?? "";
   const match = stack.match(/functions\/([A-Za-z0-9_-]+)\/[^/]+\.ts/);
   return match?.[1] ?? Deno.env.get("SB_FUNCTION_NAME") ?? "unknown-function";
-}
-
-/**
- * Fallback: send email via SENT.DM when Resend dispatch fails or is unavailable.
- */
-export async function sendEmailViaSent(payload: Record<string, unknown>): Promise<Response | null> {
-  if (!sentEnabled()) return null;
-  const baseUrl = Deno.env.get("SENT_API_BASE_URL") || "https://api.sent.dm";
-  const apiKey = sentApiKey();
-  const toRaw = payload.to;
-  const toList: string[] = Array.isArray(toRaw)
-    ? toRaw.map(String)
-    : typeof toRaw === "string"
-      ? [toRaw]
-      : [];
-
-  if (!toList.length) return null;
-
-  try {
-    const res = await fetch(`${baseUrl}/v3/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
-        to: toList,
-        channel: ["email"],
-        subject: payload.subject,
-        text: payload.text || payload.subject,
-        html: payload.html,
-        from: payload.from,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (res.ok) {
-      console.log("[resend-gateway] Email fallback via SENT.DM succeeded for", toList.join(", "));
-    } else {
-      console.warn(`[resend-gateway] Email fallback via SENT.DM returned HTTP ${res.status}`);
-    }
-    return res;
-  } catch (e) {
-    console.error("[resend-gateway] Email fallback via SENT.DM error:", e);
-    return null;
-  }
 }
 
 /**
@@ -202,22 +141,50 @@ export function ensureSenderName(addressWithOrWithoutName: string): string {
   return `${derivedName} <${parsed.local}@${parsed.domain}>`;
 }
 
-/**
- * Single transport for every outbound Resend email with SENT.DM fallback.
- * Resend is the primary Global email service provider and SENT.DM is the fallback.
- * Normalises the sender onto the verified domain and keeps the original address
- * as `reply_to` so replies still reach the human mailbox. A 401/403 from Resend
- * is terminal, so it is alerted to the team with the failing recipient and
- * payload excerpt before attempting the SENT.DM fallback.
- * Ensures all outbound emails have valid unique Id and Name attributes.
- */
+/** Single Resend transport with a server-controlled visible From identity. */
 export async function resendSendEmail(body: ResendBody, key?: string | null): Promise<Response> {
+  const rawRecipients = Array.isArray(body.to)
+    ? body.to
+    : typeof body.to === "string"
+      ? [body.to]
+      : [];
+  if (
+    rawRecipients.length === 0 ||
+    rawRecipients.length > 50 ||
+    rawRecipients.some((recipient) => typeof recipient !== "string" || !parseAddress(recipient.trim())) ||
+    body.cc !== undefined ||
+    body.bcc !== undefined
+  ) {
+    return new Response(
+      JSON.stringify({ error: "Invalid recipient list" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   const apiKey = key ?? Deno.env.get("RESEND_API_KEY") ?? "";
-  const originalFrom = typeof body.from === "string" ? body.from : "";
-  const rawFrom = originalFrom ? resendFrom(originalFrom) : originalFrom;
-  const from = rawFrom ? ensureSenderName(rawFrom) : rawFrom;
-  const replyTo = body.reply_to ??
-    (originalFrom && from !== originalFrom ? originalFrom : undefined);
+  let from: string;
+  try {
+    from = ensureSenderName(resendFrom(typeof body.from === "string" ? body.from : ""));
+  } catch (error) {
+    console.error("[resend-gateway] Outbound sender configuration is invalid");
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error
+          ? error.message
+          : "Outbound sender configuration is invalid",
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  let replyTo: string | string[] | undefined;
+  try {
+    replyTo = resolveBusinessReplyTo(body.reply_to);
+  } catch {
+    return new Response(
+      JSON.stringify({ error: "Reply-To must be an approved rentmaikar.com address" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
   const caller = callerFunctionName();
 
   // Generate or preserve unique message Id for tracking and headers
@@ -260,7 +227,6 @@ export async function resendSendEmail(body: ResendBody, key?: string | null): Pr
   };
 
   let res: Response | null = null;
-  let resendFailed = false;
 
   if (apiKey) {
     try {
@@ -268,30 +234,31 @@ export async function resendSendEmail(body: ResendBody, key?: string | null): Pr
         method: "POST",
         headers: resendHeaders(apiKey),
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15000),
       });
 
-      if (!res.ok) {
-        resendFailed = true;
-      }
     } catch (e) {
       console.warn("[resend-gateway] Primary Resend fetch failed:", e);
-      resendFailed = true;
+      return new Response(
+        JSON.stringify({ error: "Resend delivery request failed" }),
+        { status: 502, headers: { "Content-Type": "application/json" } },
+      );
     }
   } else {
-    resendFailed = true;
+    return new Response(
+      JSON.stringify({ error: "Resend is not configured" }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   if (res && (res.status === 401 || res.status === 403)) {
-    // Clone so the caller can still read the body itself if not falling back.
-    const detail = await res.clone().text().catch(() => "");
-    const to = Array.isArray(body.to) ? body.to[0] : body.to;
     await reportResendAuthFailure({
       functionName: caller,
       status: res.status,
-      recipient: typeof to === "string" ? to : null,
-      subject: typeof body.subject === "string" ? body.subject : null,
-      payload,
-      providerResponse: detail,
+      recipient: null,
+      subject: null,
+      payload: undefined,
+      providerResponse: undefined,
     });
   }
 
@@ -300,24 +267,20 @@ export async function resendSendEmail(body: ResendBody, key?: string | null): Pr
     return res;
   }
 
-  // Fallback: SENT.DM as global fallback email provider
-  if (resendFailed || !res || !res.ok) {
-    console.warn(`[resend-gateway] Resend send ${res ? `status ${res.status}` : 'unavailable'}, trying SENT.DM fallback...`);
-    const sentFallbackRes = await sendEmailViaSent(payload);
-    if (sentFallbackRes && sentFallbackRes.ok) {
-      return sentFallbackRes;
-    }
-  }
-
-  // If fallback was not successful or unavailable, return the original Resend response (or synthetic error)
   if (res) {
-    return res;
+    return new Response(JSON.stringify({ error: "Resend delivery failed" }), {
+      status: res.status,
+      headers: {
+        "Content-Type": "application/json",
+        ...(res.headers.get("retry-after")
+          ? { "Retry-After": res.headers.get("retry-after")! }
+          : {}),
+      },
+    });
   }
 
-  return new Response(
-    JSON.stringify({ error: "Resend and SENT.DM email delivery failed or unconfigured" }),
-    { status: 500, headers: { "Content-Type": "application/json" } }
-  );
+  return new Response(JSON.stringify({ error: "Resend delivery failed" }), {
+    status: 502,
+    headers: { "Content-Type": "application/json" },
+  });
 }
-
-

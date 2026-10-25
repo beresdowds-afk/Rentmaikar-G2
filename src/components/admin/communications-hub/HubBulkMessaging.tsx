@@ -460,7 +460,6 @@ export const HubBulkMessaging: React.FC = () => {
             recipientName: fullName !== 'Customer' ? fullName : undefined,
             subject: renderedSubj,
             body: renderedMsg,
-            from: 'Rentmaikar Notifications <noreply@notify.rentmaikar.com>',
             id: uniqueId,
             messageId: uniqueId,
             customData: {

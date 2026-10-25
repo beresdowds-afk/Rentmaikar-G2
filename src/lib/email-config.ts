@@ -12,13 +12,6 @@ export const EMAIL_CONFIG = {
   admin: "admin@rentmaikar.com",
 };
 
-export const OUTGOING_EMAIL_CONFIG = {
-  support: "support@notify.rentmaikar.com",
-  payments: "payments@notify.rentmaikar.com",
-  documents: "documents@notify.rentmaikar.com",
-  admin: "admin@notify.rentmaikar.com",
-};
-
 export const EMAIL_SENDER_NAMES = {
   support: "Rentmaikar Support",
   payments: "Rentmaikar Payments",

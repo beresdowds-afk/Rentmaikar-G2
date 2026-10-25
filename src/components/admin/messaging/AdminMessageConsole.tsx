@@ -114,7 +114,6 @@ import {
   getWhatsAppSenderForRecipient,
 } from '@/lib/whatsapp-templates-registry';
 import { calculateSmsSegments, getSmsProviderAndSender } from '@/lib/sms-templates';
-import { OUTGOING_EMAIL_CONFIG } from '@/lib/email-config';
 import { AiAutoResponderCard } from './AiAutoResponderCard';
 import { SavedResponsesModal } from './SavedResponsesModal';
 
@@ -366,7 +365,6 @@ export const AdminMessageConsole = ({
   const [replyChannel, setReplyChannel] = useState<'email' | 'sms' | 'whatsapp'>('email');
   const [replySubject, setReplySubject] = useState('');
   const [replyBody, setReplyBody] = useState('');
-  const [replyFromAlias, setReplyFromAlias] = useState<string>(OUTGOING_EMAIL_CONFIG.support);
   const [replySmsOptOut, setReplySmsOptOut] = useState(true);
   const [replyWhatsappTemplateId, setReplyWhatsappTemplateId] = useState<string>('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -1968,20 +1966,9 @@ export const AdminMessageConsole = ({
                             placeholder="Email subject..."
                           />
                         </div>
-                        <div className="sm:col-span-4 flex items-center gap-2">
-                          <span className="font-semibold text-muted-foreground whitespace-nowrap">From:</span>
-                          <Select value={replyFromAlias} onValueChange={setReplyFromAlias}>
-                            <SelectTrigger className="h-7 text-xs bg-background">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value={OUTGOING_EMAIL_CONFIG.support}>support@notify.rentmaikar.com</SelectItem>
-                              <SelectItem value={OUTGOING_EMAIL_CONFIG.payments}>payments@notify.rentmaikar.com</SelectItem>
-                              <SelectItem value={OUTGOING_EMAIL_CONFIG.documents}>documents@notify.rentmaikar.com</SelectItem>
-                              <SelectItem value={OUTGOING_EMAIL_CONFIG.admin}>admin@notify.rentmaikar.com</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                        <p className="sm:col-span-4 self-center text-muted-foreground">
+                          From: Configured delivery-service sender
+                        </p>
                       </div>
                     )}
 

@@ -52,7 +52,6 @@ import {
   getWhatsAppSenderForRecipient,
 } from '@/lib/whatsapp-templates-registry';
 import { calculateSmsSegments, getSmsProviderAndSender } from '@/lib/sms-templates';
-import { OUTGOING_EMAIL_CONFIG } from '@/lib/email-config';
 import {
   validateAttachmentFile,
   formatFileSize,
@@ -130,7 +129,6 @@ export function MessageComposer({ onSent, initialValues }: MessageComposerProps)
   );
   const [subject, setSubject] = useState(initialValues?.subject || '');
   const [body, setBody] = useState(initialValues?.body || '');
-  const [emailFromAlias, setEmailFromAlias] = useState<string>(OUTGOING_EMAIL_CONFIG.support);
   const [smsOptOut, setSmsOptOut] = useState(true);
   const [whatsappTemplateId, setWhatsappTemplateId] = useState<string>('');
   const [draftId, setDraftId] = useState<string | undefined>();
@@ -720,20 +718,9 @@ export function MessageComposer({ onSent, initialValues }: MessageComposerProps)
                       className="h-8 text-xs bg-background"
                     />
                   </div>
-                  <div className="sm:col-span-4 space-y-1">
-                    <Label className="text-xs font-semibold">From Sender Alias</Label>
-                    <Select value={emailFromAlias} onValueChange={setEmailFromAlias}>
-                      <SelectTrigger className="h-8 text-xs bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={OUTGOING_EMAIL_CONFIG.support}>support@notify.rentmaikar.com</SelectItem>
-                        <SelectItem value={OUTGOING_EMAIL_CONFIG.payments}>payments@notify.rentmaikar.com</SelectItem>
-                        <SelectItem value={OUTGOING_EMAIL_CONFIG.documents}>documents@notify.rentmaikar.com</SelectItem>
-                        <SelectItem value={OUTGOING_EMAIL_CONFIG.admin}>admin@notify.rentmaikar.com</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <p className="sm:col-span-4 self-end text-xs text-muted-foreground">
+                    Sender identity is enforced by the delivery service.
+                  </p>
                 </div>
               )}
 
@@ -1054,7 +1041,7 @@ export function MessageComposer({ onSent, initialValues }: MessageComposerProps)
               {channel === 'email' && (
                 <div className="rounded-xl border shadow-sm bg-background overflow-hidden">
                   <div className="p-3 border-b bg-muted/20 text-xs space-y-1">
-                    <p><strong>From:</strong> {emailFromAlias}</p>
+                    <p><strong>From:</strong> Configured delivery-service sender</p>
                     <p><strong>To:</strong> {email || 'customer@example.com'}</p>
                     <p><strong>Subject:</strong> {subject || 'Notice from Rentmaikar'}</p>
                   </div>

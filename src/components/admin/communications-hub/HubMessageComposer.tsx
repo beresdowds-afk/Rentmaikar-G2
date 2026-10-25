@@ -320,7 +320,6 @@ export const HubMessageComposer: React.FC = () => {
             subject: subject.trim() || 'Notice from Rentmaikar Admin',
             body: trimmedBody,
             recipientName: recipientName.trim() || undefined,
-            from: 'Rentmaikar Admin <admin@notify.rentmaikar.com>',
             headers: {
               'Message-ID': `<${uniqueEmailId}@notify.rentmaikar.com>`,
               'X-Entity-Ref-ID': uniqueEmailId,
@@ -665,4 +664,3 @@ export const HubMessageComposer: React.FC = () => {
     </div>
   );
 };
-
