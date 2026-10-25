@@ -140,7 +140,9 @@ const buildDriverSchema = (detailsRequired: boolean, refereesRequired: boolean) 
   });
 };
 
-type DriverFormData = z.infer<ReturnType<typeof buildDriverSchema>>;
+type DriverFormSchema = ReturnType<typeof buildDriverSchema>;
+type DriverFormInput = z.input<DriverFormSchema>;
+type DriverFormData = z.output<DriverFormSchema>;
 
 const usaCities = [
   "Washington DC",
@@ -195,7 +197,7 @@ const DriverRegistration = () => {
     trigger,
     control,
     formState: { errors, isSubmitting, touchedFields },
-  } = useForm<DriverFormData>({
+  } = useForm<DriverFormInput, any, DriverFormData>({
     resolver: zodResolver(driverSchema),
     // Validate as the user types so the address rules surface immediately
     // instead of only on submit.
