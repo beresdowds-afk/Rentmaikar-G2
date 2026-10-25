@@ -60,6 +60,7 @@ const forgotPasswordSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 type SignupFormData = z.infer<typeof signupSchema>;
+type SignupFormInput = z.input<typeof signupSchema>;
 type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>;
 
 const Auth = () => {
@@ -251,7 +252,7 @@ const Auth = () => {
     },
   });
 
-  const signupForm = useForm<SignupFormData>({
+  const signupForm = useForm<SignupFormInput, any, SignupFormData>({
     resolver: zodResolver(signupSchema),
     defaultValues: {
       fullName: '',
