@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import crypto from "crypto";
 import { normalizeToE164, PhoneValidationError } from "@/lib/phone-normalize";
+import { resolveBusinessEmailSender } from "@/server/emailSenderPolicy";
 import { looksLikeOtpMessage, OTP_IN_APP_BLOCK_MESSAGE } from "../../../supabase/functions/_shared/otp-guard";
 
 // Helper for OTP generation matching backend implementation
@@ -255,26 +256,20 @@ describe("OTP Delivery via Email", () => {
   });
 
   describe("Sender Domain Validation & Delivery Address Rewriting", () => {
+    const senderEnvironment = {
+      DEFAULT_BUSINESS_FROM: "support@rentmaikar.com",
+      APPROVED_BUSINESS_SENDERS: "support@rentmaikar.com",
+    };
+
     function resendFrom(from: string): string {
-      const domain = "notify.rentmaikar.com";
-      if (from.includes(domain)) return from;
-      const match = from.match(/^(?:(.*)<)?([^<>@\s]+)@([^<>@\s]+)>?$/);
-      if (!match) return `Rentmaikar <noreply@${domain}>`;
-      const name = match[1]?.trim() || "Rentmaikar";
-      const local = match[2];
-      return `${name} <${local}@${domain}>`;
+      return resolveBusinessEmailSender(from, senderEnvironment);
     }
 
-    it("rewrites unverified apex domains onto notify.rentmaikar.com for reliable delivery", () => {
+    it("resolves every outbound message to the configured exact-domain sender", () => {
       expect(resendFrom("Rentmaikar Security <security@rentmaikar.com>"))
-        .toBe("Rentmaikar Security <security@notify.rentmaikar.com>");
+        .toBe("RentMaikar <support@rentmaikar.com>");
       expect(resendFrom("Rentmaikar Support <support@rentmaikar.com>"))
-        .toBe("Rentmaikar Support <support@notify.rentmaikar.com>");
-    });
-
-    it("leaves already-verified notify.rentmaikar.com addresses untouched", () => {
-      expect(resendFrom("Rentmaikar Security <security@notify.rentmaikar.com>"))
-        .toBe("Rentmaikar Security <security@notify.rentmaikar.com>");
+        .toBe("RentMaikar <support@rentmaikar.com>");
     });
   });
 

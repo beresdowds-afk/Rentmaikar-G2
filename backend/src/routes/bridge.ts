@@ -7,6 +7,7 @@ import { bridgeManager, BridgeEventPacket } from "../services/bridgeManager";
 import { platformHealthService } from "../services/platformHealth";
 import { supabaseBackendService } from "../services/supabaseService";
 import { requireAdminRole, requirePortalAuth } from "./portal";
+import { authenticateCaller } from "../services/fileUploadService";
 
 export const bridgeRouter = Router();
 
@@ -163,6 +164,25 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
         // Authoritative Cloud Run execution for Email functions:
         // Eliminates 404s from un-deployed Supabase edge functions and ensures direct Resend delivery
         if (targetFunction === "send-outbound-email" || targetFunction === "send-transactional-email") {
+          let caller;
+          try {
+            caller = await authenticateCaller(clientAuth);
+          } catch {
+            return res.status(401).json({
+              status: "error",
+              success: false,
+              error: "Authentication required for email dispatch",
+              correlationId,
+            });
+          }
+          if (!caller.isAdmin) {
+            return res.status(403).json({
+              status: "error",
+              success: false,
+              error: "Administrator authorization required for email dispatch",
+              correlationId,
+            });
+          }
           try {
             const { handleSendOutboundEmail } = await import("../services/emailService");
             const emailRes = await handleSendOutboundEmail(functionBody);
@@ -246,6 +266,21 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
         };
         break;
       }
+    }
+
+    if (
+      (result?.functionName === "send-outbound-email" ||
+        result?.functionName === "send-transactional-email") &&
+      result?.success === false
+    ) {
+      return res.status(result.status || 502).json({
+        status: "error",
+        success: false,
+        action,
+        correlationId,
+        channel,
+        data: result,
+      });
     }
 
     const latencyMs = Date.now() - startTime;

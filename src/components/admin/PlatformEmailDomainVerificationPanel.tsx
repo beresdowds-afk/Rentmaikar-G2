@@ -33,11 +33,11 @@ import { backendBridge, generateBridgeCorrelationId } from "@/lib/backend-bridge
 
 interface DomainVerificationData {
   ok: boolean;
-  verifiedAt: string;
+  checkedAt: string;
   outgoing: {
     status: string;
     publicSenderIdentity: string;
-    verifiedDomain: string;
+    transportDomain: string;
     provider: string;
     apiKeyConfigured: boolean;
     domainVerified: boolean;

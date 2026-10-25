@@ -1,14 +1,14 @@
 /**
  * RentMaikar Marketing Engine - Resend Adapter
- * Transactional & Campaign Email engine using the verified outgoing domain: notify.rentmaikar.com
+ * Resend campaign delivery using the server-configured visible sender.
  * Supports delivery verification, bounce/complaint webhooks, and lead attribution.
  */
 
 import { ProviderStatusInfo, SendEmailParams } from './types';
+import { resolveBusinessEmailSender } from '../services/emailSenderPolicy';
 
 const RESEND_API_BASE = 'https://api.resend.com';
-export const OUTGOING_SENDER_DOMAIN = 'notify.rentmaikar.com';
-export const DEFAULT_SENDER = `RentMaikar <campaigns@${OUTGOING_SENDER_DOMAIN}>`;
+export const OUTGOING_SENDER_DOMAIN = 'rentmaikar.com';
 
 export interface ResendEmailResult {
   ok: boolean;
@@ -32,11 +32,9 @@ export interface ResendEmailStatus {
 export class ResendAdapter {
   readonly platform = 'resend' as const;
   private apiKey: string;
-  private defaultFrom: string;
 
   constructor() {
     this.apiKey = process.env.RESEND_API_KEY || '';
-    this.defaultFrom = DEFAULT_SENDER;
   }
 
   isConnected(): boolean {
@@ -54,7 +52,7 @@ export class ResendAdapter {
         lastSynchronized: null,
         apiStatus: 'Credentials not configured (RESEND_API_KEY missing)',
         capabilities: [
-          `Verified Outbound Domain (${OUTGOING_SENDER_DOMAIN})`,
+          `Visible From domain policy (${OUTGOING_SENDER_DOMAIN}; provider verification not checked here)`,
           'Marketing & Campaign Newsletters',
           'Transactional Email Delivery',
           'Bounce & Complaint Handling',
@@ -90,12 +88,12 @@ export class ResendAdapter {
         platform: 'resend' as any,
         displayName: 'Resend (Email Engine)',
         status: 'connected',
-        accountId: OUTGOING_SENDER_DOMAIN,
-        accountName: `Verified Sender (${OUTGOING_SENDER_DOMAIN})`,
+        accountId: null,
+        accountName: 'Resend API account',
         lastSynchronized: new Date().toISOString(),
         apiStatus: 'Connected & Operational (Resend REST API)',
         capabilities: [
-          `Verified Outbound Domain (${OUTGOING_SENDER_DOMAIN})`,
+          `Visible From domain policy (${OUTGOING_SENDER_DOMAIN}; provider verification not checked here)`,
           'Campaign Email Outbound',
           'Transactional Email Delivery',
           'Bounce & Complaint Detection',
@@ -107,7 +105,7 @@ export class ResendAdapter {
         platform: 'resend' as any,
         displayName: 'Resend (Email Engine)',
         status: 'error',
-        accountId: OUTGOING_SENDER_DOMAIN,
+        accountId: null,
         accountName: null,
         lastSynchronized: null,
         apiStatus: `Connection Error: ${err.message}`,
@@ -130,10 +128,15 @@ export class ResendAdapter {
       return { ok: false, error: 'Recipient email is required' };
     }
 
-    // Sender must use verified domain notify.rentmaikar.com
-    const from = params.from && params.from.includes(OUTGOING_SENDER_DOMAIN)
-      ? params.from
-      : this.defaultFrom;
+    let from: string;
+    try {
+      from = resolveBusinessEmailSender(params.from);
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Outbound sender configuration is invalid',
+      };
+    }
 
     try {
       const payload: any = {

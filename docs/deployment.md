@@ -196,9 +196,11 @@ RentMaikar operates two coordinated Google Cloud Run services in `europe-west1`:
 | Service Name | Container / Dockerfile | Port | Public Hostname | Role & Responsibilities |
 | :--- | :--- | :--- | :--- | :--- |
 | **`rentmaikar-g2`** | Root `Dockerfile` (`nginx:1.25-alpine`) | `80` | `rentmaikar.com` | **Frontend SPA & Ingress Proxy**: Serves static Vite React bundles and reverse-proxies `/api/*` to `rentmaikar-backend`. |
-| **`rentmaikar-backend`** | `backend/Dockerfile` (`node:20-alpine`) | `8080` | `staging.rentmaikar.com` | **Authoritative Backend API Gateway**: Executes `send-outbound-email` via Resend from `notify.rentmaikar.com`, telematics, and payments. |
+| **`rentmaikar-backend`** | `backend/Dockerfile` (`node:20-alpine`) | `8080` | `staging.rentmaikar.com` | **Authoritative Backend API Gateway**: Hosts the Cloud Run email route, telematics, and payments. The visible sender must be configured via the approved sender allowlist; the configured Resend transport domain is separate and does not prove sender-domain verification. |
 
 ---
+
+See [Outbound email architecture and verification](outbound-email-architecture.md) for the source-level dispatch inventory and external sender/DNS verification checklist.
 
 ## 4. Troubleshooting Checklist
 

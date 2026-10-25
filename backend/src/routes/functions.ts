@@ -52,6 +52,19 @@ function normalizeE164(phone: string): string {
   return `+${cleaned}`;
 }
 
+function escapeEmailHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+}
+
 import {
   iotAdminService,
   traccarService,
@@ -403,13 +416,15 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   }
   // Central access policy: reject unauthenticated/unauthorized callers before any side effect.
   let accessDecision: Awaited<ReturnType<typeof enforceFunctionAccess>> = null;
-  try {
-    accessDecision = await enforceFunctionAccess(functionName, req.headers as Record<string, unknown>);
-  } catch (err: any) {
-    if (err instanceof AccessDenied) {
-      return res.status(err.statusCode).json({ ok: false, error: err.message });
+  if (!(functionName === "send-outbound-email" && (req as any).authenticatedInternalEmailBridge)) {
+    try {
+      accessDecision = await enforceFunctionAccess(functionName, req.headers as Record<string, unknown>);
+    } catch (err: any) {
+      if (err instanceof AccessDenied) {
+        return res.status(err.statusCode).json({ ok: false, error: err.message });
+      }
+      return res.status(401).json({ ok: false, error: "Authentication required" });
     }
-    return res.status(401).json({ ok: false, error: "Authentication required" });
   }
   const gatedCaller = accessDecision?.caller ?? null;
   void gatedCaller;
@@ -1291,10 +1306,9 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
         if (resendApiKey && targetEmail) {
           try {
-            const defaultDomain = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
-            const alias = (body.fromAlias || "support").toLowerCase().trim();
-            const from = body.from || `Rentmaikar Support <${alias}@${defaultDomain}>`;
-            const replyTo = `support@${defaultDomain}`;
+            const { getConfiguredBusinessSender } = await import("../services/emailSenderPolicy");
+            const from = getConfiguredBusinessSender();
+            const replyTo = process.env.DEFAULT_BUSINESS_FROM;
             const textToRender = body.messageContent || body.body || body.text || body.content || "";
             const subject = body.subject || "Reply from Rentmaikar Support";
 
@@ -1310,7 +1324,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
                 reply_to: replyTo,
                 subject,
                 text: typeof textToRender === "string" ? textToRender : undefined,
-                html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111; max-width: 600px; margin: 0 auto; padding: 20px;">${String(textToRender).replace(/\n/g, "<br/>")}</div>`,
+                html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111; max-width: 600px; margin: 0 auto; padding: 20px;">${escapeEmailHtml(String(textToRender)).replace(/\n/g, "<br/>")}</div>`,
               }),
             });
 
@@ -1322,19 +1336,18 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
                 provider: "resend",
               });
             } else {
-              const errText = await resendRes.text().catch(() => "");
-              console.warn("[Backend Functions] Direct Resend dispatch failed:", errText);
+              console.warn("[Backend Functions] Direct Resend dispatch failed", { status: resendRes.status });
               return res.status(resendRes.status || 502).json({
                 success: false,
-                error: `Resend dispatch failed: ${errText || "Unknown error"}`,
+                error: "Email reply dispatch failed",
                 provider: "resend",
               });
             }
           } catch (resendErr: any) {
-            console.warn("[Backend Functions] Direct Resend error:", resendErr?.message || resendErr);
+            console.warn("[Backend Functions] Direct Resend request failed");
             return res.status(500).json({
               success: false,
-              error: `Direct Resend error: ${resendErr?.message || String(resendErr)}`,
+              error: "Email reply dispatch failed",
             });
           }
         }

@@ -204,7 +204,7 @@ export const KNOWLEDGE_BASE_CITATIONS: Record<InboundTopic, MatchedCitation[]> =
       section: 'General Support #1',
       title: 'How can I contact Rentmaikar administrative support?',
       excerpt:
-        'Our operations desk is active 24/7 across In-App messaging, email (support@notify.rentmaikar.com), and official WhatsApp business channels.',
+        'Our operations desk is active 24/7 across In-App messaging, email (support@rentmaikar.com), and official WhatsApp business channels.',
       url: '/faq',
     },
   ],

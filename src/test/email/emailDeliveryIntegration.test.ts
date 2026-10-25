@@ -1,29 +1,23 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  resolveBusinessEmailSender,
+  resolveBusinessReplyTo,
+  validateApprovedBusinessSender,
+} from "../../server/emailSenderPolicy";
 
-// Sender rewrite logic matching supabase/functions/_shared/resend-gateway.ts
-function parseAddress(value: string): { name?: string; local: string; domain: string } | null {
-  const angled = value.match(/^\s*(?:"?([^"<]*?)"?\s*)?<([^<>@\s]+)@([^<>@\s]+)>\s*$/);
-  if (angled) {
-    return { name: angled[1]?.trim() || undefined, local: angled[2], domain: angled[3] };
-  }
-  const bare = value.match(/^\s*([^<>@\s]+)@([^<>@\s]+)\s*$/);
-  if (!bare) return null;
-  return { local: bare[1], domain: bare[2] };
-}
+const senderEnvironment = {
+  DEFAULT_BUSINESS_FROM: "support@rentmaikar.com",
+  APPROVED_BUSINESS_SENDERS: "support@rentmaikar.com,notifications@rentmaikar.com,custom-replies@rentmaikar.com",
+};
 
-function resendSendingDomain(envDomain?: string): string {
-  return envDomain || "notify.rentmaikar.com";
-}
+beforeEach(() => {
+  vi.stubEnv("DEFAULT_BUSINESS_FROM", senderEnvironment.DEFAULT_BUSINESS_FROM);
+  vi.stubEnv("APPROVED_BUSINESS_SENDERS", senderEnvironment.APPROVED_BUSINESS_SENDERS);
+});
 
-function resendFrom(from: string, envDomain?: string, envFallback?: string): string {
-  const candidate = envFallback || from;
-  const parsed = parseAddress(candidate);
-  if (!parsed) return candidate;
-  const domain = resendSendingDomain(envDomain);
-  if (parsed.domain.toLowerCase() === domain.toLowerCase()) return candidate;
-  const address = `${parsed.local}@${domain}`;
-  return parsed.name ? `${parsed.name} <${address}>` : address;
-}
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function prepareResendPayload(body: {
   from?: string;
@@ -32,15 +26,10 @@ function prepareResendPayload(body: {
   html: string;
   reply_to?: string | string[];
 }) {
-  const originalFrom = body.from || "";
-  const rewrittenFrom = originalFrom ? resendFrom(originalFrom) : originalFrom;
-  const replyTo =
-    body.reply_to ?? (originalFrom && rewrittenFrom !== originalFrom ? originalFrom : undefined);
-
   return {
     ...body,
-    from: rewrittenFrom,
-    ...(replyTo ? { reply_to: replyTo } : {}),
+    from: resolveBusinessEmailSender(body.from, senderEnvironment),
+    reply_to: resolveBusinessReplyTo(body.reply_to, senderEnvironment),
   };
 }
 
@@ -72,26 +61,26 @@ describe("Direct Resend connector & transport", () => {
   });
 });
 
-describe("Email delivery & sender rewrite behavior", () => {
-  it("rewrites unverified apex domains onto notify.rentmaikar.com preserving display name", () => {
-    const input = "Rentmaikar <noreply@rentmaikar.com>";
-    const result = resendFrom(input);
-    expect(result).toBe("Rentmaikar <noreply@notify.rentmaikar.com>");
+describe("Email delivery & sender policy", () => {
+  it("uses the configured allowlisted sender rather than a caller-selected alias", () => {
+    const result = resolveBusinessEmailSender("Rentmaikar <noreply@notify.rentmaikar.com>", senderEnvironment);
+    expect(result).toBe("RentMaikar <support@rentmaikar.com>");
   });
 
-  it("rewrites bare email addresses onto verified domain", () => {
-    const input = "operations@rentmaikar.com";
-    const result = resendFrom(input);
-    expect(result).toBe("operations@notify.rentmaikar.com");
+  it("rejects subdomain, unrelated, lookalike, and unapproved sender addresses", () => {
+    for (const address of [
+      "support@notify.rentmaikar.com",
+      "support@backend.rentmaikar.com",
+      "support@staging.rentmaikar.com",
+      "support@rentmaikar.com.attacker.example",
+      "support@otherdomain.example",
+      "unknown@rentmaikar.com",
+    ]) {
+      expect(() => validateApprovedBusinessSender(address, ["support@rentmaikar.com"])).toThrow();
+    }
   });
 
-  it("leaves already-verified notify.rentmaikar.com addresses untouched", () => {
-    const input = "Rentmaikar Support <support@notify.rentmaikar.com>";
-    const result = resendFrom(input);
-    expect(result).toBe("Rentmaikar Support <support@notify.rentmaikar.com>");
-  });
-
-  it("preserves original sender as reply_to when rewriting", () => {
+  it("does not turn a sender override into an implicit reply_to address", () => {
     const originalPayload = {
       from: "Rentmaikar Accounts <billing@rentmaikar.com>",
       to: "driver@example.com",
@@ -100,8 +89,8 @@ describe("Email delivery & sender rewrite behavior", () => {
     };
 
     const prepared = prepareResendPayload(originalPayload);
-    expect(prepared.from).toBe("Rentmaikar Accounts <billing@notify.rentmaikar.com>");
-    expect(prepared.reply_to).toBe("Rentmaikar Accounts <billing@rentmaikar.com>");
+    expect(prepared.from).toBe("RentMaikar <support@rentmaikar.com>");
+    expect(prepared.reply_to).toBeUndefined();
   });
 
   it("does not override an explicitly provided reply_to", () => {
@@ -114,25 +103,32 @@ describe("Email delivery & sender rewrite behavior", () => {
     };
 
     const prepared = prepareResendPayload(originalPayload);
-    expect(prepared.from).toBe("Rentmaikar <noreply@notify.rentmaikar.com>");
+    expect(prepared.from).toBe("RentMaikar <support@rentmaikar.com>");
     expect(prepared.reply_to).toBe("custom-replies@rentmaikar.com");
+  });
+
+  it("constrains unapproved Reply-To addresses to the configured sender", () => {
+    expect(resolveBusinessReplyTo("driver@example.com", senderEnvironment))
+      .toBe("support@rentmaikar.com");
+    expect(resolveBusinessReplyTo("support@notify.rentmaikar.com", senderEnvironment))
+      .toBe("support@rentmaikar.com");
   });
 
   it("ensures all outbound platform email categories have valid unique Id or name attributes", () => {
     const platformEmails = [
-      { id: "platform-email-support", key: "support", email: "support@notify.rentmaikar.com", name: "Rentmaikar Support" },
-      { id: "platform-email-noreply", key: "noreply", email: "noreply@notify.rentmaikar.com", name: "Rentmaikar Notifications" },
-      { id: "platform-email-admin", key: "admin", email: "admin@notify.rentmaikar.com", name: "Rentmaikar Admin" },
-      { id: "platform-email-payments", key: "payments", email: "payments@notify.rentmaikar.com", name: "Rentmaikar Billing & Payments" },
-      { id: "platform-email-documents", key: "documents", email: "documents@notify.rentmaikar.com", name: "Rentmaikar Document Verification" },
-      { id: "platform-email-legal", key: "legal", email: "legal@notify.rentmaikar.com", name: "Rentmaikar Legal" },
-      { id: "platform-email-privacy", key: "privacy", email: "privacy@notify.rentmaikar.com", name: "Rentmaikar Privacy" },
-      { id: "platform-email-dpo", key: "dpo", email: "dpo@notify.rentmaikar.com", name: "Rentmaikar Data Protection" },
-      { id: "platform-email-verify", key: "verify", email: "verify@notify.rentmaikar.com", name: "Rentmaikar Verification" },
-      { id: "platform-email-notifications", key: "notifications", email: "notifications@notify.rentmaikar.com", name: "Rentmaikar Notifications" },
-      { id: "platform-email-negotiations", key: "negotiations", email: "negotiations@notify.rentmaikar.com", name: "Rentmaikar Pricing" },
-      { id: "platform-email-nigeria", key: "nigeria", email: "nigeria@notify.rentmaikar.com", name: "Rentmaikar Nigeria Operations" },
-      { id: "platform-email-usa", key: "usa", email: "usa@notify.rentmaikar.com", name: "Rentmaikar USA Operations" },
+      { id: "platform-email-support", key: "support", name: "Rentmaikar Support" },
+      { id: "platform-email-noreply", key: "noreply", name: "Rentmaikar Notifications" },
+      { id: "platform-email-admin", key: "admin", name: "Rentmaikar Admin" },
+      { id: "platform-email-payments", key: "payments", name: "Rentmaikar Billing & Payments" },
+      { id: "platform-email-documents", key: "documents", name: "Rentmaikar Document Verification" },
+      { id: "platform-email-legal", key: "legal", name: "Rentmaikar Legal" },
+      { id: "platform-email-privacy", key: "privacy", name: "Rentmaikar Privacy" },
+      { id: "platform-email-dpo", key: "dpo", name: "Rentmaikar Data Protection" },
+      { id: "platform-email-verify", key: "verify", name: "Rentmaikar Verification" },
+      { id: "platform-email-notifications", key: "notifications", name: "Rentmaikar Notifications" },
+      { id: "platform-email-negotiations", key: "negotiations", name: "Rentmaikar Pricing" },
+      { id: "platform-email-nigeria", key: "nigeria", name: "Rentmaikar Nigeria Operations" },
+      { id: "platform-email-usa", key: "usa", name: "Rentmaikar USA Operations" },
     ];
 
     const seenIds = new Set<string>();
@@ -195,7 +191,7 @@ describe("Queue worker delivery end-to-end simulation", () => {
 
       // Success path
       const prepared = prepareResendPayload(payload);
-      expect(prepared.from).toContain("notify.rentmaikar.com");
+      expect(prepared.from).toBe("RentMaikar <support@rentmaikar.com>");
 
       sendLog.push({
         message_id: payload.message_id,
@@ -305,7 +301,7 @@ describe("Production Email Checkpoints & Webhook Delivery Evidence", () => {
       data: {
         id: testEmailId,
         email_id: testEmailId,
-        from: "support@notify.rentmaikar.com",
+        from: "support@rentmaikar.com",
         to: ["customer@rentmaikar.com"],
         subject: "Your Rental Agreement Confirmation",
       },
@@ -446,7 +442,7 @@ describe("Production Email Checkpoints & Webhook Delivery Evidence", () => {
       data: {
         id: bounceEmailId,
         email_id: bounceEmailId,
-        from: "support@notify.rentmaikar.com",
+        from: "support@rentmaikar.com",
         to: ["invalid-mailbox-999@rentmaikar.com"],
         subject: "Contract Agreement",
         bounce: {
@@ -471,7 +467,7 @@ describe("Production Email Checkpoints & Webhook Delivery Evidence", () => {
       data: {
         id: failEmailId,
         email_id: failEmailId,
-        from: "support@notify.rentmaikar.com",
+        from: "support@rentmaikar.com",
         to: ["unreachable@external-domain.net"],
         error: "Remote MTA rejected TLS handshake",
       },
@@ -568,5 +564,3 @@ describe("Production Email Checkpoints & Webhook Delivery Evidence", () => {
     expect(cp6?.details.honestObservationNote).toContain("Awaiting asynchronous webhook callback from Resend");
   });
 });
-
-
