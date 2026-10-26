@@ -310,6 +310,17 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
   const functionName = String(req.params.functionName || "");
   const body = req.body || {};
 
+  if (
+    !AUTHORITATIVE_BACKEND_FUNCTIONS.has(functionName) &&
+    !EDGE_FUNCTIONS_SET.has(functionName)
+  ) {
+    return res.status(404).json({
+      ok: false,
+      success: false,
+      error: `Unknown function '${functionName}'`,
+    });
+  }
+
   // Extract authorization header from request if provided
   const rawAuth = req.headers["authorization"];
   const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";

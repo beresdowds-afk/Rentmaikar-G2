@@ -65,6 +65,7 @@ export const ALL_EDGE_FUNCTIONS = [
   "emqx-monitoring",
   "emqx-secret-rotation",
   "end-voip-call",
+  "emergency-sos",
   "enforce-call-in-geofence",
   "expire-call-ins",
   "expiry-notification-ivr",
