@@ -7,6 +7,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 
 export interface SynthesisOptions {
   voiceId: string;
@@ -16,8 +17,6 @@ export interface SynthesisOptions {
   /** Optional output device (speaker/headset) selected by the admin. */
   sinkId?: string | null;
 }
-
-const TTS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-tts`;
 
 type AudioElementWithSink = HTMLAudioElement & {
   setSinkId?: (id: string) => Promise<void>;
@@ -44,7 +43,7 @@ export class AccentAudioEngine {
     const token = sess.session?.access_token;
     if (!token) throw new Error('Not signed in');
 
-    const res = await fetch(TTS_URL, {
+    const res = await backendBridge.invokeRawEdgeFunction('elevenlabs-tts', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,

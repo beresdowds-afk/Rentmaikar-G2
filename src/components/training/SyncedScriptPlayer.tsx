@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Play, Pause, StopCircle, Volume2, Mic } from "lucide-react";
 import { toast } from "sonner";
 import { useRegion } from "@/contexts/RegionContext";
+import { backendBridge } from "@/lib/backend-bridge";
 
 interface SyncedScriptPlayerProps {
   script: string;
@@ -13,9 +14,6 @@ interface WordSpan {
   charStart: number;
   charEnd: number;
 }
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const SyncedScriptPlayer = ({ script }: SyncedScriptPlayerProps) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -92,12 +90,10 @@ const SyncedScriptPlayer = ({ script }: SyncedScriptPlayerProps) => {
   const playWithElevenLabs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/elevenlabs-tts`, {
+      const response = await backendBridge.invokeRawEdgeFunction("elevenlabs-tts", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
         },
         body: JSON.stringify({ text: script, region: elevenRegion }),
       });

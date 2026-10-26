@@ -191,20 +191,7 @@ export const personaWebhookService = {
           [mappedStatus, inquiryId, targetUserId]
         );
 
-        // 4. Update driver/owner application status if pending
-        if (mappedStatus === "approved") {
-          await pool.query(
-            `UPDATE public.applications
-             SET status = 'approved',
-                 reviewed_at = now(),
-                 review_notes = COALESCE(review_notes, '') || ' [Automated Persona KYC Approval]',
-                 updated_at = now()
-             WHERE user_id = $1 AND status = 'pending'`,
-            [targetUserId]
-          );
-        }
-
-        // 5. Record admin audit log
+        // 4. Record admin audit log
         await pool.query(
           `INSERT INTO public.admin_audit_log (admin_id, action, target_table, target_id, details)
            VALUES ('00000000-0000-0000-0000-000000000000', 'persona_kyc_processed', 'profiles', $1, $2)`,

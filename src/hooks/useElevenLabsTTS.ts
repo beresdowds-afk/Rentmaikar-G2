@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { backendBridge } from "@/lib/backend-bridge";
 
 interface SpeakOptions {
   region?: "US" | "NG";
@@ -42,9 +43,7 @@ export function useElevenLabsTTS() {
       if (!token) throw new Error("Not signed in");
 
       const fnName = opts.stream ? "elevenlabs-tts-stream" : "elevenlabs-tts";
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${fnName}`;
-
-      const res = await fetch(url, {
+      const res = await backendBridge.invokeRawEdgeFunction(fnName, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,

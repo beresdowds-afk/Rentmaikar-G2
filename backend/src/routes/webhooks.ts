@@ -1,5 +1,7 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
+import { personaWebhookService } from "../services/personaWebhookService";
+import { handleOpayWebhook } from "../services/opayService";
 
 export const webhooksRouter = Router();
 
@@ -69,6 +71,49 @@ function verifySentSignature(req: Request): { ok: boolean; reason?: string } {
 }
 
 /** Relay a verified Sent.dm payload to the given edge function (non-blocking). */
+export function verifyTwilioWebhookSignature(req: Request): boolean {
+  const token = process.env.TWILIO_AUTH_TOKEN || "";
+  const signature = String(req.headers["x-twilio-signature"] || "");
+  if (!token || !signature) return false;
+
+  const requestUrl = new URL(req.originalUrl || req.url, PUBLIC_BACKEND_URL);
+  const candidates = new Set([requestUrl.toString()]);
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  if (host) {
+    const forwardedUrl = new URL(requestUrl.toString());
+    forwardedUrl.host = String(host).split(",")[0].trim();
+    forwardedUrl.protocol = `${String(proto).split(",")[0].trim()}:`;
+    candidates.add(forwardedUrl.toString());
+  }
+
+  const params = req.body && typeof req.body === "object" ? req.body : {};
+  const suffix = Object.keys(params).sort().map((key) => {
+    const values = Array.isArray(params[key]) ? [...params[key]].sort() : [params[key]];
+    return values.map((value) => `${key}${String(value ?? "")}`).join("");
+  }).join("");
+
+  return [...candidates].some((url) => {
+    const expected = Buffer.from(
+      crypto.createHmac("sha1", token).update(url + suffix).digest("base64"),
+    );
+    const provided = Buffer.from(signature);
+    return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  });
+}
+
+export function verifyTermiiWebhookSecret(req: Request): boolean {
+  const expected = process.env.TERMII_WEBHOOK_SECRET || "";
+  const provided = String(req.headers["x-termii-secret"] || "");
+  if (!expected || !provided) return false;
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  return (
+    expectedBuffer.length === providedBuffer.length &&
+    crypto.timingSafeEqual(expectedBuffer, providedBuffer)
+  );
+}
+
 function relayToEdgeFunction(fn: string, rawBody: string, req: Request) {
   const url = process.env.SUPABASE_URL
     ? `${process.env.SUPABASE_URL}/functions/v1/${fn}`
@@ -90,10 +135,10 @@ function relayToEdgeFunction(fn: string, rawBody: string, req: Request) {
   })
     .then(async (r) => {
       if (!r.ok) {
-        console.error(`[Webhook][Sent.dm] Relay to ${fn} failed [${r.status}]:`, await r.text());
+        console.error(`[Webhook][Sent.dm] Relay to ${fn} failed [${r.status}]`);
       }
     })
-    .catch((e) => console.error(`[Webhook][Sent.dm] Relay to ${fn} error:`, e));
+    .catch(() => console.error(`[Webhook][Sent.dm] Relay to ${fn} failed`));
 }
 
 /** True when the payload is a delivery receipt rather than a customer message. */
@@ -131,7 +176,7 @@ function handleSentWebhook(req: Request, res: Response, force?: "status" | "inbo
   }
 
   const kind = force ?? (isStatusEvent(event) ? "status" : "inbound");
-  console.log(`[Webhook][Sent.dm] ${kind} event received:`, event);
+  console.log(`[Webhook][Sent.dm] ${kind} event received`);
 
   relayToEdgeFunction(kind === "status" ? "sent-status" : "sent-inbound", rawBody, req);
 
@@ -166,8 +211,11 @@ webhooksRouter.post("/sent/status", (req: Request, res: Response) =>
  * Twilio status callback webhook
  */
 webhooksRouter.post("/twilio", (req: Request, res: Response) => {
-  console.log("[Webhook][Twilio] Callback:", req.body);
-  return res.status(200).send("<Response></Response>");
+  if (!verifyTwilioWebhookSignature(req)) {
+    return res.status(401).json({ received: false, error: "Invalid signature" });
+  }
+  console.log("[Webhook][Twilio] Callback received");
+  return res.status(503).json({ received: false, error: "Callback processing unavailable" });
 });
 
 /**
@@ -206,10 +254,25 @@ webhooksRouter.post("/paystack", async (req: Request, res: Response) => {
  */
 webhooksRouter.post("/opay", async (req: Request, res: Response) => {
   try {
-    console.log("[Webhook][OPay] Event received:", req.body);
-    return res.status(200).json({ code: "00000", message: "SUCCESS" });
+    const rawBody = Buffer.isBuffer((req as any).rawBody)
+      ? (req as any).rawBody.toString("utf8")
+      : Buffer.isBuffer(req.body)
+        ? req.body.toString("utf8")
+        : JSON.stringify(req.body ?? {});
+    const result = await handleOpayWebhook(
+      req.headers as Record<string, any>,
+      rawBody,
+    );
+    return res.status(200).json({ code: "00000", message: "SUCCESS", ...result });
   } catch (err: any) {
-    return res.status(200).json({ code: "99999", message: err.message });
+    if (err?.message === "Invalid OPay webhook signature") {
+      return res.status(401).json({ code: "401", message: "Invalid signature" });
+    }
+    if (err instanceof SyntaxError) {
+      return res.status(400).json({ code: "400", message: "Malformed event" });
+    }
+    console.error("[Webhook][OPay] Event processing failed");
+    return res.status(500).json({ code: "500", message: "Event processing failed" });
   }
 });
 
@@ -219,10 +282,15 @@ webhooksRouter.post("/opay", async (req: Request, res: Response) => {
  */
 webhooksRouter.post("/persona", async (req: Request, res: Response) => {
   try {
-    console.log("[Webhook][Persona] Identity verification callback:", req.body?.data?.type);
-    return res.status(200).json({ received: true });
+    const result = await personaWebhookService.handle({
+      headers: req.headers as Record<string, any>,
+      body: req.body,
+      rawBody: (req as any).rawBody,
+    });
+    return res.status(result.status).json(result.body);
   } catch (err: any) {
-    return res.status(200).json({ received: false, error: err.message });
+    console.error("[Webhook][Persona] Event processing failed");
+    return res.status(500).json({ received: false, error: "Event processing failed" });
   }
 });
 
@@ -231,7 +299,9 @@ webhooksRouter.post("/persona", async (req: Request, res: Response) => {
  * Termii delivery callback webhook
  */
 webhooksRouter.post("/termii", (req: Request, res: Response) => {
-  console.log("[Webhook][Termii] Callback:", req.body);
-  return res.status(200).json({ status: "success" });
+  if (!verifyTermiiWebhookSecret(req)) {
+    return res.status(401).json({ received: false, error: "Unauthorized" });
+  }
+  console.log("[Webhook][Termii] Callback received");
+  return res.status(503).json({ received: false, error: "Callback processing unavailable" });
 });
-
