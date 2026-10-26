@@ -31,4 +31,3 @@ This is a proposed, evidence-based follow-up phase only. No production deploymen
 ## No-live-infrastructure assertion
 
 The repository's `.github/workflows/deploy.yml` describes a deployment workflow, but this task did not invoke it. No production resources or secrets were queried or changed. The deploy workflow lists only a subset of backend secrets; runtime configuration and current Cloud Run/Edge deployment state must be verified by an authorized operator in the approved deployment phase.
-
