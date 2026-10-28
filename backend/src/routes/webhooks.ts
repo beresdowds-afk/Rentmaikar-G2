@@ -162,10 +162,10 @@ webhooksRouter.post("/sent/status", (req: Request, res: Response) =>
 
 
 /**
- * POST /api/webhooks/twilio
+ * POST /api/webhooks/twilio-webhook 
  * Twilio status callback webhook
  */
-webhooksRouter.post("/twilio", (req: Request, res: Response) => {
+webhooksRouter.post("/twilio-webhook", (req: Request, res: Response) => {
   console.log("[Webhook][Twilio] Callback:", req.body);
   return res.status(200).send("<Response></Response>");
 });
