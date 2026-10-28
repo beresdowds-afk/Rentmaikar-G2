@@ -18,8 +18,8 @@
  * - Never claims "delivered" at dispatch time (delivery is confirmed only via webhooks).
  */
 
-import { sentBackendClient } from "./sentClient";
 import { getDbPool } from "./dbPool";
+import { sendApplicationMessage } from "./smsService";
 
 export interface OutboundMessagePayload {
   to: string;
@@ -38,7 +38,7 @@ export interface OutboundMessageResult {
   success: boolean;
   messageId?: string;
   channel: "sms" | "whatsapp";
-  provider: "sent";
+  provider: "sent" | "twilio" | "termii" | "none";
   deliveryStatus: "queued" | "submitted" | "simulation" | "failed";
   region: "USA" | "Nigeria";
   error?: string;
@@ -66,51 +66,8 @@ export class MessagingBridge {
   }
 
   /**
-   * Logs dispatch to public.unified_message_log
-   */
-  private async logDispatch(params: {
-    phone: string;
-    region: "USA" | "Nigeria";
-    channel: "sms" | "whatsapp";
-    message: string;
-    deliveryStatus: string;
-    messageId?: string;
-    source?: string;
-    correlationId?: string;
-    metadata?: Record<string, any>;
-    error?: string;
-  }): Promise<void> {
-    try {
-      const pool = getDbPool();
-      if (!pool) return;
-
-      await pool.query(
-        `INSERT INTO public.unified_message_log (
-          id, channel, provider, provider_message_id, recipient, message_body,
-          delivery_status, error_message, metadata, created_at, updated_at
-        ) VALUES (gen_random_uuid(), $1, 'sent', $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
-        [
-          params.channel,
-          params.messageId || null,
-          params.phone,
-          params.message,
-          params.deliveryStatus,
-          params.error || null,
-          JSON.stringify({
-            region: params.region,
-            source: params.source || "messaging_bridge",
-            correlationId: params.correlationId,
-            ...params.metadata,
-          }),
-        ]
-      ).catch(() => {});
-    } catch (err: any) {
-      console.warn("[MessagingBridge] Log error (non-fatal):", err.message);
-    }
-  }
-
-  /**
-   * Dispatches an outbound SMS or WhatsApp message via SENT.dm
+   * Dispatches an outbound SMS or WhatsApp message via canonical business dispatcher
+   * enforcing the verified hierarchy: SENT.dm -> Twilio -> Termii.
    */
   public async sendMessage(
     payload: OutboundMessagePayload
@@ -125,7 +82,7 @@ export class MessagingBridge {
       return {
         success: false,
         channel,
-        provider: "sent",
+        provider: "none",
         deliveryStatus: "failed",
         region,
         error: "Valid E.164 phone number required",
@@ -134,90 +91,34 @@ export class MessagingBridge {
 
     const messageText = payload.message || "You have an update from RentMaikar.";
 
-    try {
-      const sentRes = await sentBackendClient.sendMessage({
-        to: [to],
-        channel,
-        text: payload.templateId ? undefined : messageText,
-        sandbox: isSandbox,
-        template: payload.templateId
-          ? {
-              id: payload.templateId,
-              parameters: payload.templateParams,
-            }
-          : undefined,
-        metadata: {
-          source: payload.source || "messaging_bridge",
-          region,
-          notificationType: payload.notificationType || "general",
-          correlationId: payload.correlationId,
-          ...payload.metadata,
-        },
-      });
-
-      // SENT.dm returns the provider message ID inside the recipient record.
-// Preserve the real provider ID because delivery webhooks use it to
-// reconcile subsequent queued/sent/delivered/failed events.
-const messageId =
-  sentRes?.data?.recipients?.[0]?.message_id ||
-  sentRes?.recipients?.[0]?.message_id ||
-  sentRes?.data?.message_id ||
-  sentRes?.data?.id ||
-  sentRes?.message_id ||
-  sentRes?.id ||
-  undefined;
-
-const deliveryStatus = isSandbox ? "simulation" : "queued";
-      await this.logDispatch({
-        phone: to,
-        region,
-        channel,
-        message: messageText,
-        deliveryStatus,
-        messageId,
-        source: payload.source,
+    const res = await sendApplicationMessage({
+      to,
+      message: messageText,
+      channel,
+      whatsappTemplateId: payload.templateId,
+      whatsappTemplateParams: payload.templateParams,
+      notificationType: payload.notificationType || payload.source || "general",
+      sandbox: isSandbox,
+      idempotencyKey: payload.correlationId,
+      metadata: {
+        source: payload.source || "messaging_bridge",
         correlationId: payload.correlationId,
-        metadata: {
-          notificationType: payload.notificationType,
-          sandbox: isSandbox,
-        },
-      });
+        ...payload.metadata,
+      },
+    });
 
-      return {
-        success: !isSandbox,
-        messageId,
-        channel,
-        provider: "sent",
-        deliveryStatus,
-        region,
-        simulation: isSandbox,
-      };
-    } catch (sentErr: any) {
-      const failureError = sentErr?.message || "SENT.dm delivery failed";
-      console.error("[MessagingBridge] Dispatch failed:", failureError);
-
-      await this.logDispatch({
-        phone: to,
-        region,
-        channel,
-        message: messageText,
-        deliveryStatus: "failed",
-        source: payload.source,
-        correlationId: payload.correlationId,
-        error: failureError,
-        metadata: { notificationType: payload.notificationType },
-      });
-
-      return {
-        success: false,
-        channel,
-        provider: "sent",
-        deliveryStatus: "failed",
-        region,
-        error: failureError,
-      };
-    }
+    return {
+      success: res.success,
+      messageId: res.messageId,
+      channel: res.channel,
+      provider: res.provider,
+      deliveryStatus: res.deliveryStatus === "sent" ? "submitted" : res.deliveryStatus,
+      region,
+      error: res.error,
+      simulation: res.simulation,
+    };
   }
 }
 
 export const messagingBridge = MessagingBridge.getInstance();
+

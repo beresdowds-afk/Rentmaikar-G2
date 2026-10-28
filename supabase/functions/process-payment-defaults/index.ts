@@ -189,9 +189,9 @@ const initiateDefaultCall = async (
   // For USA, use Twilio
   const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
   const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
-  const twilioPhone = Deno.env.get('TWILIO_PHONE_NUMBER') ?? '';
+  const twilioPhone = Deno.env.get('TWILIO_PHONE_NUMBER') || '+16083843932';
 
-  if (!twilioAccountSid || !twilioAuthToken || !twilioPhone) {
+  if (!twilioAccountSid || !twilioAuthToken) {
     console.log('[PaymentDefaults] Twilio credentials not configured, skipping VoIP');
     return { success: false };
   }

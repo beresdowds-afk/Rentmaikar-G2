@@ -1,9 +1,11 @@
 /**
  * Alerting for Resend authorization failures (401 / 403).
  *
- * A 401 means the configured key is wrong for the endpoint; a 403 means the
- * workspace/domain is not allowed to send. Alerts intentionally omit recipient,
- * subject, message content, and provider response details.
+ * A 401 means the configured key is wrong for the endpoint we called; a 403
+ * means the workspace/domain is not allowed to send. Both are terminal: every
+ * subsequent email from that function fails the same way, so the team has to
+ * be told immediately — with the failing recipient and the payload that was
+ * rejected.
  *
  * Every alert is recorded in `public.email_provider_alerts` and fanned out to
  * admins (in-app) plus the Slack/webhook targets configured in

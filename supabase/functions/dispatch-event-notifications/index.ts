@@ -186,6 +186,12 @@ serve(async (req) => {
                       templateName: mapping.whatsappTemplateName,
                       name: vars.first_name,
                       customMessage: copy,
+                      idempotencyKey: `notif_${row.id}_${channel}`,
+                      metadata: {
+                        outboxRowId: row.id,
+                        eventKind: row.kind,
+                        source: "event_outbox_companion",
+                      },
                     }),
                   },
                 );
@@ -275,6 +281,12 @@ serve(async (req) => {
                 notificationType: mapping?.smsNotificationType ?? "general",
                 name: vars.first_name,
                 customMessage: copy,
+                idempotencyKey: `notif_${row.id}_${row.channel}`,
+                metadata: {
+                  outboxRowId: row.id,
+                  eventKind: row.kind,
+                  source: "event_outbox_direct",
+                },
               }),
             });
 

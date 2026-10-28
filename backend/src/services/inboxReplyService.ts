@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { manychat } from "../marketing/manychatAdapter";
 import { sentBackendClient } from "./sentClient";
+import { sendApplicationMessage } from "./smsService";
 import { supabaseBackendService } from "./supabaseService";
 
 export type InboxSocialChannel =
@@ -139,7 +140,7 @@ export async function sendInboxReply(
     const { data: conversation, error: conversationError } =
       await supabase
         .from("inbox_conversations")
-        .select("id, region, metadata, channel")
+        .select("id, region, metadata, channel, user_id, user_phone")
         .eq("id", input.conversationId)
         .single();
 
@@ -169,16 +170,79 @@ export async function sendInboxReply(
     // ============================================================
     // SMS / WHATSAPP
     //
-    // Keep these on the established CPaaS service rather than
-    // sending them through the Marketing Engine.
+    // Dispatched via the canonical business messaging service
+    // (SENT.dm primary -> Twilio -> Termii fallback)
     // ============================================================
 
     if (channel === "sms" || channel === "whatsapp") {
+      let recipientPhone = (input.recipientPhone || "").trim();
+      if (!recipientPhone) {
+        recipientPhone = String((conversation as any)?.user_phone || metadata?.phone || metadata?.recipient_phone || "").trim();
+      }
+      if (!recipientPhone && (conversation as any)?.user_id) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("phone")
+          .eq("user_id", (conversation as any).user_id)
+          .maybeSingle();
+        if (profile?.phone) {
+          recipientPhone = profile.phone;
+        }
+      }
+
+      if (!recipientPhone) {
+        return {
+          success: false,
+          channel,
+          error: "Recipient phone number could not be resolved from conversation",
+        };
+      }
+
+      const dispatchRes = await sendApplicationMessage({
+        to: recipientPhone,
+        message: input.messageContent,
+        channel: channel as "sms" | "whatsapp",
+        whatsappTemplateId: input.whatsappTemplateId,
+        whatsappTemplateParams: input.whatsappTemplateParams as any,
+        notificationType: "inbox_reply",
+        metadata: {
+          conversationId: input.conversationId,
+          source: "inbox_reply_service",
+          recipientId: input.recipientId,
+          ...input.metadata,
+        },
+      });
+
+      if (!dispatchRes.success && !dispatchRes.simulation) {
+        return {
+          success: false,
+          channel,
+          provider: dispatchRes.provider,
+          error: dispatchRes.error || `${channel.toUpperCase()} dispatch failed`,
+        };
+      }
+
+      const messageId = dispatchRes.messageId || `inbox_${Date.now()}`;
+      await updateInboxMessageDelivery(
+        supabase,
+        input.conversationId,
+        input.messageContent,
+        dispatchRes.provider,
+        messageId,
+        dispatchRes.deliveryStatus,
+        {
+          channel,
+          recipientPhone,
+          simulation: dispatchRes.simulation,
+        }
+      );
+
       return {
-        success: false,
+        success: true,
         channel,
-        error:
-          "SMS/WhatsApp dispatch must use the established CPaaS messaging service; it is not part of the social Inbox dispatcher.",
+        provider: dispatchRes.provider,
+        messageId,
+        status: dispatchRes.deliveryStatus,
       };
     }
 

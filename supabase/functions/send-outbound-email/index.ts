@@ -598,9 +598,9 @@ serve(async (req) => {
       });
 
       if (!result.success) {
-        console.error("Outbound email delivery failed", { template: resolvedTemplate });
+        console.error(`Email to ${to} failed:`, result.error);
       } else {
-        console.log("Outbound email accepted by provider", { template: resolvedTemplate });
+        console.log(`Email sent to ${to} via template ${resolvedTemplate}`);
       }
 
       return new Response(

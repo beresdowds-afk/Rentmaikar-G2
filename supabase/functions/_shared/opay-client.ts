@@ -181,7 +181,9 @@ export async function opayRequest<T = Record<string, unknown>>(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${cfg.publicKey}`,
+          Authorization: `Bearer ${
+            path.includes("/cashier/create") ? cfg.publicKey : signature
+          }`,
           MerchantId: cfg.merchantId,
           Signature: signature,
           Timestamp: String(Date.now()),

@@ -46,7 +46,7 @@ const handler = async (req: Request): Promise<Response> => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
     const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN");
-    const twilioPhoneNumber = Deno.env.get("TWILIO_PHONE_NUMBER") ?? "";
+    const twilioPhoneNumber = Deno.env.get("TWILIO_PHONE_NUMBER") || SUPPORT_NUMBER;
     const termiiApiKey = Deno.env.get("TERMII_API_KEY");
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -200,7 +200,7 @@ const handler = async (req: Request): Promise<Response> => {
         callSuccess = true;
         callSidValue = termiiData.pinId;
       }
-    } else if (twilioAccountSid && twilioAuthToken && twilioPhoneNumber) {
+    } else if (twilioAccountSid && twilioAuthToken) {
       // ─── TWILIO (USA) — CRITICAL priority, no machine detection delay ───
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Calls.json`;
       const callResponse = await fetch(twilioUrl, {

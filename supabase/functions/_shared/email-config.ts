@@ -79,8 +79,7 @@ export const INCOMING_EMAIL_CONFIG = {
 } as const;
 
 /**
- * Legacy sender aliases used to build request templates. The Resend gateway
- * enforces the recipient-visible From identity from server configuration.
+ * Default EMAIL_CONFIG for senders (uses notify.rentmaikar.com for outbound emails)
  */
 export const EMAIL_CONFIG = OUTGOING_EMAIL_CONFIG;
 

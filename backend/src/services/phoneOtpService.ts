@@ -424,15 +424,15 @@ export class OtpService {
     if (pool) {
       await pool.query(
         `UPDATE public.phone_otp_codes
-         SET status = 'delivered', provider = 'sent', provider_message_id = $2
+         SET status = 'delivered', provider = $2, provider_message_id = $3
          WHERE id = $1`,
-        [challenge.id, dispatchRes.messageId || null]
+        [challenge.id, dispatchRes.provider || 'sent', dispatchRes.messageId || null]
       ).catch(() => {});
     }
 
     return {
       success: true,
-      provider: "sent",
+      provider: dispatchRes.provider || "sent",
       channel: challenge.channel,
     };
   }

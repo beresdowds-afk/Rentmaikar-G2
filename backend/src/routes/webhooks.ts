@@ -206,9 +206,18 @@ webhooksRouter.post("/paystack", async (req: Request, res: Response) => {
  */
 webhooksRouter.post("/opay", async (req: Request, res: Response) => {
   try {
-    console.log("[Webhook][OPay] Event received:", req.body);
-    return res.status(200).json({ code: "00000", message: "SUCCESS" });
+    const { handleOpayWebhook } = await import("../services/opayService");
+    const rawBody = Buffer.isBuffer((req as any).rawBody)
+      ? (req as any).rawBody.toString("utf8")
+      : Buffer.isBuffer(req.body)
+      ? req.body.toString("utf8")
+      : typeof req.body === "string"
+      ? req.body
+      : JSON.stringify(req.body);
+    const result = await handleOpayWebhook(req.headers as Record<string, any>, rawBody);
+    return res.status(200).json(result);
   } catch (err: any) {
+    console.error("[Webhook][OPay] Error:", err.message);
     return res.status(200).json({ code: "99999", message: err.message });
   }
 });

@@ -12,6 +12,7 @@ import { SentDmAdapter } from './sentDmAdapter';
 import { TwilioAdapter } from './twilioAdapter';
 import { ResendAdapter } from './resendAdapter';
 import { leadService, LeadService } from './leadService';
+import { sendApplicationMessage } from '../services/smsService';
 import { 
   AdPlatform, 
   CommunicationProvider,
@@ -294,8 +295,23 @@ export class MarketingEngineServer {
     templateId?: string;
   }): Promise<{ ok: boolean; externalId?: string; error?: string }> {
     let result: { ok: boolean; externalId?: string; error?: string } = { ok: false };
+    let effectiveProvider: string = params.provider;
 
-    if (params.provider === 'sentdm') {
+    if (params.channel === 'sms' || params.channel === 'whatsapp') {
+      const res = await sendApplicationMessage({
+        to: params.to,
+        channel: params.channel,
+        message: params.text || '',
+        whatsappTemplateId: params.templateId,
+        notificationType: 'marketing',
+        metadata: {
+          leadId: params.leadId,
+          source: 'marketing_engine',
+        },
+      });
+      result = { ok: res.success, externalId: res.messageId, error: res.error };
+      effectiveProvider = res.provider;
+    } else if (params.provider === 'sentdm') {
       const res = await this.sentdm.sendMessage({
         to: params.to,
         channel: params.channel === 'whatsapp' ? 'whatsapp' : 'sms',
@@ -331,9 +347,9 @@ export class MarketingEngineServer {
         lead_id: params.leadId,
         activity_type: params.channel as any,
         channel: params.channel.toUpperCase(),
-        provider: params.provider,
+        provider: effectiveProvider as any,
         direction: 'outbound',
-        summary: `Outbound ${params.channel} dispatched via ${params.provider}`,
+        summary: `Outbound ${params.channel} dispatched via ${effectiveProvider}`,
         content: params.text || params.subject,
         external_id: result.externalId,
         created_at: new Date().toISOString(),

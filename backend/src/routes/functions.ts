@@ -467,6 +467,12 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         const messageText = body.customMessage || body.message || "You have an update from RentMaikar.";
         const isSandbox = Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true");
 
+        const idempotencyKey =
+          body.idempotencyKey ||
+          body.idempotency_key ||
+          (req.headers["idempotency-key"] as string) ||
+          (req.headers["x-idempotency-key"] as string);
+
         const result = await sendApplicationMessage({
           to,
           message: messageText,
@@ -474,8 +480,13 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           sandbox: isSandbox,
           whatsappTemplateId: body.whatsappTemplateId,
           whatsappTemplateParams: body.whatsappTemplateParams,
-          notificationType: functionName,
-          metadata: { source: "backend_functions_gateway", function: functionName },
+          notificationType: body.notificationType || functionName,
+          idempotencyKey: idempotencyKey ? String(idempotencyKey).trim() : undefined,
+          metadata: {
+            source: "backend_functions_gateway",
+            function: functionName,
+            ...body.metadata,
+          },
         });
 
         if (result.success) {
