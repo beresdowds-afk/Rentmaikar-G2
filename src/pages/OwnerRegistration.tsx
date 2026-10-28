@@ -97,8 +97,7 @@ const createOwnerSchema = (country: "usa" | "nigeria") => z.object({
 
 const ownerSchema = createOwnerSchema("usa");
 
-type OwnerFormInput = z.input<typeof ownerSchema>;
-type OwnerFormData = z.output<typeof ownerSchema>;
+type OwnerFormData = z.infer<typeof ownerSchema>;
 
 const usaCities = ["Washington DC", "Maryland", "Virginia"];
 const nigeriaCities = ["Lagos", "Abuja", "Port Harcourt"];
@@ -129,7 +128,7 @@ const OwnerRegistration = () => {
     watch,
     control,
     formState: { errors, isSubmitting, touchedFields },
-  } = useForm<OwnerFormInput, any, OwnerFormData>({
+  } = useForm<OwnerFormData>({
     resolver: zodResolver(createOwnerSchema(currentCountry)),
     defaultValues: {
       country: "usa",

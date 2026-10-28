@@ -59,7 +59,6 @@ import {
   getWhatsAppSenderForRecipient,
   type WhatsAppTemplateDefinition,
 } from '@/lib/whatsapp-templates-registry';
-import { sent } from '@/integrations/sent/client';
 import {
   MAX_ATTACHMENTS,
   uploadInboxAttachments,
@@ -866,24 +865,19 @@ if (
               }),
             });
             const fallbackJson = await fallbackRes.json().catch(() => null);
-            if (fallbackRes.ok && (fallbackJson?.success || fallbackJson?.ok)) {
+            if (fallbackRes.ok && (fallbackJson?.success !== false && fallbackJson?.ok !== false)) {
               msgSent = true;
             } else {
-              // Third tier: Backup bridge via Sent.dm client
-              await sent.sendMessage({
-                to: contact.phone,
-                channel: channel === 'whatsapp' ? 'whatsapp' : 'sms',
-                text: body,
-                template:
-                  channel === 'whatsapp' && selectedWhatsAppTemplate !== 'custom'
-                    ? { id: selectedWhatsAppTemplate }
-                    : undefined,
-              });
-              msgSent = true;
+              msgErr = fallbackJson?.error || msgErr || `HTTP ${fallbackRes.status}`;
             }
-          } catch (e) {
+          } catch (e: any) {
+            msgErr = e.message || msgErr || 'Local gateway request failed';
             console.warn('SMS/WhatsApp delivery warning for contact:', contact.phone, e);
           }
+        }
+
+        if (!msgSent) {
+          return { success: false, error: msgErr || 'SMS/WhatsApp dispatch failed across all providers' };
         }
       }
 

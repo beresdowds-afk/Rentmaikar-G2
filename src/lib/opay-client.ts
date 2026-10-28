@@ -71,22 +71,15 @@ export async function createOPayOrder(input: CreateOPayOrderInput): Promise<Crea
     }),
   });
 
-  if (error || !data) {
-    // If edge function is unavailable in preview, return formatted OPay cashier payload
-    const mockCashierToken = `opay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    return {
-      reference,
-      orderNo: `OPAY${Date.now()}`,
-      cashierUrl: `https://cashier.opaycheckout.com/pay/index.html?token=${mockCashierToken}`,
-      status: "INITIAL",
-      paymentId: reference,
-    };
+  const cashierUrl = data?.cashierUrl ?? data?.cashier_url;
+  if (error || !data || !cashierUrl) {
+    throw new Error(error?.message ?? data?.error ?? "Failed to initialize OPay cashier checkout session");
   }
 
   return {
     reference: data.reference ?? reference,
     orderNo: data.orderNo ?? data.order_no,
-    cashierUrl: data.cashierUrl ?? data.cashier_url,
+    cashierUrl,
     status: data.status ?? "INITIAL",
     paymentId: data.payment_id,
   };

@@ -3,7 +3,7 @@
  * - Frontend domain: rentmaikar.com (production web client)
  * - Backend domain: staging.rentmaikar.com (API gateway & server services)
  * - Incoming mail domain: backend.rentmaikar.com (inbound mailboxes & webhooks)
- * - Resend transport domain: notify.rentmaikar.com (not the recipient-visible From domain)
+ * - Outgoing mail domain: notify.rentmaikar.com (outbound transactional dispatch)
  */
 
 export const DOMAIN_CONFIG = {

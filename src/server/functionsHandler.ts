@@ -34,19 +34,6 @@ import {
   sarekonService,
 } from "../../backend/src/services/iotService";
 import { paymentService } from "../../backend/src/services/paymentService";
-import { PayoutError, resolveIdempotencyKey } from "../../backend/src/services/ownerPayoutWorkflow";
-import {
-  authenticateSelfWithdrawalCaller,
-  verifyCronSecret,
-} from "../../backend/src/services/payoutRequestAuth";
-
-function payoutErrorResponse(fn: string, err: any): { status: number; data: any } {
-  if (err instanceof PayoutError) {
-    return { status: err.statusCode, data: { ok: false, code: err.code, error: err.message } };
-  }
-  console.error(`[Functions Handler] ${fn} failed`, err);
-  return { status: 502, data: { ok: false, error: "Payout request failed" } };
-}
 
 export interface FunctionsPayload {
   body?: any;
@@ -1203,52 +1190,22 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       return { status: 200, data: { code: "00000", message: "SUCCESS" } };
     }
 
-    case "process-owner-payouts": {
-      // Weekly bulk worker entry point: cron secret only; executes an existing approved payout.
-      try {
-        if (!verifyCronSecret(headers)) {
-          return { status: 401, data: { ok: false, error: "Unauthorized" } };
-        }
-        const result = await paymentService.executeWeeklyOwnerPayout(
-          String(body.payout_id || body.payoutId || ""),
-          body.note,
-        );
-        return { status: 200, data: { ok: true, ...result } };
-      } catch (err: any) {
-        return payoutErrorResponse(functionName, err);
-      }
-    }
-
+    case "process-owner-payouts":
     case "initiate-paypal-payout":
-    case "initiate-owner-withdrawal": {
-      try {
-        const provider = String(body.provider || "paypal").toLowerCase();
-        if (provider !== "paypal") {
-          return { status: 400, data: { ok: false, error: `Unsupported payout provider: ${provider}` } };
-        }
-        // Self-withdrawal: the owner is the authenticated caller, never the body.
-        const { ownerId } = await authenticateSelfWithdrawalCaller(
-          headers,
-          body.owner_id || body.ownerId || body.userId,
-        );
-        const result = await paymentService.processPayPalOwnerPayout({
-          owner_id: ownerId,
-          amount: Number(body.amount),
-          currency: String(body.currency || "USD").toUpperCase(),
-          payout_account_id: body.payout_account_id || body.payoutAccountId,
-          authorization_id: body.authorization_id || body.authorizationId,
-          note: body.note,
-          idempotency_key: resolveIdempotencyKey(headers, body),
-        });
-        return { status: 200, data: { ok: true, ...result } };
-      } catch (err: any) {
-        return payoutErrorResponse(functionName, err);
-      }
-    }
-
     case "initiate-paystack-transfer": {
-      // Not handled locally; 404 lets the gateway dispatch to the upstream function.
-      return { status: 404, data: { ok: false, error: "Function not handled locally" } };
+      try {
+        const result = await paymentService.processOwnerPayout({
+          owner_id: body.owner_id || body.user_id,
+          amount: Number(body.amount),
+          currency: body.currency || "USD",
+          provider: functionName.includes("paystack") ? "paystack" : "paypal",
+          payout_account_id: body.payout_account_id,
+          initiated_by: body.initiated_by,
+        });
+        return { status: 200, data: result };
+      } catch (err: any) {
+        return { status: 400, data: { ok: false, error: err.message } };
+      }
     }
 
     case "persona-create-inquiry": {
@@ -1268,8 +1225,8 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     case "persona-webhook": {
       const { personaWebhookService } = await import("../../backend/src/services/personaWebhookService");
       const res = await personaWebhookService.handle({
-        headers: headers as any,
-        body,
+        headers: (request.headers || {}) as any,
+        body: request.body,
       });
       return { status: res.status, data: res.body };
     }
@@ -1298,15 +1255,15 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       try {
         const { getDbPool } = await import("../../backend/src/services/dbPool");
         const pool = getDbPool();
-        if (payload?.method === "POST" && body) {
+        if (req.method === "POST" && req.body) {
           const val = {
-            enabled: body.enabled === true,
-            background_check_enabled: body.background_check_enabled !== undefined
-              ? body.background_check_enabled === true
-              : body.enabled === true,
-            identity_verification_enabled: body.identity_verification_enabled !== undefined
-              ? body.identity_verification_enabled === true
-              : body.enabled === true,
+            enabled: req.body.enabled === true,
+            background_check_enabled: req.body.background_check_enabled !== undefined
+              ? req.body.background_check_enabled === true
+              : req.body.enabled === true,
+            identity_verification_enabled: req.body.identity_verification_enabled !== undefined
+              ? req.body.identity_verification_enabled === true
+              : req.body.enabled === true,
           };
           await pool.query(
             `INSERT INTO public.platform_kv_settings (key, value, updated_at)
@@ -1615,6 +1572,31 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
         const { paymentService } = await import("../../backend/src/services/paymentService");
         const data = await paymentService.getOwnerWithdrawalData(ownerId, currency);
         return { status: 200, data: { ok: true, ...data } };
+      } catch (err: any) {
+        return { status: 500, data: { ok: false, error: err.message } };
+      }
+    }
+
+    case "initiate-owner-withdrawal": {
+      try {
+        const ownerId = body.owner_id || body.ownerId || body.userId;
+        const amount = Number(body.amount);
+        const currency = body.currency || "USD";
+        const provider = body.provider || "paypal";
+        const payoutAccountId = body.payout_account_id || body.payoutAccountId;
+        if (!ownerId || !amount || amount <= 0) {
+          return { status: 400, data: { ok: false, error: "owner_id and valid amount are required" } };
+        }
+        const { paymentService } = await import("../../backend/src/services/paymentService");
+        const result = await paymentService.processOwnerPayout({
+          owner_id: ownerId,
+          amount,
+          currency,
+          provider,
+          payout_account_id: payoutAccountId,
+          initiated_by: body.initiated_by || "owner",
+        });
+        return { status: 200, data: result };
       } catch (err: any) {
         return { status: 500, data: { ok: false, error: err.message } };
       }

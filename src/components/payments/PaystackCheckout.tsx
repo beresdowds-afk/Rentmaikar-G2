@@ -72,10 +72,13 @@ export function PaystackCheckout({
 
       const PaystackPop = await loadPaystack();
       const popup = new PaystackPop();
-      popup.resumeTransaction(data.access_code, {
+      const handlerCallbacks = {
+        accessCode: data.access_code,
+        access_code: data.access_code,
+        key: publicKey,
         onSuccess: async (tx: any) => {
           const { data: v } = await supabase.functions.invoke("verify-paystack-transaction", {
-            body: { reference: tx.reference ?? data.reference },
+            body: { reference: tx?.reference ?? data.reference },
           });
           if (v?.status === "completed") {
             toast.success("Payment successful");
@@ -90,7 +93,17 @@ export function PaystackCheckout({
           toast.message("Payment cancelled");
           onError?.("cancelled");
         },
-      });
+        onClose: () => {
+          toast.message("Payment window closed");
+          onError?.("cancelled");
+        },
+      };
+
+      if (typeof popup.checkout === "function") {
+        popup.checkout(handlerCallbacks);
+      } else if (typeof popup.resumeTransaction === "function") {
+        popup.resumeTransaction(data.access_code, handlerCallbacks);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Paystack error";
       toast.error(msg);

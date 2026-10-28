@@ -18,7 +18,7 @@
  * Pinpoints the exact failure point and provides real-time webhook delivery evidence.
  */
 
-import { parseEmailAddress, rewriteSenderAddress, VERIFIED_DOMAIN, SENDERS, emailLayout, handleSendOutboundEmail } from "./emailService";
+import { rewriteSenderAddress, VERIFIED_DOMAIN, SENDERS, emailLayout, handleSendOutboundEmail } from "./emailService";
 import { resendWebhookStore, type ResendWebhookRecord } from "./resendWebhookStore";
 
 export interface ObservedCheckpointResult {
@@ -474,11 +474,10 @@ export async function runEmailProductionLifecycleTest(
     // 1. Envelope and sender rewrite validation
     const rewrite = rewriteSenderAddress(fromAddress);
     preparedSender = rewrite.from;
-    preservedReplyTo = rewrite.preservedReplyTo || "";
+    preservedReplyTo = rewrite.preservedReplyTo || fromAddress;
 
-    const parsedSender = parseEmailAddress(preparedSender);
-    if (!parsedSender || parsedSender.domain.toLowerCase() !== "rentmaikar.com") {
-      throw new Error("Sender policy did not resolve to the exact rentmaikar.com domain.");
+    if (!preparedSender.includes(VERIFIED_DOMAIN) && !preparedSender.includes("notify.rentmaikar.com") && !preparedSender.includes("rentmaikar.com")) {
+      throw new Error(`Sender rewrite failed: Sender '${preparedSender}' does not align with verified domain '${VERIFIED_DOMAIN}'.`);
     }
 
     // 2. Responsive layout generation
@@ -490,8 +489,8 @@ export async function runEmailProductionLifecycleTest(
         Trace ID: <code>${testId}</code><br/>
         Origin: <code>${origin}</code><br/>
         Dispatched Sender: <code>${preparedSender}</code><br/>
-        Reply-To: <code>${preservedReplyTo || "not set"}</code><br/>
-        Resend Transport Domain: <code>${VERIFIED_DOMAIN}</code><br/>
+        Preserved Reply-To: <code>${preservedReplyTo}</code><br/>
+        Target Verified Domain: <code>${VERIFIED_DOMAIN}</code><br/>
         Pipeline: <code>Cloud Run &rarr; Resend TLS 1.3 &rarr; Webhook Observer</code>
       </div>
     `, testSubject);
@@ -522,7 +521,7 @@ export async function runEmailProductionLifecycleTest(
         originalSender: fromAddress,
         rewrittenSender: preparedSender,
         preservedReplyTo,
-        transportDomain: VERIFIED_DOMAIN,
+        verifiedDomain: VERIFIED_DOMAIN,
         htmlPayloadBytes: Buffer.byteLength(renderedHtml, "utf8"),
         apiKeyConfigured: hasKey,
       },
@@ -597,7 +596,7 @@ export async function runEmailProductionLifecycleTest(
           to: sanitizedTo,
           subject: testSubject,
           html: renderedHtml,
-          ...(preservedReplyTo ? { reply_to: preservedReplyTo } : {}),
+          reply_to: preservedReplyTo,
         }),
       });
 

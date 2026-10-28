@@ -12,21 +12,26 @@ export async function resolvePostLoginDestination(
   }
 
   try {
-    if (role === 'driver' || role === 'owner') {
-      // Pending compulsory agreement awaiting this user's signature
-      const signerColumn = role === 'driver' ? 'driver_id' : 'owner_id';
-      const signedColumn = role === 'driver' ? 'driver_signed_at' : 'owner_signed_at';
-      const { data: pending } = await supabase
-        .from('legal_agreements')
-        .select('id')
-        .eq(signerColumn, userId)
-        .eq('status', 'pending')
-        .eq('is_compulsory', true)
-        .is(signedColumn, null)
-        .limit(1);
+    if (role === 'driver') {
+      // Check if agreement is pending
+      const { data: driver } = await supabase
+        .from('driver_profiles')
+        .select('agreement_signed')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-      if (pending && pending.length > 0) {
-        return role === 'driver' ? '/legal/driver-agreement' : '/onboarding/legal-agreement';
+      if (driver && !driver.agreement_signed) {
+        return '/driver-agreement';
+      }
+    } else if (role === 'owner') {
+      const { data: owner } = await supabase
+        .from('owner_profiles')
+        .select('agreement_signed')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (owner && !owner.agreement_signed) {
+        return '/owner-agreement';
       }
     }
   } catch (err) {
