@@ -1,0 +1,800 @@
+RENTMAIKAR ENTERPRISE MESSAGING UNIFICATION
+
+Surgical Implementation, Provider Failover, Authentication Integrity, and Unified Communication Logging
+
+1. YOUR ROLE
+
+Act as a senior backend architect, TypeScript engineer, Supabase specialist, Google Cloud Run engineer, communications-platform engineer, and application security specialist.
+
+You are working on the existing Rentmaikar codebase.
+
+Your task is to inspect the existing implementation and make the necessary surgical corrections to unify outbound SMS and WhatsApp delivery across the platform.
+
+This is an implementation task, not a proposal-writing exercise.
+
+You must inspect the actual repository files, trace the existing execution paths, implement the required changes, run the available tests, and report the precise files changed and any remaining deployment requirements.
+
+Do not assume that an existing implementation works merely because its documentation or comments claim that it does.
+
+Do not replace existing functionality with mock implementations, simulated delivery, placeholder functions, or success responses that do not reflect actual provider results.
+
+---
+
+2. AUTHORITATIVE BUSINESS REQUIREMENTS
+
+The following requirements are mandatory.
+
+2.1 Outbound provider policy
+
+For eligible outbound SMS and WhatsApp messages:
+
+1. SENT.dm is the primary provider.
+2. Twilio is the first fallback when SENT.dm fails under the configured fallback policy.
+3. Termii is the next fallback when the previous eligible provider fails.
+4. Provider eligibility must account for the destination region, channel, provider configuration, sender configuration, and actual supported capabilities.
+5. Stop attempting providers when the message reaches the applicable successful terminal state.
+6. Record every provider attempt and the resulting state.
+7. Prevent duplicate messages caused by network timeouts, retries, frontend retries, webhook retries, and repeated event processing.
+
+Use the provider credentials, environment variables, adapters, and configuration mechanisms already present in the repository wherever they are suitable.
+
+Do not invent new provider APIs, environment variable names, credential values, or undocumented SENT.dm capabilities.
+
+If SENT.dm, Twilio, or Termii requires a capability that cannot be verified from the existing code or provider documentation, identify the limitation explicitly.
+
+Do not interpret every timeout as proof that the previous provider failed to deliver the message.
+
+A provider may have accepted a message even when Rentmaikar did not receive its response. Handle uncertain outcomes through provider status checks, idempotency, or reconciliation wherever supported.
+
+If an outcome remains unknown, mark it accordingly rather than blindly sending duplicate messages through every fallback provider.
+
+2.2 One authoritative business messaging gateway
+
+All ordinary business SMS and WhatsApp messages must ultimately pass through one authoritative Cloud Run messaging dispatch service.
+
+The following components must use that service:
+
+- Notification Engine.
+- Marketing Engine.
+- Admin Omnichannel Composer.
+- Other business modules that send SMS or WhatsApp.
+- Any additional business messaging workflow discovered during repository inspection.
+
+These components may retain their separate business logic, user interfaces, templates, permissions, and workflows.
+
+However, they must not maintain independent provider-selection and fallback implementations that bypass the canonical dispatcher.
+
+2.3 Authentication and OTP exception
+
+Authentication messaging must preserve the intended Supabase-first authentication architecture.
+
+The required logical flow is:
+
+Supabase authentication workflow → configured authentication delivery mechanism → SENT.dm primary → eligible Twilio fallback → eligible Termii fallback → authentication delivery result and required callbacks/state updates.
+
+The precise integration must be determined from the existing Supabase Auth configuration and actual code.
+
+Do not assume that every Supabase Auth SMS or WhatsApp message is currently delivered through a custom Edge Function.
+
+Inspect the actual authentication delivery mechanism and implement the smallest safe integration that achieves the required behaviour.
+
+Supabase must remain authoritative for the applicable authentication state, OTP verification, and session establishment.
+
+The business messaging gateway must not provide an alternative route for approving accounts or establishing authenticated sessions.
+
+Authentication requirements:
+
+- Preserve OTP expiration.
+- Preserve attempt limits and rate limiting.
+- Preserve replay protection and single-use verification.
+- Preserve purpose-specific challenges.
+- Do not log plaintext OTP values.
+- Do not create independently valid OTP challenges merely because delivery falls back to another provider.
+- Do not equate provider acceptance or delivery with successful authentication.
+- Preserve existing account verification, identity checks, and authorisation controls.
+- Do not weaken RLS, JWT validation, or administrative permissions.
+
+If the current Supabase Auth delivery configuration cannot support the desired integration directly, implement only a verified, supported integration. Document any configuration that requires manual action.
+
+Do not introduce a second authentication system or silently change Supabase Auth's role.
+
+---
+
+3. PHASE ONE — INSPECT BEFORE EDITING
+
+Before modifying code, perform a focused repository audit.
+
+Inspect at least the following files if they still exist in the current branch:
+
+- "backend/src/services/smsService.ts"
+- "backend/src/services/messagingBridge.ts"
+- "backend/src/services/phoneOtpService.ts"
+- "backend/src/services/authenticator.ts"
+- "backend/src/routes/functions.ts"
+- "backend/src/marketing/routes.ts"
+- "backend/src/marketing/marketingEngineServer.ts"
+- "backend/src/marketing/sentDmAdapter.ts"
+- "src/components/admin/messaging/OmnichannelComposer.tsx"
+- "src/hooks/useMessageComposer.ts"
+- "supabase/functions/dispatch-event-notifications/index.ts"
+- "supabase/functions/_shared/event-template-map.ts"
+- "supabase/functions/send-sms-notification/index.ts"
+- "supabase/functions/send-inbox-reply/index.ts", if present.
+- The actual Supabase Auth configuration and custom authentication delivery code.
+- All provider callback, webhook, and delivery-status handlers related to SMS and WhatsApp.
+- Relevant database migrations, communication tables, notification tables, and provider-attempt records.
+
+Search the entire repository for:
+
+- SENT.dm API calls and adapters.
+- Twilio SMS and WhatsApp API calls.
+- Termii API calls.
+- Direct browser/frontend provider calls.
+- Supabase Edge Functions that send SMS or WhatsApp.
+- Functions that retry failed messaging requests.
+- Messaging-related environment variables and secret consumers.
+- Provider callback URLs and status handlers.
+- Database writes that record messages and delivery attempts.
+- Notification outbox and retry workers.
+- Marketing campaign dispatch and bulk messaging workflows.
+- Admin composer and inbox-reply dispatch routes.
+
+Inspect the current branch rather than relying on previous audit reports.
+
+Identify whether a request routed through Cloud Run is actually handled by the intended local backend service or forwarded to a Supabase Edge Function that independently dispatches messages.
+
+Required audit output
+
+Before making changes, establish:
+
+1. The current provider-selection policy in each messaging implementation.
+2. The actual execution path of each message source.
+3. Which implementations already support SENT.dm-first fallback.
+4. Which implementations lack fallback.
+5. Which routes bypass the intended central dispatcher.
+6. Which database tables currently record messages and provider attempts.
+7. Which authentication delivery mechanisms are actually configured.
+8. Which tests cover the affected workflows.
+9. Which changes can be completed safely without a schema migration.
+
+Use the audit to determine the minimum set of code changes required.
+
+Do not stop after producing the audit. Proceed to implement the corrections.
+
+---
+
+4. PHASE TWO — ESTABLISH THE CANONICAL BUSINESS DISPATCHER
+
+Use the existing backend SMS service as the preferred starting point if it can safely support the required functionality.
+
+In particular, inspect "backend/src/services/smsService.ts" before creating a new service.
+
+If an existing service already implements the required provider routing, extend and reuse it. Do not create a competing messaging gateway.
+
+If the existing service cannot support the requirements cleanly, create a narrowly scoped shared dispatcher and migrate the existing service to delegate to it.
+
+Avoid unnecessary architectural rewrites.
+
+The canonical dispatcher must accept a validated message request containing the relevant fields, using the repository's existing conventions where possible:
+
+- Logical message or dispatch ID.
+- Source system.
+- Business purpose.
+- SMS or WhatsApp channel.
+- Normalised recipient.
+- Applicable region.
+- Message content or approved template reference.
+- Campaign ID, where applicable.
+- Conversation ID, where applicable.
+- Notification event ID, where applicable.
+- Idempotency key.
+- Relevant metadata that does not contain secrets.
+
+Use strong TypeScript types and runtime validation.
+
+Reject malformed or unsupported requests before calling a provider.
+
+Provider-selection responsibilities
+
+The canonical dispatcher must:
+
+1. Resolve the destination and region.
+2. Validate channel and provider eligibility.
+3. Select SENT.dm as primary when eligible.
+4. Record the initial logical message and provider attempt.
+5. Submit the request to SENT.dm using the existing verified adapter.
+6. Interpret the actual provider response.
+7. Apply the defined fallback policy only when appropriate.
+8. Record Twilio and Termii attempts when used.
+9. Update the logical message's final or pending state.
+10. Return a structured response to the originating component.
+11. Expose enough information for support and operational troubleshooting without leaking credentials or sensitive message data.
+
+Do not hard-code a fallback that assumes Termii supports every WhatsApp or international destination.
+
+Use explicit provider eligibility and configuration rules.
+
+Configuration
+
+Reuse existing environment variables and configuration structures where possible.
+
+Do not expose provider secrets through:
+
+- "VITE_*" variables.
+- Browser bundles.
+- Frontend configuration.
+- API responses.
+- Client-side logs.
+- Error messages.
+- Source-controlled configuration files.
+
+Provider credentials must remain in the server-side secret-management system already used by the deployment.
+
+Never print actual credential values in audit reports.
+
+If a required secret is missing, report its exact expected variable name only after verifying the existing code and configuration.
+
+---
+
+5. PHASE THREE — RELIABLE FALLBACK AND IDEMPOTENCY
+
+Implement a reliable state model for logical messages and individual provider attempts.
+
+Reuse the current database schema if it can represent the required states. Add a migration only when necessary.
+
+A logical message should be distinguishable from its individual delivery attempts.
+
+Use the existing naming conventions where possible, but ensure the system can represent states equivalent to:
+
+- "queued"
+- "processing"
+- "submitted"
+- "sent"
+- "delivered"
+- "failed"
+- "unknown"
+- "retry_pending"
+
+Do not blindly replace the application's existing status vocabulary if it already has compatible states.
+
+Document the exact mapping between internal states and provider-specific responses.
+
+Required safeguards
+
+Idempotency
+
+Repeated requests with the same logical idempotency key must not create duplicate logical messages or trigger uncontrolled duplicate sends.
+
+Enforce uniqueness in the database where appropriate. Do not rely exclusively on an in-memory map or frontend-generated state.
+
+Provider-attempt tracking
+
+Record the provider, attempt number, start time, response category, provider message ID when available, and final attempt state.
+
+Never record API secrets or authentication codes in provider-attempt logs.
+
+Unknown outcomes
+
+When a provider times out after submission:
+
+- Check the provider's status API or existing reconciliation mechanism where supported.
+- Reuse the provider's idempotency support if available.
+- Avoid immediately sending the same message through a fallback if the original outcome is uncertain and could cause duplication.
+- Record unresolved outcomes for reconciliation.
+
+Retry controls
+
+Use bounded retries and backoff for retryable failures.
+
+Do not retry permanent failures indefinitely.
+
+Do not treat invalid recipients, authentication failures, disabled provider accounts, invalid credentials, or unsupported channels as ordinary transient errors.
+
+Concurrent dispatch
+
+Prevent two workers or simultaneous requests from dispatching the same logical message concurrently.
+
+Use database constraints, atomic state transitions, locks, or another appropriate mechanism already supported by the project.
+
+Webhook safety
+
+Provider callbacks must be authenticated or validated using the provider's supported security mechanism.
+
+Handle repeated and out-of-order callbacks idempotently.
+
+Do not let an old callback overwrite a newer terminal state without an explicitly defined and valid state transition.
+
+---
+
+6. PHASE FOUR — CORRECT THE ADMIN OMNICHANNEL COMPOSER
+
+Inspect:
+
+- "src/components/admin/messaging/OmnichannelComposer.tsx"
+- "src/hooks/useMessageComposer.ts"
+- Related messaging hooks and API clients.
+- The Cloud Run implementation of the inbox-reply route.
+- Relevant authorisation and conversation services.
+
+Previously identified concerns include a composer that attempts a Supabase Edge Function, then a backend route, and then a direct SENT.dm fallback.
+
+There is also an apparent conflict between the frontend's use of "send-inbox-reply" for SMS/WhatsApp and a backend inbox-reply service that rejects those channels.
+
+Verify these issues in the current code before editing.
+
+Required corrections
+
+1. Make SMS and WhatsApp composition call one authoritative Cloud Run dispatch operation.
+2. Retain admin permission checks and recipient validation.
+3. Retain conversation IDs and other relevant inbox metadata.
+4. Preserve message previews and the existing user experience where possible.
+5. Remove direct frontend SENT.dm dispatch.
+6. Remove conflicting independent provider-dispatch paths.
+7. Do not silently fall back to a separate provider implementation when the main request fails.
+8. Return a clear pending, success, failed, or unknown outcome.
+9. Ensure the UI does not blindly resubmit a message after an ambiguous timeout.
+10. Preserve email delivery through its appropriate existing business email service.
+11. Preserve unrelated voice, push, and inbox features.
+
+Do not make a UI-only correction while leaving the backend dispatch conflict unresolved.
+
+Do not route all inbox replies into the SMS service indiscriminately. Keep conversation-level validation and message-purpose handling intact.
+
+---
+
+7. PHASE FIVE — CORRECT THE MARKETING ENGINE
+
+Inspect:
+
+- "backend/src/marketing/routes.ts"
+- "backend/src/marketing/marketingEngineServer.ts"
+- "backend/src/marketing/sentDmAdapter.ts"
+- All relevant marketing campaign and lead communication services.
+
+Previously identified code includes a marketing communications endpoint and provider-specific adapters. Verify the current implementation and all callers.
+
+Required corrections
+
+Marketing messages must use the canonical business dispatcher for SMS and WhatsApp.
+
+Preserve:
+
+- Campaign management.
+- Lead selection and targeting.
+- Campaign and lead IDs.
+- Template selection.
+- Marketing-specific authorisation.
+- Consent and opt-out checks.
+- Rate limits.
+- Campaign attribution.
+- Delivery reporting.
+- Existing supported non-SMS/WhatsApp channels.
+
+The Marketing Engine may decide which eligible audience should receive a message and what content to send. It must not independently decide to bypass the canonical provider policy.
+
+Pass the relevant marketing metadata to the central dispatcher.
+
+If the marketing interface explicitly selects a provider today, replace that behaviour for SMS/WhatsApp with the approved central policy. Preserve provider selection for other channels only where it remains appropriate.
+
+Do not silently remove existing marketing capabilities.
+
+Inspect scheduled, queued, and bulk campaign delivery as well as immediate one-off sends. Both must use the canonical dispatcher.
+
+Ensure bulk messaging is bounded, rate-limited, idempotent, and observable.
+
+---
+
+8. PHASE SIX — CORRECT THE NOTIFICATION ENGINE
+
+Inspect:
+
+- "supabase/functions/dispatch-event-notifications/index.ts"
+- "supabase/functions/_shared/event-template-map.ts"
+- "supabase/functions/send-sms-notification/index.ts"
+- Relevant notification outbox, event processing, retry, and callback services.
+
+Preserve the event-driven notification architecture and existing event-to-template mapping.
+
+Do not replace the notification engine with a generic send-message function.
+
+Required corrections
+
+1. Keep event processing and notification generation in their existing appropriate components.
+2. Route all business SMS/WhatsApp delivery through the canonical Cloud Run dispatcher.
+3. Pass the notification event ID and logical message ID to the dispatcher.
+4. Preserve channel preferences, notification eligibility, and applicable opt-out rules.
+5. Preserve notification templates and event-specific content.
+6. Keep email and push notifications on their appropriate channel-specific routes.
+7. Make notification retries idempotent.
+8. Ensure the same event cannot generate uncontrolled duplicate SMS/WhatsApp messages.
+9. Preserve notification state transitions and event correlation.
+10. Ensure failures remain observable and eligible work can be retried safely.
+
+Supabase Edge Function handling
+
+If a Supabase Edge Function is still needed for notification orchestration, keep it as an orchestrator or controlled adapter.
+
+It must not independently implement a second provider-selection and fallback policy.
+
+Where the existing function is retained as a compatibility endpoint, make it forward to the canonical Cloud Run dispatcher using authenticated server-to-server communication.
+
+Validate the receiving backend's authentication and request integrity.
+
+Do not expose a privileged Cloud Run credential to the browser.
+
+Do not remove an Edge Function until its callers, scheduled triggers, deployed configuration, and compatibility requirements have been verified.
+
+---
+
+9. PHASE SEVEN — AUTHENTICATION DELIVERY INTEGRATION
+
+Inspect the real Supabase Auth configuration and the current OTP implementation, including:
+
+- "backend/src/services/phoneOtpService.ts"
+- "backend/src/services/authenticator.ts"
+- "backend/src/services/messagingBridge.ts"
+- "src/components/auth/PhoneOtpPanel.tsx"
+- The custom OTP Edge Function, if present.
+- Supabase Auth configuration.
+- Any configured custom SMS provider, authentication hook, or supported delivery integration.
+
+Determine whether the repository uses native Supabase Auth OTP delivery, a custom OTP challenge service, or both for different flows.
+
+Do not merge distinct authentication flows without proving that they have equivalent security semantics.
+
+Required outcome
+
+Authentication messages must follow the intended Supabase-first architecture and use:
+
+SENT.dm → eligible Twilio fallback → eligible Termii fallback.
+
+The provider policy should be shared conceptually and, where technically safe, reuse common provider adapters. Authentication-specific challenge creation, verification, and session logic must remain separate from business-message dispatch.
+
+Do not force an authentication message through a business messaging endpoint if that would bypass the supported Supabase Auth delivery mechanism.
+
+If the architecture requires a separate authenticated internal provider-dispatch interface for Supabase Auth, use the smallest safe implementation and document why it is necessary.
+
+Preserve all existing authentication security guarantees.
+
+Do not report this phase as complete merely because the business messaging dispatcher supports fallback. Verify that the actual authentication delivery path invokes the required provider policy.
+
+---
+
+10. PHASE EIGHT — UNIFIED SUPABASE COMMUNICATION RECORDS
+
+Inspect the existing database schema before adding tables or columns.
+
+Identify the existing authoritative communication, message, notification, provider-attempt, and delivery-status tables.
+
+Prefer extending the existing schema over introducing parallel tables that represent the same information.
+
+The target data model must distinguish:
+
+Logical message
+
+- One durable record representing the intended communication.
+
+Provider attempt
+
+- One record for each attempted provider delivery.
+
+Business context
+
+- The source system, purpose, recipient, channel, and relevant campaign, event, or conversation reference.
+
+Delivery state
+
+- The latest known state of the logical message and each provider attempt.
+
+Use appropriate foreign keys, uniqueness constraints, indexes, and database transactions.
+
+Use migrations compatible with the project's existing migration practices.
+
+Ensure:
+
+- Supabase is the durable record store.
+- Cloud Run performs privileged provider dispatch.
+- Frontend clients cannot manipulate provider attempts or delivery states without appropriate authorisation.
+- RLS protects tenant and user data.
+- Service-role credentials are never exposed to clients.
+- Provider callbacks update the correct records.
+- Authentication logs do not contain plaintext OTPs.
+- Message retention and privacy requirements remain enforceable.
+
+If a schema migration is necessary, implement it and explain the required application and deployment order.
+
+Do not claim a migration has been deployed simply because its SQL file exists.
+
+---
+
+11. PHASE NINE — PRESERVE OTHER CHANNELS AND EXISTING FUNCTIONALITY
+
+This task primarily concerns outbound SMS and WhatsApp.
+
+Do not accidentally merge or break:
+
+- Business email through its existing approved email infrastructure.
+- Native Supabase Auth email delivery.
+- Push notifications.
+- Twilio voice calls and call control.
+- Voice access tokens.
+- Voice webhooks and recordings.
+- Inbox conversation history.
+- Marketing campaign management.
+- Notification preferences.
+- Existing payment, booking, verification, and vehicle workflows.
+
+Do not change payment provider routing, account permissions, or unrelated authentication logic.
+
+Do not weaken existing security controls to make integration easier.
+
+---
+
+12. PHASE TEN — SECURITY AND FAILURE HANDLING
+
+Verify the following controls.
+
+Backend security
+
+- Validate authentication and authorisation for every dispatch request.
+- Enforce role and tenant boundaries.
+- Reject unauthorised marketing and administrative sends.
+- Validate and normalise recipient addresses.
+- Enforce message-size and content constraints appropriate to each provider.
+- Apply rate limits and abuse prevention.
+- Avoid exposing provider error details that contain sensitive information.
+- Prevent arbitrary clients from choosing an unapproved provider to bypass routing rules.
+- Prevent the browser from calling provider APIs directly.
+
+Provider secrets
+
+- Keep SENT.dm, Twilio, and Termii credentials server-side.
+- Reuse the existing secrets-management approach.
+- Do not commit secrets or print their values.
+- Do not create fake credentials to make tests pass.
+
+Observability
+
+Record appropriate structured events for:
+
+- Message creation.
+- Dispatch initiation.
+- Provider selection.
+- Provider attempt.
+- Provider acceptance or rejection.
+- Unknown outcomes.
+- Fallback initiation.
+- Delivery callbacks.
+- Final failure.
+- Reconciliation.
+- Authentication delivery outcomes.
+
+Use correlation IDs and logical message IDs.
+
+Never log OTP values, API keys, access tokens, or unnecessary sensitive message content.
+
+---
+
+13. PHASE ELEVEN — TESTS REQUIRED BEFORE COMPLETION
+
+Add or update automated tests using the testing tools already configured in the repository.
+
+Do not replace actual integration code with mocks. Tests may mock provider boundaries to exercise failure scenarios, but the production implementation must continue using real configured provider integrations.
+
+At minimum, test the following.
+
+Business provider routing
+
+1. SENT.dm succeeds; no fallback is attempted.
+2. SENT.dm fails definitively; eligible Twilio fallback is attempted.
+3. SENT.dm and Twilio fail; eligible Termii fallback is attempted.
+4. Twilio or Termii is ineligible for the destination or channel; it is skipped.
+5. A permanent failure does not trigger uncontrolled retries.
+6. An ambiguous SENT.dm timeout does not immediately cause a duplicate send.
+7. Missing credentials produce a controlled and observable failure.
+8. Duplicate dispatch requests with the same idempotency key do not produce duplicate logical messages.
+9. Concurrent workers cannot dispatch the same logical message simultaneously.
+10. Duplicate or out-of-order callbacks do not corrupt the final state.
+
+Admin Composer
+
+11. SMS and WhatsApp use the canonical Cloud Run dispatch operation.
+12. No frontend direct SENT.dm fallback remains.
+13. Ambiguous requests do not cause blind duplicate submissions.
+14. Admin permissions and conversation context are preserved.
+15. Email continues to use its intended route.
+
+Marketing Engine
+
+16. Immediate campaign messages use the canonical dispatcher.
+17. Scheduled and bulk messages use the canonical dispatcher.
+18. Campaign and lead attribution is preserved.
+19. Consent, opt-out, authorisation, and rate-limit rules remain enforced.
+20. A retry does not create duplicate campaign messages.
+
+Notification Engine
+
+21. Event-generated SMS and WhatsApp use the canonical dispatcher.
+22. Existing templates and event references are preserved.
+23. Duplicate events do not create duplicate logical messages.
+24. Email and push notifications continue to use their appropriate routes.
+25. Failed messages remain observable and safely retryable.
+
+Authentication
+
+26. The actual Supabase-first authentication flow uses the intended SENT.dm-first provider policy.
+27. Eligible fallbacks work without creating independently valid OTP challenges.
+28. OTP expiration and attempt limits remain enforced.
+29. Replayed or consumed codes are rejected.
+30. Provider acceptance does not establish an authenticated session.
+31. Authentication logs do not expose plaintext OTPs.
+32. Existing authentication and verification flows continue to function.
+
+Regression checks
+
+Run the available:
+
+- Lint checks.
+- TypeScript type checks.
+- Unit tests.
+- Relevant integration tests.
+- Production build.
+
+Do not claim a check passed unless it was actually run and its result inspected.
+
+If an existing failure prevents a check from completing, report the precise failure and distinguish it from any new regression.
+
+---
+
+14. IMPLEMENTATION RULES
+
+Follow these rules throughout the task.
+
+1. Inspect the actual code before editing.
+2. Make the smallest coherent set of changes that achieves the architecture.
+3. Reuse existing services, adapters, types, tables, and configuration where appropriate.
+4. Avoid duplicated provider-selection logic.
+5. Do not introduce unnecessary dependencies.
+6. Do not rewrite unrelated components.
+7. Do not remove security checks.
+8. Do not silently change public API contracts.
+9. Update affected callers when a contract must change.
+10. Keep TypeScript types accurate.
+11. Use the repository's established coding conventions.
+12. Add database migrations only where required.
+13. Do not use placeholder success responses.
+14. Do not treat an attempted provider request as proof of delivery.
+15. Do not claim production deployment or runtime verification without evidence.
+16. If an implementation detail cannot be safely established, implement the verified portion and report the unresolved dependency instead of guessing.
+17. Do not stop after describing the intended solution. Implement, test, and report.
+
+---
+
+15. ACCEPTANCE CRITERIA
+
+The implementation is acceptable only when all applicable criteria below are met.
+
+A. One business dispatch policy
+
+Notification Engine, Marketing Engine, Admin Composer, and all other business SMS/WhatsApp sources use the same authoritative Cloud Run dispatcher.
+
+B. Consistent provider ordering
+
+SENT.dm is primary, followed by eligible Twilio and Termii fallbacks according to the defined failure and eligibility policy.
+
+C. No independent frontend provider dispatch
+
+Frontend components cannot bypass the authoritative dispatcher by calling SENT.dm, Twilio, or Termii directly.
+
+D. No competing Edge Function dispatch policy
+
+Supabase Edge Functions may orchestrate events or act as controlled adapters, but they cannot independently implement a conflicting business provider-selection policy.
+
+E. Authentication remains Supabase-first
+
+The real authentication delivery mechanism follows the intended provider policy without bypassing Supabase authentication controls.
+
+F. Duplicate protection
+
+Idempotency, concurrent-dispatch protection, callback handling, and uncertain-outcome reconciliation are implemented appropriately.
+
+G. Unified durable records
+
+Logical messages and provider attempts are traceable in Supabase without creating unnecessary duplicate ledgers.
+
+H. Business-specific behaviour remains intact
+
+Marketing attribution, notification event correlation, admin conversation context, and relevant consent and permission rules are preserved.
+
+I. No unrelated regressions
+
+Email, push, voice, payments, bookings, and other unrelated workflows remain intact.
+
+J. Evidence-based completion
+
+The report identifies exactly what was changed, what was tested, what passed, what failed, and what still requires deployment or external configuration.
+
+---
+
+16. FINAL REPORT FORMAT
+
+After implementing the changes, provide a concise but complete engineering report using these headings.
+
+1. Executive Summary
+
+State whether the implementation is complete, partially complete, or blocked.
+
+2. Before-and-After Architecture
+
+Describe the previous conflicting paths and the resulting architecture.
+
+3. Files Changed
+
+List every changed or created file, with a concise explanation of the change.
+
+4. Canonical Dispatcher
+
+Identify the exact service and API endpoint used for business SMS/WhatsApp dispatch.
+
+5. Provider Policy
+
+Explain SENT.dm-first routing, Twilio and Termii eligibility, fallback triggers, and ambiguous-outcome handling.
+
+6. Component Integration
+
+Report the actual integration status of:
+
+- Notification Engine.
+- Marketing Engine.
+- Admin Omnichannel Composer.
+- Other discovered business messaging callers.
+- Supabase-first authentication delivery.
+
+7. Database and Migrations
+
+List the migrations and schema changes, or explain why none were required.
+
+8. Security and Idempotency
+
+Describe the implemented controls and any outstanding risks.
+
+9. Test Results
+
+List the checks actually executed, their results, and any failures.
+
+10. Deployment Requirements
+
+Identify required environment variables, secrets, Supabase configuration, Cloud Run deployment, migrations, provider callback configuration, and any manual actions.
+
+List variable names only; never reveal secret values.
+
+Clearly distinguish code changes from deployed and runtime-verified functionality.
+
+11. Remaining Gaps
+
+Identify any incomplete work, unsupported provider capability, missing configuration, or unverified production dependency.
+
+12. Final Acceptance Matrix
+
+For each acceptance criterion, mark:
+
+- PASS — verified by code and relevant tests.
+- PARTIAL — implementation exists but verification is incomplete.
+- BLOCKED — requires missing configuration, external access, or another dependency.
+- FAIL — the requirement is not satisfied.
+
+Do not mark a criterion PASS based solely on comments, intended design, or a successful build.
+
+---
+
+FINAL DIRECTIVE
+
+Proceed with the repository inspection, then implement the corrections in the existing codebase.
+
+The central objective is one authoritative business SMS/WhatsApp delivery policy, not one giant function that absorbs every messaging feature.
+
+Keep the Notification Engine, Marketing Engine, and Admin Composer separate as business systems. Unify their outbound provider orchestration, fallback rules, idempotency, and communication records.
+
+Keep authentication delivery Supabase-first, with the required provider policy implemented through a verified, security-preserving integration.
+
+Make surgical changes, test them, and report the actual results. Do not stop at recommendations.

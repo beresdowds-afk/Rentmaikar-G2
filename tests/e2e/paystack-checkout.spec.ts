@@ -69,7 +69,6 @@ async function stubPaystack(page: Page, opts: { outcome: "success" | "failure" |
 }
 
 test.describe("Paystack checkout", () => {
-    test.skip(!process.env.E2E_RENTAL_URL, "Requires an authenticated session; set E2E_RENTAL_URL to run.");
   test("successful payment shows Completed row and Receipt link", async ({ page }) => {
     await stubPaystack(page, { outcome: "success" });
     await page.goto(RENTAL_URL);

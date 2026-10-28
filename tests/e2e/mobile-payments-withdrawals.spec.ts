@@ -109,7 +109,6 @@ async function stubOwnerPayouts(page: Page, outcome: "success" | "failure") {
 
 for (const profile of MOBILE_PROFILES) {
   test.describe(`Mobile driver payment · ${profile.name}`, () => {
-    test.skip(!process.env.E2E_DRIVER_URL, "Requires an authenticated session; set E2E_DRIVER_URL to run.");
     const mobileDevice = { ...devices[profile.device] };
      delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
 
@@ -152,7 +151,6 @@ for (const profile of MOBILE_PROFILES) {
   });
 
   test.describe(`Mobile owner withdrawal · ${profile.name}`, () => {
-    test.skip(!process.env.E2E_OWNER_URL, "Requires an authenticated session; set E2E_OWNER_URL to run.");
      const mobileDevice = { ...devices[profile.device] };
       delete (mobileDevice as { defaultBrowserType?: string }).defaultBrowserType;
 

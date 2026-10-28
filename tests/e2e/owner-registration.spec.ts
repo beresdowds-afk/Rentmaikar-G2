@@ -12,7 +12,7 @@ test.describe('Owner registration → onboarding', () => {
   test('renders registration form and required fields', async ({ page }) => {
     await page.goto('/owner/register');
 
-    await expect(page.getByRole('heading', { name: /list your vehicle/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /owner registration/i })).toBeVisible();
     await expect(page.getByLabel(/first name|full name/i).first()).toBeVisible();
     await expect(page.getByLabel(/^email/i).first()).toBeVisible();
 

@@ -84,7 +84,6 @@ async function stubEnv(page: Page, provider: "paystack" | "opay", status: "compl
 }
 
 test.describe("Owner exclusion from payment push notifications", () => {
-    test.skip(!process.env.E2E_RENTAL_URL, "Requires an authenticated session; set E2E_RENTAL_URL to run.");
   for (const provider of ["paystack", "opay"] as const) {
     for (const status of ["completed", "failed"] as const) {
       test(`${provider} ${status}: owners are never in recipient list`, async ({ page }) => {
