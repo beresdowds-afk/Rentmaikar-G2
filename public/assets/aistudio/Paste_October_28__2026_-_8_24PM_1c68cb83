@@ -1,0 +1,813 @@
+RENTMAIKAR ENTERPRISE VOICE ARCHITECTURE
+
+Surgical Unification of VoIP, WebRTC, Twilio, Supabase, Call Recording, and Voice Morphing
+
+1. ROLE AND OBJECTIVE
+
+Act as a senior VoIP architect, WebRTC engineer, Twilio Voice specialist, Supabase architect, TypeScript engineer, application security engineer, and real-time audio systems engineer.
+
+Inspect and correct the existing Rentmaikar repository to establish one coherent, secure, production-oriented voice architecture.
+
+The work must unify the existing voice calling, WebRTC, Twilio, Supabase call records, call-status callbacks, recording management, and voice-morphing components.
+
+This is an implementation task.
+
+Inspect the current code, trace the actual execution paths, implement the smallest safe set of corrections, run available tests, and produce an evidence-based implementation report.
+
+Do not assume that the existence of a service, hook, Edge Function, or database table proves that the corresponding feature works in production.
+
+Do not replace real calling or audio-processing functionality with simulated calls, mock recordings, placeholder voice morphing, or fabricated successful responses.
+
+Do not weaken existing authentication, verification, or authorisation controls.
+
+---
+
+2. REQUIRED ARCHITECTURAL PRINCIPLES
+
+The following requirements are mandatory.
+
+2.1 Twilio: authoritative telephony provider
+
+Twilio must be the authoritative provider for supported telephony operations, including:
+
+- Outbound PSTN calls.
+- Inbound PSTN calls.
+- Call initiation and termination.
+- Twilio call control.
+- TwiML generation and call routing.
+- Voice access-token issuance.
+- Call status callbacks.
+- Recording status callbacks.
+- Recording retrieval and processing workflows where applicable.
+- Telephony-provider identifiers and reconciliation.
+
+Use the existing verified Twilio integration and credentials.
+
+Do not create competing implementations that independently initiate or control the same call.
+
+Do not expose Twilio account credentials or signing secrets to the browser.
+
+2.2 WebRTC: real-time audio transport
+
+Preserve the existing WebRTC and Twilio Voice SDK architecture where appropriate.
+
+WebRTC is responsible for real-time audio transport between supported clients and the voice service.
+
+The browser or mobile client may use the supported Twilio Voice SDK to establish its media connection, but privileged call creation, authorisation, token issuance, call control, and authoritative state updates must remain server-controlled.
+
+Do not route every audio packet through Supabase merely because Supabase is the database and authentication platform.
+
+Supabase should not become an unnecessary real-time audio relay.
+
+Inspect whether the existing client uses Twilio's WebRTC-based Voice SDK, direct WebRTC connections, or both. Establish the correct role of each implementation before changing it.
+
+2.3 Supabase: identity, durable records, and authorised storage
+
+Supabase must remain the authoritative application data and identity platform for the applicable workflows.
+
+Use it for:
+
+- Authentication and user identity.
+- Authorisation-related application records.
+- Durable call records.
+- Call participants and application associations.
+- Call status history, where supported by the schema.
+- Recording metadata.
+- Approved recording asset storage.
+- Voice-morphing job metadata and processing status.
+- Audit events and operational correlation.
+
+Use the existing schema and storage buckets where appropriate.
+
+Do not introduce parallel tables or storage buckets unnecessarily.
+
+Do not expose service-role credentials to frontend applications.
+
+Enforce RLS, tenant isolation, and access permissions for call records and recordings.
+
+2.4 Voice morphing: a first-class capability
+
+Voice morphing is a required feature and must not be removed, bypassed, or treated as an ordinary call-recording feature.
+
+The implementation must distinguish:
+
+1. Normal, unaltered voice calls.
+2. Calls that use voice morphing.
+3. Calls that have voice recording enabled.
+4. Calls that use both voice morphing and recording.
+5. Post-call voice processing, if the existing implementation supports it.
+
+Do not assume that changing a stored audio file after a call constitutes real-time voice morphing.
+
+Determine whether the current implementation intends to alter voice in real time, transform recordings after a call, or support both modes.
+
+Preserve the existing supported modes.
+
+If the repository contains only a partial implementation of a mode, report the gap rather than claiming the capability is production-ready.
+
+---
+
+3. PHASE ONE — REPOSITORY AUDIT BEFORE EDITING
+
+Inspect the current repository and branch before making changes.
+
+Start with the existing voice-related files, including the following if they still exist:
+
+- "backend/src/services/voipService.ts"
+- "backend/src/routes/functions.ts"
+- "src/hooks/useVoiceDevice.ts"
+- "src/hooks/useVoiceCall.ts"
+- "src/hooks/useVoIPCalls.ts"
+- "supabase/functions/initiate-voip-call/index.ts"
+- "supabase/functions/voice-access-token/index.ts"
+- "supabase/functions/voice-twiml-dial/index.ts"
+- "supabase/functions/voip-status-callback/index.ts"
+- "supabase/functions/recording-status-callback/index.ts"
+- "supabase/functions/twilio-webhook/index.ts"
+- "supabase/functions/process-call-recording/index.ts", if present.
+- Any voice-morphing components, services, workers, Edge Functions, and database migrations.
+- The actual Supabase call-record and recording schema.
+- Supabase Storage bucket definitions and policies relevant to recordings.
+- Twilio webhook and callback configuration.
+- Relevant environment variable declarations and secret consumers.
+- Existing voice tests and build configuration.
+
+Search the entire repository for:
+
+- "Twilio"
+- "twilio"
+- "Voice"
+- "WebRTC"
+- "RTCPeerConnection"
+- "Device"
+- "CallSid"
+- "ParentCallSid"
+- "TwiML"
+- "voice-access-token"
+- "initiate-voip-call"
+- "voip-status-callback"
+- "recording-status-callback"
+- "voice-twiml-dial"
+- "recording"
+- "voice morph"
+- "voiceMorph"
+- "voice-morphing"
+- "morph"
+- Audio transformation, filtering, pitch-shifting, or speech-processing services.
+
+Trace every relevant frontend-to-backend call.
+
+Determine which operations are implemented locally in Cloud Run and which are forwarded to Supabase Edge Functions.
+
+Identify duplicate implementations, incompatible response contracts, overlapping callbacks, and direct frontend access to privileged operations.
+
+Required audit findings
+
+Establish:
+
+1. The actual call-initiation path.
+2. The actual voice-token issuance path.
+3. The actual inbound-call routing path.
+4. The actual call-control and termination paths.
+5. The actual TwiML generation path.
+6. The actual call-status callback path.
+7. The actual recording-status callback path.
+8. The actual recording-processing path.
+9. The actual voice-morphing implementation and its execution mode.
+10. The actual call-record schema and storage locations.
+11. The current authentication and authorisation boundaries.
+12. Any remaining independent Twilio REST integrations.
+13. Any existing tests and unverified deployment dependencies.
+
+Do not infer runtime behaviour solely from source code.
+
+---
+
+4. PHASE TWO — ESTABLISH ONE AUTHORITATIVE CALL-CONTROL PATH
+
+Use the existing backend voice service as the preferred starting point.
+
+Inspect "backend/src/services/voipService.ts" and the Cloud Run function router.
+
+Extend and reuse the existing service wherever possible.
+
+Do not create another competing call-control service if the existing one can be corrected safely.
+
+The intended logical architecture is:
+
+Frontend or mobile client
+→ Rentmaikar backend bridge
+→ Cloud Run voice API
+→ authoritative voice service
+→ Twilio Voice infrastructure
+→ applicable WebRTC or PSTN media path.
+
+Supabase is used for authentication, durable application records, and authorised storage.
+
+The frontend must not independently create privileged Twilio calls or bypass the backend's call-authorisation process.
+
+Required call operations
+
+Use existing API conventions where possible, but ensure the architecture supports:
+
+- Authorised call initiation.
+- Call acceptance or connection where applicable.
+- Call rejection where applicable.
+- Call termination.
+- Call status retrieval.
+- Voice access-token issuance.
+- Inbound-call handling.
+- TwiML generation.
+- Call-status callback processing.
+- Recording-status callback processing.
+- Call-record reconciliation.
+
+Use explicit TypeScript types and validated request/response contracts.
+
+Do not silently change existing API contracts without updating every affected caller.
+
+If a legacy Supabase Edge Function is required for compatibility, convert it into a controlled adapter or forwarder where appropriate.
+
+A retained compatibility function must not independently initiate or control a second call.
+
+---
+
+5. PHASE THREE — UNIFY WEBRTC AND THE TWILIO VOICE SDK
+
+Inspect the existing voice hooks and client components, especially:
+
+- "src/hooks/useVoiceDevice.ts"
+- "src/hooks/useVoiceCall.ts"
+- "src/hooks/useVoIPCalls.ts"
+
+Determine how the client currently obtains voice tokens and establishes audio connections.
+
+Required corrections
+
+1. Use the authoritative backend token-issuance operation.
+2. Validate the authenticated user and applicable call permissions before issuing tokens.
+3. Apply the minimum required Twilio Voice SDK grants and token lifetime.
+4. Preserve secure token refresh and expired-token handling.
+5. Prevent unauthorised clients from initiating or joining calls.
+6. Prevent duplicate call initiation caused by repeated UI events or network retries.
+7. Keep frontend call state synchronised with authoritative backend state.
+8. Handle disconnects, reconnects, rejected calls, and network interruptions.
+9. Ensure call termination updates both the client and authoritative call record.
+10. Preserve existing device-selection and microphone-permission handling where supported.
+11. Ensure media resources and SDK listeners are cleaned up correctly.
+12. Avoid unnecessary duplicate SDK instances or competing call-state managers.
+
+Do not implement a second raw WebRTC transport if the existing Twilio Voice SDK already provides the required real-time audio path.
+
+If the repository has a separate direct WebRTC implementation, determine whether it is necessary for voice morphing or another documented requirement before removing or merging it.
+
+Important distinction
+
+A Twilio Voice SDK call may use WebRTC for browser media while Twilio controls telephony and bridges PSTN participants.
+
+Do not mistake the use of WebRTC for proof that two browsers communicate directly with each other.
+
+Document the actual media topology and preserve the correct one for each call type.
+
+---
+
+6. PHASE FOUR — UNIFY TWILIO WEBHOOKS AND CALLBACKS
+
+Inspect the existing backend and Supabase implementations of:
+
+- Call initiation.
+- TwiML generation.
+- Call-status callbacks.
+- Inbound voice webhooks.
+- Recording-status callbacks.
+- Recording processing.
+
+Previously identified code contains overlapping backend and Supabase implementations. Verify their current behaviour.
+
+Required outcome
+
+Establish one authoritative processing path for each type of privileged Twilio operation.
+
+For every inbound callback:
+
+1. Validate the Twilio signature using the supported validation method.
+2. Validate the expected request type and required parameters.
+3. Identify the call using the correct provider identifiers.
+4. Locate the associated Rentmaikar call record.
+5. Apply a valid, idempotent state transition.
+6. Persist the relevant event and provider identifiers.
+7. Return the response required by the Twilio webhook contract.
+8. Record operational failures without exposing secrets.
+
+Handle callbacks that are:
+
+- Repeated.
+- Delayed.
+- Out of order.
+- Received after a call is already terminal.
+- Received before the corresponding local record is fully reconciled.
+
+Do not allow a late callback to overwrite a newer state incorrectly.
+
+Do not assume a successful HTTP response from Twilio means that the call has connected.
+
+Do not treat a recording-status callback as proof that the recording asset is already available for retrieval.
+
+If an existing Supabase Edge Function must remain as a webhook endpoint because of current provider configuration, it may act as a controlled adapter. However, it must not independently duplicate state-transition or call-control logic.
+
+Do not change production webhook URLs without identifying the existing configuration and documenting the required migration.
+
+---
+
+7. PHASE FIVE — PRESERVE AND INTEGRATE VOICE MORPHING
+
+This phase is mandatory.
+
+Do not complete the unification while ignoring the voice-morphing requirement.
+
+7.1 Discover the existing implementation
+
+Search the repository for every voice-morphing-related service, component, API route, database table, provider, library, audio worker, and storage location.
+
+Determine whether the current implementation provides:
+
+- Real-time voice transformation during a live call.
+- Post-call transformation of an audio recording.
+- Voice effects or filters only.
+- A user-selected voice profile.
+- A server-side speech-processing pipeline.
+- A client-side audio-processing pipeline.
+- A placeholder or incomplete implementation.
+
+Do not infer functionality from a component name.
+
+Verify the actual data flow and identify where audio is transformed.
+
+7.2 Preserve the distinction between normal and morphed calls
+
+The call model should identify whether voice morphing is enabled for a call, using the existing schema or a minimal compatible extension.
+
+Where applicable, record:
+
+- Whether voice morphing was requested.
+- Whether it was authorised.
+- The selected transformation profile or configuration.
+- Whether transformation is real-time or post-call.
+- The processing state.
+- The associated call ID.
+- The resulting recording or audio asset reference, where permitted.
+- Relevant processing errors and timestamps.
+
+Do not store sensitive voice-processing credentials or unnecessary biometric data in application logs.
+
+Do not expose voice-processing provider secrets to the browser.
+
+7.3 Real-time voice morphing
+
+If the repository already implements real-time voice transformation, preserve and integrate it into the actual outbound audio path.
+
+Verify that transformed audio—not the original microphone stream—is delivered to the intended remote participant when morphing is enabled.
+
+Preserve a normal unaltered audio path when morphing is disabled.
+
+The architecture must avoid accidentally bypassing the transformation stage when a call connects through the Twilio Voice SDK.
+
+If the current implementation uses a client-side audio-processing pipeline, inspect how the processed audio reaches the supported calling SDK. Do not assume that a browser-generated audio track can be injected into the existing SDK without a supported integration mechanism.
+
+If real-time transformation requires a media gateway, WebRTC media server, or other audio-processing infrastructure that does not exist in the repository, do not fabricate it.
+
+Instead:
+
+1. Preserve the existing working call architecture.
+2. Implement safe integration points supported by the current system.
+3. Identify the exact missing media-processing component.
+4. Document the required infrastructure and integration contract.
+5. Mark real-time voice morphing as incomplete until an actual transformed audio path is verified.
+
+Do not claim real-time voice morphing works merely because the interface contains a voice-selection control.
+
+7.4 Post-call voice transformation
+
+If post-call transformation is implemented or intended:
+
+1. Use the authoritative recording workflow.
+2. Verify the source recording is available and authorised for processing.
+3. Create an idempotent processing job.
+4. Track the processing status.
+5. Store the transformed output in the approved storage location.
+6. Associate the output with the correct call record.
+7. Apply access controls and retention policies.
+8. Preserve the original recording where policy requires it.
+9. Record processing failures and permit safe retries.
+
+Do not overwrite an original recording silently.
+
+Do not confuse transformed audio with the original call recording.
+
+7.5 Recording and morphing are different operations
+
+Keep these concepts distinct:
+
+- Live voice transport.
+- Real-time voice transformation.
+- Call recording.
+- Post-call recording transformation.
+- Recording metadata and storage.
+
+The recording subsystem must not be treated as the real-time voice-morphing engine.
+
+---
+
+8. PHASE SIX — UNIFY CALL RECORDS IN SUPABASE
+
+Inspect the existing call-related tables, relationships, migrations, and storage policies before changing the schema.
+
+Reuse the current schema where possible.
+
+The durable call record must be able to associate:
+
+- Rentmaikar call ID.
+- Twilio Call SID.
+- Parent Call SID or related call identifiers where applicable.
+- Authenticated initiating user.
+- Other authorised participants.
+- Call direction.
+- Call type.
+- Call status.
+- Start, answer, and end timestamps where available.
+- Call duration where available.
+- Recording status and recording reference.
+- Voice-morphing mode and processing status where applicable.
+- Relevant booking, support, or business context.
+- Created and updated timestamps.
+
+Use existing field names where possible.
+
+Do not add every field if the existing schema already represents it adequately.
+
+Ensure that Twilio callbacks can locate the correct Rentmaikar call record.
+
+Recording assets
+
+Use the approved Supabase Storage bucket or existing recording storage architecture.
+
+Ensure:
+
+- Recordings are private by default.
+- Access is restricted to authorised users.
+- Signed URLs are short-lived and appropriately scoped.
+- RLS and storage policies are enforced.
+- Recording metadata is not exposed to unauthorised tenants.
+- The backend does not treat a recording URL as public merely because it is accessible to a service role.
+- Recording download or processing failures are observable.
+
+If Twilio recording media must be fetched, do so through a properly authenticated backend operation.
+
+Do not place Twilio credentials or privileged recording URLs in browser-visible state.
+
+Data consistency
+
+Call records, callback events, recording records, and morphing jobs must be linked consistently.
+
+Use idempotent writes and suitable database constraints.
+
+Where full transactional consistency across Twilio and Supabase is impossible, use explicit pending states and reconciliation rather than assuming distributed operations always succeed together.
+
+---
+
+9. PHASE SEVEN — AUTHENTICATION AND AUTHORISATION
+
+Preserve the existing identity and security model.
+
+For every privileged call operation:
+
+- Authenticate the user.
+- Verify the user's permission to initiate or participate in the call.
+- Enforce tenant boundaries.
+- Validate the target and call context.
+- Prevent unauthorised call-control operations.
+- Validate ownership or permission before returning call details or recordings.
+- Protect voice-morphing settings and outputs.
+- Keep service-role and Twilio secrets server-side.
+
+Do not accept a client-supplied call ID as sufficient proof of authorisation.
+
+Do not allow a user to join, terminate, or retrieve recordings from another user's call without explicit permission.
+
+Validate Twilio webhook signatures before trusting callback parameters.
+
+Do not bypass existing verification requirements.
+
+---
+
+10. PHASE EIGHT — ELIMINATE DUPLICATE AND CONFLICTING IMPLEMENTATIONS
+
+Search for all competing implementations of:
+
+- Call initiation.
+- Voice-token issuance.
+- Call termination.
+- TwiML generation.
+- Call-status processing.
+- Recording-status processing.
+- Recording retrieval.
+- Voice-morphing dispatch.
+
+For each operation, identify the authoritative implementation.
+
+Where legacy Supabase Edge Functions must remain:
+
+- Retain them only when required for compatibility, webhook routing, or supported orchestration.
+- Ensure they forward to or coordinate with the authoritative backend.
+- Remove duplicated privileged logic where safe.
+- Preserve the expected request and response contracts.
+- Authenticate server-to-server requests.
+- Keep webhook responses compatible with Twilio requirements.
+
+Do not delete a legacy function solely because another implementation exists.
+
+Before removing or redirecting it, inspect:
+
+- Frontend callers.
+- Backend callers.
+- Scheduled jobs.
+- Supabase triggers.
+- Twilio webhook configuration.
+- Environment variables.
+- Deployed Edge Function configuration.
+- Database references.
+- Tests and integration contracts.
+
+Avoid changing a live webhook destination without documenting the migration and verification steps.
+
+---
+
+11. PHASE NINE — OBSERVABILITY AND RECONCILIATION
+
+Provide a consistent correlation strategy across the voice lifecycle.
+
+Where appropriate, link:
+
+- Rentmaikar call ID.
+- Twilio Call SID.
+- Parent Call SID.
+- Authenticated user ID.
+- Relevant business object ID.
+- Call-control request ID.
+- Callback event ID.
+- Recording ID.
+- Voice-morphing job ID.
+
+Record structured events for:
+
+- Call request accepted or rejected.
+- Token issuance.
+- Call initiation.
+- Call answered.
+- Call ended.
+- Call failed.
+- Callback received.
+- Callback rejected.
+- Recording available.
+- Recording retrieval started or failed.
+- Morphing job started.
+- Morphing job completed or failed.
+- Reconciliation performed.
+
+Do not log authentication tokens, Twilio secrets, unnecessary personal information, or sensitive audio content.
+
+Implement reconciliation for cases where:
+
+- Twilio creates a call but Rentmaikar fails to persist the result.
+- A callback arrives before the local call record is complete.
+- A callback is lost.
+- The call ends but the UI remains in a connected state.
+- A recording exists in Twilio but its metadata is missing locally.
+- A morphing job is interrupted.
+- A processing worker fails after uploading its output.
+
+Reuse the existing background-job or retry infrastructure where appropriate.
+
+Do not create an unbounded polling loop.
+
+---
+
+12. PHASE TEN — TESTS AND VERIFICATION
+
+Use the repository's existing testing framework and add tests where needed.
+
+Tests may simulate Twilio responses or WebRTC state transitions at the test boundary, but the production implementation must use the actual configured services.
+
+Call control
+
+1. An authorised user can request a call.
+2. An unauthorised user cannot initiate a call.
+3. Duplicate requests do not create uncontrolled duplicate calls.
+4. Call termination is handled correctly.
+5. Call status is persisted.
+6. A late callback cannot incorrectly revert a terminal call state.
+
+Tokens and WebRTC
+
+7. Voice tokens are issued only after the required authentication and authorisation checks.
+8. Token grants and lifetime are appropriate.
+9. Expired-token handling works.
+10. Client disconnect and reconnection states are handled correctly.
+11. Call-state listeners and media resources are cleaned up.
+12. Existing WebRTC/Voice SDK behaviour is preserved.
+
+Webhooks
+
+13. Valid Twilio callbacks are accepted.
+14. Invalid signatures are rejected.
+15. Duplicate callbacks are idempotent.
+16. Out-of-order callbacks are reconciled correctly.
+17. Recording callbacks update the correct call and recording records.
+18. Callback failures do not expose secrets.
+
+Recordings
+
+19. Recording metadata is associated with the correct call.
+20. Private recording access is enforced.
+21. Unauthorised users cannot retrieve recordings.
+22. Missing recordings are handled without fabricated success.
+23. Recording retrieval and processing failures are observable.
+
+Voice morphing
+
+24. A normal call uses the normal audio path when morphing is disabled.
+25. When real-time morphing is claimed to be supported, verify that the transformed audio is the actual outgoing media.
+26. The original microphone stream does not silently bypass the transformation stage when morphing is enabled.
+27. Post-call transformation, if implemented, uses the correct source recording.
+28. Morphing jobs are idempotent and recoverable.
+29. Original and transformed recordings are distinguishable.
+30. Morphing outputs are accessible only to authorised users.
+31. Missing media-processing infrastructure is reported explicitly rather than replaced with simulated success.
+
+Regression checks
+
+Run the existing:
+
+- Lint checks.
+- TypeScript type checks.
+- Unit tests.
+- Relevant integration tests.
+- Production build.
+
+Inspect and report actual results.
+
+Do not state that a test passed if it was not run.
+
+---
+
+13. IMPLEMENTATION CONSTRAINTS
+
+Follow these rules:
+
+1. Inspect before editing.
+2. Make surgical changes.
+3. Reuse existing services and schemas where appropriate.
+4. Preserve public API contracts where possible.
+5. Update affected callers when a contract must change.
+6. Do not create duplicate call-control authorities.
+7. Do not expose secrets.
+8. Do not weaken authentication, RLS, or tenant isolation.
+9. Do not silently remove voice morphing.
+10. Do not claim that a media-processing component exists unless the repository or verified deployment proves it.
+11. Do not claim real-time voice morphing works unless transformed audio is actually routed into the live call.
+12. Do not treat a successful build as proof of successful telephony.
+13. Do not claim production deployment without evidence.
+14. Do not change unrelated messaging, payments, booking, or vehicle workflows.
+15. Do not stop after generating a plan; implement all safe, verified corrections.
+
+If a requirement depends on unavailable Twilio configuration, an external audio-processing provider, or deployment permissions, implement the verified code portion and identify the outstanding dependency.
+
+---
+
+14. ACCEPTANCE CRITERIA
+
+The implementation is complete only when the following conditions are satisfied.
+
+A. One authoritative call-control architecture
+
+Call initiation, token issuance, call control, and authoritative state updates have one verified backend authority.
+
+B. Correct Twilio/WebRTC relationship
+
+The existing supported Voice SDK and WebRTC media architecture remain functional, with privileged operations controlled by the backend.
+
+C. Unified call records
+
+Twilio call identifiers, Rentmaikar call IDs, participants, status updates, and recordings are consistently correlated in Supabase.
+
+D. Reliable callbacks
+
+Twilio callbacks are validated, idempotent, and safe against duplicate or out-of-order delivery.
+
+E. Secure recording access
+
+Recording metadata and media are protected by the applicable authorisation, RLS, and storage controls.
+
+F. Voice morphing is preserved
+
+Existing morphing functionality is integrated into the actual supported processing path.
+
+G. No false claims about morphing
+
+Real-time voice morphing is marked complete only when transformed audio is verified in the live media path. Post-call processing is not misrepresented as real-time transformation.
+
+H. No duplicate call-control authorities
+
+Legacy functions no longer independently execute conflicting privileged operations.
+
+I. No unrelated regressions
+
+Authentication, payments, messaging, booking, and other unrelated workflows remain intact.
+
+J. Evidence-based completion
+
+Every claimed result is supported by source inspection, tests, or verified deployment/runtime evidence.
+
+---
+
+15. FINAL REPORT FORMAT
+
+After implementation, provide:
+
+1. Executive Summary
+
+State whether the task is complete, partially complete, or blocked.
+
+2. Previous Architecture and Problems
+
+Identify the actual duplicated or conflicting paths found.
+
+3. Resulting Architecture
+
+Explain the final Twilio, WebRTC, Cloud Run, and Supabase responsibilities.
+
+4. Files Changed
+
+List every changed or created file and its purpose.
+
+5. Call-Control Unification
+
+Identify the authoritative implementation for initiation, tokens, termination, and status handling.
+
+6. WebRTC and Media Flow
+
+Explain the actual client-to-provider media path and any remaining limitations.
+
+7. Voice-Morphing Findings
+
+Clearly distinguish:
+
+- Existing real-time morphing.
+- Existing post-call morphing.
+- Existing voice effects or filters.
+- Incomplete or missing functionality.
+
+State exactly which parts were preserved, integrated, tested, and verified.
+
+8. Supabase and Storage
+
+List the relevant schema changes, migrations, storage policies, and deployment requirements.
+
+9. Security and Reliability
+
+Explain authentication, authorisation, webhook validation, idempotency, and reconciliation.
+
+10. Test Results
+
+Report only tests actually executed and inspected.
+
+11. Deployment Requirements
+
+List required environment variable names, secret configuration, Supabase deployment/configuration, Cloud Run deployment, and Twilio webhook changes.
+
+Never print secret values.
+
+12. Remaining Gaps
+
+List all unresolved implementation or infrastructure requirements.
+
+13. Acceptance Matrix
+
+Mark each criterion:
+
+- PASS — verified by code and relevant tests.
+- PARTIAL — implemented but incompletely verified.
+- BLOCKED — requires external configuration or missing infrastructure.
+- FAIL — requirement is not satisfied.
+
+---
+
+FINAL DIRECTIVE
+
+Implement a unified Rentmaikar voice architecture using Twilio for authoritative telephony, WebRTC for the appropriate real-time audio transport, and Supabase for identity, durable call records, and authorised storage.
+
+Preserve the existing voice-morphing requirement as a first-class capability.
+
+Unify the execution paths without confusing call control, real-time audio transport, recording, and audio transformation.
+
+Make the smallest coherent set of corrections, test them, and report the actual implementation status.

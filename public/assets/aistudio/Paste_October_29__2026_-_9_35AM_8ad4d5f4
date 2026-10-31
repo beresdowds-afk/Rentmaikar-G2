@@ -1,0 +1,593 @@
+MASTER IMPLEMENTATION PROMPT: RENTMAIKAR ENTERPRISE-GRADE EMAIL ARCHITECTURE — RESEND ONLY, CLOUD RUN CENTRALISED, NO FALLBACKS
+
+1. ROLE AND MISSION
+
+Act as a senior enterprise software architect, backend engineer, cloud infrastructure engineer, application security engineer, and QA engineer working on the existing Rentmaikar platform.
+
+Repository: "beresdowds-afk/Rentmaikar-G2"
+
+Primary architecture:
+
+- Frontend: React, Vite, TypeScript.
+- Backend: Google Cloud Run.
+- Backend bridge: existing Rentmaikar backend bridge and API gateway.
+- Authentication and identity: Supabase Auth.
+- Database and application persistence: Supabase PostgreSQL, subject to existing security policies.
+- Business email provider: Resend, exclusively.
+- Outgoing email infrastructure domain: "notify.rentmaikar.com".
+- Required public-facing sender domain: "rentmaikar.com".
+- Designated incoming email domain: "backend.rentmaikar.com".
+
+Your mission is to inspect the current repository, identify every email-related implementation and configuration consumer, repair the architecture without breaking existing functionality, and prove the result through automated and end-to-end tests wherever access permits.
+
+Do not merely generate a proposal, mock implementation, checklist, or sample code. Implement the required changes in the actual project files and applicable configuration.
+
+Do not claim that a feature works in production merely because its source code exists, an environment variable is configured, a DNS record is present, or a test mock passes.
+
+2. NON-NEGOTIABLE ARCHITECTURAL DECISIONS
+
+2.1 Outgoing business email
+
+Resend is the sole provider for outgoing business email.
+
+All business-email sending must follow:
+
+"Frontend or internal workflow → Rentmaikar Cloud Run backend → Resend API → Recipient"
+
+The frontend must never send business email directly through Resend.
+
+All business-email operations must be mediated by the backend, which must authenticate and authorise the initiating user or internal workflow, validate the message, enforce applicable tenant and role restrictions, and record the outcome.
+
+Do not implement automatic provider failover.
+
+Do not silently substitute SendGrid, SMTP, Gmail, Nodemailer with external SMTP, Twilio, Termii, or any other provider if Resend is unavailable.
+
+If Resend fails, return or record a controlled failure, apply safe retry rules where appropriate, and expose the actual outcome through monitoring.
+
+Nodemailer or another library may be used only if it is genuinely necessary for a permitted implementation and does not introduce an alternative delivery provider. Prefer the official Resend SDK or supported Resend API.
+
+2.2 Outgoing email domains and sender addresses
+
+Preserve these exact decisions:
+
+- Outgoing infrastructure domain: "notify.rentmaikar.com".
+- Public-facing sender addresses: "*@rentmaikar.com".
+- Do not use "*@notify.rentmaikar.com" as the visible sender address.
+- Incoming email domain: "backend.rentmaikar.com".
+
+Examples of permitted sender addresses, subject to verification and authorisation( give priority to existing platform email address list):
+
+- "support@rentmaikar.com"
+- "notifications@rentmaikar.com"
+- "bookings@rentmaikar.com"
+- "payments@rentmaikar.com"
+- "no-reply@rentmaikar.com"
+
+These are examples, not proof that the addresses or mailboxes already exist.
+
+Centralise sender-address configuration in a backend-controlled configuration module. Do not let an ordinary frontend user supply an arbitrary sender address.
+
+Use "notify.rentmaikar.com" for the configured sending infrastructure and provider verification where appropriate. Ensure the intended "From" addresses are accepted by Resend's actual verified-domain configuration.
+
+Inspect the current Resend account configuration and DNS requirements if credentials or access are available. Do not invent SPF, DKIM, DMARC, MX, or other DNS record values. Generate a deployment checklist containing the exact records supplied by the actual provider configuration.
+
+Configure or document DMARC alignment and monitoring. Do not claim that the sending domain is authenticated until its live DNS and Resend verification status have been checked.
+
+2.3 Incoming email
+
+"backend.rentmaikar.com" remains the designated incoming email domain.
+
+Implement or repair the inbound-email pipeline so that:
+
+1. The configured inbound-email service receives mail addressed to the supported inbound addresses.
+2. The service forwards an authenticated webhook or other supported event to a dedicated Cloud Run endpoint.
+3. Cloud Run validates the authenticity of the request and validates the payload.
+4. The backend validates the sender, recipient, message identifiers, attachments, and routing rules.
+5. The message is safely processed and routed to the correct Rentmaikar workflow or authorised mailbox.
+6. Processing outcomes are logged, and duplicate deliveries are handled idempotently.
+
+Investigate whether the current Resend account and product configuration actually supports the required inbound-email workflow for "backend.rentmaikar.com". If Resend inbound email is not available or does not satisfy the requirement, identify a compatible inbound-email service for receiving and forwarding messages.
+
+The restriction against provider fallbacks applies to outgoing business email. Do not confuse inbound message reception with outgoing email failover.
+
+Do not assume that creating an MX record automatically delivers incoming messages to Cloud Run. An actual inbound-email service and a working forwarding or event-delivery mechanism are required.
+
+Never expose an unauthenticated inbound endpoint that accepts arbitrary email payloads and triggers privileged application actions.
+
+2.4 Authentication email separation
+
+Preserve Supabase Auth email delivery and existing authentication flows unless a separate, explicit migration is necessary and fully implemented, tested, and documented.
+
+Business emails and authentication emails are separate logical responsibilities.
+
+Business emails must use the Cloud Run → Resend architecture.
+
+Authentication emails must continue to use their existing supported Supabase Auth delivery configuration unless the project contains a deliberate migration requirement.
+
+Do not accidentally redirect password-reset emails, verification emails, magic links, or authentication OTPs into a generic business-email handler.
+
+Do not weaken authentication, verification, access control, or tenant isolation to simplify implementation.
+
+3. PHASE 1 — INSPECT THE ENTIRE REPOSITORY BEFORE EDITING
+
+Before modifying code, inspect the current branch and working tree, identify the actual backend entry points, and map the email architecture.
+
+Search all relevant source files, infrastructure files, workflow files, environment templates, documentation, SQL migrations, and Supabase Edge Functions.
+
+Inspect at least:
+
+- "src/"
+- "backend/src/"
+- "supabase/functions/"
+- "supabase/config.toml"
+- GitHub Actions workflows.
+- Cloud Run deployment configuration.
+- Existing backend bridge and API gateway.
+- Email templates and notification services.
+- Database tables and migrations related to email logs, notifications, messaging events, inbound messages, and audit records.
+
+Search for, at minimum:
+
+- "resend"
+- "RESEND_API_KEY"
+- "RESEND_FROM_EMAIL"
+- "notify.rentmaikar.com"
+- "backend.rentmaikar.com"
+- "rentmaikar.com"
+- "sendEmail"
+- "send-email"
+- "send-email-notification"
+- "send-invitation"
+- "password-reset"
+- "email-verification"
+- "nodemailer"
+- "smtp"
+- "sendgrid"
+- "gmail"
+- "mailgun"
+- "postmark"
+- "fetch" calls to email APIs
+- "supabase.functions.invoke"
+- direct calls to external mail providers
+- email webhook handlers
+- email retries and queue consumers
+- email delivery-status updates
+- frontend environment variables containing email configuration.
+
+Search for direct and indirect delivery paths, including dynamically selected providers, generic communication adapters, notification orchestrators, legacy implementations, duplicated Edge Functions, and code paths hidden behind helper functions.
+
+Produce an initial audit table:
+
+Finding| File and symbol| Current behaviour| Risk| Required change
+
+Identify which implementations are active, which are legacy, which are referenced by production code, and which are unreferenced.
+
+Do not delete an existing implementation solely because its name appears obsolete. Establish whether it is referenced by routing, configuration, workflows, scheduled jobs, or other modules.
+
+Do not stop after producing the audit. Continue with implementation.
+
+4. PHASE 2 — ESTABLISH ONE AUTHORITATIVE BUSINESS-EMAIL SERVICE
+
+Create or consolidate a single authoritative backend business-email service using the repository's existing architectural conventions.
+
+The service must:
+
+- Use the official Resend API or SDK.
+- Read "RESEND_API_KEY" only on the backend.
+- Use a centralised, server-controlled sender configuration.
+- Validate sender addresses and allowed recipients as appropriate.
+- Validate required fields, message size, HTML/text content, and attachment rules.
+- Support the existing Rentmaikar templates and notification use cases.
+- Support correlation IDs and provider message IDs.
+- Return structured results that distinguish accepted, sent, delivered, bounced, complained, failed, and unknown states where the provider supports them.
+- Use timeouts and bounded retry policies.
+- Prevent duplicate sends where idempotency can be enforced.
+- Record operational failures without exposing secrets or sensitive message content.
+- Provide structured logs and operational metrics.
+- Avoid logging API keys, authentication tokens, passwords, magic links, full OTPs, or unnecessarily sensitive message content.
+
+Do not represent Resend's API acceptance as proof of final delivery.
+
+Use an explicit email-service interface and a single production Resend implementation. Do not leave a second hidden business-email implementation that bypasses this service.
+
+If the existing architecture already contains an appropriate service, improve and consolidate it rather than creating unnecessary parallel modules.
+
+5. PHASE 3 — REMOVE BUSINESS-EMAIL PROVIDER FALLBACKS
+
+Inspect all business-email dispatch paths, including fallback branches in:
+
+- Provider-selection utilities.
+- Generic communication services.
+- Notification dispatchers.
+- Error handlers.
+- Queue workers.
+- Edge Functions.
+- Administrative tools.
+- Scheduled jobs.
+- Retry workers.
+- Development-to-production configuration.
+- Environment-variable defaults.
+- Legacy email adapters.
+
+Remove automatic provider switching for outgoing business email.
+
+If Resend is not configured, the business-email service must fail with a clear, structured configuration error. It must not silently send through another provider.
+
+If Resend is temporarily unavailable, apply only the defined Resend retry strategy. A retry must not create duplicate emails.
+
+A fallback to a different provider must never be hidden inside a generic catch block.
+
+Do not use dummy production credentials, fabricated sender domains, placeholder API keys, or fake success responses.
+
+A local development test double may be used only through an explicitly selected test configuration that cannot silently activate in production.
+
+Retain independent SMS/WhatsApp routing rules. Do not change the existing SMS/WhatsApp provider policy as part of this email-only repair.
+
+6. PHASE 4 — FORCE ALL BUSINESS EMAIL THROUGH CLOUD RUN
+
+Audit all frontend components, hooks, libraries, state managers, Edge Functions, server utilities, and notification workflows that can trigger business email.
+
+Replace direct provider calls with authenticated requests to the existing Cloud Run backend bridge and authorised email endpoint.
+
+Reuse the existing backend bridge rather than creating a parallel API gateway.
+
+Ensure that:
+
+- No browser bundle contains a Resend API key.
+- No "VITE_RESEND_API_KEY" or equivalent privileged frontend secret is used.
+- No frontend module calls Resend's email API directly.
+- No frontend business-email workflow bypasses Cloud Run through a direct Supabase Edge Function invocation.
+- Existing Supabase Auth SDK operations required for authentication remain intact.
+- Administrative email actions require appropriate server-side permissions.
+- Internal system notifications use an authenticated service-to-service mechanism.
+- User-supplied sender addresses and arbitrary recipient lists cannot bypass backend policies.
+- Cross-tenant email access and disclosure are prevented.
+
+Check all email-related environment variables and ensure Vite exposes only values that are safe for public use.
+
+Where direct Supabase functions are retained for unrelated responsibilities, do not indiscriminately remove them. Redirect only the business-email paths that violate the required architecture.
+
+7. PHASE 5 — CONFIGURE RESEND AND CLOUD RUN SECRETS
+
+Use these canonical settings, adapting variable names only where the current codebase requires compatibility.
+
+Setting| Purpose
+"RESEND_API_KEY"| Private credential for sending business emails
+"RESEND_FROM_EMAIL"| Authorised sender on "@rentmaikar.com"
+"RESEND_SENDING_DOMAIN"| "notify.rentmaikar.com"
+"RESEND_WEBHOOK_SECRET"| Secret for validating Resend webhook signatures
+"INBOUND_EMAIL_DOMAIN"| "backend.rentmaikar.com"
+"PUBLIC_BACKEND_URL"| Canonical public Cloud Run backend URL or verified backend custom domain
+"EMAIL_DELIVERY_ENABLED"| Explicit control over whether live business-email sending is enabled
+
+Do not assume every variable already exists or is currently used. Inspect the code and deployment configuration, then reconcile all names.
+
+Prefer Google Cloud Secret Manager for sensitive credentials and bind secrets to the Cloud Run service using secure environment-variable or supported secret-mount configuration.
+
+Keep non-secret configuration separate from secrets.
+
+Do not place "RESEND_API_KEY" or "RESEND_WEBHOOK_SECRET" in:
+
+- Frontend environment variables.
+- Vite "VITE_*" variables.
+- Browser local storage.
+- Public source code.
+- Client-side build artifacts.
+- Public logs.
+- Public error messages.
+- Committed ".env" files.
+
+Use least-privilege IAM for secret access and Cloud Run service accounts.
+
+Update environment templates using placeholders only. Never commit actual secrets.
+
+Inspect GitHub Actions and deployment workflows. Add only the secrets genuinely required by those workflows; do not duplicate provider credentials into GitHub unnecessarily if the deployment can retrieve them securely from Google Cloud Secret Manager.
+
+Document exact deployment commands or console steps appropriate to the repository's actual setup. Do not execute destructive cloud changes without authorisation.
+
+8. PHASE 6 — IMPLEMENT RESEND WEBHOOK SECURITY
+
+Inspect the current webhook routing and middleware order before implementing the handler.
+
+Create or consolidate a dedicated Resend webhook endpoint under the existing Cloud Run routing conventions.
+
+The endpoint must:
+
+1. Receive the actual webhook request format supported by Resend.
+2. Preserve the original raw request body where signature verification requires it.
+3. Validate the signature using the correct Resend webhook verification mechanism and configured webhook secret.
+4. Validate timestamp or replay protections where supported by the mechanism.
+5. Reject invalid signatures before trusting or persisting delivery events.
+6. Validate the event type and payload schema.
+7. Handle duplicate event deliveries idempotently.
+8. Persist the event and correlate it with the original email/provider message ID.
+9. Update the appropriate delivery state without incorrectly overwriting a terminal state.
+10. Return appropriate HTTP status codes so Resend's retry behaviour works as intended.
+11. Avoid trusting user-supplied delivery status or arbitrary message IDs.
+12. Log verification failures and processing errors without exposing secrets.
+
+Use the official Resend webhook specification for the exact signature algorithm and headers. Do not invent a signature format or copy an unrelated provider's verification logic.
+
+Configure delivery, bounce, complaint, and other relevant event types only where supported by the actual Resend configuration.
+
+Do not acknowledge an event as successfully processed before it is durably accepted for processing, unless a reliable queue or transactional outbox has already taken responsibility.
+
+9. PHASE 7 — INBOUND EMAIL SECURITY AND PROCESSING
+
+Implement or repair the inbound-email endpoint and service integration for "backend.rentmaikar.com".
+
+Before selecting a provider or implementation, establish the current inbound-email service and the real Resend account capabilities.
+
+The inbound pipeline must support:
+
+- Verified inbound delivery.
+- Recipient and tenant routing.
+- Sender validation and anti-spoofing controls.
+- Message ID deduplication.
+- Safe MIME and attachment handling.
+- Attachment size and type limits.
+- Malware scanning or a documented security control appropriate to the existing infrastructure.
+- Rate limiting and abuse controls.
+- Safe storage for any retained attachments.
+- Access-controlled message retrieval.
+- Auditing and error monitoring.
+- Clear handling of rejected, malformed, oversized, and unsupported messages.
+
+Use a provider-supported signature or authentication mechanism for inbound webhooks. If the inbound provider does not offer a sufficient mechanism, implement a documented alternative with request authentication and replay protection.
+
+Do not accept arbitrary inbound payloads merely because they arrive at the correct domain.
+
+Do not expose attachment download URLs publicly unless they are deliberately short-lived and authorised.
+
+Document the DNS MX records supplied by the actual inbound provider. Do not invent records.
+
+10. PHASE 8 — DELIVERY STATE, RETRIES, AND IDEMPOTENCY
+
+Design or reuse a durable email-delivery record and event model appropriate to the existing database.
+
+Inspect existing tables and migrations before creating new schema.
+
+If a schema change is required, add a forward-only migration that preserves existing data and conforms to current migration conventions.
+
+Support, as appropriate:
+
+- Internal email operation ID.
+- Tenant ID and authorised initiating actor.
+- Recipient reference, with sensitive data protected.
+- Template identifier and template version.
+- Resend message ID.
+- Idempotency key.
+- Current delivery state.
+- Attempt count and last error classification.
+- Created, accepted, delivered, bounced, complained, and failed timestamps where applicable.
+- Correlation and trace identifiers.
+
+Do not store full sensitive message bodies unless necessary and explicitly governed by retention controls.
+
+Use a transactional outbox or equivalent durable queue if the existing system requires reliable asynchronous sending.
+
+Enforce uniqueness constraints or equivalent atomic controls on idempotency keys.
+
+Do not retry permanent failures indefinitely. Use bounded retries with exponential backoff and jitter for transient failures, respecting provider guidance.
+
+Do not resend a message merely because a status webhook was delayed.
+
+Ensure the system distinguishes an API request being accepted from actual delivery.
+
+11. PHASE 9 — MONITORING, ALERTING, AND OPERATIONS
+
+Implement structured logs, metrics, and operational alerts using the existing Rentmaikar monitoring approach.
+
+At minimum, monitor:
+
+- Total business-email requests.
+- Resend acceptance and rejection rates.
+- Delivered, bounced, complained, failed, and unknown states.
+- Webhook signature verification failures.
+- Invalid inbound messages.
+- Retry volume and exhausted retries.
+- Resend API latency and timeout rates.
+- Missing secrets and invalid sender configuration.
+- Email queue depth and processing delay, if a queue is used.
+- Duplicate-send prevention events.
+
+Redact secrets and sensitive message data from logs.
+
+Create actionable alerts for sustained delivery failures, abnormal bounce or complaint rates, webhook failures, and exhausted retry queues.
+
+If monitoring infrastructure is unavailable, document the missing component and provide a concrete implementation path. Do not claim that alerts exist unless they are actually configured and tested.
+
+12. PHASE 10 — PRESERVE EXISTING RENTMAIKAR FUNCTIONALITY
+
+Audit existing business-email workflows and migrate them without losing their business rules or templates.
+
+Include, where present:
+
+- Booking confirmations and updates.
+- Driver and vehicle-owner notifications.
+- Payment and payout notifications.
+- Referee and vehicle-verification notifications.
+- Administrative notifications.
+- Support communications.
+- Invitations.
+- Operational alerts.
+- Scheduled reminders.
+- Email-based reports.
+- Inbound support or operational messages.
+
+Do not assume these features exist merely because they are listed here. Locate the actual implementation and map each existing workflow.
+
+Preserve the existing SMS/WhatsApp architecture and its independent provider rules.
+
+Preserve the current authentication, Persona verification, payment security, role checks, RLS, tenant isolation, and backend bridge.
+
+Do not restore deleted users, bypass approval checks, weaken account verification, or alter unrelated payment or communications logic.
+
+13. PHASE 11 — AUTOMATED TESTS AND LIVE VERIFICATION
+
+Implement tests that verify behaviour, not just the existence of configuration.
+
+Unit tests
+
+Test:
+
+- Sender-domain restrictions.
+- Recipient and payload validation.
+- Resend-only provider selection.
+- Explicit failure when Resend configuration is missing.
+- No alternative-provider fallback on API errors.
+- Correct handling of transient and permanent failures.
+- Idempotency and duplicate prevention.
+- Webhook signature acceptance and rejection.
+- Invalid event payloads.
+- Inbound sender, recipient, and attachment validation.
+- Tenant and role authorisation.
+- Authentication-email separation.
+
+Integration tests
+
+Verify:
+
+- Frontend-to-Cloud-Run business-email request flow.
+- Cloud Run-to-Resend API behaviour.
+- Persistence of email request and delivery records.
+- Delivery webhook event correlation.
+- Inbound provider-to-Cloud-Run request validation.
+- Retry behaviour after transient failures.
+- Duplicate webhook delivery handling.
+- Failure recovery after process interruption, if applicable.
+
+Use mocks only for deterministic tests. Clearly label them as mocked tests.
+
+Static and build checks
+
+Run the project's existing:
+
+- Lint.
+- Typecheck.
+- Unit tests.
+- Integration tests.
+- Production build.
+- Relevant security checks.
+
+Fix regressions introduced by the changes. Do not conceal pre-existing failures; report them separately.
+
+End-to-end live tests
+
+Where authorised credentials, network access, DNS access, and deployment access are available, perform actual tests:
+
+1. Send a controlled test business email through the Cloud Run endpoint.
+2. Confirm Resend accepted the request and capture the provider message ID.
+3. Verify receipt at a controlled test mailbox.
+4. Verify the visible "From" address ends with "@rentmaikar.com".
+5. Inspect the actual message headers and confirm the configured sending infrastructure and authentication alignment.
+6. Trigger or observe a genuine Resend delivery event.
+7. Verify the webhook signature and resulting persisted delivery state.
+8. Test duplicate webhook delivery.
+9. Test a controlled failure and verify that no alternative provider is used.
+10. Send an email to a test address on the inbound domain.
+11. Verify that the inbound service receives the message and forwards it to Cloud Run.
+12. Confirm that the backend authenticates, processes, and records the inbound event.
+
+Use controlled test accounts and non-sensitive test content.
+
+Never send messages to real customers merely to test infrastructure.
+
+If access to live credentials, DNS, Resend, or Cloud Run is unavailable, clearly identify the blocked steps and provide precise instructions for an authorised operator to complete them. Do not simulate successful live tests.
+
+14. PHASE 12 — REPOSITORY AND DEPLOYMENT HYGIENE
+
+Before completion:
+
+- Review all changed files.
+- Remove obsolete business-email provider paths only after confirming they are no longer referenced.
+- Update environment templates and deployment documentation.
+- Update relevant tests and API contracts.
+- Confirm that no real secrets have been added to Git.
+- Confirm that no privileged email credential is exposed in the production frontend bundle.
+- Check for hardcoded placeholder provider IDs and fake success responses.
+- Confirm the existing backend bridge is still used.
+- Confirm the inbound and outbound domains have not been swapped.
+- Review the database migrations for backward compatibility.
+- Report all required DNS, Secret Manager, IAM, and provider-console changes separately from source-code changes.
+
+Do not silently change production DNS, rotate credentials, delete secrets, disable authentication, or perform destructive database operations.
+
+15. REQUIRED COMPLETION REPORT
+
+At the end, provide an evidence-based report containing:
+
+A. Initial findings
+
+Every discovered sender, inbound handler, webhook, fallback, environment variable, and deployment consumer, with file paths and relevant symbols.
+
+B. Changes implemented
+
+List changed files, explain what each change accomplishes, and distinguish code changes from cloud-console or DNS actions.
+
+C. Final architecture
+
+Show the outgoing and incoming email flows, clearly separating business email from Supabase Auth email.
+
+D. Provider fallback audit
+
+List every former business-email fallback found, the corrective action, and evidence that no reachable business-email path silently switches providers.
+
+E. Credential and configuration inventory
+
+For every required variable, state:
+
+- Whether the code consumes it.
+- Which service consumes it.
+- Where it should be stored.
+- Whether the value is present and validated.
+- Whether live configuration has been independently verified.
+
+Never disclose actual secret values.
+
+F. Testing evidence
+
+For every test, state:
+
+- Test name or command.
+- Pass, fail, blocked, or not run.
+- Actual result.
+- Whether the test used a mock or a live external service.
+
+G. Outstanding actions
+
+List unresolved issues, DNS records requiring provider confirmation, required secret bindings, IAM permissions, provider-console changes, and deployment steps.
+
+H. Production readiness
+
+Use one of these explicit classifications:
+
+- Implemented and locally tested
+- Integrated and deployed, but live delivery not verified
+- Live outbound email verified
+- Live inbound email verified
+- End-to-end email architecture verified
+
+Use the strongest classification supported by actual evidence, and state which tests justify it.
+
+FINAL INSTRUCTION
+
+Begin by inspecting the actual current repository and its working state. Establish the real architecture before making changes.
+
+Then implement the changes, test them, and report evidence.
+
+Do not stop after writing a plan. Do not fabricate routes, credentials, DNS records, test results, deployment status, or production success.
+
+The final system must enforce this architecture:
+
+Outgoing business email: Rentmaikar frontend or internal workflow → authenticated Cloud Run backend → Resend → recipient.
+
+Outgoing sender identity: "*@rentmaikar.com", using the configured sending infrastructure associated with "notify.rentmaikar.com".
+
+Incoming email: Sender → configured inbound-email service for "backend.rentmaikar.com" → authenticated Cloud Run endpoint → validated and authorised Rentmaikar workflow.
+
+Authentication email: remains under the existing Supabase Auth configuration unless an explicitly approved and tested migration is implemented.
+
+Business-email provider policy: Resend only, with no automatic provider fallbacks.
+
+The implementation is complete only when the code, configuration, security controls, tests, and evidence agree with these requirements.
