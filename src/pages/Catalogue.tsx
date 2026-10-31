@@ -167,7 +167,11 @@ const Catalogue = () => {
         const location = row.pickup_city || row.pickup_location || "Unknown";
         return { row, location };
       })
-      .filter(({ location }) => (country === "Nigeria" ? isNigeriaLocation(location) : !isNigeriaLocation(location)))
+      .filter(({ location }) => {
+        if (country === "Nigeria") return isNigeriaLocation(location);
+        if (country === "USA") return !isNigeriaLocation(location);
+        return location.toLowerCase().includes(country.toLowerCase()) || (!isNigeriaLocation(location) && !location.toLowerCase().includes("washington") && !location.toLowerCase().includes("maryland") && !location.toLowerCase().includes("virginia"));
+      })
 
       .map(({ row, location }) => {
         const coordinates = usaLocationCoordinates[location] ?? null;

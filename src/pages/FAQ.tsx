@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const FAQ = () => {
   const { country } = useRegion();
-  const regionFilter = country === 'USA' ? 'USA' : 'Nigeria';
+  const regionFilter = country === 'USA' ? 'USA' : country === 'Nigeria' ? 'Nigeria' : country;
   const { categories, items, loading } = useFAQ(regionFilter);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
