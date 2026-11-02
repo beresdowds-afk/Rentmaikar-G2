@@ -16,6 +16,7 @@ import {
   PenSquare,
   Users,
   ExternalLink,
+  Minus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -265,9 +266,10 @@ export const AdminCommunicationsHub: React.FC = () => {
                 size="sm"
                 onClick={() => setIsMinimized(true)}
                 className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                title="Minimize to floating button"
+                title="Minimise Hub"
+                aria-label="Minimise Hub"
               >
-                <Minimize2 className="h-3.5 w-3.5 rotate-45" />
+                <Minus className="h-3.5 w-3.5" />
               </Button>
 
               <Button
