@@ -16,7 +16,13 @@ echo "=================================================================="
 echo "  RentMaikar Phased Git Repository Push [Branch: $TARGET_BRANCH]"
 echo "=================================================================="
 
-# 1. Ensure repository is initialized and aligned on target branch
+# 1. Global Git configuration (safe directory & author) before any repository commands
+git config --global --add safe.directory "*" 2>/dev/null || true
+git config --global user.name "Olusola Adebayo" 2>/dev/null || true
+git config --global user.email "beresdowds@gmail.com" 2>/dev/null || true
+git config advice.ignoredHook false 2>/dev/null || true
+
+# 2. Ensure repository is initialized and aligned on target branch
 if [ ! -d ".git" ]; then
   echo "==> Initializing git repository..."
   git init -b "$TARGET_BRANCH" 2>/dev/null || (git init && git branch -M "$TARGET_BRANCH")
@@ -30,17 +36,13 @@ elif [ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]; then
   git branch -M "$TARGET_BRANCH" 2>/dev/null || git checkout -B "$TARGET_BRANCH" 2>/dev/null || true
 fi
 
-# 2. Ensure Git author information is configured
+# Ensure local Git author information is configured
 if [ -z "$(git config user.name 2>/dev/null || true)" ]; then
   git config user.name "Olusola Adebayo"
 fi
 if [ -z "$(git config user.email 2>/dev/null || true)" ]; then
   git config user.email "beresdowds@gmail.com"
 fi
-git config --global user.name "Olusola Adebayo" 2>/dev/null || true
-git config --global user.email "beresdowds@gmail.com" 2>/dev/null || true
-git config --global --add safe.directory "*" 2>/dev/null || true
-git config advice.ignoredHook false 2>/dev/null || true
 
 # 3. Increase git HTTP buffers to 500MB to avoid large-pack dropouts and timeouts
 git config http.postBuffer 524288000 || git config --global http.postBuffer 524288000 || true
@@ -63,6 +65,8 @@ if [ -n "$GITHUB_TOKEN" ]; then
   CLEAN_REPO="${CLEAN_REPO#*@}"
   PUSH_REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@${CLEAN_REPO}"
   echo "==> Authenticated remote URL configured with access token."
+else
+  echo "⚠ Note: GITHUB_TOKEN is not provided. Pushing requires GitHub write credentials."
 fi
 
 if git remote | grep -q "^origin$"; then
