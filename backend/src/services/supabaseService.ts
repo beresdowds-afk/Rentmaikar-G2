@@ -6,8 +6,6 @@
  */
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import fs from "fs";
-import path from "path";
 
 const DEFAULT_SUPABASE_URL = "https://jrsydiofzceoeddjogov.supabase.co";
 const DEFAULT_SUPABASE_KEY = "sb_publishable_uE7DPlUSNxgQ1pfEA6nfQA_Z0VDAP4p";
@@ -21,7 +19,10 @@ export const isValidKey = (k?: string): boolean => {
     const parts = k.split(".");
     if (parts.length === 3) {
       const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
-      if (payload.ref === "bwvocmhcledbwqlpcswp") return false;
+      if (
+        payload.ref === "bwvocmhcledbwqlpcswp" ||
+        String(payload.role || "").toLowerCase() === "service_role"
+      ) return false;
     }
   } catch {
     // Ignore base64 decoding errors for custom tokens
@@ -95,6 +96,7 @@ export const ALL_EDGE_FUNCTIONS = [
   "iot-scheduled-sync",
   "manychat-webhook",
   "mqtt-ingestion-worker",
+  "notify-withdrawal",
   "notify-referees",
   "notify-training-review",
   "notify-withdrawal",
@@ -203,6 +205,31 @@ export const ALL_EDGE_FUNCTIONS = [
 ];
 
 export const EDGE_FUNCTIONS_SET = new Set(ALL_EDGE_FUNCTIONS);
+const ANONYMOUS_EDGE_FUNCTIONS = new Set(["get-vapid-public-key"]);
+const INTERNAL_EDGE_FUNCTIONS = new Set([
+  "accident-emergency-dispatch",
+  "auth-email-hook",
+  "dispatch-event-notifications",
+  "email-webhook",
+  "manychat-webhook",
+  "mqtt-ingestion-worker",
+  "opay-webhook",
+  "paypal-webhook",
+  "persona-webhook",
+  "paystack-webhook",
+  "recording-status-callback",
+  "send-email-notification",
+  "send-sms-notification",
+  "sent-inbound",
+  "sent-status",
+  "social-inbox-webhook",
+  "termii-webhook",
+  "twilio-webhook",
+  "telemetry-dispatch",
+  "telemetry-ingest",
+  "voip-status-callback",
+  "whatchimp-webhook",
+]);
 
 export interface EdgeFunctionInvocationResult {
   ok: boolean;
@@ -219,7 +246,6 @@ export class SupabaseBackendService {
   private url: string;
   private apiKey: string;
   private serviceRoleKey: string | null = null;
-  private dynamicFunctionsSet: Set<string>;
 
   constructor() {
     const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_PROJECT_URL;
@@ -228,7 +254,6 @@ export class SupabaseBackendService {
       : DEFAULT_SUPABASE_URL;
 
     const rawKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_ANON_KEY ||
       process.env.VITE_SUPABASE_ANON_KEY ||
       process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
@@ -238,34 +263,6 @@ export class SupabaseBackendService {
 
     if (process.env.SUPABASE_SERVICE_ROLE_KEY && isValidKey(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
       this.serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    }
-
-    this.dynamicFunctionsSet = new Set(ALL_EDGE_FUNCTIONS);
-    this.discoverLocalEdgeFunctions();
-  }
-
-  /**
-   * Scans filesystem if available to auto-discover any newly created edge functions
-   */
-  private discoverLocalEdgeFunctions(): void {
-    const searchPaths = [
-      path.resolve(process.cwd(), "supabase/functions"),
-      path.resolve(process.cwd(), "../supabase/functions"),
-    ];
-
-    for (const sp of searchPaths) {
-      try {
-        if (fs.existsSync(sp)) {
-          const entries = fs.readdirSync(sp, { withFileTypes: true });
-          for (const entry of entries) {
-            if (entry.isDirectory() && !entry.name.startsWith("_")) {
-              this.dynamicFunctionsSet.add(entry.name);
-            }
-          }
-        }
-      } catch {
-        // Ignore filesystem scan errors
-      }
     }
   }
 
@@ -303,22 +300,24 @@ export class SupabaseBackendService {
   }
 
   public isKnownFunction(name: string): boolean {
-    return this.dynamicFunctionsSet.has(name) || /^[a-zA-Z0-9_-]+$/.test(name);
+    return EDGE_FUNCTIONS_SET.has(name);
   }
 
   public getAllFunctions(): string[] {
-    return Array.from(this.dynamicFunctionsSet).sort();
+    return Array.from(EDGE_FUNCTIONS_SET).sort();
   }
 
   /**
-   * Dispatches an Edge Function invocation upstream to Supabase
-   * with complete header and authorization forwarding.
+   * Dispatches only catalogued functions with a caller token, an explicit
+   * public-function exception, or an allowlisted internal service identity.
    */
   public async invokeEdgeFunction(
     functionName: string,
     body: any = {},
     options: {
       userToken?: string;
+      allowAnonymous?: boolean;
+      internalService?: boolean;
       method?: string;
       headers?: Record<string, string>;
       timeoutMs?: number;
@@ -329,14 +328,62 @@ export class SupabaseBackendService {
     const timeoutMs = options.timeoutMs || 25000;
     const method = options.method || "POST";
 
+    if (!this.isKnownFunction(functionName)) {
+      return {
+        ok: false,
+        status: 404,
+        error: "Unknown Edge Function",
+        latencyMs: Date.now() - startTime,
+        functionName,
+        provider: "supabase_edge",
+      };
+    }
+
+    if (
+      options.internalService &&
+      (!INTERNAL_EDGE_FUNCTIONS.has(functionName) || !this.serviceRoleKey)
+    ) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Internal service invocation is not authorized",
+        latencyMs: Date.now() - startTime,
+        functionName,
+        provider: "supabase_edge",
+      };
+    }
+    if (
+      !options.userToken &&
+      !options.internalService &&
+      !(options.allowAnonymous && ANONYMOUS_EDGE_FUNCTIONS.has(functionName))
+    ) {
+      return {
+        ok: false,
+        status: 401,
+        error: "Authenticated caller required",
+        latencyMs: Date.now() - startTime,
+        functionName,
+        provider: "supabase_edge",
+      };
+    }
+
     const forwardHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       apikey: this.apiKey,
       ...(options.headers || {}),
     };
 
-    if (options.userToken) {
-      forwardHeaders["Authorization"] = options.userToken.startsWith("Bearer ")
+    const userAuthorization = options.userToken
+      ? (/^Bearer\s+/i.test(options.userToken)
+          ? options.userToken
+          : `Bearer ${options.userToken}`)
+      : "";
+    forwardHeaders["Authorization"] = options.internalService
+      ? `Bearer ${this.serviceRoleKey}`
+      : userAuthorization || `Bearer ${this.apiKey}`;
+
+    if (options.userToken && !options.internalService) {
+      forwardHeaders["Authorization"] = /^Bearer\s+/i.test(options.userToken)
         ? options.userToken
         : `Bearer ${options.userToken}`;
     } else if (!forwardHeaders["Authorization"]) {
@@ -429,7 +476,7 @@ export class SupabaseBackendService {
         restStatus: res.status,
         latencyMs,
         timestamp: new Date().toISOString(),
-        totalEdgeFunctionsAvailable: this.dynamicFunctionsSet.size,
+        totalEdgeFunctionsAvailable: EDGE_FUNCTIONS_SET.size,
       };
     } catch {
       return {
@@ -438,7 +485,7 @@ export class SupabaseBackendService {
         restStatus: 0,
         latencyMs: Date.now() - startTime,
         timestamp: new Date().toISOString(),
-        totalEdgeFunctionsAvailable: this.dynamicFunctionsSet.size,
+        totalEdgeFunctionsAvailable: EDGE_FUNCTIONS_SET.size,
       };
     }
   }
