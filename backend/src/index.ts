@@ -16,6 +16,7 @@ import { bridgeRouter } from "./routes/bridge";
 import { marketingRouter } from "./routes/marketing";
 import { renderPortalHtml } from "./portal/portalHtml";
 import { bridgeManager } from "./services/bridgeManager";
+import { rateLimit } from "./services/requestGuards";
 import { platformHealthService } from "./services/platformHealth";
 import { generateServerSitemap } from "./services/sitemapGenerator";
 import {
@@ -226,12 +227,27 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use(
   express.urlencoded({
     extended: true,
+    limit: "1mb",
     verify: (req: any, _res, buf) => {
       req.rawBody = buf;
     },
   })
 );
 app.use(morgan("combined"));
+
+const apiFunctionRateLimit = rateLimit(90, 60_000);
+const bridgeApiRateLimit = rateLimit(120, 60_000);
+app.use(["/api/functions", "/functions", "/functions/v1"], apiFunctionRateLimit);
+app.use("/api/bridge", bridgeApiRateLimit);
+app.use(
+  ["/api/functions", "/functions", "/functions/v1", "/api/bridge"],
+  express.json({
+    limit: "1mb",
+    verify: (req: any, _res, buf) => {
+      req.rawBody = Buffer.from(buf);
+    },
+  }),
+);
 
 // Webhooks raw body capture (for /api/webhooks and all provider endpoints)
 app.use("/api/webhooks", express.raw({ type: "application/json" }), webhooksRouter);

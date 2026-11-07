@@ -25,6 +25,7 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
 | `PORTAL_ADMIN_EMAIL` | Admin backend | Sensitive config | Cloud Run env (`--update-env-vars`) or Secret Manager | Change with password |
 | `PORTAL_ADMIN_PASSWORD` | Admin backend | **Secret** | Secret Manager | Rotate on operator change / suspected exposure |
 | `PORTAL_MASTER_KEY` | Admin backend | **Secret** | Secret Manager | Rotate on suspected exposure |
+| `RENTMAIKAR_INTERNAL_SERVICE_SECRET` | Admin backend | **Secret** | Secret Manager | Rotate on suspected exposure; required for allowlisted internal function calls |
 | `SUPABASE_SERVICE_ROLE_KEY` | Admin backend | **Secret** | Secret Manager | Rotate in Supabase; redeploy |
 | `TWILIO_*`, `SENT_*`, `RESEND_*`, `PAYSTACK_*`, `PAYPAL_*`, `OPAY_*`, `PERSONA_API_KEY`, `ELEVENLABS_API_KEY`, `TERMII_API_KEY` | Admin backend | **Secret** (IDs/modes are config) | Secret Manager (see Section 2 and admin template) | Rotate at provider console |
 | `PORT`, `NODE_ENV`, `PUBLIC_BACKEND_URL`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | Admin backend | Public config | Cloud Run env | n/a |
@@ -50,6 +51,7 @@ Credentials are split by deployment surface. Templates: `handoff/env/public-fron
 [ SURFACE 2: staging.rentmaikar.com — rentmaikar-backend API and admin portal (PORTAL_* + backend secrets) ]
   ├── PORTAL_SECRET_KEY, PORTAL_ADMIN_EMAIL, PORTAL_ADMIN_PASSWORD, PORTAL_MASTER_KEY
 [ BACKEND / EDGE FUNCTIONS (Strict Secrets) ]
+  ├── RENTMAIKAR_INTERNAL_SERVICE_SECRET (allowlisted service-to-service function identity)
   ├── SUPABASE_SERVICE_ROLE_KEY (Bypasses RLS - NEVER expose to frontend)
   ├── TWILIO_AUTH_TOKEN & TWILIO_API_KEY_SECRET
   ├── SENT_API_KEY & SENT_WEBHOOK_SECRET
@@ -70,7 +72,7 @@ See [`DEPLOYMENT-SURFACES.md`](./DEPLOYMENT-SURFACES.md) for ownership and deplo
 | `VITE_*` (public client config) | Yes (build-time) | No |
 | `BACKEND_URL`, `SUPABASE_URL` (non-secret runtime URLs) | Yes | Yes |
 | `PORTAL_SECRET_KEY`, `PORTAL_ADMIN_EMAIL`, `PORTAL_ADMIN_PASSWORD`, `PORTAL_MASTER_KEY` | **Never** | Yes (env / Secret Manager) |
-| `SUPABASE_SERVICE_ROLE_KEY` and all provider secrets (Twilio, Sent.dm, PayPal, Paystack, OPay, Persona, Resend, ...) | **Never** | Yes |
+| `SUPABASE_SERVICE_ROLE_KEY`, `RENTMAIKAR_INTERNAL_SERVICE_SECRET`, and all provider secrets (Twilio, Sent.dm, PayPal, Paystack, OPay, Persona, Resend, ...) | **Never** | Yes |
 
 Templates: [`handoff/env/public-frontend.env.template`](./env/public-frontend.env.template) (surface 1) and [`handoff/env/admin-backend.env.template`](./env/admin-backend.env.template) (surface 2) are the source of truth. `handoff/backend.env.template` is only a pointer to them, and `.env.example` (local development) carries per-variable surface headers. Compliance is enforced by `npm run check:env-surfaces`.
 

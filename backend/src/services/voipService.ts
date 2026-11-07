@@ -194,7 +194,7 @@ export async function twilioRequest(
 // -----------------------------------------------------------------
 
 export async function mintVoiceAccessToken(
-  identityParam?: string,
+  _identityParam?: string,
   userToken?: string
 ): Promise<{
   token: string;
@@ -208,24 +208,16 @@ export async function mintVoiceAccessToken(
   const apiKeySecret = process.env.TWILIO_API_KEY_SECRET || process.env.TWILIO_API_SECRET;
   const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
 
-  let resolvedIdentity = identityParam;
-
-  if (userToken) {
-    try {
-      const supabase = supabaseBackendService.getClient();
-      const cleanToken = userToken.replace(/^Bearer\s+/i, "").trim();
-      const { data: { user }, error } = await supabase.auth.getUser(cleanToken);
-      if (!error && user?.id) {
-        resolvedIdentity = `user_${user.id}`;
-      }
-    } catch (e: any) {
-      console.warn("[Voice Token] Could not resolve user from token:", e.message);
-    }
+  const cleanToken = String(userToken || "").replace(/^Bearer\s+/i, "").trim();
+  if (!cleanToken) {
+    return { token: "", identity: "", ttl: 0, error: "Authenticated session required" };
   }
-
-  if (!resolvedIdentity) {
-    resolvedIdentity = `agent_${Math.random().toString(36).slice(2, 9)}`;
+  const supabase = supabaseBackendService.getClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser(cleanToken);
+  if (authError || !user?.id) {
+    return { token: "", identity: "", ttl: 0, error: "Invalid authentication session" };
   }
+  const resolvedIdentity = `user_${user.id}`;
 
   const missing = [
     !accountSid && "TWILIO_ACCOUNT_SID",

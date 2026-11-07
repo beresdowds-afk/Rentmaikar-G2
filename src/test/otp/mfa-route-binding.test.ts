@@ -41,6 +41,7 @@ vi.mock("../../../backend/src/services/phoneOtpService", () => ({
 }));
 
 vi.mock("../../../backend/src/services/supabaseService", () => ({
+  ALL_EDGE_FUNCTIONS: [],
   supabaseBackendService: {
     getAdminClient: () => ({
       from: (table: string) => {
