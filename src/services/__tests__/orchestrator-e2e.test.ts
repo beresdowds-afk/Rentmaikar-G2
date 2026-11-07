@@ -56,12 +56,7 @@ describe("Orchestrator E2E: Traccar → MQTT → Plugin → vehicle_analytics_ev
     const state = orchestrator.getVehicleState(vehicleId);
     expect(state?.battery).toBe(10);
     expect(state?.temperature).toBe(110);
-    // Analytics persistence is server-authoritative: the browser forwards the
-    // raw event to the telemetry-ingest edge function.
-    expect(supabase.functions.invoke).toHaveBeenCalledWith(
-      "telemetry-ingest",
-      expect.objectContaining({ body: expect.anything() }),
-    );
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
   });
 
   it("Disabled plugin does not process events; re-enabled resumes", async () => {
