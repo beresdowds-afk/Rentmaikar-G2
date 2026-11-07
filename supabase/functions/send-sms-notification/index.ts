@@ -16,7 +16,7 @@ import {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, idempotency-key, x-correlation-id",
 };
 
 type NotificationType = 
@@ -80,6 +80,7 @@ interface SMSNotificationRequest {
   device?: string;
   /** Force a specific provider; omit to use Sent.dm with regional fallback. */
   providerOverride?: "sent" | "twilio" | "termii";
+  idempotencyKey?: string;
   /** WhatsApp approved template (required outside the 24h session window). */
   whatsappTemplateId?: string;
   templateName?: string;
@@ -207,6 +208,58 @@ const getMessageContent = (data: SMSNotificationRequest): string => {
   }
 };
 
+async function getAdministratorUserId(token: string): Promise<string | null> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey || !token) return null;
+  const admin = createClient(supabaseUrl, serviceKey);
+  const { data: userData, error: userError } = await admin.auth.getUser(token);
+  if (userError || !userData.user) return null;
+  const { data: isAdmin, error: roleError } = await admin.rpc("is_admin", {
+    _user_id: userData.user.id,
+  });
+  return !roleError && isAdmin === true ? userData.user.id : null;
+}
+
+async function consumeSmsProviderRateLimit(
+  supabase: ReturnType<typeof createClient>,
+  actorId: string,
+  phone: string,
+  provider: "sent" | "twilio" | "termii",
+): Promise<boolean> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(phone),
+  );
+  const recipientHash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+  const scopes: Array<[string, string, number]> = [
+    [actorId, `sms:${provider}:actor`, provider === "sent" ? 30 : 10],
+    [`${actorId}:${recipientHash}`, `sms:${provider}:recipient`, 5],
+  ];
+  for (const [identifier, endpoint, maxRequests] of scopes) {
+    const { data: allowed, error } = await supabase.rpc(
+      "check_auth_rate_limit",
+      {
+        _identifier: identifier,
+        _endpoint: endpoint,
+        _max_requests: maxRequests,
+        _window_seconds: 60,
+      },
+    );
+    if (error) {
+      console.error(
+        `[send-sms-notification] rate limit failed provider=${provider}:`,
+        error.message,
+      );
+      throw new Error("SMS rate limiting is unavailable");
+    }
+    if (allowed !== true) return false;
+  }
+  return true;
+}
+
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -226,7 +279,11 @@ const handler = async (req: Request): Promise<Response> => {
 
   // Check if the authorization includes the service role key (Bearer token)
   const token = authHeader.replace('Bearer ', '');
-  if (token !== supabaseServiceKey) {
+  const isServiceCaller = token === supabaseServiceKey;
+  const administratorUserId = isServiceCaller
+    ? null
+    : await getAdministratorUserId(token);
+  if (!isServiceCaller && !administratorUserId) {
     console.error('Invalid authorization - service role key mismatch');
     return new Response(
       JSON.stringify({ success: false, error: 'Unauthorized' }),
@@ -234,8 +291,32 @@ const handler = async (req: Request): Promise<Response> => {
     );
   }
 
+  const actorId = administratorUserId ?? "service:send-sms-notification";
+  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, supabaseServiceKey);
+  const correlationId =
+    req.headers.get("x-correlation-id") ??
+    req.headers.get("x-request-id") ??
+    crypto.randomUUID();
+  let body: SMSNotificationRequest | undefined;
+  let attemptedProvider: "sent" | "twilio" | "termii" | "none" = "none";
+
   try {
-    const body: SMSNotificationRequest = await req.json();
+    body = await req.json();
+    if (!isServiceCaller && body.notificationType !== "general") {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Administrator-originated messages must use the general purpose",
+        }),
+        { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+    if (!isServiceCaller && body.providerOverride) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Provider overrides are not permitted" }),
+        { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
     
     // Log request for audit (mask phone number)
     console.log('SMS request:', {
@@ -243,6 +324,7 @@ const handler = async (req: Request): Promise<Response> => {
       phone: body.phone ? body.phone.substring(0, 6) + '****' : 'none',
       channel: body.channel,
       type: body.notificationType,
+      correlationId,
     });
     
     // Validate phone
@@ -368,6 +450,21 @@ const handler = async (req: Request): Promise<Response> => {
           }
         : undefined;
 
+      if (
+        !(await consumeSmsProviderRateLimit(
+          supabase,
+          actorId,
+          body.phone,
+          "sent",
+        ))
+      ) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Rate limit exceeded" }),
+          { status: 429, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      attemptedProvider = "sent";
       const sentResult = await sendViaSent({
         to: body.phone,
         channel: isWa ? 'whatsapp' : 'sms',
@@ -376,10 +473,13 @@ const handler = async (req: Request): Promise<Response> => {
         sandbox: isSandboxRequested,
         template: templateConfig,
         mediaUrls: isWa ? body.mediaUrls : undefined,
+        idempotencyKey:
+          body.idempotencyKey ?? req.headers.get("idempotency-key") ?? undefined,
         metadata: {
           notification_type: body.notificationType,
           region: region ?? "Global",
           template_name: isOtp ? 'SENT_VERIFY_CODE_2' : (waTemplateId || body.notificationType),
+          correlation_id: correlationId,
         },
       });
 
@@ -396,7 +496,12 @@ const handler = async (req: Request): Promise<Response> => {
           region: region ?? "Global",
           provider_message_id: sentResult.messageId,
           template_name: waTemplateId || body.notificationType,
-          metadata: { notification_type: body.notificationType, sandbox: sentResult.sandbox },
+          metadata: {
+            notification_type: body.notificationType,
+            sandbox: sentResult.sandbox,
+            correlation_id: correlationId,
+            delivery_status: "accepted",
+          },
         });
         await logOutboundDecision(supabase, {
           channel: body.channel === 'whatsapp' ? 'whatsapp' : 'sms',
@@ -438,6 +543,21 @@ const handler = async (req: Request): Promise<Response> => {
         throw new Error("Nigeria SMS service not configured. Please ensure Sent.dm is enabled or set TERMII_API_KEY.");
       }
 
+      if (
+        !(await consumeSmsProviderRateLimit(
+          supabase,
+          actorId,
+          body.phone,
+          "termii",
+        ))
+      ) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Rate limit exceeded" }),
+          { status: 429, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      attemptedProvider = "termii";
       const isWhatsApp = body.channel === 'whatsapp';
       let termiiChannel = isWhatsApp ? 'whatsapp' : 'generic';
 
@@ -462,7 +582,9 @@ const handler = async (req: Request): Promise<Response> => {
 
       // If generic channel fails or DND block occurs, retry via DND route for transactional delivery
       if ((!termiiResponse.ok || termiiData.code !== 'ok') && termiiChannel === 'generic') {
-        console.warn("Termii generic route failed, retrying via DND route:", termiiData);
+        console.warn("Termii generic route failed; trying configured DND fallback", {
+          correlationId,
+        });
         termiiChannel = 'dnd';
         termiiResponse = await fetch('https://api.ng.termii.com/api/sms/send', {
           method: 'POST',
@@ -481,8 +603,12 @@ const handler = async (req: Request): Promise<Response> => {
       }
 
       if (!termiiResponse.ok || termiiData.code !== 'ok') {
-        console.error("Termii API error:", termiiData);
-        throw new Error(termiiData.message || `Failed to send ${body.channel} via Termii`);
+        console.error("Termii API rejected SMS", {
+          status: termiiResponse.status,
+          correlationId,
+          notificationType: body.notificationType,
+        });
+        throw new Error("Termii delivery failed");
       }
 
       console.log(`${body.channel.toUpperCase()} sent via Termii:`, termiiData.message_id);
@@ -497,7 +623,11 @@ const handler = async (req: Request): Promise<Response> => {
         region: 'NIGERIA',
         provider_message_id: termiiData.message_id,
         template_name: body.notificationType,
-        metadata: { notification_type: body.notificationType },
+        metadata: {
+          notification_type: body.notificationType,
+          correlation_id: correlationId,
+          delivery_status: "accepted",
+        },
       });
       await logOutboundDecision(supabase, {
         channel: body.channel === 'whatsapp' ? 'whatsapp' : 'sms',
@@ -551,6 +681,21 @@ if (!twilioFallbackAllowed(body.phone)) {
       throw new Error("SMS service not configured");
     }
 
+    if (
+      !(await consumeSmsProviderRateLimit(
+        supabase,
+        actorId,
+        body.phone,
+        "twilio",
+      ))
+    ) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Rate limit exceeded" }),
+        { status: 429, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    attemptedProvider = "twilio";
     const isWhatsApp = body.channel === 'whatsapp';
     const mainNumber = getFromNumber(body.phone, 'main');
     const fromNumber = isWhatsApp ? `whatsapp:${mainNumber}` : mainNumber;
@@ -587,8 +732,12 @@ if (!twilioFallbackAllowed(body.phone)) {
     const responseData = await twilioResponse.json();
 
     if (!twilioResponse.ok) {
-      console.error("Twilio API error:", responseData);
-      throw new Error(responseData.message || `Failed to send ${body.channel}`);
+      console.error("Twilio API rejected SMS", {
+        status: twilioResponse.status,
+        correlationId,
+        notificationType: body.notificationType,
+      });
+      throw new Error("Twilio delivery failed");
     }
 
     console.log(`${body.channel.toUpperCase()} sent via Twilio:`, responseData.sid);
@@ -603,7 +752,12 @@ if (!twilioFallbackAllowed(body.phone)) {
       region: 'USA',
       provider_message_id: responseData.sid,
       template_name: body.notificationType,
-      metadata: { notification_type: body.notificationType, segments: responseData.num_segments || 1 },
+      metadata: {
+        notification_type: body.notificationType,
+        segments: responseData.num_segments || 1,
+        correlation_id: correlationId,
+        delivery_status: "accepted",
+      },
     });
     await logOutboundDecision(supabase, {
       channel: body.channel === 'whatsapp' ? 'whatsapp' : 'sms',
@@ -629,8 +783,15 @@ if (!twilioFallbackAllowed(body.phone)) {
       { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error("Error in send-sms-notification function:", errorMessage);
+    const failureReason =
+      error instanceof Error ? error.message.slice(0, 100) : "Unknown error";
+    const errorMessage = "Message delivery failed";
+    console.error("SMS dispatch failed", {
+      provider: attemptedProvider,
+      notificationType: body?.notificationType ?? "unknown",
+      correlationId,
+      failureReason,
+    });
 
     try {
       const supabase = createClient(Deno.env.get("SUPABASE_URL")!, supabaseServiceKey);
@@ -640,18 +801,28 @@ if (!twilioFallbackAllowed(body.phone)) {
         event_type: 'failed',
         direction: 'outbound',
         error_message: errorMessage,
-        metadata: { notification_type: body?.notificationType },
+        metadata: {
+          notification_type: body?.notificationType,
+          correlation_id: correlationId,
+          failure_reason: failureReason,
+        },
       });
       await logOutboundDecision(supabase, {
         channel: body?.channel === 'whatsapp' ? 'whatsapp' : 'sms',
         decision: 'failed',
-        reason: errorMessage.slice(0, 300),
+        reason: failureReason,
         region: outboundRegionFromPhone(body?.phone),
         recipient: body?.phone,
         notificationType: body?.notificationType,
         functionName: 'send-sms-notification',
       });
-    } catch (_) { /* ignore logging errors */ }
+    } catch (loggingError) {
+      console.error("SMS failure audit logging failed", {
+        correlationId,
+        error:
+          loggingError instanceof Error ? loggingError.name : "UnknownError",
+      });
+    }
 
     return new Response(
       JSON.stringify({ success: false, error: errorMessage }),

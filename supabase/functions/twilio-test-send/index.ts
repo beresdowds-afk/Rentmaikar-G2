@@ -1,10 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-correlation-id",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
@@ -14,7 +14,10 @@ interface TestSendRequest {
   message?: string;
 }
 
-const isValidE164 = (phone: string) => /^\+[1-9]\d{6,14}$/.test(phone.trim());
+const isValidE164 = (phone: unknown): phone is string =>
+  typeof phone === "string" && /^\+[1-9]\d{6,14}$/.test(phone.trim());
+const maskPhone = (phone: string) =>
+  phone.replace(/\d(?=\d{4})/g, "*");
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -63,6 +66,35 @@ async function requireAdmin(req: Request) {
   return { user: userRes.user, admin, supabaseUrl };
 }
 
+async function consumeDiagnosticLimit(
+  admin: SupabaseClient,
+  identifier: string,
+  endpoint: string,
+  maxRequests: number,
+): Promise<boolean> {
+  const { data, error } = await admin.rpc("check_auth_rate_limit", {
+    _identifier: identifier,
+    _endpoint: endpoint,
+    _max_requests: maxRequests,
+    _window_seconds: 60,
+  });
+  if (error) {
+    console.error("[twilio-test-send] diagnostic rate limit failed:", error.message);
+    throw new Error("SMS diagnostic rate limiting is unavailable");
+  }
+  return data === true;
+}
+
+async function hashRateLimitIdentifier(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -74,6 +106,14 @@ serve(async (req) => {
   const user = gate.user;
   const admin = gate.admin;
   const supabaseUrl = gate.supabaseUrl;
+
+  try {
+    if (!(await consumeDiagnosticLimit(admin, user.id, "twilio-test-send:user", 15))) {
+      return json({ error: "Rate limit exceeded" }, 429);
+    }
+  } catch {
+    return json({ error: "SMS diagnostic service unavailable" }, 503);
+  }
 
 
 
@@ -119,7 +159,7 @@ serve(async (req) => {
     const acc = await accRes.json().catch(() => ({}));
     checks.account = accRes.ok
       ? { ok: true, friendlyName: acc.friendly_name, status: acc.status, type: acc.type }
-      : { ok: false, status: accRes.status, error: acc.message ?? "auth failed" };
+      : { ok: false, status: accRes.status, error: "Twilio account lookup failed" };
 
     // 2. Sender phone numbers owned by the account
     const numRes = await fetch(
@@ -154,19 +194,15 @@ serve(async (req) => {
     const numberWebhooks = (nums.incoming_phone_numbers ?? []).map((n: any) => {
       const voiceUrl: string = n.voice_url ?? "";
       const smsUrl: string = n.sms_url ?? "";
-      const stale = (u: string) => !!u && !u.startsWith(baseUrl);
       const problems: string[] = [];
       if (!voiceUrl) problems.push("voice webhook not set");
-      else if (voiceUrl !== expectedVoice)
-        problems.push(stale(voiceUrl) ? `voice webhook points at foreign host: ${voiceUrl}` : `voice webhook is ${voiceUrl}`);
+      else if (voiceUrl !== expectedVoice) problems.push("voice webhook mismatch");
       if (smsUrl && smsUrl !== expectedSms)
-        problems.push(stale(smsUrl) ? `sms webhook points at foreign host: ${smsUrl}` : `sms webhook is ${smsUrl}`);
+        problems.push("sms webhook mismatch");
       return {
         phoneNumber: n.phone_number as string,
         sid: n.sid as string,
         friendlyName: n.friendly_name ?? null,
-        voiceUrl,
-        smsUrl,
         ok: problems.length === 0,
         problems,
       };
@@ -189,8 +225,8 @@ serve(async (req) => {
       );
       const ms = await msRes.json().catch(() => ({}));
       checks.messagingService = msRes.ok
-        ? { ok: true, friendlyName: ms.friendly_name, statusCallback: ms.status_callback ?? null }
-        : { ok: false, status: msRes.status, error: ms.message ?? "lookup failed" };
+        ? { ok: true, friendlyName: ms.friendly_name, statusCallbackConfigured: Boolean(ms.status_callback) }
+        : { ok: false, status: msRes.status, error: "Messaging service lookup failed" };
     } else {
       checks.messagingService = { ok: false, error: "TWILIO_MESSAGING_SERVICE_SID not set" };
     }
@@ -205,7 +241,7 @@ serve(async (req) => {
       const cp = await cpRes.json().catch(() => ({}));
       checks.customerProfile = cpRes.ok
         ? { ok: cp.status === "twilio-approved", status: cp.status, friendlyName: cp.friendly_name }
-        : { ok: false, status: cpRes.status, error: cp.message ?? "lookup failed" };
+        : { ok: false, status: cpRes.status, error: "Customer profile lookup failed" };
     } else {
       checks.customerProfile = { ok: false, error: "TWILIO_CUSTOMER_PROFILE_SID not set" };
     }
@@ -220,7 +256,7 @@ serve(async (req) => {
       const key = await keyRes.json().catch(() => ({}));
       checks.apiKey = keyRes.ok
         ? { ok: true, friendlyName: key.friendly_name }
-        : { ok: false, status: keyRes.status, error: key.message ?? "lookup failed" };
+        : { ok: false, status: keyRes.status, error: "API key lookup failed" };
     } else {
       checks.apiKey = { ok: false, error: "TWILIO_API_KEY_SID not set" };
     }
@@ -270,19 +306,14 @@ serve(async (req) => {
     );
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return json({ error: "Twilio lookup failed", status: res.status, twilio: body }, res.status);
+      return json({ error: "Twilio lookup failed", status: res.status }, res.status);
     }
     return json({
       sid: body.sid,
       status: body.status, // queued, sending, sent, delivered, undelivered, failed, read
-      to: body.to,
-      from: body.from,
-      errorCode: body.error_code,
-      errorMessage: body.error_message,
+      to: maskPhone(String(body.to ?? "")),
       dateSent: body.date_sent,
       dateUpdated: body.date_updated,
-      price: body.price,
-      priceUnit: body.price_unit,
     });
   }
 
@@ -309,13 +340,21 @@ serve(async (req) => {
     );
     const list = await listRes.json().catch(() => ({}));
     if (!listRes.ok) {
-      return json({ error: "Failed to list phone numbers", status: listRes.status, twilio: list }, listRes.status);
+      return json({ error: "Failed to list phone numbers", status: listRes.status }, listRes.status);
     }
     const results: Array<Record<string, unknown>> = [];
     // Optional filter so a single number can be repaired without touching the
     // dial-out-only number or any Studio Flow it is attached to.
-    const onlyNumbers = Array.isArray((body as { phoneNumbers?: string[] }).phoneNumbers)
-      ? (body as { phoneNumbers: string[] }).phoneNumbers.map((p) => p.trim())
+    const requestedNumbers = (body as { phoneNumbers?: unknown }).phoneNumbers;
+    if (
+      requestedNumbers !== undefined &&
+      (!Array.isArray(requestedNumbers) ||
+        requestedNumbers.some((phone) => typeof phone !== "string"))
+    ) {
+      return json({ error: "phoneNumbers must be an array of phone numbers" }, 400);
+    }
+    const onlyNumbers = Array.isArray(requestedNumbers)
+      ? requestedNumbers.map((phone) => phone.trim())
       : null;
     for (const n of list.incoming_phone_numbers ?? []) {
       if (onlyNumbers && !onlyNumbers.includes(n.phone_number)) continue;
@@ -336,15 +375,9 @@ serve(async (req) => {
           body: params,
         },
       );
-      const upBody = await upRes.json().catch(() => ({}));
       results.push({
-        phoneNumber: n.phone_number,
-        sid: n.sid,
         ok: upRes.ok,
-        previousVoiceUrl: n.voice_url ?? null,
-        voiceUrl: upBody.voice_url ?? null,
-        smsUrl: upBody.sms_url ?? null,
-        error: upRes.ok ? undefined : upBody.message ?? `HTTP ${upRes.status}`,
+        error: upRes.ok ? undefined : "Twilio webhook update failed",
       });
     }
     try {
@@ -368,17 +401,39 @@ serve(async (req) => {
     return json({ error: "channel must be 'sms' or 'whatsapp'" }, 400);
   }
 
+  try {
+    const recipientKey = await hashRateLimitIdentifier(body.to.trim());
+    if (
+      !(await consumeDiagnosticLimit(
+        admin,
+        `${user.id}:${recipientKey}`,
+        "twilio-test-send:recipient:twilio",
+        3,
+      ))
+    ) {
+      return json({ error: "Rate limit exceeded for this recipient" }, 429);
+    }
+  } catch {
+    return json({ error: "SMS diagnostic service unavailable" }, 503);
+  }
+
   const smsFrom =
     Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") ||
     Deno.env.get("TWILIO_PHONE_NUMBER");
   const waFrom = Deno.env.get("TWILIO_WHATSAPP_NUMBER");
 
-  const message =
-    (body.message ?? "").trim().slice(0, 320) ||
-    `Rentmaikar test ${body.channel.toUpperCase()} @ ${new Date().toISOString()}`;
+  if (body.message !== undefined && typeof body.message !== "string") {
+    return json({ error: "message must be a string" }, 400);
+  }
+  const message = (body.message ?? "").trim();
+  if (message.length > 320) {
+    return json({ error: "message must be 320 characters or fewer" }, 400);
+  }
+  const testMessage =
+    message || `Rentmaikar test ${body.channel.toUpperCase()} @ ${new Date().toISOString()}`;
 
   const params = new URLSearchParams();
-  params.append("Body", message);
+  params.append("Body", testMessage);
 
   if (body.channel === "whatsapp") {
     if (!waFrom) return json({ error: "TWILIO_WHATSAPP_NUMBER not configured" }, 500);
@@ -422,9 +477,11 @@ serve(async (req) => {
       provider_message_id: twBody?.sid ?? null,
       metadata: {
         initiated_by: user.id,
+        correlation_id: req.headers.get("x-correlation-id"),
+        notification_type: "provider_diagnostic",
         twilio_status: twBody?.status,
         twilio_error_code: twBody?.error_code,
-        twilio_error_message: twBody?.error_message,
+        failure_reason: twRes.ok ? null : "provider_rejected",
       },
     });
   } catch (e) {
@@ -432,9 +489,9 @@ serve(async (req) => {
   }
 
   if (!twRes.ok) {
-    console.error("Twilio send failed", twRes.status, twBody);
+    console.error("Twilio diagnostic send rejected", twRes.status);
     return json(
-      { error: "Twilio API error", status: twRes.status, twilio: twBody },
+      { error: "Twilio diagnostic send failed", status: twRes.status },
       twRes.status,
     );
   }
@@ -442,7 +499,7 @@ serve(async (req) => {
   return json({
     success: true,
     channel: body.channel,
-    to: body.to,
+    to: maskPhone(body.to),
     sid: twBody?.sid,
     twilioStatus: twBody?.status,
   });

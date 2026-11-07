@@ -479,32 +479,6 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       };
     }
 
-    // -----------------------------------------------------------------
-    // CPaaS & SMS Notification Handlers
-    // -----------------------------------------------------------------
-    case "send-sms-notification": {
-      try {
-        const result = await sendSmsNotification(body);
-        return { status: 200, data: result };
-      } catch (err: any) {
-        console.error("[send-sms-notification Error]", err);
-        return { status: 400, data: { success: false, error: err.message || "Failed to dispatch SMS notification" } };
-      }
-    }
-
-    case "case-send-sms": {
-      try {
-        const result = await sendSmsNotification({
-          phone: body.phone,
-          channel: body.channel || "sms",
-          customMessage: body.message,
-        });
-        return { status: 200, data: result };
-      } catch (err: any) {
-        return { status: 400, data: { success: false, error: err.message } };
-      }
-    }
-
     case "reprocess-sms-dlq": {
       return {
         status: 200,
@@ -528,20 +502,6 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
       } catch (err: any) {
         const status = err.message?.includes("Authentication required") ? 401 : 400;
         return { status, data: { success: false, valid: false, error: err.message } };
-      }
-    }
-
-    case "twilio-test-send": {
-      try {
-        const result = await sendSmsNotification({
-          phone: body.to,
-          channel: body.channel || "sms",
-          customMessage: body.message || "RentMaikar Twilio delivery test probe",
-          providerOverride: "twilio",
-        });
-        return { status: 200, data: result };
-      } catch (err: any) {
-        return { status: 400, data: { success: false, error: err.message } };
       }
     }
 
