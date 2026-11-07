@@ -833,18 +833,14 @@ Deno.serve(async (req) => {
           },
         };
 
-        const { data: upserted, error } = await supa
+        const { error } = await supa
           .from("iot_devices")
-          .upsert(row, { onConflict: "serial_number" })
-          .select("id, vehicle_id")
-          .maybeSingle();
+          .upsert(row, { onConflict: "serial_number" });
         if (error) {
           deviceErrors.push({ device: serial, error: error.message });
           continue;
         }
         upserts++;
-
-        const linkedVehicleId = upserted?.vehicle_id ?? existing?.vehicle_id ?? null;
 
         if (writeTelemetry && d.latitude !== null && d.longitude !== null) {
           // Unified location pipeline: one normalized shape, shared fleet map.
@@ -861,30 +857,15 @@ Deno.serve(async (req) => {
               device: { device_description: serial },
             }]);
             if (normalized.length) {
-              await persistLocations(supa as never, normalized, { writeHistory: false, publishMqtt: true });
+              const persisted = await persistLocations(supa as never, normalized, { publishMqtt: true });
+              inserts += persisted.persisted;
+              if (persisted.errors.length) {
+                deviceErrors.push({ device: serial, error: `telemetry: ${persisted.errors.join("; ")}` });
+              }
             }
           } catch (e) {
             deviceErrors.push({ device: serial, error: `unified_location: ${(e as Error).message}` });
           }
-          const { error: telErr } = await supa.from("mqtt_telemetry_logs").insert({
-            data_type: "sarekon_position",
-            vehicle_id: linkedVehicleId ?? serial,
-            payload: {
-              lat: d.latitude,
-              lng: d.longitude,
-              speed_kmh: d.speedKmh ?? 0,
-              course: d.course ?? 0,
-              ignition: d.ignition,
-              address: d.address,
-              iot_device_id: upserted?.id ?? existing?.id ?? null,
-              linked_vehicle_id: linkedVehicleId,
-              device_time: d.lastUpdate,
-            },
-            mqtt_topic: `sarekon/${serial}/position`,
-            received_at: d.lastUpdate ?? nowIso,
-          } as never);
-          if (telErr) deviceErrors.push({ device: serial, error: `position: ${telErr.message}` });
-          else inserts++;
         }
       }
 

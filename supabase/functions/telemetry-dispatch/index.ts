@@ -76,17 +76,59 @@ Deno.serve(async (req) => {
       return json({ ok: true, provider: target, ...result });
     }
 
-    // Resolve a device identifier: explicit, or the device linked to the vehicle.
-    let target = device_id ?? null;
-    if (!target && vehicle_id) {
-      const { data: dev } = await supa
-        .from("iot_devices")
-        .select("serial_number")
-        .eq("vehicle_id", vehicle_id)
-        .maybeSingle();
-      target = dev?.serial_number ?? null;
+    if (!device_id && !vehicle_id) {
+      return json({ error: "device_id or a linked vehicle_id is required" }, 400);
     }
-    if (!target) return json({ error: "device_id or a linked vehicle_id is required" }, 400);
+
+    let candidates: Array<{
+      id: string;
+      vehicle_id: string | null;
+      provider_device_id: string | null;
+      serial_number: string | null;
+    }> = [];
+    if (vehicle_id) {
+      const { data, error } = await supa
+        .from("iot_devices")
+        .select("id, vehicle_id, provider_device_id, serial_number")
+        .eq("provider", active)
+        .eq("status", "active")
+        .eq("telemetry_enabled", true)
+        .eq("vehicle_id", vehicle_id)
+        .limit(2);
+      if (error) throw error;
+      candidates = data ?? [];
+    }
+    if (device_id) {
+      const byProviderId = await supa
+        .from("iot_devices")
+        .select("id, vehicle_id, provider, provider_device_id, serial_number, status, telemetry_enabled")
+        .eq("provider", active)
+        .eq("status", "active")
+        .eq("telemetry_enabled", true)
+        .eq("provider_device_id", device_id)
+        .limit(2);
+      const bySerial = await supa
+        .from("iot_devices")
+        .select("id, vehicle_id, provider, provider_device_id, serial_number, status, telemetry_enabled")
+        .eq("provider", active)
+        .eq("status", "active")
+        .eq("telemetry_enabled", true)
+        .eq("serial_number", device_id)
+        .limit(2);
+      if (byProviderId.error) throw byProviderId.error;
+      if (bySerial.error) throw bySerial.error;
+      candidates = [
+        ...candidates,
+        ...(byProviderId.data ?? []),
+        ...(bySerial.data ?? []),
+      ];
+    }
+    const matchingDevices = [...new Map(candidates.map((row) => [row.id, row])).values()]
+      .filter((row) => !vehicle_id || row.vehicle_id === vehicle_id);
+    if (matchingDevices.length !== 1) return json({ error: "Registered active device not found" }, 404);
+    const device = matchingDevices[0];
+    const target = device.provider_device_id || device.serial_number;
+    if (!target) return json({ error: "Registered device has no provider identifier" }, 409);
 
     const adapter = adapters[active];
 

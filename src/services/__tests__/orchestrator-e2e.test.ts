@@ -47,7 +47,7 @@ describe("Orchestrator E2E: Traccar → MQTT → Plugin → vehicle_analytics_ev
     expect(pluginManager.getCallCount("e2e-test-plugin")).toBeGreaterThan(0);
   });
 
-  it("MQTT event updates state and triggers analytics persistence", async () => {
+  it("MQTT browser event updates only the local mirror, not authoritative persistence", async () => {
     const vehicleId = `test-mqtt-${Date.now()}`;
     receiveMQTTMessage(`rentmaikar/vehicle/${vehicleId}/telemetry`, {
       battery: 10, temperature: 110,

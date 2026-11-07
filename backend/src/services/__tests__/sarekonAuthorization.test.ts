@@ -112,6 +112,6 @@ test("Sarekon and telemetry internal operations accept only configured service i
     false,
   );
   assert.equal(isTrustedInternalRequest(headers({}), "", ""), false);
-  assert.equal(getFunctionAccessLevel("telemetry-ingest"), "internal");
+  assert.equal(getFunctionAccessLevel("telemetry-ingest"), "service");
   assert.equal(getFunctionAccessLevel("sarekon-location-worker"), "cron_or_admin");
 });

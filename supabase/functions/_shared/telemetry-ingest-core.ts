@@ -7,6 +7,10 @@ import {
   runAnalytics,
   type AnalyticsRow,
 } from "./orchestrator-core.ts";
+import {
+  isAcceptableTelemetryPayload,
+  isAcceptableTelemetryTimestamp,
+} from "./telemetry-security.ts";
 
 type Admin = ReturnType<typeof createClient>;
 
@@ -42,18 +46,75 @@ export async function ingestRecords(
   result.skipped = records.length - events.length;
   if (!events.length) return result;
 
+  const deviceIds = [...new Set(events.map((event) => event.deviceId).filter((id): id is string => !!id))];
+  if (!deviceIds.length) {
+    result.skipped += events.length;
+    return result;
+  }
+  const registryQueries = [
+    admin.from("iot_devices")
+      .select("id, vehicle_id, provider, provider_device_id, serial_number, status, telemetry_enabled")
+      .eq("provider", "emqx")
+      .eq("status", "active")
+      .eq("telemetry_enabled", true)
+      .in("provider_device_id", deviceIds),
+    admin.from("iot_devices")
+      .select("id, vehicle_id, provider, provider_device_id, serial_number, status, telemetry_enabled")
+      .eq("provider", "emqx")
+      .eq("status", "active")
+      .eq("telemetry_enabled", true)
+      .in("serial_number", deviceIds),
+  ];
+  const registryResults = await Promise.all(registryQueries);
+  const registeredDevices = new Map<string, Record<string, unknown>>();
+  for (const { data, error } of registryResults) {
+    if (error) throw new Error(`device_registry_lookup_failed: ${error.message}`);
+    for (const device of (data ?? []) as Record<string, unknown>[]) {
+      registeredDevices.set(String(device.id), device);
+    }
+  }
+  const devicesById = new Map<string, Record<string, unknown>[]>();
+  for (const device of registeredDevices.values()) {
+    const identifiers = new Set(
+      [device.provider_device_id, device.serial_number]
+        .filter((identifier) => identifier != null)
+        .map(String),
+    );
+    for (const key of identifiers) {
+      const matches = devicesById.get(key) ?? [];
+      matches.push(device);
+      devicesById.set(key, matches);
+    }
+  }
+  const authenticatedEvents = events.filter((event) => {
+    const matches = event.deviceId ? devicesById.get(event.deviceId) ?? [] : [];
+    if (matches.length !== 1) return false;
+    const device = matches[0];
+    if (!device.vehicle_id || String(device.vehicle_id) !== event.vehicleId) return false;
+    return event.source === "mqtt" &&
+      event.topic === `rentmaikar/vehicle/${device.vehicle_id}/${event.eventType}` &&
+      ["telemetry", "location", "status"].includes(event.eventType) &&
+      isAcceptableTelemetryTimestamp(event.timestamp, "emqx") &&
+      isAcceptableTelemetryPayload(event.payload);
+  });
+  result.skipped += events.length - authenticatedEvents.length;
+  if (!authenticatedEvents.length) return result;
+
   // Vehicles whose admin GPS/telemetry switch is off are dropped entirely —
   // no state, history, analytics, or downstream location persist.
-  const gpsDisabled = await getGpsDisabledVehicles(admin, events.map((e) => e.vehicleId));
-  const scoped = gpsDisabled.size ? events.filter((e) => !gpsDisabled.has(e.vehicleId)) : events;
-  result.skipped += events.length - scoped.length;
+  const gpsDisabled = await getGpsDisabledVehicles(admin, authenticatedEvents.map((e) => e.vehicleId));
+  const scoped = gpsDisabled.size
+    ? authenticatedEvents.filter((e) => !gpsDisabled.has(e.vehicleId))
+    : authenticatedEvents;
+  result.skipped += authenticatedEvents.length - scoped.length;
   if (!scoped.length) return result;
 
   const ids = [...new Set(scoped.map((e) => e.vehicleId))];
-  const { data: existing } = await admin
+  const { data: existing, error: stateLookupError } = await admin
     .from("vehicle_telemetry_state")
     .select("*")
     .in("vehicle_id", ids);
+  if (stateLookupError) throw new Error(`telemetry_state_lookup_failed: ${stateLookupError.message}`);
 
   const stateMap = new Map<string, Record<string, unknown>>();
   (existing ?? []).forEach((row: Record<string, unknown>) =>
@@ -62,24 +123,41 @@ export async function ingestRecords(
 
   const analytics: AnalyticsRow[] = [];
   const telemetryLogs: Record<string, unknown>[] = [];
+  const updatedVehicles = new Set<string>();
 
   for (const event of scoped) {
-    const prev = (stateMap.get(event.vehicleId) ?? null) as never;
+    const prev = stateMap.get(event.vehicleId) ?? null;
+    const previousTimestamp = prev?.last_event_at ? Date.parse(String(prev.last_event_at)) : NaN;
+    if (Number.isFinite(previousTimestamp) && Date.parse(event.timestamp) <= previousTimestamp) {
+      result.skipped += 1;
+      continue;
+    }
     const next = reduceState(prev, event);
     stateMap.set(event.vehicleId, next as unknown as Record<string, unknown>);
+    updatedVehicles.add(event.vehicleId);
     analytics.push(...runAnalytics(next, event));
     telemetryLogs.push({
       vehicle_id: event.vehicleId,
-      data_type: event.eventType || "telemetry",
-      payload: event.payload ?? {},
-      mqtt_topic: event.topic ?? null,
-      received_at: event.timestamp,
+      data_type: event.eventType === "location" ? "location" : "status",
+      payload: {
+        ...(event.payload ?? {}),
+        provider: "emqx",
+        provider_device_id: event.deviceId,
+        provider_event_time: event.timestamp,
+      },
+      provider: "emqx",
+      provider_device_id: event.deviceId,
+      provider_event_time: event.timestamp,
+      mqtt_topic: event.topic,
+      received_at: new Date().toISOString(),
     });
     result.processed += 1;
   }
 
-  const upserts = [...stateMap.values()].filter((s) => "last_event_at" in s).map((s) => ({
+  const upserts = [...updatedVehicles].map((vehicleId) => stateMap.get(vehicleId)!).map((s) => ({
     vehicle_id: s.vehicle_id,
+    provider: s.provider,
+    provider_device_id: s.provider_device_id,
     latitude: s.latitude ?? null,
     longitude: s.longitude ?? null,
     speed: s.speed ?? null,
@@ -90,6 +168,8 @@ export async function ingestRecords(
     last_source: s.last_source,
     last_event_type: s.last_event_type,
     last_event_at: s.last_event_at,
+    gps_timestamp: s.last_event_at,
+    received_at: new Date().toISOString(),
     payload: s.payload ?? {},
   }));
 
@@ -97,12 +177,15 @@ export async function ingestRecords(
     const { error } = await admin
       .from("vehicle_telemetry_state")
       .upsert(upserts as never, { onConflict: "vehicle_id" });
-    if (error) console.error("[orchestrator] state upsert failed", error.message);
+    if (error) throw new Error(`telemetry_state_upsert_failed: ${error.message}`);
   }
 
   if (telemetryLogs.length) {
-    const { error } = await admin.from("mqtt_telemetry_logs").insert(telemetryLogs as never);
-    if (error) console.error("[orchestrator] telemetry log insert failed", error.message);
+    const { error } = await admin.from("mqtt_telemetry_logs").upsert(telemetryLogs as never, {
+      onConflict: "provider,provider_device_id,provider_event_time,mqtt_topic",
+      ignoreDuplicates: true,
+    });
+    if (error) throw new Error(`telemetry_log_insert_failed: ${error.message}`);
   }
 
   if (analytics.length) {
@@ -114,10 +197,11 @@ export async function ingestRecords(
       .filter((id) => uuidRe.test(id));
     let known = new Set<string>();
     if (candidateIds.length) {
-      const { data: vehicleRows } = await admin
+      const { data: vehicleRows, error: vehicleLookupError } = await admin
         .from("vehicles")
         .select("id")
         .in("id", candidateIds);
+      if (vehicleLookupError) throw new Error(`vehicle_lookup_failed: ${vehicleLookupError.message}`);
       known = new Set((vehicleRows ?? []).map((v: Record<string, unknown>) => String(v.id)));
     }
     const valid = analytics.filter((a) => known.has(String(a.vehicle_id)));
@@ -125,29 +209,32 @@ export async function ingestRecords(
     if (dropped) console.warn(`[orchestrator] dropped ${dropped} analytics rows with unknown vehicle_id`);
     if (valid.length) {
       const { error } = await admin.from("vehicle_analytics_events").insert(valid as never);
-      if (error) console.error("[orchestrator] analytics insert failed", error.message);
-      else result.analytics = valid.length;
+      if (error) throw new Error(`telemetry_analytics_insert_failed: ${error.message}`);
+      result.analytics = valid.length;
     }
   }
 
 
   // Locations additionally flow through the unified location service so every
   // provider (MQTT included) lands in one normalized shape on the shared map.
-  try {
-    const locations = adaptMqttLocations(
-      scoped.map((e) => ({
-        vehicleId: e.vehicleId,
-        topic: e.topic ?? null,
-        timestamp: e.timestamp,
-        payload: (e.payload ?? {}) as Record<string, unknown>,
-      })),
-    );
-    if (locations.length) {
-      // History + MQTT publish are already covered by this pipeline/topic.
-      await persistLocations(admin, locations, { publishMqtt: false, writeHistory: false });
+  const locations = adaptMqttLocations(
+    scoped.map((e) => ({
+      vehicleId: e.vehicleId,
+      deviceId: e.deviceId,
+      topic: e.topic ?? null,
+      timestamp: e.timestamp,
+      payload: (e.payload ?? {}) as Record<string, unknown>,
+    })),
+  );
+  if (locations.length) {
+    // History + MQTT publish are already covered by this pipeline/topic.
+    const locationResult = await persistLocations(admin, locations, {
+      publishMqtt: false,
+      writeHistory: false,
+    });
+    if (locationResult.errors.length) {
+      throw new Error(`unified_location_persist_failed: ${locationResult.errors.join("; ")}`);
     }
-  } catch (e) {
-    console.error("[orchestrator] unified location persist failed", (e as Error).message);
   }
 
   result.vehicles = ids;
