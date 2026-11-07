@@ -47,6 +47,12 @@ import {
   isResourceParticipant,
 } from "../services/functionAccessPolicy";
 import { limitJsonPayload, rateLimit } from "../services/requestGuards";
+import {
+  getMfaSessionContext,
+  getVerifiedMfaPhone,
+  isMfaChallengeId,
+  isMfaPhoneBound,
+} from "../services/mfaSecurity";
 import { personaWebhookService } from "../services/personaWebhookService";
 export const functionsRouter = Router();
 
@@ -652,74 +658,66 @@ functionsRouter.all(
 
       case "send-2fa-code": {
         const action = body.action || "status";
+        const userId = gatedCaller?.userId;
+        if (!userId) {
+          return res.status(401).json({ success: false, error: "Authentication required" });
+        }
+
+        const admin = supabaseBackendService.getAdminClient();
+        const [profileResult, settingsResult] = await Promise.all([
+          admin
+            .from("profiles")
+            .select("phone, phone_verified")
+            .eq("user_id", userId)
+            .maybeSingle(),
+          admin
+            .from("two_factor_settings")
+            .select("is_enabled, phone_number, preferred_channel")
+            .eq("user_id", userId)
+            .maybeSingle(),
+        ]);
+        if (profileResult.error || settingsResult.error) {
+          return res.status(500).json({ success: false, error: "Failed to load MFA account settings" });
+        }
+        const profile = profileResult.data;
+        const settings = settingsResult.data;
+        const verifiedPhone = getVerifiedMfaPhone(profile);
+        const hasBoundPhone = !!verifiedPhone && isMfaPhoneBound(settings, verifiedPhone);
 
         if (action === "status") {
-          const userId = body.user_id;
-          if (!userId) {
-            return res.status(400).json({ success: false, error: "user_id required" });
-          }
-          const admin = supabaseBackendService.getAdminClient();
-          const { data: settings } = await admin
-            .from("two_factor_settings")
-            .select("is_enabled, is_mandatory, phone_number, preferred_channel")
-            .eq("user_id", userId)
-            .maybeSingle();
-
-          const { data: roleData } = await admin
+          const { data: roleData, error: roleError } = await admin
             .from("user_roles")
             .select("role")
             .eq("user_id", userId)
             .maybeSingle();
-
-          const role = roleData?.role;
-          const isMandatory = role === "admin" || role === "owner";
-
+          if (roleError) {
+            return res.status(500).json({ success: false, error: "Failed to load MFA account role" });
+          }
+          const isMandatory = roleData?.role === "admin" || roleData?.role === "owner";
           return res.status(200).json({
             success: true,
-            requires_2fa: settings?.is_enabled || isMandatory,
-            is_setup: settings?.is_enabled || false,
+            requires_2fa: !!settings?.is_enabled || isMandatory,
+            is_setup: !!settings?.is_enabled,
             is_mandatory: isMandatory,
-            has_phone: !!settings?.phone_number,
+            has_phone: hasBoundPhone,
+            phone: hasBoundPhone ? verifiedPhone : undefined,
             preferred_channel: settings?.preferred_channel || "sms",
           });
         }
 
         if (action === "setup") {
-          if (!clientAuth) {
-            return res.status(401).json({ success: false, error: "Authentication required" });
-          }
-          const admin = supabaseBackendService.getAdminClient();
-          const token = clientAuth.replace(/^Bearer\s+/i, "").trim();
-          const { data: authData, error: authError } = await admin.auth.getUser(token);
-          if (authError || !authData?.user) {
-            return res.status(401).json({ success: false, error: "Invalid authentication" });
-          }
-          const user = authData.user;
-          const phone = normalizeE164(body.phone || "");
+          const phone = getVerifiedMfaPhone(profile, body.phone);
           if (!phone) {
-            return res.status(400).json({ success: false, error: "Phone must be normalized E.164" });
-          }
-          const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
-
-          // Verify phone is verified on profile
-          const { data: profile } = await admin
-            .from("profiles")
-            .select("phone, phone_verified")
-            .eq("user_id", user.id)
-            .maybeSingle();
-
-          if (!profile || profile.phone !== phone || !profile.phone_verified) {
             return res.status(400).json({
               success: false,
-              error: "Phone number must be verified before enabling 2FA. Please complete SMS/WhatsApp verification first.",
+              error: "Use the phone number already verified on your account before enabling MFA.",
             });
           }
-
-          // Update or create 2FA settings
+          const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
           const { error: upsertError } = await admin
             .from("two_factor_settings")
             .upsert({
-              user_id: user.id,
+              user_id: userId,
               phone_number: phone,
               preferred_channel: channel,
               is_enabled: true,
@@ -727,88 +725,77 @@ functionsRouter.all(
             }, { onConflict: "user_id" });
 
           if (upsertError) {
-            return res.status(500).json({ success: false, error: "Failed to save 2FA settings" });
+            return res.status(500).json({ success: false, error: "Failed to save MFA settings" });
           }
 
           await admin.from("two_factor_audit_log").insert({
-            user_id: user.id,
+            user_id: userId,
             action: "2fa_enabled",
             channel,
             phone_number: phone,
             success: true,
           }).then(() => {}, () => {});
-
-          return res.status(200).json({ success: true, message: "2FA enabled successfully" });
+          return res.status(200).json({ success: true, message: "MFA enabled successfully" });
         }
 
-        if (action === "send_code") {
-          const userId = body.user_id;
-          let phone = normalizeE164(body.phone || "");
-          const admin = supabaseBackendService.getAdminClient();
+        if (action === "send_code" || action === "verify_code") {
+          if (!verifiedPhone || !settings?.is_enabled || !hasBoundPhone) {
+            return res.status(403).json({
+              success: false,
+              error: "MFA requires an enabled setting and a verified phone bound to this account.",
+            });
+          }
+          if (body.phone !== undefined && getVerifiedMfaPhone(profile, body.phone) !== verifiedPhone) {
+            return res.status(400).json({ success: false, error: "Alternative phone numbers cannot be used for MFA." });
+          }
+          const sessionContext = getMfaSessionContext(clientAuth);
+          if (!sessionContext) {
+            return res.status(401).json({ success: false, error: "A valid authenticated session is required for MFA." });
+          }
+          const channel =
+            body.channel === "whatsapp" ||
+            (body.channel !== "sms" && settings.preferred_channel === "whatsapp")
+              ? "whatsapp"
+              : "sms";
 
-          if (!phone && userId) {
-            const { data: settings } = await admin
-              .from("two_factor_settings")
-              .select("phone_number, preferred_channel")
-              .eq("user_id", userId)
-              .maybeSingle();
-            if (settings?.phone_number) {
-              phone = normalizeE164(settings.phone_number);
+          if (action === "send_code") {
+            const sendRes = await sendPhoneOtp({
+              phone: verifiedPhone,
+              channel,
+              action: "send_code",
+              purpose: "mfa",
+              callerId: userId,
+              metadata: { session_context: sessionContext },
+              expiresInSeconds: 300,
+              sandbox: Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true"),
+            });
+
+            if (sendRes.success) {
+              return res.status(200).json({
+                success: true,
+                message: `MFA code sent via ${channel.toUpperCase()}`,
+                expiresIn: sendRes.expiresIn,
+                challenge_id: sendRes.challengeId,
+              });
             }
-          }
-
-          if (!phone) {
-            return res.status(400).json({ success: false, error: "No phone number configured for 2FA" });
-          }
-
-          const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
-          const sendRes = await sendPhoneOtp({
-            phone,
-            channel,
-            action: "send_code",
-            purpose: "mfa",
-            callerId: userId,
-            sandbox: Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true"),
-          });
-
-          if (sendRes.success) {
-            return res.status(200).json({ success: true, message: `2FA code sent via ${channel.toUpperCase()}`, expiresIn: 300 });
-          } else {
             return res.status(400).json({ success: false, error: sendRes.message });
           }
-        }
 
-        if (action === "verify_code") {
-          const userId = body.user_id;
-          const code = String(body.code || "").trim();
-          let phone = normalizeE164(body.phone || "");
-          const admin = supabaseBackendService.getAdminClient();
-
-          if (!phone && userId) {
-            const { data: settings } = await admin
-              .from("two_factor_settings")
-              .select("phone_number")
-              .eq("user_id", userId)
-              .maybeSingle();
-            if (settings?.phone_number) {
-              phone = normalizeE164(settings.phone_number);
-            }
+          if (!isMfaChallengeId(body.challenge_id)) {
+            return res.status(400).json({ success: false, error: "Valid MFA challenge ID required." });
           }
-
-          if (!phone) {
-            return res.status(400).json({ success: false, error: "Phone number required for 2FA verification" });
-          }
-
           const verifyRes = await verifyPhoneOtp({
-            phone,
-            code,
+            phone: verifiedPhone,
+            code: String(body.code || "").trim(),
             action: "verify_code",
             purpose: "mfa",
             callerId: userId,
+            challengeId: body.challenge_id,
+            sessionContext,
           });
 
-          if (verifyRes.success) {
-            return res.status(200).json({ success: true, message: "Two-factor authentication verified" });
+          if (verifyRes.success && verifyRes.user_id === userId) {
+            return res.status(200).json({ success: true, message: "MFA verified" });
           } else {
             return res.status(400).json({ success: false, error: verifyRes.error || "Invalid or expired verification code" });
           }

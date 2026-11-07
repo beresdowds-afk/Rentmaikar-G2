@@ -100,6 +100,9 @@ export interface ConsumeChallengeParams {
   identity: string;
   code: string;
   purpose?: OtpPurpose;
+  challengeId?: string;
+  userId?: string;
+  sessionContext?: string;
 }
 
 export interface SendOtpParams {
@@ -108,6 +111,8 @@ export interface SendOtpParams {
   action?: "send" | "link_send" | "send_code";
   purpose?: OtpPurpose;
   callerId?: string;
+  metadata?: Record<string, any>;
+  expiresInSeconds?: number;
   sandbox?: boolean;
 }
 
@@ -117,6 +122,8 @@ export interface VerifyOtpParams {
   action?: "verify" | "link_verify" | "verify_code";
   purpose?: OtpPurpose;
   callerId?: string;
+  challengeId?: string;
+  sessionContext?: string;
   full_name?: string;
   role?: string;
 }
@@ -346,6 +353,10 @@ export class OtpService {
       );
       return { success: true };
     } catch (dbErr: any) {
+      if (challenge.purpose === "mfa") {
+        console.error("[OtpService] MFA challenge schema is unavailable:", dbErr.message);
+        return { success: false, error: "Secure MFA challenge storage is unavailable." };
+      }
       // Fallback if migration hasn't been executed on the target database yet
       if (dbErr.code === "42703" || dbErr.message?.includes("column")) {
         try {
@@ -382,7 +393,11 @@ export class OtpService {
     error?: string;
   }> {
     const { challenge, rawOtp, sandbox } = params;
-    const messageBody = `${rawOtp} is your RentMaikar verification code. Valid for 10 minutes.`;
+    const validityMinutes = Math.max(
+      1,
+      Math.ceil((challenge.expiresAt.getTime() - Date.now()) / 60_000),
+    );
+    const messageBody = `${rawOtp} is your RentMaikar verification code. Valid for ${validityMinutes} minutes.`;
 
     const dispatchRes = await messagingBridge.sendMessage({
       to: challenge.identity,
@@ -406,7 +421,11 @@ export class OtpService {
 
     const pool = getDbPool();
 
-    if (!dispatchRes.success && !dispatchRes.simulation) {
+    if (
+      !dispatchRes.success ||
+      dispatchRes.simulation ||
+      dispatchRes.deliveryStatus === "simulation"
+    ) {
       // Fail Closed: invalidate the stored OTP so an undelivered code cannot be guessed
       if (pool) {
         await pool.query(
@@ -416,7 +435,9 @@ export class OtpService {
       }
       return {
         success: false,
-        error: `Failed to deliver verification code: ${dispatchRes.error || "SENT.dm delivery unavailable"}`,
+        error: dispatchRes.simulation || dispatchRes.deliveryStatus === "simulation"
+          ? "Verification code delivery is simulated; no external message was sent."
+          : `Failed to deliver verification code: ${dispatchRes.error || "SENT.dm delivery unavailable"}`,
       };
     }
 
@@ -469,23 +490,47 @@ export class OtpService {
         purpose?: string;
         user_id?: string | null;
         status?: string;
+        metadata?: Record<string, unknown> | null;
       } | null = null;
+
+      const hasMfaBinding =
+        purpose === "mfa" &&
+        !!params.challengeId &&
+        !!params.userId &&
+        !!params.sessionContext;
+      if (purpose === "mfa" && !hasMfaBinding) {
+        await client.query("ROLLBACK");
+        return {
+          success: false,
+          error: "Authenticated MFA challenge context is required.",
+        };
+      }
 
       try {
         const res = await client.query(
           `SELECT id, code_hash, attempts, expires_at, consumed_at,
-                  purpose, user_id, status
+                  purpose, user_id, status, metadata
            FROM public.phone_otp_codes
            WHERE (identity = $1 OR phone = $1) AND purpose = $2
+             AND ($3::uuid IS NULL OR id = $3::uuid)
+             AND ($4::uuid IS NULL OR user_id = $4::uuid)
            ORDER BY created_at DESC
            LIMIT 1
            FOR UPDATE`,
-          [identity, purpose]
+          [identity, purpose, params.challengeId || null, params.userId || null]
         );
         if (res.rows.length > 0) {
           otpRow = res.rows[0];
         }
       } catch (err: any) {
+        if (purpose === "mfa") {
+          await client.query("ROLLBACK").catch(() => {});
+          console.error("[OtpService] MFA challenge lookup failed:", err.message);
+          return {
+            success: false,
+            error: "Secure MFA challenge verification is unavailable.",
+          };
+        }
         // Fallback for legacy schema before formalize migration
         try {
           const fallbackRes = await client.query(
@@ -516,6 +561,15 @@ export class OtpService {
           success: false,
           error: "No active verification code requested for this phone number and purpose.",
         };
+      }
+
+      if (
+        purpose === "mfa" &&
+        (otpRow.user_id !== params.userId ||
+          otpRow.metadata?.session_context !== params.sessionContext)
+      ) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "MFA challenge is not valid for this session." };
       }
 
       if (otpRow.consumed_at) {
@@ -611,6 +665,7 @@ export const otpService = OtpService.getInstance();
 export async function sendPhoneOtp(params: SendOtpParams): Promise<{
   success: boolean;
   message: string;
+  challengeId?: string;
   provider?: string;
   channel?: string;
   expiresIn?: number;
@@ -629,6 +684,8 @@ export async function sendPhoneOtp(params: SendOtpParams): Promise<{
     userId: params.callerId,
     channel,
     purpose,
+    metadata: params.metadata,
+    expiresInSeconds: params.expiresInSeconds,
   });
 
   const persistResult = await otpService.persistChallenge({
@@ -656,7 +713,8 @@ export async function sendPhoneOtp(params: SendOtpParams): Promise<{
     message: `Verification code sent to ${phone}`,
     provider: dispatchResult.provider,
     channel: dispatchResult.channel,
-    expiresIn: 600,
+    expiresIn: Math.max(0, Math.floor((challenge.expiresAt.getTime() - Date.now()) / 1000)),
+    challengeId: challenge.id,
   };
 }
 
@@ -680,6 +738,8 @@ export async function verifyPhoneOtp(params: VerifyOtpParams): Promise<{
     action: params.action,
     purpose: params.purpose,
     callerId: params.callerId,
+    challengeId: params.challengeId,
+    sessionContext: params.sessionContext,
     full_name: params.full_name,
     role: params.role,
   });
