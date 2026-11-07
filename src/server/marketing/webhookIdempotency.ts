@@ -1,147 +1,97 @@
 /**
- * Durable Webhook Idempotency Engine for RentMaikar Marketing Engine
- * Replaces ephemeral in-memory Sets with PostgreSQL / Supabase durable state
- * Survives Cloud Run container restarts, cold starts, and horizontal scaling.
+ * Durable webhook idempotency using a database-enforced provider/event identity.
+ * The database is authoritative: a database error fails closed, never falling
+ * back to instance-local memory. Raw request bodies and secret headers are not
+ * copied into the webhook audit record.
  */
 
+import crypto from 'crypto';
 import { getSupabase } from './supabaseClient';
 
 export interface WebhookDeduplicationResult {
   isDuplicate: boolean;
   recordId?: string;
-  source: 'database' | 'memory_fallback';
+  source: 'database';
 }
 
-// In-memory fallback LRU cache (used ONLY if database is temporarily unreachable)
-const fallbackCache = new Map<string, number>();
-const MAX_FALLBACK_CACHE = 2000;
-const DEDUPLICATION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-function recordToFallback(key: string): boolean {
-  const now = Date.now();
-  const existing = fallbackCache.get(key);
-  if (existing && now - existing < DEDUPLICATION_WINDOW_MS) {
-    return true; // Duplicate in fallback
-  }
-
-  if (fallbackCache.size >= MAX_FALLBACK_CACHE) {
-    const oldestKey = fallbackCache.keys().next().value;
-    if (oldestKey) fallbackCache.delete(oldestKey);
-  }
-
-  fallbackCache.set(key, now);
-  return false;
+function isUniqueViolation(error: { code?: string; message?: string }): boolean {
+  return error.code === '23505' || /duplicate key|unique constraint/i.test(error.message || '');
 }
 
-/**
- * Durably claims an incoming webhook event.
- * Uses atomic conflict handling against `marketing_webhooks`.
- * Returns `isDuplicate: true` if the event has already been registered or processed.
- */
+async function reclaimFailedEvent(platform: string, eventId: string): Promise<WebhookDeduplicationResult> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('marketing_webhooks')
+    .update({ processing_status: 'pending', error_message: null })
+    .eq('platform', platform)
+    .eq('provider_event_id', eventId)
+    .eq('processing_status', 'failed')
+    .select('id')
+    .maybeSingle();
+  if (error) throw new Error('Webhook retry claim failed');
+  if (data?.id) return { isDuplicate: false, recordId: data.id, source: 'database' };
+  return { isDuplicate: true, source: 'database' };
+}
+
 export async function claimWebhookEventDurable(
   platform: string,
   eventId: string,
-  payload?: any,
-  headers?: Record<string, string>
+  payload?: unknown,
+  _headers?: Record<string, string>
 ): Promise<WebhookDeduplicationResult> {
-  if (!eventId) {
-    return { isDuplicate: false, source: 'database' };
+  const normalizedPlatform = String(platform || '').toLowerCase().trim();
+  const normalizedEventId = String(eventId || '').trim();
+  if (!normalizedPlatform || !normalizedEventId || normalizedEventId.length > 255) {
+    throw new Error('A valid provider event identity is required');
   }
 
-  const normalizedPlatform = platform.toLowerCase().trim();
-  const normalizedEventId = String(eventId).trim();
-  const deduplicationKey = `${normalizedPlatform}:${normalizedEventId}`;
+  // This digest supports audit correlation without persisting webhook PII or secrets.
+  const payloadHash = crypto.createHash('sha256').update(JSON.stringify(payload ?? null)).digest('hex');
+  const eventType = payload && typeof payload === 'object'
+    ? String((payload as Record<string, unknown>).type || (payload as Record<string, unknown>).event_name || 'webhook_event').slice(0, 100)
+    : 'webhook_event';
+  const supabase = getSupabase();
+  const { data: inserted, error } = await supabase
+    .from('marketing_webhooks')
+    .insert({
+      platform: normalizedPlatform,
+      provider_event_id: normalizedEventId,
+      payload_sha256: payloadHash,
+      event_type: eventType,
+      signature_verified: true,
+      headers: {},
+      payload: {},
+      processing_status: 'pending',
+    })
+    .select('id')
+    .maybeSingle();
 
-  try {
-    const supabase = getSupabase();
-    if (!supabase) {
-      const isDup = recordToFallback(deduplicationKey);
-      return { isDuplicate: isDup, source: 'memory_fallback' };
-    }
-
-    // 1. Check if event was already received and processed
-    // In marketing_webhooks, we search for matching platform and event ID in headers or payload
-    const { data: existing, error: queryErr } = await supabase
-      .from('marketing_webhooks')
-      .select('id, processing_status, created_at')
-      .eq('platform', normalizedPlatform)
-      .filter('headers->>x-event-id', 'eq', normalizedEventId)
-      .limit(1);
-
-    if (!queryErr && existing && existing.length > 0) {
-      return {
-        isDuplicate: true,
-        recordId: existing[0].id,
-        source: 'database',
-      };
-    }
-
-    // 2. Perform atomic insert with event metadata in headers
-    const sanitizedHeaders: Record<string, string> = {
-      ...(headers || {}),
-      'x-event-id': normalizedEventId,
-      'x-ingested-at': new Date().toISOString(),
-    };
-
-    const { data: inserted, error: insertErr } = await supabase
-      .from('marketing_webhooks')
-      .insert({
-        platform: normalizedPlatform,
-        event_type: payload?.type || payload?.event_name || payload?.object || 'webhook_event',
-        signature_verified: true,
-        headers: sanitizedHeaders,
-        payload: payload || {},
-        processing_status: 'pending',
-      })
-      .select('id')
-      .single();
-
-    if (insertErr) {
-      // If code 23505 (unique_violation) or query error, check if another instance inserted it concurrently
-      if (insertErr.code === '23505' || insertErr.message?.includes('duplicate key')) {
-        return { isDuplicate: true, source: 'database' };
-      }
-
-      // If database is temporarily unavailable, fall back safely
-      console.warn('[WebhookIdempotency] Database insert warning, falling back to LRU cache:', insertErr.message);
-      const isDup = recordToFallback(deduplicationKey);
-      return { isDuplicate: isDup, source: 'memory_fallback' };
-    }
-
-    return {
-      isDuplicate: false,
-      recordId: inserted?.id,
-      source: 'database',
-    };
-  } catch (err: any) {
-    console.warn('[WebhookIdempotency] Exception during claim, using fallback:', err.message);
-    const isDup = recordToFallback(deduplicationKey);
-    return { isDuplicate: isDup, source: 'memory_fallback' };
+  if (!error && inserted?.id) {
+    return { isDuplicate: false, recordId: inserted.id, source: 'database' };
   }
+  if (error && !isUniqueViolation(error)) {
+    // No unsafe memory fallback: return failure so the webhook can be retried.
+    throw new Error('Durable webhook claim unavailable');
+  }
+  if (error && isUniqueViolation(error)) return reclaimFailedEvent(normalizedPlatform, normalizedEventId);
+
+  return { isDuplicate: true, source: 'database' };
 }
 
-/**
- * Updates the processing status of a webhook record
- */
 export async function markWebhookStatus(
   recordId: string | undefined,
   status: 'processed' | 'failed' | 'ignored',
   errorMessage?: string
 ): Promise<void> {
   if (!recordId) return;
-
-  try {
-    const supabase = getSupabase();
-    if (!supabase) return;
-
-    await supabase
-      .from('marketing_webhooks')
-      .update({
-        processing_status: status,
-        error_message: errorMessage || null,
-      })
-      .eq('id', recordId);
-  } catch (err: any) {
-    console.warn('[WebhookIdempotency] Failed to update webhook status:', err.message);
-  }
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('marketing_webhooks')
+    .update({
+      processing_status: status,
+      // Do not write exception text, payload fragments, or credentials into the audit table.
+      error_message: errorMessage ? 'Webhook processing failed' : null,
+    })
+    .eq('id', recordId);
+  if (error) throw new Error('Unable to persist webhook processing status');
 }
