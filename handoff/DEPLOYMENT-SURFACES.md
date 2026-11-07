@@ -50,7 +50,7 @@ The repository deploys a public nginx SPA and a backend API gateway that also se
 | Image / Dockerfile | `backend/Dockerfile` |
 | Build / deploy | `cloudbuild-backend.yaml`, or `cloudbuild.yaml` (steps 4–6), or `.github/workflows/deploy.yml` (backend job). Deploy commands use `--update-env-vars`, which retains existing Secret Manager bindings for `PORTAL_*` and other secrets |
 | Runtime port | `8080` |
-| Env vars / secrets | `PORTAL_SECRET_KEY=<secret>`, `PORTAL_ADMIN_EMAIL=<admin-email>`, `PORTAL_ADMIN_PASSWORD=<secret>`, `PORTAL_MASTER_KEY=<secret>`, `SUPABASE_SERVICE_ROLE_KEY=<secret>`, `PUBLIC_BACKEND_URL=https://staging.rentmaikar.com`, plus the provider secrets in [`env/admin-backend.env.template`](./env/admin-backend.env.template) |
+| Env vars / secrets | `PORTAL_SECRET_KEY=<secret>`, `PORTAL_ADMIN_EMAIL=<admin-email>`, `PORTAL_ADMIN_PASSWORD=<secret>`, `PORTAL_MASTER_KEY=<secret>`, `RENTMAIKAR_INTERNAL_SERVICE_SECRET=<secret>`, `SUPABASE_SERVICE_ROLE_KEY=<secret>`, `PUBLIC_BACKEND_URL=https://staging.rentmaikar.com`, plus the provider secrets in [`env/admin-backend.env.template`](./env/admin-backend.env.template) |
 | Health check | `/api/health` |
 
 `PORTAL_*` values must come from env / Secret Manager and never be hardcoded (D4 addressed).
