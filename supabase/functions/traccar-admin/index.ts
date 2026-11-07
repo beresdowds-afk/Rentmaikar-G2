@@ -412,15 +412,11 @@ Deno.serve(async (req) => {
               : null,
           },
         };
-        const { data: upserted, error } = await supa
+        const { error } = await supa
           .from("iot_devices")
-          .upsert(row, { onConflict: "serial_number" })
-          .select("id, vehicle_id")
-          .maybeSingle();
+          .upsert(row, { onConflict: "serial_number" });
         if (error) deviceErrors.push({ device: serial, error: error.message });
         else upserts++;
-
-        const linkedVehicleId = upserted?.vehicle_id ?? existing?.vehicle_id ?? null;
 
         if (p) {
           // Unified location pipeline: one normalized shape, shared fleet map.
@@ -429,28 +425,15 @@ Deno.serve(async (req) => {
               serials: new Map([[String(d.id), serial]]),
             });
             if (normalized.length) {
-              await persistLocations(supa as never, normalized, { writeHistory: false, publishMqtt: true });
+              const persisted = await persistLocations(supa as never, normalized, { publishMqtt: true });
+              inserts += persisted.persisted;
+              if (persisted.errors.length) {
+                deviceErrors.push({ device: serial, error: `telemetry: ${persisted.errors.join("; ")}` });
+              }
             }
           } catch (e) {
             deviceErrors.push({ device: serial, error: `unified_location: ${(e as Error).message}` });
           }
-          const { error: telErr } = await supa.from("mqtt_telemetry_logs").insert({
-            data_type: "traccar_position",
-            vehicle_id: linkedVehicleId ?? serial,
-            payload: {
-              lat: p.latitude, lng: p.longitude,
-              speed_kmh: (p.speed || 0) * KNOTS_TO_KMH,
-              course: p.course, valid: p.valid, address: p.address,
-              attributes: p.attributes,
-              device_time: p.deviceTime, fix_time: p.fixTime,
-              iot_device_id: upserted?.id ?? existing?.id ?? null,
-              linked_vehicle_id: linkedVehicleId,
-            },
-            mqtt_topic: `traccar/${serial}/position`,
-            received_at: p.serverTime || nowIso,
-          } as never);
-          if (telErr) deviceErrors.push({ device: serial, error: `position: ${telErr.message}` });
-          else inserts++;
         }
       }
       const hasErrors = deviceErrors.length > 0;

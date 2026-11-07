@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
       .from("iot_devices")
       .select("provider_device_id, serial_number, vehicle_id")
       .eq("provider", "sarekon")
+      .eq("status", "active")
       .eq("telemetry_enabled", true)
       .not("vehicle_id", "is", null)
       .limit(500);

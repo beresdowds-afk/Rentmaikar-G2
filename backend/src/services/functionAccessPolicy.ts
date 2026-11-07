@@ -16,6 +16,7 @@ export type AccessLevel =
   | "admin"
   | "cron_or_admin"
   | "service_or_admin"
+  | "service"
   | "internal";
 
 export type AccessDecision = {
@@ -152,10 +153,7 @@ classify("owner", [
   "initiate-paystack-transfer",
   "refresh-export-download-url",
 ]);
-classify("driver", [
-  "driver-vehicle-command",
-  "voice-access-token",
-]);
+classify("driver", ["driver-vehicle-command", "voice-access-token"]);
 classify("service_or_admin", [
   "send-email-notification",
   "send-sms-notification",
@@ -177,12 +175,12 @@ classify("internal", [
   "sent-status",
   "social-inbox-webhook",
   "termii-webhook",
-  "telemetry-dispatch",
-  "telemetry-ingest",
   "twilio-webhook",
   "voip-status-callback",
   "whatchimp-webhook",
 ]);
+classify("service", ["telemetry-ingest"]);
+classify("admin", ["telemetry-dispatch"]);
 classify("cron_or_admin", [
   "expire-call-ins",
   "gps-worker-watchdog",
@@ -199,9 +197,12 @@ classify("cron_or_admin", [
 
 classify("driver", ["driver-vehicle-command"]);
 
-export const FUNCTION_ACCESS: Readonly<Record<string, AccessLevel>> = Object.freeze(policy);
+export const FUNCTION_ACCESS: Readonly<Record<string, AccessLevel>> =
+  Object.freeze(policy);
 
-export function getFunctionAccessLevel(functionName: string): AccessLevel | undefined {
+export function getFunctionAccessLevel(
+  functionName: string,
+): AccessLevel | undefined {
   return Object.prototype.hasOwnProperty.call(FUNCTION_ACCESS, functionName)
     ? FUNCTION_ACCESS[functionName]
     : undefined;
@@ -218,7 +219,7 @@ export class AccessDenied extends Error {
 
 function headerValue(headers: Record<string, unknown>, name: string): string {
   const raw = headers[name] ?? headers[name.toLowerCase()];
-  return String(Array.isArray(raw) ? raw[0] ?? "" : raw ?? "").trim();
+  return String(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? "")).trim();
 }
 
 function secretMatches(provided: string, configured: string): boolean {
@@ -247,12 +248,15 @@ export function isAuthorizedForAccessLevel(
     case "driver":
       return hasRole(caller, ["driver"]);
     case "support":
-      return caller.isAdmin || hasRole(caller, ["inspector", "driver", "owner"]);
+      return (
+        caller.isAdmin || hasRole(caller, ["inspector", "driver", "owner"])
+      );
     case "admin":
       return caller.isAdmin;
     case "cron_or_admin":
     case "service_or_admin":
       return caller.isAdmin;
+    case "service":
     case "internal":
       return false;
   }
@@ -262,7 +266,9 @@ export function isResourceOwner(
   caller: AuthContext,
   resourceOwnerId: unknown,
 ): boolean {
-  return caller.isAdmin || caller.userId === String(resourceOwnerId ?? "").trim();
+  return (
+    caller.isAdmin || caller.userId === String(resourceOwnerId ?? "").trim()
+  );
 }
 
 export function isResourceParticipant(
@@ -283,14 +289,16 @@ function auditAccess(
   callerId: string | null,
   correlationId: string,
 ): void {
-  console.info(JSON.stringify({
-    type: "function_access_audit",
-    actor: callerId,
-    function: functionName,
-    decision,
-    correlationId,
-    outcome,
-  }));
+  console.info(
+    JSON.stringify({
+      type: "function_access_audit",
+      actor: callerId,
+      function: functionName,
+      decision,
+      correlationId,
+      outcome,
+    }),
+  );
 }
 
 /**
@@ -321,10 +329,22 @@ export async function enforceFunctionAccess(
     const secret = headerValue(headers, "x-rentmaikar-internal-secret");
     const configured = process.env.RENTMAIKAR_INTERNAL_SERVICE_SECRET || "";
     if (!secretMatches(secret, configured)) {
-      auditAccess(functionName, "deny", "internal_identity_required", "unauthenticated", correlationId);
+      auditAccess(
+        functionName,
+        "deny",
+        "internal_identity_required",
+        "unauthenticated",
+        correlationId,
+      );
       throw new AccessDenied("Internal service authentication required", 401);
     }
-    auditAccess(functionName, "allow", "internal_service", "internal-service", correlationId);
+    auditAccess(
+      functionName,
+      "allow",
+      "internal_service",
+      "internal-service",
+      correlationId,
+    );
     return { caller: null, via: "service" };
   }
 
@@ -333,10 +353,58 @@ export async function enforceFunctionAccess(
     return { caller: null, via: "cron" };
   }
 
+  if (level === "service") {
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+    const presented = headerValue(headers, "authorization")
+      .replace(/^Bearer\s+/i, "")
+      .trim();
+    if (secretMatches(presented, serviceKey)) {
+      auditAccess(functionName, "allow", "service", "service", correlationId);
+      return { caller: null, via: "service" };
+    }
+
+    const internalSecret = headerValue(headers, "x-rentmaikar-internal-secret");
+    if (
+      secretMatches(
+        internalSecret,
+        process.env.RENTMAIKAR_INTERNAL_SERVICE_SECRET || "",
+      )
+    ) {
+      auditAccess(
+        functionName,
+        "allow",
+        "internal_service",
+        "internal-service",
+        correlationId,
+      );
+      return { caller: null, via: "service" };
+    }
+
+    auditAccess(
+      functionName,
+      "deny",
+      "service_identity_required",
+      "unauthenticated",
+      correlationId,
+    );
+    throw new AccessDenied("Service authentication required", 401);
+  }
+
   if (level === "service_or_admin") {
     const serviceSecret = headerValue(headers, "x-rentmaikar-internal-secret");
-    if (secretMatches(serviceSecret, process.env.RENTMAIKAR_INTERNAL_SERVICE_SECRET || "")) {
-      auditAccess(functionName, "allow", "internal_service", "internal-service", correlationId);
+    if (
+      secretMatches(
+        serviceSecret,
+        process.env.RENTMAIKAR_INTERNAL_SERVICE_SECRET || "",
+      )
+    ) {
+      auditAccess(
+        functionName,
+        "allow",
+        "internal_service",
+        "internal-service",
+        correlationId,
+      );
       return { caller: null, via: "service" };
     }
   }
@@ -345,7 +413,13 @@ export async function enforceFunctionAccess(
   try {
     caller = await authenticate(headerValue(headers, "authorization"));
   } catch (error: any) {
-    auditAccess(functionName, "deny", "authentication_failed", null, correlationId);
+    auditAccess(
+      functionName,
+      "deny",
+      "authentication_failed",
+      null,
+      correlationId,
+    );
     throw new AccessDenied(
       "Authentication required",
       [403, 503].includes(error?.statusCode) ? error.statusCode : 401,
@@ -353,7 +427,13 @@ export async function enforceFunctionAccess(
   }
 
   if (!isAuthorizedForAccessLevel(level, caller)) {
-    auditAccess(functionName, "deny", "role_not_authorized", caller.userId, correlationId);
+    auditAccess(
+      functionName,
+      "deny",
+      "role_not_authorized",
+      caller.userId,
+      correlationId,
+    );
     throw new AccessDenied("Forbidden", 403);
   }
 

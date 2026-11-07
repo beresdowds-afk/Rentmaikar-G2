@@ -1,6 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { locationTopic, type NormalizedVehicleLocation } from "./location-types.ts";
 import { resolveEmqxClient } from "./emqx-client.ts";
+import {
+  isAcceptableTelemetryTimestamp,
+  isAcceptableTelemetryValues,
+  isNewerTelemetryEvent,
+  resolveTelemetryBinding,
+  type RegisteredTelemetryDevice,
+} from "./telemetry-security.ts";
 
 type Admin = ReturnType<typeof createClient>;
 
@@ -44,14 +51,6 @@ function metersBetween(aLat: number, aLng: number, bLat: number, bLng: number): 
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-interface DeviceRow {
-  id: string;
-  vehicle_id: string | null;
-  provider: string | null;
-  serial_number: string | null;
-  provider_device_id: string | null;
-}
-
 /**
  * Resolve provider device ids → { vehicleId, iotDeviceId } using iot_devices.
  * Matching is scoped to the provider so two providers can reuse an id safely.
@@ -61,23 +60,25 @@ export async function resolveDeviceMap(
   provider: string,
   deviceIds: string[],
   serials: string[] = [],
-): Promise<Map<string, DeviceRow>> {
-  const map = new Map<string, DeviceRow>();
+): Promise<Map<string, RegisteredTelemetryDevice>> {
+  const map = new Map<string, RegisteredTelemetryDevice>();
   if (!deviceIds.length && !serials.length) return map;
 
-
-  const { data } = await admin
-    .from("iot_devices")
-    .select("id, vehicle_id, provider, serial_number, provider_device_id")
-    .eq("provider", provider)
-    .or(
-      [
-        deviceIds.length ? `provider_device_id.in.(${deviceIds.map((d) => `"${d}"`).join(",")})` : null,
-        serials.length ? `serial_number.in.(${serials.map((s) => `"${s}"`).join(",")})` : null,
-      ].filter(Boolean).join(","),
-    );
-
-  for (const row of (data ?? []) as unknown as DeviceRow[]) {
+  const select = "id, vehicle_id, provider, serial_number, provider_device_id, status, telemetry_enabled";
+  const queries = [];
+  if (deviceIds.length) {
+    queries.push(admin.from("iot_devices").select(select).eq("provider", provider).in("provider_device_id", deviceIds));
+  }
+  if (serials.length) {
+    queries.push(admin.from("iot_devices").select(select).eq("provider", provider).in("serial_number", serials));
+  }
+  const results = await Promise.all(queries);
+  const rows = new Map<string, RegisteredTelemetryDevice>();
+  for (const result of results) {
+    if (result.error) throw new Error(`device_registry_lookup_failed: ${result.error.message}`);
+    for (const row of (result.data ?? []) as unknown as RegisteredTelemetryDevice[]) rows.set(row.id, row);
+  }
+  for (const row of rows.values()) {
     if (row.provider_device_id) map.set(row.provider_device_id, row);
     if (row.serial_number) map.set(`serial:${row.serial_number}`, row);
   }
@@ -95,11 +96,12 @@ export async function getGpsDisabledVehicles(
 ): Promise<Set<string>> {
   const ids = [...new Set(vehicleIds.filter(Boolean))];
   if (!ids.length) return new Set();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("vehicles")
     .select("id")
     .in("id", ids)
     .eq("gps_tracking_enabled", false);
+  if (error) throw new Error(`gps_setting_lookup_failed: ${error.message}`);
   return new Set(((data ?? []) as { id: string }[]).map((r) => r.id));
 }
 
@@ -147,11 +149,26 @@ export async function persistLocations(
       [...new Set(list.map((l) => l.serialNumber).filter(Boolean) as string[])],
     );
     for (const loc of list) {
-      const row = deviceMap.get(loc.providerDeviceId) ??
-        (loc.serialNumber ? deviceMap.get(`serial:${loc.serialNumber}`) : undefined);
-      const vehicleId = loc.vehicleId ?? row?.vehicle_id ?? null;
-      if (!vehicleId) result.unmapped += 1;
-      resolved.push({ ...loc, vehicleId, iotDeviceId: row?.id ?? null });
+      if (!isAcceptableTelemetryValues(loc) ||
+        !isAcceptableTelemetryTimestamp(loc.gpsTimestamp, loc.provider)) {
+        result.unmapped += 1;
+        continue;
+      }
+      const candidates = [
+        deviceMap.get(loc.providerDeviceId),
+        loc.serialNumber ? deviceMap.get(`serial:${loc.serialNumber}`) : undefined,
+      ].filter((row): row is RegisteredTelemetryDevice => !!row);
+      const binding = resolveTelemetryBinding(loc, candidates);
+      if (!binding.device || !binding.vehicleId) {
+        result.unmapped += 1;
+        continue;
+      }
+      resolved.push({
+        ...loc,
+        vehicleId: binding.vehicleId,
+        iotDeviceId: binding.device.id,
+        providerDeviceId: binding.device.provider_device_id ?? loc.providerDeviceId,
+      });
     }
   }
 
@@ -181,10 +198,11 @@ export async function persistLocations(
   const vehicleIds = [...latestByVehicle.keys()];
   const existingState = new Map<string, Record<string, unknown>>();
   if (vehicleIds.length) {
-    const { data } = await admin
+    const { data, error } = await admin
       .from("vehicle_telemetry_state")
       .select("vehicle_id, latitude, longitude, speed, heading, gps_timestamp, ignition")
       .in("vehicle_id", vehicleIds);
+    if (error) throw new Error(`telemetry_state_lookup_failed: ${error.message}`);
     for (const row of (data ?? []) as Record<string, unknown>[]) {
       existingState.set(String(row.vehicle_id), row);
     }
@@ -200,7 +218,7 @@ export async function persistLocations(
       const prevTs = prev.gps_timestamp ? Date.parse(String(prev.gps_timestamp)) : 0;
       const nextTs = Date.parse(loc.gpsTimestamp);
       // Never let a stale/historic fix overwrite a newer live one.
-      if (loc.isHistoric && prevTs >= nextTs) {
+      if (!isNewerTelemetryEvent(loc.gpsTimestamp, String(prev.gps_timestamp ?? ""))) {
         result.deduped += 1;
         continue;
       }
@@ -214,10 +232,6 @@ export async function persistLocations(
       const headingChanged = Number(prev.heading ?? 0) !== Number(loc.heading ?? 0);
       const withinHeartbeat = prevTs > 0 && Date.now() - prevTs < opts.heartbeatMs;
       if ((sameTime || (!moved && !speedChanged && !headingChanged)) && withinHeartbeat) {
-        result.deduped += 1;
-        continue;
-      }
-      if (nextTs < prevTs) {
         result.deduped += 1;
         continue;
       }
@@ -265,6 +279,9 @@ export async function persistLocations(
       vehicle_id: l.vehicleId,
       data_type: "location",
       mqtt_topic: locationTopic(l.vehicleId!),
+      provider: l.provider,
+      provider_device_id: l.providerDeviceId,
+      provider_event_time: l.gpsTimestamp,
       received_at: l.receivedAt,
       payload: {
         provider: l.provider,
@@ -282,7 +299,10 @@ export async function persistLocations(
       },
     }));
   if (opts.writeHistory && logs.length) {
-    const { error } = await admin.from("mqtt_telemetry_logs").insert(logs as never);
+    const { error } = await admin.from("mqtt_telemetry_logs").upsert(logs as never, {
+      onConflict: "provider,provider_device_id,provider_event_time,mqtt_topic",
+      ignoreDuplicates: true,
+    });
     if (error) result.errors.push(`history_insert: ${error.message}`);
   }
 

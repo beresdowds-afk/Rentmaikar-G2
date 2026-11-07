@@ -47,7 +47,7 @@ describe("Orchestrator E2E: Traccar → MQTT → Plugin → vehicle_analytics_ev
     expect(pluginManager.getCallCount("e2e-test-plugin")).toBeGreaterThan(0);
   });
 
-  it("MQTT event updates state and triggers analytics persistence", async () => {
+  it("MQTT browser event updates only the local mirror, not authoritative persistence", async () => {
     const vehicleId = `test-mqtt-${Date.now()}`;
     receiveMQTTMessage(`rentmaikar/vehicle/${vehicleId}/telemetry`, {
       battery: 10, temperature: 110,
@@ -56,11 +56,9 @@ describe("Orchestrator E2E: Traccar → MQTT → Plugin → vehicle_analytics_ev
     const state = orchestrator.getVehicleState(vehicleId);
     expect(state?.battery).toBe(10);
     expect(state?.temperature).toBe(110);
-    // Analytics persistence is server-authoritative: the browser forwards the
-    // raw event to the telemetry-ingest edge function.
-    expect(supabase.functions.invoke).toHaveBeenCalledWith(
+    expect(supabase.functions.invoke).not.toHaveBeenCalledWith(
       "telemetry-ingest",
-      expect.objectContaining({ body: expect.anything() }),
+      expect.anything(),
     );
   });
 

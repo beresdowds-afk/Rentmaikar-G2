@@ -43,9 +43,9 @@ export function toNumber(value: unknown): number | null {
 }
 
 export function toIso(value: unknown, fallback = new Date().toISOString()): string {
-  if (!value) return fallback;
+  if (value === undefined || value === null || value === "") return fallback;
   const d = new Date(typeof value === "number" ? value : String(value));
-  return Number.isNaN(d.getTime()) ? fallback : d.toISOString();
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
 /**

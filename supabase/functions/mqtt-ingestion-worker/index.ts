@@ -49,16 +49,23 @@ Deno.serve(async (req) => {
     }
 
     // Vehicles we care about: linked, telemetry-enabled IoT devices.
-    const { data: devices } = await admin
+    const { data: devices, error: deviceError } = await admin
       .from("iot_devices")
-      .select("vehicle_id")
+      .select("vehicle_id, provider_device_id, serial_number")
+      .eq("provider", "emqx")
       .not("vehicle_id", "is", null)
+      .eq("status", "active")
       .eq("telemetry_enabled", true)
       .limit(500);
+    if (deviceError) throw new Error(`device_registry_lookup_failed: ${deviceError.message}`);
 
-    const vehicleIds = [
-      ...new Set((devices ?? []).map((d: Record<string, unknown>) => String(d.vehicle_id))),
-    ];
+    const linkedDevices = (devices ?? [])
+      .map((device: Record<string, unknown>) => ({
+        vehicleId: String(device.vehicle_id),
+        deviceId: String(device.provider_device_id || device.serial_number || ""),
+      }))
+      .filter((device) => device.deviceId);
+    const vehicleIds = [...new Set(linkedDevices.map((device) => device.vehicleId))];
 
     if (!vehicleIds.length) {
       // Nothing to pull: still probe the broker so the dashboard shows real health.
@@ -80,7 +87,7 @@ Deno.serve(async (req) => {
     let reachable = false;
     let degradedReason: string | null = null;
 
-    for (const vehicleId of vehicleIds) {
+    for (const { vehicleId, deviceId } of linkedDevices) {
       for (const suffix of TOPIC_SUFFIXES) {
         const topic = `rentmaikar/vehicle/${vehicleId}/${suffix}`;
         try {
@@ -95,14 +102,15 @@ Deno.serve(async (req) => {
           } catch {
             payload = { raw: payloadRaw };
           }
+          const eventTimestamp = payload.gps_time ?? payload.device_time ?? payload.timestamp ?? payload.ts ??
+            (msg?.publish_at ? new Date(Number(msg.publish_at)).toISOString() : "");
           records.push({
             source: "mqtt",
             topic,
             vehicleId,
+            deviceId,
             eventType: suffix,
-            timestamp: msg?.publish_at
-              ? new Date(Number(msg.publish_at)).toISOString()
-              : new Date().toISOString(),
+            timestamp: eventTimestamp,
             payload,
           });
         } catch (e) {

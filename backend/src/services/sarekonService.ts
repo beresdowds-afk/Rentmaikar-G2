@@ -35,6 +35,28 @@ function getDbPool(): pg.Pool | null {
   return pgPool;
 }
 
+function isValidSarekonFix(
+  latitude: number,
+  longitude: number,
+  speed: number,
+  heading: number,
+  eventTime: string,
+): boolean {
+  const now = Date.now();
+  return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
+    Number.isFinite(longitude) && longitude >= -180 && longitude <= 180 &&
+    !(latitude === 0 && longitude === 0) &&
+    Number.isFinite(speed) && speed >= 0 && speed <= 300 &&
+    Number.isFinite(heading) && heading >= 0 && heading < 360 &&
+    isAcceptableSarekonTimestamp(eventTime, now);
+}
+
+function isAcceptableSarekonTimestamp(eventTime: string, now = Date.now()): boolean {
+  const timestamp = Date.parse(eventTime);
+  return Number.isFinite(timestamp) && timestamp <= now + 5 * 60_000 &&
+    now - timestamp <= 48 * 60 * 60_000;
+}
+
 const DEFAULT_BASE = "https://api.sarekon.com/v1";
 
 export function normaliseBaseUrl(input?: string): string {
@@ -399,30 +421,37 @@ export const sarekonService = {
 
       // Find vehicle
       const devRes = await pool.query(
-        `SELECT d.id, d.vehicle_id, v.gps_tracking_enabled
+        `SELECT d.id, d.vehicle_id, d.provider_device_id, d.serial_number,
+                d.status, d.telemetry_enabled, v.gps_tracking_enabled
          FROM public.iot_devices d
          JOIN public.vehicles v ON d.vehicle_id = v.id
-         WHERE (d.provider_device_id = $1 OR d.serial_number = $1) AND d.provider = 'sarekon'`,
+         WHERE (d.provider_device_id = $1 OR d.serial_number = $1)
+           AND d.provider = 'sarekon'
+           AND d.status = 'active'
+           AND d.telemetry_enabled = true
+         LIMIT 2`,
         [devId]
       );
 
-      if (devRes.rows.length === 0) continue;
+      if (devRes.rows.length !== 1) continue;
       const { vehicle_id: vId, gps_tracking_enabled } = devRes.rows[0];
-      if (!vId || gps_tracking_enabled === false) continue;
+      if (!vId || gps_tracking_enabled !== true) continue;
 
       const eventDesc = String(msg.message_type_description || "Event");
       const eventId = Number(msg.message_type_id || 0);
+      const eventKey = String(msg.event_id || msg.eventId || msg.id || eventId);
       const lat = Number(msg.latitude);
       const lng = Number(msg.longitude);
       const speed = Number(msg.speed || 0);
       const heading = Number(msg.bearing_deg || 0);
       const address = msg.address || null;
-      const triggeredAt = msg.triggered_on_local || new Date().toISOString();
+      const triggeredAt = String(msg.triggered_on_local || msg.triggered_on || msg.timestamp || "");
+      if (!isAcceptableSarekonTimestamp(triggeredAt)) continue;
 
       // Determine MQTT data_type according to constraint:
       // ('location', 'engine', 'status', 'sensors', 'command')
       let dataType: "location" | "engine" | "status" | "sensors" | "command" = "status";
-      if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0) {
+      if (isValidSarekonFix(lat, lng, speed, heading, triggeredAt)) {
         dataType = "location";
       } else if (eventId === 1252 || eventId === 1253) {
         dataType = "engine";
@@ -433,19 +462,29 @@ export const sarekonService = {
       // Log into continuous mqtt_telemetry_logs stream
       await pool.query(
         `INSERT INTO public.mqtt_telemetry_logs (
-           vehicle_id, data_type, payload, mqtt_topic, received_at
-         ) VALUES ($1, $2, $3, $4, now())`,
-        [vId, dataType, JSON.stringify(msg), `sarekon/events/${eventId}`]
-      ).catch(() => {});
+           vehicle_id, provider, provider_device_id, provider_event_time, data_type, payload, mqtt_topic, received_at
+         ) VALUES ($1, 'sarekon', $2, $3, $4, $5, $6, now())
+         ON CONFLICT (provider, provider_device_id, provider_event_time, mqtt_topic) DO NOTHING`,
+        [
+          vId,
+          devRes.rows[0].provider_device_id || devRes.rows[0].serial_number,
+          triggeredAt,
+          dataType,
+          JSON.stringify({ ...msg, provider: "sarekon", provider_device_id: devRes.rows[0].provider_device_id, provider_event_time: triggeredAt }),
+          `sarekon/events/${eventId}/${eventKey}`,
+        ]
+      );
 
       // Update vehicle_telemetry_state if location is valid or event is significant
-      if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0) {
+      if (isValidSarekonFix(lat, lng, speed, heading, triggeredAt)) {
         await pool.query(
           `INSERT INTO public.vehicle_telemetry_state (
-             vehicle_id, latitude, longitude, speed, heading, address,
+             vehicle_id, provider, provider_device_id, latitude, longitude, speed, heading, address,
              last_source, last_event_type, last_event_at, gps_timestamp, received_at, payload, updated_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, 'sarekon', $7, $8, $9, now(), $10, now())
+           ) VALUES ($1, 'sarekon', $2, $3, $4, $5, $6, $7, 'sarekon', $8, $9, $9, now(), $10, now())
            ON CONFLICT (vehicle_id) DO UPDATE SET
+             provider = EXCLUDED.provider,
+             provider_device_id = EXCLUDED.provider_device_id,
              latitude = EXCLUDED.latitude,
              longitude = EXCLUDED.longitude,
              speed = EXCLUDED.speed,
@@ -458,9 +497,21 @@ export const sarekonService = {
              received_at = now(),
              payload = EXCLUDED.payload,
              updated_at = now()
-           WHERE vehicle_telemetry_state.last_event_at IS NULL OR EXCLUDED.last_event_at >= vehicle_telemetry_state.last_event_at`,
-          [vId, lat, lng, speed, heading, address, eventDesc, triggeredAt, triggeredAt, JSON.stringify(msg)]
-        ).catch(() => {});
+           WHERE vehicle_telemetry_state.gps_timestamp IS NULL
+              OR EXCLUDED.gps_timestamp > vehicle_telemetry_state.gps_timestamp`,
+          [
+            vId,
+            devRes.rows[0].provider_device_id || devRes.rows[0].serial_number,
+            lat,
+            lng,
+            speed,
+            heading,
+            address,
+            eventDesc,
+            triggeredAt,
+            JSON.stringify(msg),
+          ]
+        );
       }
 
       // If security alert (tow, movement breach, tamper, battery disconnect), audit log
@@ -686,7 +737,7 @@ export const sarekonService = {
       latestSpeed = Number(locationObj.speed || 0);
       latestHeading = Number(locationObj.bearing_deg || 0);
       latestAddress = locationObj.address || null;
-      latestGpsTime = locationObj.triggered_on_local || new Date().toISOString();
+      latestGpsTime = locationObj.triggered_on_local || locationObj.location_valid_on_local || null;
     } else {
       // Try fetching latest location via list.json
       try {
@@ -698,12 +749,13 @@ export const sarekonService = {
           latestSpeed = Number(l.speed || 0);
           latestHeading = Number(l.bearing_deg || 0);
           latestAddress = l.address || null;
-          latestGpsTime = l.triggered_on_local || new Date().toISOString();
+          latestGpsTime = l.triggered_on_local || l.location_valid_on_local || null;
         }
       } catch {}
     }
 
-    const hasValidCoords = Number.isFinite(latestLat) && Number.isFinite(latestLng) && latestLat !== 0;
+    const hasValidFix = latestLat !== null && latestLng !== null && latestGpsTime !== null &&
+      isValidSarekonFix(latestLat, latestLng, latestSpeed, latestHeading, latestGpsTime);
 
     // 7. Upsert into Supabase public.iot_devices
     let supabaseDeviceId = dbDevice?.id;
@@ -738,8 +790,8 @@ export const sarekonService = {
           sarekonDeviceId,
           deviceModel,
           shouldLink ? targetVehicleId : null,
-          hasValidCoords ? latestLat : null,
-          hasValidCoords ? latestLng : null,
+          hasValidFix ? latestLat : null,
+          hasValidFix ? latestLng : null,
           syncNote,
           supabaseDeviceId,
         ]
@@ -768,30 +820,27 @@ export const sarekonService = {
           shouldLink ? targetVehicleId : null,
           Boolean(shouldLink && targetVehicleId),
           shouldLink && targetVehicleId ? "confirmed" : "pending",
-          hasValidCoords ? latestLat : null,
-          hasValidCoords ? latestLng : null,
-          hasValidCoords ? new Date() : null,
+          hasValidFix ? latestLat : null,
+          hasValidFix ? latestLng : null,
+          hasValidFix ? new Date() : null,
           syncNote,
         ]
       );
       supabaseDeviceId = insertRes.rows[0]?.id;
     }
 
-    // 8. If linked to vehicle, ensure vehicle has GPS enabled and update telemetry state
+    // 8. Persist only against the existing vehicle GPS setting.
     const effectiveVehicleId = shouldLink ? targetVehicleId : dbDevice?.vehicle_id;
     if (effectiveVehicleId) {
-      await pool.query(
-        `UPDATE public.vehicles SET gps_tracking_enabled = true, updated_at = now() WHERE id = $1::uuid`,
-        [effectiveVehicleId]
-      ).catch(() => {});
-
-      if (hasValidCoords) {
+      if (hasValidFix) {
         await pool.query(
           `INSERT INTO public.vehicle_telemetry_state (
-             vehicle_id, latitude, longitude, speed, heading, address,
+             vehicle_id, provider, provider_device_id, latitude, longitude, speed, heading, address,
              last_source, last_event_type, last_event_at, gps_timestamp, received_at, payload, updated_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, 'sarekon', 'location', now(), $7, now(), $8, now())
+           ) VALUES ($1, 'sarekon', $2, $3, $4, $5, $6, $7, 'sarekon', 'location', $8, $8, now(), $9, now())
            ON CONFLICT (vehicle_id) DO UPDATE SET
+             provider = EXCLUDED.provider,
+             provider_device_id = EXCLUDED.provider_device_id,
              latitude = EXCLUDED.latitude,
              longitude = EXCLUDED.longitude,
              speed = EXCLUDED.speed,
@@ -799,30 +848,39 @@ export const sarekonService = {
              address = COALESCE(EXCLUDED.address, vehicle_telemetry_state.address),
              last_source = 'sarekon',
              last_event_type = 'location',
-             last_event_at = now(),
+             last_event_at = EXCLUDED.last_event_at,
              gps_timestamp = EXCLUDED.gps_timestamp,
              received_at = now(),
              payload = EXCLUDED.payload,
-             updated_at = now()`,
+             updated_at = now()
+           WHERE vehicle_telemetry_state.gps_timestamp IS NULL
+              OR EXCLUDED.gps_timestamp > vehicle_telemetry_state.gps_timestamp`,
           [
             effectiveVehicleId,
+            sarekonDeviceId,
             latestLat,
             latestLng,
             latestSpeed,
             latestHeading,
             latestAddress,
-            latestGpsTime || new Date().toISOString(),
+            latestGpsTime,
             JSON.stringify(dvdData),
           ]
-        ).catch(() => {});
+        );
 
         // Insert stream row into mqtt_telemetry_logs
         await pool.query(
           `INSERT INTO public.mqtt_telemetry_logs (
-             vehicle_id, data_type, payload, mqtt_topic, received_at
-           ) VALUES ($1, 'location', $2, 'sarekon/resync', now())`,
-          [effectiveVehicleId, JSON.stringify({ device_id: sarekonDeviceId, imei: activeImei, location: locationObj })]
-        ).catch(() => {});
+             vehicle_id, provider, provider_device_id, provider_event_time, data_type, payload, mqtt_topic, received_at
+           ) VALUES ($1, 'sarekon', $2, $3, 'location', $4, 'sarekon/resync', now())
+           ON CONFLICT (provider, provider_device_id, provider_event_time, mqtt_topic) DO NOTHING`,
+          [
+            effectiveVehicleId,
+            sarekonDeviceId,
+            latestGpsTime,
+            JSON.stringify({ device_id: sarekonDeviceId, imei: activeImei, location: locationObj }),
+          ]
+        );
       }
     }
 
@@ -858,7 +916,7 @@ export const sarekonService = {
     });
 
     // 11. Update IoT Sync State
-    await updateSarekonSyncState("sarekon", "ok", { devicesSynced: 1, positionsImported: hasValidCoords ? 1 : 0 });
+    await updateSarekonSyncState("sarekon", "ok", { devicesSynced: 1, positionsImported: hasValidFix ? 1 : 0 });
 
     return {
       ok: true,
@@ -888,7 +946,7 @@ export const sarekonService = {
       vehicle_id: effectiveVehicleId,
       vehicle_linked: Boolean(effectiveVehicleId),
       canonical_synced: canonicalSynced,
-      location: hasValidCoords ? {
+      location: hasValidFix ? {
         latitude: latestLat,
         longitude: latestLng,
         speed: latestSpeed,
@@ -980,18 +1038,24 @@ export const sarekonService = {
           const speed = Number(loc.speed || 0);
           const heading = Number(loc.bearing_deg || 0);
           const address = loc.address || null;
-          const gpsTime = loc.triggered_on_local || new Date().toISOString();
+          const gpsTime = String(loc.triggered_on_local || loc.location_valid_on_local || "");
+          if (!isValidSarekonFix(lat, lng, speed, heading, gpsTime)) continue;
 
           // Find mapped vehicle
           const devQuery = await pool.query(
-            `SELECT d.id, d.vehicle_id, v.gps_tracking_enabled
+            `SELECT d.id, d.vehicle_id, d.provider_device_id, d.serial_number, v.gps_tracking_enabled
              FROM public.iot_devices d
-             LEFT JOIN public.vehicles v ON d.vehicle_id = v.id
-             WHERE d.provider_device_id = $1 AND d.provider = 'sarekon'`,
+             JOIN public.vehicles v ON d.vehicle_id = v.id
+             WHERE (d.provider_device_id = $1 OR d.serial_number = $1)
+               AND d.provider = 'sarekon'
+               AND d.status = 'active'
+               AND d.telemetry_enabled = true
+               AND v.gps_tracking_enabled = true
+             LIMIT 2`,
             [devId]
           );
 
-          if (devQuery.rows.length > 0) {
+          if (devQuery.rows.length === 1) {
             const dev = devQuery.rows[0];
             const vId = dev.vehicle_id;
 
@@ -1004,13 +1068,15 @@ export const sarekonService = {
             );
 
             // If mapped to vehicle and GPS tracking not explicitly disabled, update telemetry
-            if (vId && dev.gps_tracking_enabled !== false) {
-              await pool.query(
+            if (vId && dev.gps_tracking_enabled === true) {
+              const stateWrite = await pool.query(
                 `INSERT INTO public.vehicle_telemetry_state (
-                   vehicle_id, latitude, longitude, speed, heading, address,
+                   vehicle_id, provider, provider_device_id, latitude, longitude, speed, heading, address,
                    last_source, last_event_type, last_event_at, gps_timestamp, received_at, payload, updated_at
-                 ) VALUES ($1, $2, $3, $4, $5, $6, 'sarekon', 'location', now(), $7, now(), $8, now())
+                 ) VALUES ($1, 'sarekon', $2, $3, $4, $5, $6, $7, 'sarekon', 'location', $8, $8, now(), $9, now())
                  ON CONFLICT (vehicle_id) DO UPDATE SET
+                   provider = EXCLUDED.provider,
+                   provider_device_id = EXCLUDED.provider_device_id,
                    latitude = EXCLUDED.latitude,
                    longitude = EXCLUDED.longitude,
                    speed = EXCLUDED.speed,
@@ -1018,20 +1084,39 @@ export const sarekonService = {
                    address = EXCLUDED.address,
                    last_source = 'sarekon',
                    last_event_type = 'location',
-                   last_event_at = now(),
+                   last_event_at = EXCLUDED.last_event_at,
                    gps_timestamp = EXCLUDED.gps_timestamp,
                    received_at = now(),
                    payload = EXCLUDED.payload,
-                   updated_at = now()`,
-                [vId, lat, lng, speed, heading, address, gpsTime, JSON.stringify(loc)]
+                   updated_at = now()
+                 WHERE vehicle_telemetry_state.gps_timestamp IS NULL
+                    OR EXCLUDED.gps_timestamp > vehicle_telemetry_state.gps_timestamp`,
+                [
+                  vId,
+                  dev.provider_device_id || dev.serial_number,
+                  lat,
+                  lng,
+                  speed,
+                  heading,
+                  address,
+                  gpsTime,
+                  JSON.stringify(loc),
+                ]
               );
+              if (stateWrite.rowCount === 0) continue;
 
               // Continuous stream row into mqtt_telemetry_logs
               await pool.query(
                 `INSERT INTO public.mqtt_telemetry_logs (
-                   vehicle_id, data_type, payload, mqtt_topic, received_at
-                 ) VALUES ($1, 'location', $2, 'sarekon/location', now())`,
-                [vId, JSON.stringify(loc)]
+                   vehicle_id, provider, provider_device_id, provider_event_time, data_type, payload, mqtt_topic, received_at
+                 ) VALUES ($1, 'sarekon', $2, $3, 'location', $4, 'sarekon/location', now())
+                 ON CONFLICT (provider, provider_device_id, provider_event_time, mqtt_topic) DO NOTHING`,
+                [
+                  vId,
+                  dev.provider_device_id || dev.serial_number,
+                  gpsTime,
+                  JSON.stringify({ ...loc, provider: "sarekon", provider_device_id: dev.provider_device_id || dev.serial_number, provider_event_time: gpsTime }),
+                ]
               );
 
               positionsImported++;
@@ -1061,14 +1146,16 @@ export const sarekonService = {
 
     // Get unlinked SareKon devices
     const unlinkedTrackers = await pool.query(
-      `SELECT id, provider_device_id, serial_number, notes
+      `SELECT id, provider_device_id, serial_number, imei
        FROM public.iot_devices
-       WHERE provider = 'sarekon' AND (vehicle_id IS NULL OR is_linked = false)`
+       WHERE provider = 'sarekon'
+         AND status = 'active'
+         AND (vehicle_id IS NULL OR is_linked = false)`
     );
 
     // Get USA vehicles needing tracking (DMV region: MD, VA, DC or pickup_location in USA)
     const usaVehicles = await pool.query(
-      `SELECT v.id, v.make, v.model, v.license_plate, v.pickup_location
+      `SELECT v.id, v.make, v.model, v.license_plate, v.vin, v.pickup_location
        FROM public.vehicles v
        LEFT JOIN public.iot_devices d ON d.vehicle_id = v.id
        WHERE d.id IS NULL AND (
@@ -1082,11 +1169,19 @@ export const sarekonService = {
     );
 
     const linkedList: any[] = [];
-    const minLen = Math.min(unlinkedTrackers.rows.length, usaVehicles.rows.length);
+    const normalize = (value: unknown) =>
+      String(value ?? "").replace(/[^a-z0-9]/gi, "").toUpperCase();
 
-    for (let i = 0; i < minLen; i++) {
-      const tracker = unlinkedTrackers.rows[i];
-      const vehicle = usaVehicles.rows[i];
+    for (const vehicle of usaVehicles.rows) {
+      const vehicleIdentifiers = [normalize(vehicle.license_plate), normalize(vehicle.vin)]
+        .filter(Boolean);
+      const trackerIndex = unlinkedTrackers.rows.findIndex((device: Record<string, unknown>) =>
+        [device.serial_number, device.imei]
+          .map(normalize)
+          .some((identifier) => identifier && vehicleIdentifiers.includes(identifier))
+      );
+      if (trackerIndex < 0) continue;
+      const [tracker] = unlinkedTrackers.rows.splice(trackerIndex, 1);
 
       try {
         await pool.query(
@@ -1094,11 +1189,6 @@ export const sarekonService = {
            SET vehicle_id = $1::uuid, is_linked = true, installation_status = 'confirmed', telemetry_enabled = true, updated_at = now()
            WHERE id = $2::uuid`,
           [vehicle.id, tracker.id]
-        );
-
-        await pool.query(
-          `UPDATE public.vehicles SET gps_tracking_enabled = true, updated_at = now() WHERE id = $1::uuid`,
-          [vehicle.id]
         );
 
         // Reconcile canonical identity
@@ -1119,8 +1209,10 @@ export const sarekonService = {
       ok: true,
       total_linked: linkedList.length,
       linked: linkedList,
-      remaining_unlinked_trackers: unlinkedTrackers.rows.length - minLen,
-      remaining_usa_vehicles: usaVehicles.rows.length - minLen,
+      remaining_unlinked_trackers: unlinkedTrackers.rows.length,
+      remaining_usa_vehicles: usaVehicles.rows.filter(
+        (vehicle: Record<string, unknown>) => !linkedList.some((linked) => linked.vehicle_id === vehicle.id)
+      ).length,
     };
   },
 
@@ -1133,10 +1225,13 @@ export const sarekonService = {
     if (!pool) return { ok: false, error: "Database pool not ready" };
 
     const devRes = await pool.query(
-      `SELECT d.provider_device_id, d.serial_number, d.vehicle_id, v.gps_tracking_enabled
+      `SELECT d.provider_device_id, d.serial_number, d.vehicle_id, d.status, d.telemetry_enabled, v.gps_tracking_enabled
        FROM public.iot_devices d
        JOIN public.vehicles v ON d.vehicle_id = v.id
-       WHERE d.provider = 'sarekon' AND d.telemetry_enabled = true AND v.gps_tracking_enabled = true`
+       WHERE d.provider = 'sarekon'
+         AND d.status = 'active'
+         AND d.telemetry_enabled = true
+         AND v.gps_tracking_enabled = true`
     );
 
     const devices = devRes.rows;
@@ -1156,14 +1251,19 @@ export const sarekonService = {
 
         const lat = Number(loc.latitude);
         const lng = Number(loc.longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const speed = Number(loc.speed || 0);
+        const heading = Number(loc.bearing_deg || 0);
+        const gpsTime = String(loc.triggered_on_local || loc.location_valid_on_local || "");
+        if (!isValidSarekonFix(lat, lng, speed, heading, gpsTime)) continue;
 
-        await pool.query(
+        const stateWrite = await pool.query(
           `INSERT INTO public.vehicle_telemetry_state (
-             vehicle_id, latitude, longitude, speed, heading, address,
+             vehicle_id, provider, provider_device_id, latitude, longitude, speed, heading, address,
              last_source, last_event_type, last_event_at, gps_timestamp, received_at, payload, updated_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, 'sarekon', 'location', now(), $7, now(), $8, now())
+           ) VALUES ($1, 'sarekon', $2, $3, $4, $5, $6, $7, 'sarekon', 'location', $8, $8, now(), $9, now())
            ON CONFLICT (vehicle_id) DO UPDATE SET
+             provider = EXCLUDED.provider,
+             provider_device_id = EXCLUDED.provider_device_id,
              latitude = EXCLUDED.latitude,
              longitude = EXCLUDED.longitude,
              speed = EXCLUDED.speed,
@@ -1171,28 +1271,43 @@ export const sarekonService = {
              address = EXCLUDED.address,
              last_source = 'sarekon',
              last_event_type = 'location',
-             last_event_at = now(),
+             last_event_at = EXCLUDED.last_event_at,
              gps_timestamp = EXCLUDED.gps_timestamp,
              received_at = now(),
              payload = EXCLUDED.payload,
-             updated_at = now()`,
+             updated_at = now()
+           WHERE vehicle_telemetry_state.gps_timestamp IS NULL
+              OR EXCLUDED.gps_timestamp > vehicle_telemetry_state.gps_timestamp`,
           [
             match.vehicle_id,
+            match.provider_device_id || match.serial_number,
             lat,
             lng,
-            Number(loc.speed || 0),
-            Number(loc.bearing_deg || 0),
+            speed,
+            heading,
             loc.address || null,
-            loc.triggered_on_local || new Date().toISOString(),
+            gpsTime,
             JSON.stringify(loc),
           ]
         );
+        if (stateWrite.rowCount === 0) continue;
 
         await pool.query(
           `INSERT INTO public.mqtt_telemetry_logs (
-             vehicle_id, data_type, payload, mqtt_topic, received_at
-           ) VALUES ($1, 'location', $2, 'sarekon/location', now())`,
-          [match.vehicle_id, JSON.stringify(loc)]
+             vehicle_id, provider, provider_device_id, provider_event_time, data_type, payload, mqtt_topic, received_at
+           ) VALUES ($1, 'sarekon', $2, $3, 'location', $4, 'sarekon/location', now())
+           ON CONFLICT (provider, provider_device_id, provider_event_time, mqtt_topic) DO NOTHING`,
+          [
+            match.vehicle_id,
+            match.provider_device_id || match.serial_number,
+            gpsTime,
+            JSON.stringify({
+              ...loc,
+              provider: "sarekon",
+              provider_device_id: match.provider_device_id || match.serial_number,
+              provider_event_time: gpsTime,
+            }),
+          ]
         );
 
         processed++;

@@ -557,61 +557,96 @@ export const traccarService = {
               const devUniqueId = String(pos.deviceId || pos.uniqueId || "");
               // Find matching iot_device
               const devRes = await pool.query(
-                `SELECT d.id, d.vehicle_id, v.gps_tracking_enabled
+                `SELECT d.id, d.vehicle_id, d.provider_device_id, d.serial_number, v.gps_tracking_enabled
                  FROM public.iot_devices d
                  LEFT JOIN public.vehicles v ON d.vehicle_id = v.id
-                 WHERE d.serial_number = $1 OR d.imei = $1 OR d.provider_device_id = $1`,
+                 WHERE d.provider = 'traccar'
+                   AND d.status = 'active'
+                   AND d.telemetry_enabled = true
+                   AND (d.serial_number = $1 OR d.imei = $1 OR d.provider_device_id = $1)
+                 LIMIT 2`,
                 [devUniqueId]
               );
 
-              if (devRes.rows.length > 0) {
+              const fixTime = Date.parse(String(pos.fixTime || pos.deviceTime || pos.serverTime || ""));
+              const receivedAt = Date.now();
+              const latitude = Number(pos.latitude);
+              const longitude = Number(pos.longitude);
+              const speedKmh = Number(pos.speed ?? 0) * 1.852;
+              const heading = Number(pos.course ?? 0);
+              const altitude = Number(pos.altitude ?? 0);
+              if (
+                pos.valid !== false &&
+                devRes.rows.length === 1 &&
+                Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
+                Number.isFinite(longitude) && longitude >= -180 && longitude <= 180 &&
+                !(latitude === 0 && longitude === 0) &&
+                Number.isFinite(speedKmh) && speedKmh >= 0 && speedKmh <= 300 &&
+                Number.isFinite(heading) && heading >= 0 && heading < 360 &&
+                Number.isFinite(altitude) &&
+                Number.isFinite(fixTime) && fixTime <= receivedAt + 5 * 60_000 &&
+                receivedAt - fixTime <= 24 * 60 * 60_000
+              ) {
                 const dev = devRes.rows[0];
                 const vehicleId = dev.vehicle_id;
-                if (vehicleId && dev.gps_tracking_enabled !== false) {
+                if (vehicleId && dev.gps_tracking_enabled === true) {
                   // Upsert vehicle_telemetry_state
-                  await pool.query(
+                  const stateWrite = await pool.query(
                     `INSERT INTO public.vehicle_telemetry_state (
-                       vehicle_id, latitude, longitude, speed, heading, altitude, last_source, last_event_type,
+                       vehicle_id, provider, provider_device_id, latitude, longitude, speed, heading, altitude, last_source, last_event_type,
                        last_event_at, gps_timestamp, received_at, payload, updated_at
-                     ) VALUES ($1, $2, $3, $4, $5, $6, 'traccar', 'position', $7, $7, now(), $8, now())
+                     ) VALUES ($1, 'traccar', $2, $3, $4, $5, $6, $7, 'traccar', 'position', $8, $8, now(), $9, now())
                      ON CONFLICT (vehicle_id) DO UPDATE SET
                        latitude = EXCLUDED.latitude,
                        longitude = EXCLUDED.longitude,
                        speed = EXCLUDED.speed,
                        heading = EXCLUDED.heading,
                        altitude = EXCLUDED.altitude,
+                       provider = EXCLUDED.provider,
+                       provider_device_id = EXCLUDED.provider_device_id,
                        last_source = EXCLUDED.last_source,
                        last_event_type = EXCLUDED.last_event_type,
                        last_event_at = EXCLUDED.last_event_at,
                        gps_timestamp = EXCLUDED.gps_timestamp,
                        received_at = now(),
                        payload = EXCLUDED.payload,
-                       updated_at = now()`,
+                       updated_at = now()
+                     WHERE public.vehicle_telemetry_state.gps_timestamp IS NULL
+                        OR public.vehicle_telemetry_state.gps_timestamp < EXCLUDED.gps_timestamp`,
                     [
                       vehicleId,
-                      pos.latitude,
-                      pos.longitude,
-                      pos.speed ? pos.speed * 1.852 : 0, // knots to km/h
-                      pos.course || 0,
-                      pos.altitude || 0,
+                      dev.provider_device_id || dev.serial_number,
+                      latitude,
+                      longitude,
+                      speedKmh,
+                      heading,
+                      altitude,
                       pos.fixTime || pos.deviceTime || new Date().toISOString(),
                       JSON.stringify(pos),
                     ]
                   );
+                  if (stateWrite.rowCount === 0) continue;
 
                   // Update device position in iot_devices
                   await pool.query(
                     `UPDATE public.iot_devices
                      SET latitude = $1, longitude = $2, last_ping = now(), status = 'active', updated_at = now()
                      WHERE id = $3::uuid`,
-                    [pos.latitude, pos.longitude, dev.id]
+                    [latitude, longitude, dev.id]
                   );
 
                   // Log to mqtt_telemetry_logs for continuous stream history
                   await pool.query(
-                    `INSERT INTO public.mqtt_telemetry_logs (vehicle_id, data_type, payload, mqtt_topic, received_at)
-                     VALUES ($1, 'location', $2, 'traccar/location', now())`,
-                    [vehicleId, JSON.stringify(pos)]
+                    `INSERT INTO public.mqtt_telemetry_logs (
+                       vehicle_id, provider, provider_device_id, provider_event_time, data_type, payload, mqtt_topic, received_at
+                     ) VALUES ($1, 'traccar', $2, $3, 'location', $4, 'traccar/location', now())
+                     ON CONFLICT (provider, provider_device_id, provider_event_time, mqtt_topic) DO NOTHING`,
+                    [
+                      vehicleId,
+                      dev.provider_device_id || dev.serial_number,
+                      new Date(fixTime).toISOString(),
+                      JSON.stringify(pos),
+                    ]
                   );
 
                   await pool.query(`SELECT public.sync_device_identity($1::uuid)`, [dev.id]);
@@ -836,7 +871,6 @@ export const iotAdminService = {
             notes || null,
           ]
         );
-
         const newDevice = devRes.rows[0];
         // Trigger identity synthesis
         await pool.query(`SELECT public.sync_device_identity($1::uuid)`, [newDevice.id]);
@@ -1315,9 +1349,12 @@ export const autoProvisionService = {
 // ---------------------------------------------------------------------------
 
 export const telemetryService = {
-  async ingest(records: any[], source = "client") {
+  async ingest(records: Record<string, any>[], source = "client") {
     if (!Array.isArray(records) || records.length === 0) {
       return { ok: true, processed: 0, message: "No records to ingest" };
+    }
+    if (!["emqx", "traccar", "sarekon"].includes(source)) {
+      return { ok: false, error: "Unsupported telemetry provider" };
     }
 
     const pool = getDbPool();
@@ -1330,69 +1367,112 @@ export const telemetryService = {
     for (const record of records) {
       try {
         const payload = record.payload || record;
+        const deviceId = String(
+          record.deviceId || record.device_id || payload.device_id || payload.deviceId ||
+            payload.serial_number || payload.imei || "",
+        ).trim();
+        if (!deviceId) {
+          skipped++;
+          continue;
+        }
+
+        const devRes = await pool.query(
+          `SELECT d.id, d.vehicle_id, d.provider_device_id, d.serial_number, v.gps_tracking_enabled
+           FROM public.iot_devices d
+           JOIN public.vehicles v ON v.id = d.vehicle_id
+           WHERE d.provider = $1
+             AND d.status = 'active'
+             AND d.telemetry_enabled = true
+             AND d.vehicle_id IS NOT NULL
+             AND (d.provider_device_id = $2 OR d.serial_number = $2 OR d.imei = $2)
+           LIMIT 2`,
+          [source, deviceId],
+        );
+        if (devRes.rows.length !== 1) {
+          skipped++;
+          continue;
+        }
+        const device = devRes.rows[0];
+        const vehicleId = String(device.vehicle_id);
+        const claimedVehicleId = String(
+          record.vehicleId || record.vehicle_id || payload.vehicleId || payload.vehicle_id || "",
+        );
+        if (claimedVehicleId && claimedVehicleId !== vehicleId) {
+          skipped++;
+          continue;
+        }
+        if (device.gps_tracking_enabled !== true) {
+          skipped++;
+          continue;
+        }
+
         const rawLat = payload.latitude ?? payload.lat;
         const rawLng = payload.longitude ?? payload.lng ?? payload.lon;
         const lat = Number(rawLat);
         const lng = Number(rawLng);
-
-        if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
+        const rawSpeed = Number(payload.speed_kmh ?? payload.speed_kph ?? payload.speed ?? 0);
+        const speed = source === "traccar" && payload.speed_kmh == null && payload.speed_kph == null
+          ? rawSpeed * 1.852
+          : rawSpeed;
+        const heading = Number(payload.heading ?? payload.course ?? 0);
+        const altitude = Number(payload.altitude ?? 0);
+        if (
+          !Number.isFinite(lat) || lat < -90 || lat > 90 ||
+          !Number.isFinite(lng) || lng < -180 || lng > 180 ||
+          (lat === 0 && lng === 0) ||
+          !Number.isFinite(speed) || speed < 0 || speed > 300 ||
+          !Number.isFinite(heading) || heading < 0 || heading >= 360 ||
+          !Number.isFinite(altitude)
+        ) {
           skipped++;
           continue;
         }
 
-        let vehicleId = String(record.vehicleId || record.vehicle_id || payload.vehicleId || payload.vehicle_id || "");
-
-        // Resolve vehicleId from device identifier if vehicleId is absent
-        if (!vehicleId) {
-          const devIdent = String(record.deviceId || record.device_id || payload.deviceId || payload.serial_number || payload.imei || "");
-          if (devIdent) {
-            const devRes = await pool.query(
-              `SELECT vehicle_id FROM public.iot_devices 
-               WHERE (id::text = $1 OR serial_number = $1 OR imei = $1 OR provider_device_id = $1)
-                 AND vehicle_id IS NOT NULL LIMIT 1`,
-              [devIdent]
-            );
-            if (devRes.rows.length > 0) {
-              vehicleId = String(devRes.rows[0].vehicle_id);
-            }
-          }
-        }
-
-        if (!vehicleId) {
-          skipped++;
-          continue;
-        }
-
-        // Verify vehicle has gps_tracking_enabled
-        const vehRes = await pool.query(
-          `SELECT gps_tracking_enabled FROM public.vehicles WHERE id::text = $1 LIMIT 1`,
-          [vehicleId]
+        const battery = Number(payload.battery ?? payload.battery_level ?? 0);
+        const fuel = Number(payload.fuel ?? payload.fuel_level ?? 0);
+        const temperature = Number(payload.temperature ?? payload.engine_temp ?? 0);
+        const ignition = typeof payload.ignition === "boolean"
+          ? payload.ignition
+          : payload.ignition === "true" || payload.ignition === 1;
+        const eventTime = String(
+          record.timestamp || payload.fixTime || payload.deviceTime || payload.serverTime || payload.timestamp || "",
         );
-        if (vehRes.rows.length > 0 && vehRes.rows[0].gps_tracking_enabled === false) {
+        const eventTimeMs = Date.parse(eventTime);
+        const now = Date.now();
+        if (
+          !Number.isFinite(battery) || battery < 0 || battery > 100 ||
+          !Number.isFinite(fuel) || fuel < 0 || fuel > 100 ||
+          !Number.isFinite(temperature) || temperature < -100 || temperature > 300 ||
+          !Number.isFinite(eventTimeMs) || eventTimeMs > now + 5 * 60_000 ||
+          now - eventTimeMs > (source === "sarekon" ? 48 : 24) * 60 * 60_000
+        ) {
           skipped++;
           continue;
         }
 
-        const speed = Number(payload.speed || 0);
-        const heading = Number(payload.heading || payload.course || 0);
-        const altitude = Number(payload.altitude || 0);
-        const battery = Number(payload.battery || payload.battery_level || 0);
-        const fuel = Number(payload.fuel || payload.fuel_level || 0);
-        const temperature = Number(payload.temperature || payload.engine_temp || 0);
-        const ignition = Boolean(payload.ignition);
-        const eventTime = record.timestamp || payload.timestamp || new Date().toISOString();
+        const currentState = await pool.query(
+          `SELECT gps_timestamp FROM public.vehicle_telemetry_state WHERE vehicle_id = $1::uuid`,
+          [vehicleId],
+        );
+        if (
+          currentState.rows[0]?.gps_timestamp &&
+          Date.parse(String(currentState.rows[0].gps_timestamp)) >= eventTimeMs
+        ) {
+          skipped++;
+          continue;
+        }
         const rawType = String(record.eventType || record.event_type || payload.type || "").toLowerCase();
         const allowedDataTypes = ["location", "engine", "status", "sensors", "command"];
         const dataType = allowedDataTypes.includes(rawType) ? rawType : "location";
         const eventType = rawType || "location";
 
         // Authoritative UPSERT into vehicle_telemetry_state
-        await pool.query(
+        const stateWrite = await pool.query(
           `INSERT INTO public.vehicle_telemetry_state (
-             vehicle_id, latitude, longitude, speed, heading, altitude,
+             vehicle_id, provider, provider_device_id, latitude, longitude, speed, heading, altitude,
              ignition, battery, fuel, temperature,
              last_source, last_event_type, last_event_at, gps_timestamp, received_at, payload, updated_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, now(), $14, now())
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15, now(), $16, now())
            ON CONFLICT (vehicle_id) DO UPDATE SET
              latitude = EXCLUDED.latitude,
              longitude = EXCLUDED.longitude,
@@ -1403,15 +1483,21 @@ export const telemetryService = {
              battery = EXCLUDED.battery,
              fuel = EXCLUDED.fuel,
              temperature = EXCLUDED.temperature,
+             provider = EXCLUDED.provider,
+             provider_device_id = EXCLUDED.provider_device_id,
              last_source = EXCLUDED.last_source,
              last_event_type = EXCLUDED.last_event_type,
              last_event_at = EXCLUDED.last_event_at,
              gps_timestamp = EXCLUDED.gps_timestamp,
              received_at = now(),
              payload = EXCLUDED.payload,
-             updated_at = now()`,
+             updated_at = now()
+           WHERE public.vehicle_telemetry_state.gps_timestamp IS NULL
+              OR public.vehicle_telemetry_state.gps_timestamp < EXCLUDED.gps_timestamp`,
           [
             vehicleId,
+            source,
+            device.provider_device_id || device.serial_number,
             lat,
             lng,
             speed,
@@ -1428,19 +1514,34 @@ export const telemetryService = {
           ]
         );
 
+        if (stateWrite.rowCount === 0) {
+          skipped++;
+          continue;
+        }
+
         // Record stream row in mqtt_telemetry_logs
         await pool.query(
-          `INSERT INTO public.mqtt_telemetry_logs (vehicle_id, data_type, payload, mqtt_topic, received_at)
-           VALUES ($1, $2, $3, $4, now())`,
-          [vehicleId, dataType, JSON.stringify(payload), `telemetry/${vehicleId}`]
+          `INSERT INTO public.mqtt_telemetry_logs (
+             vehicle_id, provider, provider_device_id, provider_event_time, data_type, payload, mqtt_topic, received_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+           ON CONFLICT (provider, provider_device_id, provider_event_time, mqtt_topic) DO NOTHING`,
+          [
+            vehicleId,
+            source,
+            device.provider_device_id || device.serial_number,
+            eventTime,
+            dataType,
+            JSON.stringify({ ...payload, provider: source, provider_device_id: deviceId, provider_event_time: eventTime }),
+            `telemetry/${vehicleId}`,
+          ]
         );
 
         // Update device latitude/longitude
         await pool.query(
           `UPDATE public.iot_devices 
            SET latitude = $1, longitude = $2, last_ping = now(), status = 'active', updated_at = now()
-           WHERE vehicle_id::text = $3`,
-          [lat, lng, vehicleId]
+           WHERE id = $3::uuid`,
+          [lat, lng, device.id]
         );
 
         processed++;
