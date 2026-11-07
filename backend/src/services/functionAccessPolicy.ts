@@ -38,6 +38,7 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "send-sms-notification": "service_or_admin",
   "google-sso-auth-email": "authenticated",
   "provision-user-account": "authenticated",
+  "send-2fa-code": "authenticated",
   // User-initiated operations
   "create-paypal-order": "authenticated",
   "capture-paypal-order": "authenticated",

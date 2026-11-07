@@ -31,6 +31,7 @@ export const TwoFactorChallenge = ({
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [codeSent, setCodeSent] = useState(channel === 'authenticator');
+  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [totpSeconds, setTotpSeconds] = useState(getTotpSecondsRemaining());
 
@@ -62,29 +63,19 @@ export const TwoFactorChallenge = ({
     try {
       const payload = {
         action: 'send_code',
-        user_id: userId,
-        phone,
         channel,
       };
 
-      let resultData: any = null;
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {
-        // Fallback to client gateway
-      }
-
-      if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-          body: payload,
-        });
-        if (error) throw error;
-        resultData = data;
-      }
+      const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
+      if (bridgeRes.error) throw bridgeRes.error;
+      const resultData = bridgeRes.data;
 
       if (!resultData?.success) throw new Error(resultData?.error || 'Failed to send code');
+      if (typeof resultData.challenge_id !== 'string') {
+        throw new Error('MFA service did not return a valid challenge');
+      }
 
+      setChallengeId(resultData.challenge_id);
       setCodeSent(true);
       toast.success(`Verification code sent via ${channel.toUpperCase()}`);
     } catch (err) {
@@ -112,39 +103,19 @@ export const TwoFactorChallenge = ({
             throw new Error('Invalid code. Check Google Authenticator and make sure your device time is synchronized.');
           }
         } else {
-          // Fallback check against Supabase MFA factors if present
-          try {
-            const factors = await supabase.auth.mfa.listFactors();
-            if (factors.data?.totp && factors.data.totp.length > 0) {
-              const factorId = factors.data.totp[0].id;
-              const challenge = await supabase.auth.mfa.challenge({ factorId });
-              if (!challenge.error) {
-                const verifyRes = await supabase.auth.mfa.verify({
-                  factorId,
-                  challengeId: challenge.data.id,
-                  code: otpValue,
-                });
-                if (verifyRes.error) throw verifyRes.error;
-              }
-            }
-          } catch (mfaErr) {
-            // Verify via backend
-            const payload = { action: 'verify_code', user_id: userId, code: otpValue };
-            let resultData: any = null;
-            try {
-              const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
-              if (bridgeRes?.data) resultData = bridgeRes.data;
-            } catch {}
-            if (!resultData) {
-              const { data } = await supabase.functions.invoke('send-2fa-code', {
-                body: payload,
-              });
-              resultData = data;
-            }
-            if (resultData && !resultData.success) {
-              throw new Error(resultData.error || 'Verification failed');
-            }
-          }
+          const factors = await supabase.auth.mfa.listFactors();
+          if (factors.error) throw factors.error;
+          const factor = (factors.data?.totp ?? []).find((item) => item.status === 'verified');
+          if (!factor) throw new Error('No verified authenticator is configured for this account.');
+
+          const challenge = await supabase.auth.mfa.challenge({ factorId: factor.id });
+          if (challenge.error) throw challenge.error;
+          const verifyRes = await supabase.auth.mfa.verify({
+            factorId: factor.id,
+            challengeId: challenge.data.id,
+            code: otpValue,
+          });
+          if (verifyRes.error) throw verifyRes.error;
         }
 
         toast.success('Google Authenticator code verified!');
@@ -155,23 +126,14 @@ export const TwoFactorChallenge = ({
       // 2. Phone SMS / WhatsApp Verification
       const payload = {
         action: 'verify_code',
-        user_id: userId,
         code: otpValue,
+        challenge_id: challengeId,
       };
 
-      let resultData: any = null;
-      try {
-        const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
-        if (bridgeRes?.data) resultData = bridgeRes.data;
-      } catch {}
-
-      if (!resultData) {
-        const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-          body: payload,
-        });
-        if (error) throw error;
-        resultData = data;
-      }
+      if (!challengeId) throw new Error('Request a new MFA code before verifying.');
+      const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', payload);
+      if (bridgeRes.error) throw bridgeRes.error;
+      const resultData = bridgeRes.data;
 
       if (!resultData?.success) throw new Error(resultData?.error || 'Verification failed');
 
