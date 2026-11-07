@@ -60,7 +60,15 @@ Deno.serve(async (req) => {
 
     const { credentialId, vehicleId, expiryDays = 30 } = await req.json();
 
-    if (!credentialId || !vehicleId) {
+    if (
+      typeof credentialId !== 'string' ||
+      typeof vehicleId !== 'string' ||
+      !credentialId ||
+      !vehicleId ||
+      !Number.isInteger(expiryDays) ||
+      expiryDays < 1 ||
+      expiryDays > 30
+    ) {
       return new Response(JSON.stringify({ error: 'credentialId and vehicleId are required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -78,6 +86,48 @@ Deno.serve(async (req) => {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
+    if (!cred.is_active || String(cred.vehicle_id) !== vehicleId) {
+      return new Response(JSON.stringify({ error: 'Credential is inactive or assigned to another vehicle' }), {
+        status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    let deviceQuery = adminClient
+      .from('iot_devices')
+      .select('id, vehicle_id')
+      .eq('provider', 'emqx')
+      .eq('status', 'active')
+      .eq('telemetry_enabled', true)
+      .eq('vehicle_id', vehicleId);
+    if (cred.iot_device_id) deviceQuery = deviceQuery.eq('id', cred.iot_device_id);
+    const { data: devices, error: deviceError } = await deviceQuery.limit(2);
+    if (deviceError) throw deviceError;
+    if (devices?.length !== 1) {
+      return new Response(JSON.stringify({ error: 'No unique active registered device is assigned to this vehicle' }), {
+        status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const topicPrefix = `rentmaikar/vehicle/${vehicleId}`;
+    if (String(cred.topic_prefix).replace(/\/+$/, '') !== topicPrefix) {
+      return new Response(JSON.stringify({ error: 'MQTT credential topic is not bound to the assigned vehicle' }), {
+        status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    const publishTopics = Array.isArray(cred.publish_topics)
+      ? cred.publish_topics.filter((topic: unknown) =>
+        typeof topic === 'string' && (topic === `${topicPrefix}/#` || topic.startsWith(`${topicPrefix}/`))
+      )
+      : [];
+    if (
+      !Array.isArray(cred.publish_topics) ||
+      !publishTopics.length ||
+      publishTopics.length !== cred.publish_topics.length
+    ) {
+      return new Response(JSON.stringify({ error: 'MQTT publish topics are not restricted to the assigned vehicle' }), {
+        status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const expirySeconds = expiryDays * 24 * 60 * 60;
@@ -89,7 +139,7 @@ Deno.serve(async (req) => {
       exp: now + expirySeconds,
       vehicle_id: vehicleId,
       username: cred.mqtt_username,
-      acl: { pub: cred.publish_topics, sub: cred.subscribe_topics },
+      acl: { pub: publishTopics, sub: Array.isArray(cred.subscribe_topics) ? cred.subscribe_topics : [] },
     };
 
     const encoder = new TextEncoder();
@@ -111,11 +161,12 @@ Deno.serve(async (req) => {
     const issuedAt = new Date().toISOString();
     const expiresAt = new Date((now + expirySeconds) * 1000).toISOString();
 
-    await adminClient.from('vehicle_mqtt_credentials').update({
+    const { error: updateError } = await adminClient.from('vehicle_mqtt_credentials').update({
       jwt_token: jwt,
       jwt_issued_at: issuedAt,
       jwt_expires_at: expiresAt,
     }).eq('id', credentialId);
+    if (updateError) throw updateError;
 
     return new Response(JSON.stringify({
       success: true, jwt, issued_at: issuedAt, expires_at: expiresAt,

@@ -12,7 +12,7 @@ import { authenticateCaller, type AuthContext } from "./fileUploadService";
 import crypto from "crypto";
 import { verifyCronSecret } from "./payoutRequestAuth";
 
-export type AccessLevel = "admin" | "authenticated" | "cron_or_admin" | "service_or_admin";
+export type AccessLevel = "admin" | "authenticated" | "cron_or_admin" | "service_or_admin" | "service";
 
 export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   // Device / infrastructure administration
@@ -29,6 +29,8 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "iot-scheduled-sync": "cron_or_admin",
   "process-inspection-reminders": "cron_or_admin",
   "sarekon-location-worker": "cron_or_admin",
+  "telemetry-ingest": "service",
+  "telemetry-dispatch": "admin",
   // Email / provisioning (no supabase/functions directory; backend-only)
   "email-health": "admin",
   "send-email-reply": "admin",
@@ -82,6 +84,17 @@ export async function enforceFunctionAccess(
 
   const raw = headers["authorization"];
   const header = Array.isArray(raw) ? String(raw[0] ?? "") : String(raw ?? "");
+
+  if (level === "service") {
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+    const presented = header.replace(/^Bearer\s+/i, "").trim();
+    const a = crypto.createHash("sha256").update(presented).digest();
+    const b = crypto.createHash("sha256").update(serviceKey).digest();
+    if (serviceKey && presented && crypto.timingSafeEqual(a, b)) {
+      return { caller: null, via: "service" };
+    }
+    throw new AccessDenied("Service authentication required", 401);
+  }
 
   if (level === "service_or_admin") {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";

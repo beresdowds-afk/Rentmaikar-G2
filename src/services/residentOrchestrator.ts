@@ -4,7 +4,6 @@ import {
   AnalyticsEvent,
 } from "./resident-ochestrator/types";
 import pluginManager from "@/plugins/pluginManager";
-import { supabase } from "@/integrations/supabase/client";
 
 type Listener = (state: VehicleState, events: AnalyticsEvent[]) => void;
 
@@ -127,38 +126,9 @@ class ResidentOrchestrator {
       if (this.recentAnalytics.length > 200) {
         this.recentAnalytics = this.recentAnalytics.slice(-200);
       }
-      this.persistAnalytics(events, event).catch((e) =>
-        console.warn("persist analytics failed", e),
-      );
     }
 
     return events;
-  }
-
-  /**
-   * Persistence + analytics are authoritative on the server: the browser only
-   * forwards the raw event to the `telemetry-ingest` edge function, which runs
-   * the same orchestrator core, upserts vehicle state and writes analytics.
-   * The local instance stays as a low-latency UI mirror.
-   */
-  private async persistAnalytics(_events: AnalyticsEvent[], src: VehicleEvent) {
-    try {
-      await supabase.functions.invoke("telemetry-ingest", {
-        body: {
-          events: [
-            {
-              source: src.source,
-              vehicleId: src.vehicleId,
-              eventType: src.eventType,
-              timestamp: src.timestamp,
-              payload: src.payload,
-            },
-          ],
-        },
-      });
-    } catch (e) {
-      console.warn("orchestrator: server ingest skipped", e);
-    }
   }
 
   getVehicleState(vehicleId: string) {

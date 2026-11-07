@@ -1475,8 +1475,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         return res.status(200).json(result);
       }
 
-      case "telemetry-ingest":
-      case "telemetry-dispatch": {
+      case "telemetry-ingest": {
         const records = Array.isArray(body.records)
           ? body.records
           : Array.isArray(body.events)
@@ -1485,6 +1484,9 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
         const result = await telemetryService.ingest(records, body.source || "bridge");
         return res.status(200).json(result);
       }
+
+      case "telemetry-dispatch":
+        return res.status(501).json({ ok: false, error: "Use the authenticated telemetry provider dispatcher" });
 
       case "emqx-monitoring":
       case "emqx-secret-rotation": {

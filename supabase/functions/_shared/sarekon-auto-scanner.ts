@@ -260,7 +260,7 @@ export async function runSarekonAutoScan(
     // Fetch all vehicles listed in the USA only (Maryland, Washington DC, Virginia, etc.)
     const { data: usaVehicles, error: vErr } = await supa
       .from("vehicles")
-      .select("id, make, model, year, license_plate, pickup_city, pickup_location, pickup_address, gps_tracking_enabled")
+      .select("id, make, model, year, license_plate, vin, pickup_city, pickup_location, pickup_address, gps_tracking_enabled")
       .or(
         "pickup_city.ilike.%maryland%,pickup_city.ilike.%washington%,pickup_city.ilike.%virginia%,pickup_city.ilike.%dc%,pickup_city.ilike.%baltimore%,pickup_city.ilike.%usa%,pickup_city.ilike.%us%"
       )
@@ -272,7 +272,7 @@ export async function runSarekonAutoScan(
       // Get all currently linked vehicle IDs in iot_devices
       const { data: currentLinks } = await supa
         .from("iot_devices")
-        .select("id, vehicle_id, provider_device_id, serial_number")
+        .select("id, vehicle_id, provider_device_id, serial_number, imei")
         .eq("provider", "sarekon");
 
       const linkedVehicleIds = new Set(
@@ -291,32 +291,20 @@ export async function runSarekonAutoScan(
 
       for (const veh of unlinkedVehicles) {
         const vehId = veh.id as string;
-        const plate = String(veh.license_plate || "").trim();
         const make = String(veh.make || "").trim();
         const model = String(veh.model || "").trim();
         const year = String(veh.year || "").trim();
-        const plateTail = plate.slice(-6).toUpperCase();
-
-        // 1. Try to find direct match in unlinked devices
-        let matchedDev = unlinkedDevices.find((d: { serial_number: string }) => {
-          const s = (d.serial_number || "").toUpperCase();
-          return plateTail && s.includes(plateTail);
-        });
-
-        // 2. Try match by make and model
-        if (!matchedDev && make && model) {
-          matchedDev = unlinkedDevices.find((d: { serial_number: string }) => {
-            const s = (d.serial_number || "").toLowerCase();
-            return s.includes(make.toLowerCase()) && s.includes(model.toLowerCase());
-          });
-        }
-
-        // 3. Fallback to any available unlinked device
-        if (!matchedDev && unlinkedDevices.length > 0) {
-          matchedDev = unlinkedDevices.shift();
-        }
-
-        if (matchedDev) {
+        const vehicleIdentifiers = [veh.license_plate, veh.vin]
+          .filter((value): value is string => typeof value === "string" && !!value.trim())
+          .map((value) => value.replace(/[^a-z0-9]/gi, "").toUpperCase());
+        const deviceIndex = unlinkedDevices.findIndex((device: { serial_number?: string; imei?: string }) =>
+          [device.serial_number, device.imei]
+            .filter((value): value is string => typeof value === "string" && !!value.trim())
+            .some((value) => vehicleIdentifiers.includes(value.replace(/[^a-z0-9]/gi, "").toUpperCase()))
+        );
+        if (deviceIndex >= 0) {
+          const [matchedDev] = unlinkedDevices.splice(deviceIndex, 1);
+          const plate = String(veh.license_plate || "").trim();
           const { error: linkErr } = await supa
             .from("iot_devices")
             .update({
@@ -358,50 +346,15 @@ export async function runSarekonAutoScan(
   // Write to vehicle_telemetry_state & mqtt_telemetry_logs
   for (const dv of activeDriverVehicles) {
     try {
-      // Find if this device is linked to a vehicle in our database
-      const { data: devRow } = await supa
-        .from("iot_devices")
-        .select("id, vehicle_id")
-        .eq("provider", "sarekon")
-        .eq("provider_device_id", dv.device_id)
-        .maybeSingle();
+      const location = locationMap.get(dv.device_id);
+      if (!location) continue;
+      const normalized = adaptSarekonLocations([location]);
+      if (!normalized.length) continue;
 
-      const targetVehicleId = devRow?.vehicle_id ?? `sarekon-asset-${dv.device_id}`;
-
-      // Upsert vehicle_telemetry_state
-      await supa.from("vehicle_telemetry_state").upsert({
-        vehicle_id: targetVehicleId,
-        provider: "sarekon",
-        provider_device_id: dv.device_id,
-        latitude: dv.latitude,
-        longitude: dv.longitude,
-        speed: dv.speed_kmh,
-        heading: 0,
-        address: dv.address,
-        gps_timestamp: nowIso,
-        received_at: nowIso,
-        is_historic: false,
-        updated_at: nowIso,
-      });
-
-      // Insert into mqtt_telemetry_logs for real-time map feeds
-      await supa.from("mqtt_telemetry_logs").insert({
-        data_type: "sarekon_position",
-        vehicle_id: targetVehicleId,
-        payload: {
-          lat: dv.latitude,
-          lng: dv.longitude,
-          speed_kmh: dv.speed_kmh,
-          address: dv.address,
-          driver: dv.driver_name,
-          vehicle_description: dv.vehicle_description,
-          provider: "sarekon",
-          provider_device_id: dv.device_id,
-          iot_device_id: devRow?.id ?? null,
-        },
-        mqtt_topic: `sarekon/${dv.device_id}/position`,
-        received_at: nowIso,
-      });
+      const persisted = await persistLocations(supa, normalized);
+      if (persisted.errors.length) {
+        throw new Error(`sarekon_location_persist_failed: ${persisted.errors.join("; ")}`);
+      }
     } catch (pubErr) {
       errors.push(`Publish ${dv.device_id}: ${(pubErr as Error).message}`);
     }

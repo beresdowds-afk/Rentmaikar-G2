@@ -5,6 +5,7 @@
 
 export interface VehicleEvent {
   vehicleId: string;
+  deviceId?: string;
   source: "traccar" | "mqtt" | "manual";
   eventType: string;
   timestamp: string;
@@ -14,6 +15,8 @@ export interface VehicleEvent {
 
 export interface VehicleState {
   vehicle_id: string;
+  provider?: string;
+  provider_device_id?: string;
   latitude?: number | null;
   longitude?: number | null;
   speed?: number | null;
@@ -51,6 +54,8 @@ export function reduceState(prev: Partial<VehicleState> | null, event: VehicleEv
   const p = event.payload ?? {};
   const next: VehicleState = {
     vehicle_id: event.vehicleId,
+    provider: event.source === "mqtt" ? "emqx" : event.source,
+    provider_device_id: event.deviceId,
     latitude: prev?.latitude ?? null,
     longitude: prev?.longitude ?? null,
     speed: prev?.speed ?? null,
@@ -163,11 +168,29 @@ export function normalizeEvent(input: Record<string, unknown>): VehicleEvent | n
     (typeof input.eventType === "string" && input.eventType) ||
     (topic ? topic.split("/")[3] ?? "telemetry" : String(payload.type ?? "position"));
 
-  const timestamp =
-    (typeof input.timestamp === "string" && input.timestamp) ||
-    (typeof payload.fixTime === "string" && (payload.fixTime as string)) ||
-    (typeof payload.serverTime === "string" && (payload.serverTime as string)) ||
-    new Date().toISOString();
+  const timestampValue = input.timestamp ?? payload.fixTime ?? payload.serverTime ?? payload.timestamp;
+  const numericDate = typeof timestampValue === "number" && Number.isFinite(timestampValue)
+    ? new Date(timestampValue)
+    : null;
+  const timestamp = numericDate
+    ? Number.isFinite(numericDate.getTime()) ? numericDate.toISOString() : ""
+    : typeof timestampValue === "string" ? timestampValue : "";
+  if (!timestamp) return null;
 
-  return { vehicleId, source: source as VehicleEvent["source"], eventType, timestamp, topic, payload };
+  const deviceId =
+    (typeof input.deviceId === "string" && input.deviceId) ||
+    (typeof input.device_id === "string" && input.device_id) ||
+    (typeof payload.device_id === "string" && payload.device_id) ||
+    (typeof payload.deviceId === "string" && payload.deviceId) ||
+    undefined;
+
+  return {
+    vehicleId,
+    deviceId,
+    source: source as VehicleEvent["source"],
+    eventType,
+    timestamp,
+    topic,
+    payload,
+  };
 }

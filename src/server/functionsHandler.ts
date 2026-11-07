@@ -29,7 +29,6 @@ import {
   traccarService,
   hologramService,
   autoProvisionService,
-  telemetryService,
   emqxService,
   sarekonService,
 } from "../../backend/src/services/iotService";
@@ -147,11 +146,8 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "telemetry-ingest":
-    case "telemetry-dispatch": {
-      const records = Array.isArray(body.records) ? body.records : Array.isArray(body.events) ? body.events : [body];
-      const result = await telemetryService.ingest(records, body.source || "gateway");
-      return { status: 200, data: result };
-    }
+    case "telemetry-dispatch":
+      return { status: 404, data: { error: "Forward to the authenticated telemetry function" } };
 
     case "emqx-monitoring":
     case "emqx-secret-rotation": {
