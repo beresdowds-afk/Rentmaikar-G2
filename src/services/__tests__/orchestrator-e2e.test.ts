@@ -56,10 +56,7 @@ describe("Orchestrator E2E: Traccar → MQTT → Plugin → vehicle_analytics_ev
     const state = orchestrator.getVehicleState(vehicleId);
     expect(state?.battery).toBe(10);
     expect(state?.temperature).toBe(110);
-    expect(supabase.functions.invoke).not.toHaveBeenCalledWith(
-      "telemetry-ingest",
-      expect.anything(),
-    );
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
   });
 
   it("Disabled plugin does not process events; re-enabled resumes", async () => {

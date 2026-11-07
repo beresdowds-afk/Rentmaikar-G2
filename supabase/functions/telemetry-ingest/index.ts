@@ -1,9 +1,9 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ingestRecords, serviceClient } from "../_shared/telemetry-ingest-core.ts";
-import { isTrustedIngestionCaller } from "../_shared/telemetry-security.ts";
+import { isTrustedInternalRequest } from "../_shared/internal-auth.ts";
 
 /**
- * telemetry-ingest — server-side Resident Orchestrator entry point.
+ * telemetry-ingest — trusted server-side Resident Orchestrator entry point.
  *
  * Accepts one or more raw telemetry records (MQTT topic payloads, Traccar
  * positions, or already-normalised events), reduces them into canonical
@@ -18,11 +18,10 @@ const json = (body: unknown, status = 200) =>
   });
 
 function isTrustedCaller(req: Request): boolean {
-  return isTrustedIngestionCaller(
-    req.headers.get("Authorization"),
-    req.headers.get("x-cron-secret"),
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
-    Deno.env.get("CRON_SECRET"),
+  return isTrustedInternalRequest(
+    req.headers,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    Deno.env.get("CRON_SECRET") ?? "",
   );
 }
 
@@ -51,6 +50,6 @@ Deno.serve(async (req) => {
     return json({ success: true, ...result });
   } catch (err) {
     console.error("[telemetry-ingest]", err);
-    return json({ error: (err as Error).message || "Internal error" }, 500);
+    return json({ error: "Internal error" }, 500);
   }
 });

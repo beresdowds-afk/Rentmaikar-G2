@@ -18,6 +18,8 @@ import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { invalidateProviderConfig } from "../_shared/provider-config.ts";
 import { logIngestRun } from "../_shared/telemetry-ingest-core.ts";
 import { runSarekonAutoScan, autoDetectAgreementsAndNotify } from "../_shared/sarekon-auto-scanner.ts";
+import { hasFullAdministratorRole } from "../_shared/sarekon-auth.ts";
+import { isTrustedInternalRequest } from "../_shared/internal-auth.ts";
 
 
 const PROVIDER = "sarekon";
@@ -192,14 +194,16 @@ Deno.serve(async (req) => {
 
   try {
     const auth = req.headers.get("Authorization") ?? "";
-    const cronSecret = Deno.env.get("CRON_SECRET") ?? "";
-    const isCron = !!cronSecret && (req.headers.get("x-cron-secret") ?? "") === cronSecret;
+    const isInternal = isTrustedInternalRequest(
+      req.headers,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      Deno.env.get("CRON_SECRET") ?? "",
+    );
 
     const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     let actor: string | null = null;
-    let isFullAdmin = isCron;
-    if (!isCron) {
+    if (!isInternal) {
       if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
       const { data: u, error: uErr } = await supa.auth.getUser(auth.replace("Bearer ", ""));
       if (uErr || !u?.user) return json({ error: "Unauthenticated" }, 401);
@@ -208,23 +212,16 @@ Deno.serve(async (req) => {
         .from("user_roles")
         .select("role")
         .eq("user_id", actor)
-        .in("role", ["admin", "iot_support"]);
+        .eq("role", "admin");
       if (roleErr) return json({ error: "Role check failed" }, 500);
-      if (!roleRows || roleRows.length === 0) return json({ error: "Admin only" }, 403);
-      isFullAdmin = roleRows.some((r: { role: string }) => r.role === "admin");
+      if (!hasFullAdministratorRole(roleRows)) return json({ error: "Admin only" }, 403);
     }
+    const rateLimitActor = actor ?? (isInternal ? "internal-service" : null);
 
     const parsed = Body.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return json({ error: parsed.error.flatten().fieldErrors }, 400);
     const p = parsed.data;
     const { action, dvd_id, device_row_id, vehicle_id, vehicle_ids, command, parameters, limit, refresh_credentials } = p;
-
-    // Ownership-changing operations (account transfers and deals) stay with
-    // full admins; iot_support keeps install/assign/maintenance actions.
-    const ADMIN_ONLY = new Set(["transfer_trackers", "deal_create", "deal_unwind", "set_vehicle_gps"]);
-    if (ADMIN_ONLY.has(action) && !isFullAdmin) {
-      return json({ error: "This operation requires a full admin role." }, 403);
-    }
 
     // A freshly saved credential version must beat the 60s config cache.
     if (refresh_credentials) {
@@ -707,8 +704,8 @@ Deno.serve(async (req) => {
 
     if (action === "send_command") {
       if (!dvd_id || !command) return json({ error: "dvd_id and command are required" }, 400);
-      if (actor) {
-        const rl = await checkRateLimit(actor, "sarekon-admin:send_command", 20);
+      if (rateLimitActor) {
+        const rl = await checkRateLimit(rateLimitActor, "sarekon-admin:send_command", 20);
         if (!rl.allowed) {
           return json({ ok: false, error: "rate_limited", retry_after_seconds: rl.retry_after_seconds }, 429);
         }
@@ -1092,8 +1089,8 @@ Deno.serve(async (req) => {
 
     if (FLEET_ACTIONS.has(action)) {
       const isRead = action === "deal_list" || action === "deal_show" || action === "install_test_result";
-      if (actor && !isRead) {
-        const rl = await checkRateLimit(actor, `sarekon-admin:${action}`, 30);
+      if (rateLimitActor && !isRead) {
+        const rl = await checkRateLimit(rateLimitActor, `sarekon-admin:${action}`, 30);
         if (!rl.allowed) {
           return json({ ok: false, error: "rate_limited", retry_after_seconds: rl.retry_after_seconds }, 429);
         }
