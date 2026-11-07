@@ -29,6 +29,8 @@ export interface AuthenticatorVerifyParams {
   purpose?: OtpPurpose;
   action?: "verify" | "link_verify" | "verify_code" | "login" | "signup";
   callerId?: string;
+  challengeId?: string;
+  sessionContext?: string;
   full_name?: string;
   role?: string;
   correlationId?: string;
@@ -91,11 +93,25 @@ export class Authenticator {
       params.purpose ||
       (action === "link_verify" || action === "verify_code" ? "phone_link" : "login");
 
+    if (
+      purpose === "mfa" &&
+      (!params.callerId || !params.challengeId || !params.sessionContext)
+    ) {
+      return {
+        success: false,
+        valid: false,
+        error: "Authenticated MFA challenge context is required.",
+      };
+    }
+
     // 1. Atomically consume challenge via OtpService (enforces expiry, attempts, timing-safe verifier, single consumption)
     const consumeResult = await otpService.consumeChallenge({
       identity,
       code,
       purpose,
+      challengeId: params.challengeId,
+      userId: purpose === "mfa" ? params.callerId : undefined,
+      sessionContext: params.sessionContext,
     });
 
     const pool = getDbPool();

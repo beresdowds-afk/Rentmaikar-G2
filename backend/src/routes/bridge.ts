@@ -8,16 +8,68 @@ import { platformHealthService } from "../services/platformHealth";
 import { supabaseBackendService } from "../services/supabaseService";
 import { requireAdminRole, requirePortalAuth } from "./portal";
 import { authenticateCaller } from "../services/fileUploadService";
+import {
+  auditFunctionOutcome,
+  enforceFunctionAccess,
+  AccessDenied,
+} from "../services/functionAccessPolicy";
+import { limitJsonPayload, rateLimit } from "../services/requestGuards";
+import type { AuthContext } from "../services/fileUploadService";
 
 export const bridgeRouter = Router();
 
+function requireBridgeSession(req: Request, res: Response, next: NextFunction): void {
+  authenticateCaller(String(req.headers.authorization || ""))
+    .then((caller) => {
+      (req as any).bridgeCaller = caller;
+      const correlationId = String(
+        req.headers["x-correlation-id"] || req.headers["x-request-id"] || crypto.randomUUID(),
+      );
+      req.once("finish", () => {
+        auditFunctionOutcome(
+          `bridge:${req.path}`,
+          "allow",
+          `http_${res.statusCode}`,
+          caller.userId,
+          correlationId,
+        );
+      });
+      next();
+    })
+    .catch((error: any) => {
+      auditFunctionOutcome(
+        `bridge:${req.path}`,
+        "deny",
+        "authentication_failed",
+        "unauthenticated",
+        String(req.headers["x-correlation-id"] || req.headers["x-request-id"] || crypto.randomUUID()),
+      );
+      res.status(error?.statusCode === 503 ? 503 : 401).json({
+        ok: false,
+        error: error?.statusCode === 503 ? "Authentication service unavailable" : "Authentication required",
+      });
+    });
+}
+
 function requireAdminForDiagnostics(req: Request, res: Response, next: NextFunction): void {
-  if (!["diagnostics", "status", "get_status"].includes(req.body?.action)) {
+  if (!["diagnostics", "status", "get_status", "supabase_health"].includes(req.body?.action)) {
     next();
     return;
   }
 
-  requirePortalAuth(req, res, () => requireAdminRole(req, res, next));
+  const caller = (req as any).bridgeCaller as AuthContext | undefined;
+  if (!caller?.isAdmin) {
+    auditFunctionOutcome(
+      `bridge:${String(req.body?.action)}`,
+      "deny",
+      "role_not_authorized",
+      caller?.userId || "unauthenticated",
+      String(req.headers["x-correlation-id"] || req.headers["x-request-id"] || crypto.randomUUID()),
+    );
+    res.status(403).json({ ok: false, error: "Administrator authorization required" });
+    return;
+  }
+  next();
 }
 
 /**
@@ -25,7 +77,13 @@ function requireAdminForDiagnostics(req: Request, res: Response, next: NextFunct
  * General-purpose RPC endpoint allowing frontend files to invoke backend
  * actions through staging.rentmaikar.com when direct contact is severed.
  */
-bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res: Response) => {
+bridgeRouter.post(
+  "/call",
+  rateLimit(60, 60_000),
+  limitJsonPayload(1024 * 1024),
+  requireBridgeSession,
+  requireAdminForDiagnostics,
+  async (req: Request, res: Response) => {
   const startTime = Date.now();
   const incomingCorrelationId =
     (req.headers["x-correlation-id"] as string) ||
@@ -38,6 +96,13 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
     correlationId = incomingCorrelationId,
     clientTimestamp,
   } = req.body || {};
+  if (
+    (action !== undefined && typeof action !== "string") ||
+    (correlationId !== undefined &&
+      (typeof correlationId !== "string" || correlationId.length > 200))
+  ) {
+    return res.status(400).json({ ok: false, error: "Invalid bridge request" });
+  }
 
   const channel = req.headers["x-rentmaikar-fallback"] === "staging" ? "staging_fallback" : "direct";
 
@@ -126,10 +191,10 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
 
       case "cpaas_simulate": {
         result = {
-          success: true,
-          messageId: `cpaas-${Date.now()}`,
-          status: "delivered_via_staging_bridge",
-          recipient: payload.recipient,
+          success: false,
+          simulated: true,
+          status: "simulation",
+          message: "No external messaging provider transaction was performed",
         };
         break;
       }
@@ -143,13 +208,25 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
       case "invoke_function":
       case "invoke_edge_function":
       case "edge_function": {
-        const targetFunction = (payload.functionName || payload.function || req.body.functionName || "").trim();
+        const invocationPayload =
+          payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+        const rawTargetFunction =
+          invocationPayload.functionName ||
+          invocationPayload.function ||
+          req.body.functionName ||
+          "";
+        const targetFunction =
+          typeof rawTargetFunction === "string" ? rawTargetFunction.trim() : "";
         const functionBody =
-          payload.body !== undefined && typeof payload.body === "object" && payload.body !== null
-            ? payload.body
-            : payload.params && typeof payload.params === "object" && payload.params !== null
-              ? payload.params
-              : payload;
+          invocationPayload.body !== undefined &&
+          typeof invocationPayload.body === "object" &&
+          invocationPayload.body !== null
+            ? invocationPayload.body
+            : invocationPayload.params &&
+                typeof invocationPayload.params === "object" &&
+                invocationPayload.params !== null
+              ? invocationPayload.params
+              : invocationPayload;
         const clientAuth = (req.headers["authorization"] || req.headers["Authorization"]) as string | undefined;
 
         if (!targetFunction) {
@@ -157,6 +234,29 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
             status: "error",
             success: false,
             error: "functionName is required for bridge edge function invocation",
+            correlationId,
+          });
+        }
+
+        let functionDecision;
+        try {
+          functionDecision = await enforceFunctionAccess(
+            targetFunction,
+            req.headers as Record<string, unknown>,
+          );
+        } catch (error: any) {
+          if (error instanceof AccessDenied) {
+            return res.status(error.statusCode).json({
+              status: "error",
+              success: false,
+              error: error.message,
+              correlationId,
+            });
+          }
+          return res.status(401).json({
+            status: "error",
+            success: false,
+            error: "Function authorization failed",
             correlationId,
           });
         }
@@ -211,6 +311,8 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
 
         const edgeResult = await supabaseBackendService.invokeEdgeFunction(targetFunction, functionBody, {
           userToken: clientAuth,
+          allowAnonymous: functionDecision.via === "public",
+          internalService: functionDecision.via === "service",
           method: "POST",
           headers: {
             "x-invoked-via": "rentmaikar-link-bridge",
@@ -232,6 +334,10 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
 
       case "list_edge_functions":
       case "get_edge_functions": {
+        const caller = (req as any).bridgeCaller as AuthContext;
+        if (!caller.isAdmin) {
+          return res.status(403).json({ ok: false, error: "Administrator authorization required" });
+        }
         result = {
           success: true,
           count: supabaseBackendService.getAllFunctions().length,
@@ -248,6 +354,10 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
 
       case "email_lifecycle_test":
       case "test_email_lifecycle": {
+        const caller = (req as any).bridgeCaller as AuthContext;
+        if (!caller.isAdmin) {
+          return res.status(403).json({ ok: false, error: "Administrator authorization required" });
+        }
         const { runEmailProductionLifecycleTest } = await import("../services/emailLifecycleTest");
         result = await runEmailProductionLifecycleTest({
           ...(typeof payload === "object" ? payload : {}),
@@ -284,12 +394,14 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
     }
 
     const latencyMs = Date.now() - startTime;
+    const operationSucceeded =
+      result?.success !== false && result?.ok !== false && result?.simulated !== true;
 
     // Record response telemetry
     bridgeManager.logFrontendResponse({
       correlationId,
       eventType: `call_${action || "custom"}`,
-      status: "success",
+      status: operationSucceeded ? "success" : "error",
       clientTimestamp,
       clientOrigin: (req.headers.origin as string) || (req.headers.referer as string) || "rentmaikar.com",
       clientIp: req.ip,
@@ -297,10 +409,9 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
       latencyMs,
       payload: { action, resultSummary: typeof result === "object" ? Object.keys(result) : "value" },
     });
-
     res.json({
-      status: "ok",
-      success: true,
+      status: result?.simulated ? "simulation" : operationSucceeded ? "ok" : "error",
+      success: operationSucceeded,
       action,
       correlationId,
       channel,
@@ -309,15 +420,16 @@ bridgeRouter.post("/call", requireAdminForDiagnostics, async (req: Request, res:
       data: result,
       timestamp: new Date().toISOString(),
     });
-  } catch (err: any) {
+  } catch {
     res.status(500).json({
       status: "error",
       success: false,
       correlationId,
       channel,
-      error: err.message || "Failed to execute backend call",
+      error: "Failed to execute backend call",
       processedBy: "staging.rentmaikar.com",
-    });
+      },
+    );
   }
 });
 
@@ -485,7 +597,16 @@ bridgeRouter.post("/respond", (req: Request, res: Response) => {
  * after submitting a mutation (payment, rental, KYC, or email dispatch).
  * Queries authoritative backend database by idempotencyKey, correlationId, or recordId.
  */
-bridgeRouter.post("/reconcile", async (req: Request, res: Response) => {
+bridgeRouter.post(
+  "/reconcile",
+  rateLimit(30, 60_000),
+  limitJsonPayload(64 * 1024),
+  requireBridgeSession,
+  async (req: Request, res: Response) => {
+  const caller = (req as any).bridgeCaller as AuthContext;
+  if (!caller.isAdmin) {
+    return res.status(403).json({ reconciled: false, error: "Administrator authorization required" });
+  }
   const { correlationId, idempotencyKey, recordType, recordId } = req.body || {};
   const queryId =
     (req.headers["x-correlation-id"] as string) ||
@@ -525,7 +646,8 @@ bridgeRouter.post("/reconcile", async (req: Request, res: Response) => {
         status: "completed",
         correlationId: queryId,
         data: recordFound,
-      });
+        },
+      );
     }
 
     return res.status(200).json({
@@ -534,12 +656,12 @@ bridgeRouter.post("/reconcile", async (req: Request, res: Response) => {
       correlationId: queryId,
       message: "No authoritative completed operation found for given identifier",
     });
-  } catch (err: any) {
+  } catch {
     return res.status(500).json({
       reconciled: false,
       status: "failed",
       correlationId: queryId,
-      error: err.message || "Failed to reconcile state with backend",
+      error: "Failed to reconcile state with backend",
     });
   }
 });

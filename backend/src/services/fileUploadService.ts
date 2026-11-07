@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { decodeJwt } from "jose";
 import path from "path";
 import { supabaseBackendService } from "./supabaseService";
 import { getDbPool } from "./dbPool";
@@ -25,7 +26,38 @@ export interface AuthContext {
   userId: string;
   email?: string;
   role: string;
+  roles?: string[];
   isAdmin: boolean;
+}
+
+export function validateSupabaseJwtClaims(
+  token: string,
+  expectedIssuer: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): { subject: string } {
+  if (!token || token.length > 16_384) {
+    throw new Error("Invalid authentication session");
+  }
+  let claims: ReturnType<typeof decodeJwt>;
+  try {
+    claims = decodeJwt(token);
+  } catch {
+    throw new Error("Invalid authentication session");
+  }
+
+  const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  if (
+    claims.iss !== expectedIssuer ||
+    !audience.includes("authenticated") ||
+    typeof claims.sub !== "string" ||
+    !claims.sub.trim() ||
+    typeof claims.exp !== "number" ||
+    claims.exp <= nowSeconds ||
+    (typeof claims.nbf === "number" && claims.nbf > nowSeconds)
+  ) {
+    throw new Error("Invalid authentication session");
+  }
+  return { subject: claims.sub };
 }
 
 export async function authenticateCaller(
@@ -41,10 +73,22 @@ export async function authenticateCaller(
     throw err;
   }
 
+  let subject: string;
+  try {
+    subject = validateSupabaseJwtClaims(
+      token,
+      `${supabaseBackendService.getUrl()}/auth/v1`,
+    ).subject;
+  } catch {
+    const err = new Error("Invalid authentication session");
+    (err as any).statusCode = 401;
+    throw err;
+  }
+
   const admin = supabaseBackendService.getAdminClient();
   const { data: authData, error: authError } = await admin.auth.getUser(token);
 
-  if (authError || !authData?.user?.id) {
+  if (authError || !authData?.user?.id || authData.user.id !== subject) {
     const err = new Error("Invalid authentication session");
     (err as any).statusCode = 401;
     throw err;
@@ -52,29 +96,37 @@ export async function authenticateCaller(
 
   const user = authData.user;
   const pool = getDbPool();
-  let role = "driver";
-
-  try {
-    const roleResult = await pool.query(
-      `
-        SELECT role
-        FROM public.user_roles
-        WHERE user_id = $1
-        LIMIT 1
-      `,
-      [user.id]
-    );
-    role = String(roleResult.rows[0]?.role || "driver").trim();
-  } catch {
-    // Non-blocking, default role
+  if (!pool) {
+    const err = new Error("Authorization service unavailable");
+    (err as any).statusCode = 503;
+    throw err;
   }
-
-  const isAdmin = role === "admin" || role === "admin_assistant";
+  const roleResult = await pool.query(
+    `
+      SELECT role
+      FROM public.user_roles
+      WHERE user_id = $1
+      ORDER BY CASE role::text
+        WHEN 'admin' THEN 0
+        WHEN 'admin_assistant' THEN 1
+        ELSE 2
+      END
+    `,
+    [user.id]
+  );
+  const roles = roleResult.rows
+    .map((row: { role: unknown }) => String(row.role || "").trim())
+    .filter(Boolean);
+  const role = roles[0] || "unassigned";
+  const isAdmin = roles.some((assignedRole: string) =>
+    assignedRole === "admin" || assignedRole === "admin_assistant"
+  );
 
   return {
     userId: user.id,
     email: user.email,
     role,
+    roles,
     isAdmin,
   };
 }

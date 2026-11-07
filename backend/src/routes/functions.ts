@@ -39,7 +39,20 @@ import {
 } from "../services/fileUploadService";
 import { visualDamageDetectionService } from "../services/visualDamageDetectionService";
 import { inspectionReminderService } from "../services/inspectionReminderService";
-import { enforceFunctionAccess, AccessDenied } from "../services/functionAccessPolicy";
+import {
+  auditFunctionOutcome,
+  enforceFunctionAccess,
+  AccessDenied,
+  isResourceOwner,
+  isResourceParticipant,
+} from "../services/functionAccessPolicy";
+import { limitJsonPayload, rateLimit } from "../services/requestGuards";
+import {
+  getMfaSessionContext,
+  getVerifiedMfaPhone,
+  isMfaChallengeId,
+  isMfaPhoneBound,
+} from "../services/mfaSecurity";
 import { personaWebhookService } from "../services/personaWebhookService";
 export const functionsRouter = Router();
 
@@ -155,6 +168,7 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "initiate-paystack-transfer",
   "persona-webhook",
   "send-inbox-reply",
+  "driver-vehicle-command",
   // Inbound Email Retrieval & Secure Attachment Access
   "list-inbound-emails",
   "get-inbound-email",
@@ -175,6 +189,8 @@ const storageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
+const standardFunctionRateLimit = rateLimit(90, 60_000);
+const otpFunctionRateLimit = rateLimit(8, 15 * 60_000);
 
 async function processFileUploadRequest(req: Request, res: Response) {
   try {
@@ -306,25 +322,23 @@ functionsRouter.post(
  * Provides unified Edge Function execution on the RentMaikar API Gateway
  * Bridges all 164 available Edge Functions between frontend and Supabase
  */
-functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
+functionsRouter.all(
+  "/:functionName",
+  (req, res, next) => {
+    const limiter = ["phone-otp-custom", "verify-phone"].includes(String(req.params.functionName))
+      ? otpFunctionRateLimit
+      : standardFunctionRateLimit;
+    limiter(req, res, next);
+  },
+  limitJsonPayload(1024 * 1024),
+  async (req: Request, res: Response) => {
   const functionName = String(req.params.functionName || "");
   const body = req.body || {};
 
   // Extract authorization header from request if provided
   const rawAuth = req.headers["authorization"];
   const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
-    // Operational email is an authenticated administrative operation.
-  //
-  // There are TWO permitted callers:
-  //
-  // 1. An authenticated Rentmaikar platform user/admin using a Supabase JWT.
-  //
-  // 2. A trusted server-side automated platform-email caller using the
-  //    dedicated internal bridge secret.
-  //
-  // The internal secret is NEVER accepted from frontend configuration and
-  // NEVER grants access to arbitrary functions. It is valid only for
-  // send-outbound-email.
+  // The internal email secret is scoped only to this one operation.
   if (functionName === "send-outbound-email") {
     const rawInternalSecret =
       req.headers["x-rentmaikar-internal-secret"];
@@ -336,86 +350,24 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     const configuredInternalSecret =
       process.env.RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET || "";
 
-    let trustedServerCaller = false;
-
-    if (
-      internalSecret &&
-      configuredInternalSecret &&
-      internalSecret.length === configuredInternalSecret.length
-    ) {
-      // Constant-time comparison to avoid using ordinary string equality
-      // for the server-to-server authentication secret.
-      const secretBuffer = Buffer.from(internalSecret, "utf8");
-      const configuredBuffer = Buffer.from(
-        configuredInternalSecret,
-        "utf8"
-      );
-
-      trustedServerCaller = crypto.timingSafeEqual(
-        secretBuffer,
-        configuredBuffer
-      );
-    }
-
+    const providedDigest = crypto.createHash("sha256").update(internalSecret).digest();
+    const configuredDigest = crypto.createHash("sha256").update(configuredInternalSecret).digest();
+    const trustedServerCaller =
+      Boolean(internalSecret && configuredInternalSecret) &&
+      crypto.timingSafeEqual(providedDigest, configuredDigest);
     if (trustedServerCaller) {
       (req as any).authenticatedInternalEmailBridge = true;
-
-      console.log(
-        "[Backend Functions] Trusted server-side email bridge authenticated",
-        {
-          functionName,
-          correlationId:
-            req.headers["x-correlation-id"] || null,
-          platformSource: body?.platformSource || null,
-        }
+      auditFunctionOutcome(
+        functionName,
+        "allow",
+        "internal_email_service_authenticated",
+        "internal-email-service",
+        String(req.headers["x-correlation-id"] || crypto.randomUUID()),
       );
-    } else {
-      // Preserve the existing authenticated-user path for administrative
-      // frontend email operations.
-      if (!clientAuth) {
-        return res.status(401).json({
-          ok: false,
-          success: false,
-          error:
-            "Authentication required for operational email dispatch",
-        });
-      }
-
-      try {
-        const admin = supabaseBackendService.getAdminClient();
-        const token = clientAuth
-          .replace(/^Bearer\s+/i, "")
-          .trim();
-
-        const { data: authData, error: authError } =
-          await admin.auth.getUser(token);
-
-        if (authError || !authData?.user) {
-          return res.status(401).json({
-            ok: false,
-            success: false,
-            error: "Invalid authentication session",
-          });
-        }
-
-        // Preserve the existing authenticated platform-user identity.
-        (req as any).authenticatedUser = authData.user;
-      } catch (authErr: any) {
-        console.error(
-          "[Backend Functions] send-outbound-email authentication failed:",
-          authErr?.message || authErr
-        );
-
-        return res.status(401).json({
-          ok: false,
-          success: false,
-          error: "Authentication validation failed",
-        });
-      }
     }
   }
   // Central access policy: reject unauthenticated/unauthorized callers before any side effect.
-  let accessDecision: Awaited<ReturnType<typeof enforceFunctionAccess>> = null;
+  let accessDecision: Awaited<ReturnType<typeof enforceFunctionAccess>> | null = null;
   if (!(functionName === "send-outbound-email" && (req as any).authenticatedInternalEmailBridge)) {
     try {
       accessDecision = await enforceFunctionAccess(functionName, req.headers as Record<string, unknown>);
@@ -427,7 +379,23 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     }
   }
   const gatedCaller = accessDecision?.caller ?? null;
-  void gatedCaller;
+  const correlationId = String(
+    req.headers["x-correlation-id"] || req.headers["x-request-id"] || crypto.randomUUID(),
+  );
+  req.once("finish", () => {
+    auditFunctionOutcome(
+      functionName,
+      "allow",
+      `http_${res.statusCode}`,
+      gatedCaller?.userId ||
+        (accessDecision?.via === "service"
+          ? "internal-service"
+          : (req as any).authenticatedInternalEmailBridge
+            ? "internal-email-service"
+            : null),
+      correlationId,
+    );
+  });
 
   // 1. Generic Supabase-first dispatch for all non-authoritative functions.
   // Authoritative functions (Email, VoIP, Call Center) execute directly on Cloud Run.
@@ -435,12 +403,15 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
     try {
       const upstreamResult = await supabaseBackendService.invokeEdgeFunction(functionName, body, {
         userToken: clientAuth,
+        allowAnonymous: accessDecision?.via === "public",
+        internalService: accessDecision?.via === "service",
         method: req.method || "POST",
         headers: {
           ...(req.headers["x-client-info"] ? { "x-client-info": String(req.headers["x-client-info"]) } : {}),
         },
         timeoutMs: 15000,
-      });
+        },
+      );
 
       // If Supabase returned a valid response (and not a 404 missing function), forward it directly.
       if (upstreamResult.status !== 404 && upstreamResult.status !== 502 && upstreamResult.status !== 504) {
@@ -687,74 +658,66 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
       case "send-2fa-code": {
         const action = body.action || "status";
+        const userId = gatedCaller?.userId;
+        if (!userId) {
+          return res.status(401).json({ success: false, error: "Authentication required" });
+        }
+
+        const admin = supabaseBackendService.getAdminClient();
+        const [profileResult, settingsResult] = await Promise.all([
+          admin
+            .from("profiles")
+            .select("phone, phone_verified")
+            .eq("user_id", userId)
+            .maybeSingle(),
+          admin
+            .from("two_factor_settings")
+            .select("is_enabled, phone_number, preferred_channel")
+            .eq("user_id", userId)
+            .maybeSingle(),
+        ]);
+        if (profileResult.error || settingsResult.error) {
+          return res.status(500).json({ success: false, error: "Failed to load MFA account settings" });
+        }
+        const profile = profileResult.data;
+        const settings = settingsResult.data;
+        const verifiedPhone = getVerifiedMfaPhone(profile);
+        const hasBoundPhone = !!verifiedPhone && isMfaPhoneBound(settings, verifiedPhone);
 
         if (action === "status") {
-          const userId = body.user_id;
-          if (!userId) {
-            return res.status(400).json({ success: false, error: "user_id required" });
-          }
-          const admin = supabaseBackendService.getAdminClient();
-          const { data: settings } = await admin
-            .from("two_factor_settings")
-            .select("is_enabled, is_mandatory, phone_number, preferred_channel")
-            .eq("user_id", userId)
-            .maybeSingle();
-
-          const { data: roleData } = await admin
+          const { data: roleData, error: roleError } = await admin
             .from("user_roles")
             .select("role")
             .eq("user_id", userId)
             .maybeSingle();
-
-          const role = roleData?.role;
-          const isMandatory = role === "admin" || role === "owner";
-
+          if (roleError) {
+            return res.status(500).json({ success: false, error: "Failed to load MFA account role" });
+          }
+          const isMandatory = roleData?.role === "admin" || roleData?.role === "owner";
           return res.status(200).json({
             success: true,
-            requires_2fa: settings?.is_enabled || isMandatory,
-            is_setup: settings?.is_enabled || false,
+            requires_2fa: !!settings?.is_enabled || isMandatory,
+            is_setup: !!settings?.is_enabled,
             is_mandatory: isMandatory,
-            has_phone: !!settings?.phone_number,
+            has_phone: hasBoundPhone,
+            phone: hasBoundPhone ? verifiedPhone : undefined,
             preferred_channel: settings?.preferred_channel || "sms",
           });
         }
 
         if (action === "setup") {
-          if (!clientAuth) {
-            return res.status(401).json({ success: false, error: "Authentication required" });
-          }
-          const admin = supabaseBackendService.getAdminClient();
-          const token = clientAuth.replace(/^Bearer\s+/i, "").trim();
-          const { data: authData, error: authError } = await admin.auth.getUser(token);
-          if (authError || !authData?.user) {
-            return res.status(401).json({ success: false, error: "Invalid authentication" });
-          }
-          const user = authData.user;
-          const phone = normalizeE164(body.phone || "");
+          const phone = getVerifiedMfaPhone(profile, body.phone);
           if (!phone) {
-            return res.status(400).json({ success: false, error: "Phone must be normalized E.164" });
-          }
-          const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
-
-          // Verify phone is verified on profile
-          const { data: profile } = await admin
-            .from("profiles")
-            .select("phone, phone_verified")
-            .eq("user_id", user.id)
-            .maybeSingle();
-
-          if (!profile || profile.phone !== phone || !profile.phone_verified) {
             return res.status(400).json({
               success: false,
-              error: "Phone number must be verified before enabling 2FA. Please complete SMS/WhatsApp verification first.",
+              error: "Use the phone number already verified on your account before enabling MFA.",
             });
           }
-
-          // Update or create 2FA settings
+          const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
           const { error: upsertError } = await admin
             .from("two_factor_settings")
             .upsert({
-              user_id: user.id,
+              user_id: userId,
               phone_number: phone,
               preferred_channel: channel,
               is_enabled: true,
@@ -762,88 +725,77 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             }, { onConflict: "user_id" });
 
           if (upsertError) {
-            return res.status(500).json({ success: false, error: "Failed to save 2FA settings" });
+            return res.status(500).json({ success: false, error: "Failed to save MFA settings" });
           }
 
           await admin.from("two_factor_audit_log").insert({
-            user_id: user.id,
+            user_id: userId,
             action: "2fa_enabled",
             channel,
             phone_number: phone,
             success: true,
           }).then(() => {}, () => {});
-
-          return res.status(200).json({ success: true, message: "2FA enabled successfully" });
+          return res.status(200).json({ success: true, message: "MFA enabled successfully" });
         }
 
-        if (action === "send_code") {
-          const userId = body.user_id;
-          let phone = normalizeE164(body.phone || "");
-          const admin = supabaseBackendService.getAdminClient();
+        if (action === "send_code" || action === "verify_code") {
+          if (!verifiedPhone || !settings?.is_enabled || !hasBoundPhone) {
+            return res.status(403).json({
+              success: false,
+              error: "MFA requires an enabled setting and a verified phone bound to this account.",
+            });
+          }
+          if (body.phone !== undefined && getVerifiedMfaPhone(profile, body.phone) !== verifiedPhone) {
+            return res.status(400).json({ success: false, error: "Alternative phone numbers cannot be used for MFA." });
+          }
+          const sessionContext = getMfaSessionContext(clientAuth);
+          if (!sessionContext) {
+            return res.status(401).json({ success: false, error: "A valid authenticated session is required for MFA." });
+          }
+          const channel =
+            body.channel === "whatsapp" ||
+            (body.channel !== "sms" && settings.preferred_channel === "whatsapp")
+              ? "whatsapp"
+              : "sms";
 
-          if (!phone && userId) {
-            const { data: settings } = await admin
-              .from("two_factor_settings")
-              .select("phone_number, preferred_channel")
-              .eq("user_id", userId)
-              .maybeSingle();
-            if (settings?.phone_number) {
-              phone = normalizeE164(settings.phone_number);
+          if (action === "send_code") {
+            const sendRes = await sendPhoneOtp({
+              phone: verifiedPhone,
+              channel,
+              action: "send_code",
+              purpose: "mfa",
+              callerId: userId,
+              metadata: { session_context: sessionContext },
+              expiresInSeconds: 300,
+              sandbox: Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true"),
+            });
+
+            if (sendRes.success) {
+              return res.status(200).json({
+                success: true,
+                message: `MFA code sent via ${channel.toUpperCase()}`,
+                expiresIn: sendRes.expiresIn,
+                challenge_id: sendRes.challengeId,
+              });
             }
-          }
-
-          if (!phone) {
-            return res.status(400).json({ success: false, error: "No phone number configured for 2FA" });
-          }
-
-          const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
-          const sendRes = await sendPhoneOtp({
-            phone,
-            channel,
-            action: "send_code",
-            purpose: "mfa",
-            callerId: userId,
-            sandbox: Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true"),
-          });
-
-          if (sendRes.success) {
-            return res.status(200).json({ success: true, message: `2FA code sent via ${channel.toUpperCase()}`, expiresIn: 300 });
-          } else {
             return res.status(400).json({ success: false, error: sendRes.message });
           }
-        }
 
-        if (action === "verify_code") {
-          const userId = body.user_id;
-          const code = String(body.code || "").trim();
-          let phone = normalizeE164(body.phone || "");
-          const admin = supabaseBackendService.getAdminClient();
-
-          if (!phone && userId) {
-            const { data: settings } = await admin
-              .from("two_factor_settings")
-              .select("phone_number")
-              .eq("user_id", userId)
-              .maybeSingle();
-            if (settings?.phone_number) {
-              phone = normalizeE164(settings.phone_number);
-            }
+          if (!isMfaChallengeId(body.challenge_id)) {
+            return res.status(400).json({ success: false, error: "Valid MFA challenge ID required." });
           }
-
-          if (!phone) {
-            return res.status(400).json({ success: false, error: "Phone number required for 2FA verification" });
-          }
-
           const verifyRes = await verifyPhoneOtp({
-            phone,
-            code,
+            phone: verifiedPhone,
+            code: String(body.code || "").trim(),
             action: "verify_code",
             purpose: "mfa",
             callerId: userId,
+            challengeId: body.challenge_id,
+            sessionContext,
           });
 
-          if (verifyRes.success) {
-            return res.status(200).json({ success: true, message: "Two-factor authentication verified" });
+          if (verifyRes.success && verifyRes.user_id === userId) {
+            return res.status(200).json({ success: true, message: "MFA verified" });
           } else {
             return res.status(400).json({ success: false, error: verifyRes.error || "Invalid or expired verification code" });
           }
@@ -856,10 +808,13 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
       // VoIP & Twilio Voice Handlers (Authoritative Cloud Run Engine)
       // -----------------------------------------------------------------
       case "voice-access-token": {
-        const identity = body.identity || (req.query.identity as string);
-        const result = await mintVoiceAccessToken(identity, clientAuth);
+        const result = await mintVoiceAccessToken(undefined, clientAuth);
         if (result.error && !result.token) {
-          return res.status(503).json(result);
+          return res.status(result.error.includes("session") ? 401 : 503).json({
+            ...result,
+            error: result.error,
+            details: undefined,
+          });
         }
         return res.status(200).json(result);
       }
@@ -1216,29 +1171,65 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
       case "get-inspection-findings": {
         try {
+          if (!gatedCaller) {
+            return res.status(401).json({ ok: false, error: "Authentication required" });
+          }
+          const staffAccess =
+            gatedCaller.isAdmin || gatedCaller.roles?.includes("inspector") === true;
           const findings = await visualDamageDetectionService.getFindings({
             inspectionId: body.inspectionId,
             vehicleId: body.vehicleId,
             driverId: body.driverId,
             status: body.status,
+            authorizedUserId: gatedCaller.userId,
+            staffAccess,
           });
           return res.status(200).json({ ok: true, success: true, findings });
         } catch (err: any) {
-          return res.status(500).json({ ok: false, error: err.message || "Failed to retrieve inspection findings" });
+          return res.status(500).json({ ok: false, error: "Failed to retrieve inspection findings" });
         }
       }
 
       case "update-inspection-finding": {
         try {
+          if (!gatedCaller) {
+            return res.status(401).json({ ok: false, error: "Authentication required" });
+          }
           const findingId = body.findingId || body.id;
           const status = body.status;
-          if (!findingId || !status) {
-            return res.status(400).json({ ok: false, error: "findingId and status are required" });
+          if (!findingId || !["open", "acknowledged", "disputed", "resolved"].includes(status)) {
+            return res.status(400).json({ ok: false, error: "findingId and a valid status are required" });
+          }
+          const pool = getDbPool();
+          const access = await pool.query(
+            `SELECT f.driver_id, v.owner_id
+             FROM public.inspection_findings f
+             LEFT JOIN public.vehicles v ON v.id = f.vehicle_id
+             WHERE f.id = $1
+             LIMIT 1`,
+            [findingId],
+          );
+          const finding = access.rows[0];
+          if (!finding) {
+            return res.status(404).json({ ok: false, error: "Inspection finding not found" });
+          }
+          const staffAccess =
+            gatedCaller.isAdmin || gatedCaller.roles?.includes("inspector") === true;
+          const participantAccess = isResourceParticipant(
+            gatedCaller,
+            finding.driver_id,
+            finding.owner_id,
+          );
+          if (!staffAccess && !participantAccess) {
+            return res.status(403).json({ ok: false, error: "Forbidden" });
+          }
+          if (!staffAccess && !["acknowledged", "disputed"].includes(status)) {
+            return res.status(403).json({ ok: false, error: "Only acknowledge or dispute is permitted" });
           }
           const result = await visualDamageDetectionService.updateFindingStatus(findingId, status, body.notes);
           return res.status(200).json({ success: true, ...result });
         } catch (err: any) {
-          return res.status(500).json({ ok: false, error: err.message || "Failed to update inspection finding" });
+          return res.status(500).json({ ok: false, error: "Failed to update inspection finding" });
         }
       }
 
@@ -1464,7 +1455,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
 
       case "iot-admin": {
         const action = String(body.action || "list_devices");
-        const result = await iotAdminService.handleAction(action, body, { id: clientAuth ? "authenticated_user" : "system" });
+        const result = await iotAdminService.handleAction(action, body, { id: gatedCaller?.userId || "internal-service" });
         return res.status(200).json(result);
       }
 
@@ -1514,14 +1505,14 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
             return res.status(400).json({ ok: false, error: "device_id is required" });
           }
           const result = await sarekonService.resyncDeviceImei(deviceId, {
-            performedBy: clientAuth ? "authenticated_admin" : "system",
+            performedBy: gatedCaller?.userId || "internal-service",
             vehicleId: body.vehicle_id,
             overrideImei: body.override_imei || body.imei,
             forceLinkVehicle: Boolean(body.force_link_vehicle),
           });
           return res.status(result.ok ? 200 : 400).json(result);
         }
-        const result = await sarekonService.handleAdminAction(action, body, { id: clientAuth ? "authenticated_user" : "system" });
+        const result = await sarekonService.handleAdminAction(action, body, { id: gatedCaller?.userId || "internal-service" });
         return res.status(200).json(result);
       }
 
@@ -1534,7 +1525,7 @@ functionsRouter.all("/:functionName", async (req: Request, res: Response) => {
           return res.status(400).json({ ok: false, error: "device_id is required" });
         }
         const result = await sarekonService.resyncDeviceImei(deviceId, {
-          performedBy: clientAuth ? "authenticated_admin" : "system",
+          performedBy: gatedCaller?.userId || "internal-service",
           vehicleId: body.vehicle_id,
           overrideImei: body.override_imei || body.imei,
           forceLinkVehicle: Boolean(body.force_link_vehicle),
@@ -2022,7 +2013,7 @@ case "reconcile-owner-payout": {
           throw err;
         });
         const requested = String(body.owner_id || body.ownerId || body.userId || "").trim();
-        if (requested && requested !== caller.userId && !caller.isAdmin) {
+        if (requested && !isResourceOwner(caller, requested)) {
           return res.status(403).json({ error: "Forbidden" });
         }
         const ownerId = requested || caller.userId;
@@ -2113,11 +2104,18 @@ case "reconcile-owner-payout": {
       }
 
       case "driver-vehicle-command": {
-        const driverId = body.driverId || body.driver_id;
+        const driverId = gatedCaller?.userId;
+        const requestedDriverId = body.driverId || body.driver_id;
         const vehicleId = body.vehicleId || body.vehicle_id;
         const command = body.command;
         const parameters = body.parameters || {};
 
+        if (!driverId) {
+          return res.status(401).json({ ok: false, error: "Authentication required" });
+        }
+        if (requestedDriverId && requestedDriverId !== driverId) {
+          return res.status(403).json({ ok: false, error: "Driver identity mismatch" });
+        }
         if (!driverId || !vehicleId || !command) {
           return res.status(400).json({ ok: false, error: "driver_id, vehicle_id, and command are required" });
         }
@@ -2168,7 +2166,7 @@ case "reconcile-owner-payout": {
             });
           }
         } else {
-          commandResult = { ok: true, simulated: true, message: `Command '${command}' dispatched for vehicle ${vehicleId}` };
+          commandResult = { ok: false, simulated: true, message: `No linked device is available for vehicle ${vehicleId}` };
         }
 
         // 4. Log audit event
@@ -2180,7 +2178,8 @@ case "reconcile-owner-payout": {
           );
         } catch {}
 
-        return res.status(200).json({ ok: true, success: true, command, result: commandResult });
+        const success = commandResult?.ok === true && commandResult?.simulated !== true;
+        return res.status(success ? 200 : 502).json({ ok: success, success, command, result: commandResult });
       }
 
       case "google-sso-auth-email": {

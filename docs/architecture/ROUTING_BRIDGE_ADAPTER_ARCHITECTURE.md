@@ -671,6 +671,13 @@ Responsibility
 
 The backend email bridge provides a trusted server-to-server boundary for outbound platform email.
 
+The generic Cloud Run function gateway uses the default-deny `FUNCTION_ACCESS`
+policy. Internal Edge Function invocations require the separate
+`RENTMAIKAR_INTERNAL_SERVICE_SECRET` and an exact function allowlist; the
+Supabase service-role key is never used as a fallback for a missing caller
+session. This internal service identity is distinct from the email-only bridge
+secret.
+
 It must remain distinct from:
 
 - inbound email routing

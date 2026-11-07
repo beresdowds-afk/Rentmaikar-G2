@@ -1498,46 +1498,15 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
     }
 
     case "send-2fa-code": {
-      try {
-        const action = body.action || "status";
-        const targetUserId = body.user_id;
-        const admin = getSupabase();
-        if (action === "status") {
-          let requires2FA = false;
-          let isSetup = false;
-          let phone: string | null = null;
-          if (targetUserId) {
-            const { data: settings } = await admin
-              .from("two_factor_settings")
-              .select("phone_number, is_enabled, preferred_channel")
-              .eq("user_id", targetUserId)
-              .maybeSingle();
-            if (settings) {
-              requires2FA = !!settings.is_enabled;
-              isSetup = !!settings.phone_number || !!settings.is_enabled;
-              phone = settings.phone_number;
-            }
-          }
-          return {
-            status: 200,
-            data: {
-              success: true,
-              ok: true,
-              requires_2fa: requires2FA,
-              is_setup: isSetup,
-              is_mandatory: false,
-              has_phone: !!phone,
-              phone,
-            },
-          };
-        }
-        return {
-          status: 200,
-          data: { success: true, ok: true, message: "Handled by gateway" },
-        };
-      } catch (err: any) {
-        return { status: 200, data: { success: true, ok: true, requires_2fa: false } };
-      }
+      return {
+        status: 410,
+        data: {
+          success: false,
+          error: "DECOMMISSIONED: MFA operations are handled by the authenticated backend gateway.",
+          decommissioned: true,
+          migratedTo: "/api/functions/send-2fa-code",
+        },
+      };
     }
 
     case "billing-reconciliation": {

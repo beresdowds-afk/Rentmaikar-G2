@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { backendBridge } from '@/lib/backend-bridge';
 import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 import { useAuthTabSync } from '@/hooks/useAuthTabSync';
 import type { AppRole } from '@/lib/role-home';
@@ -418,35 +419,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const check2FAStatus = async (userId: string): Promise<TwoFactorStatus | null> => {
     try {
-      // Check database settings first
-      const { data: settings } = await supabase
-        .from('two_factor_settings')
-        .select('phone_number, preferred_channel, is_enabled')
-        .eq('user_id', userId)
-        .maybeSingle();
-
       const hasStoredTotp = typeof window !== 'undefined' && !!localStorage.getItem(`rentmaikar:totp:${userId}`);
-      const isAuthenticator = settings?.preferred_channel === 'authenticator' || hasStoredTotp;
-
-      const { data, error } = await supabase.functions.invoke('send-2fa-code', {
-        body: { action: 'status', user_id: userId },
+      const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', {
+        action: 'status',
       });
+      if (bridgeRes.error || !bridgeRes.data?.success) {
+        throw bridgeRes.error || new Error('Unable to verify MFA status');
+      }
 
-      const currentUserEmail = user?.email?.trim().toLowerCase();
-      const predefined = currentUserEmail ? USER_ROLE_OVERRIDES[currentUserEmail] : null;
-      const adminInfo = currentUserEmail ? KNOWN_ADMINS[currentUserEmail] : null;
-      const effectivePhone = settings?.phone_number || predefined?.phone || adminInfo?.phone || undefined;
-
-      const isSetup = (data && data.success && data.is_setup) || isAuthenticator || !!settings?.is_enabled || !!predefined?.phone || !!adminInfo;
-      const requires2FA = (data && data.success && data.requires_2fa) || isAuthenticator || !!settings?.is_enabled;
+      const data = bridgeRes.data;
+      const isAuthenticator = data.preferred_channel === 'authenticator' || hasStoredTotp;
+      const isSetup = !!data.is_setup;
+      const requires2FA = !!data.requires_2fa;
 
       const status: TwoFactorStatus = {
         requires_2fa: requires2FA,
         is_setup: isSetup,
-        is_mandatory: (data && data.success && data.is_mandatory) || false,
-        has_phone: (data && data.success && data.has_phone) || !!effectivePhone,
-        preferred_channel: isAuthenticator ? 'authenticator' : (settings?.preferred_channel || (data && data.preferred_channel) || 'sms'),
-        phone: effectivePhone,
+        is_mandatory: !!data.is_mandatory,
+        has_phone: !!data.has_phone,
+        preferred_channel: isAuthenticator ? 'authenticator' : data.preferred_channel || 'sms',
+        phone: data.has_phone ? data.phone : undefined,
       };
       setTwoFactorStatus(status);
       if (!requires2FA) {

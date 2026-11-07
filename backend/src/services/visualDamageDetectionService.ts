@@ -474,7 +474,12 @@ export class VisualDamageDetectionService {
     vehicleId?: string;
     driverId?: string;
     status?: string;
+    authorizedUserId?: string;
+    staffAccess?: boolean;
   }): Promise<VisualDamageFinding[]> {
+    if (!options.staffAccess && !options.authorizedUserId) {
+      throw new Error("Inspection finding authorization is required");
+    }
     const pool = getDbPool();
     const admin = supabaseBackendService.getAdminClient();
 
@@ -484,25 +489,36 @@ export class VisualDamageDetectionService {
       let idx = 1;
 
       if (options.inspectionId) {
-        conditions.push(`inspection_id = $${idx++}`);
+        conditions.push(`f.inspection_id = $${idx++}`);
         params.push(options.inspectionId);
       }
       if (options.vehicleId) {
-        conditions.push(`vehicle_id = $${idx++}`);
+        conditions.push(`f.vehicle_id = $${idx++}`);
         params.push(options.vehicleId);
       }
       if (options.driverId) {
-        conditions.push(`driver_id = $${idx++}`);
+        conditions.push(`f.driver_id = $${idx++}`);
         params.push(options.driverId);
       }
       if (options.status) {
-        conditions.push(`status = $${idx++}`);
+        conditions.push(`f.status = $${idx++}`);
         params.push(options.status);
+      }
+      if (options.authorizedUserId && !options.staffAccess) {
+        conditions.push(`(
+          f.driver_id = $${idx}
+          OR EXISTS (
+            SELECT 1 FROM public.vehicles v
+            WHERE v.id = f.vehicle_id AND v.owner_id = $${idx}
+          )
+        )`);
+        params.push(options.authorizedUserId);
+        idx += 1;
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
       const res = await pool.query(
-        `SELECT * FROM public.inspection_findings ${whereClause} ORDER BY created_at DESC`,
+        `SELECT f.* FROM public.inspection_findings f ${whereClause} ORDER BY f.created_at DESC`,
         params
       );
 
@@ -526,7 +542,8 @@ export class VisualDamageDetectionService {
         detectedBy: r.detected_by,
         createdAt: r.created_at,
       }));
-    } catch {
+    } catch (error) {
+      if (!options.staffAccess) throw error;
       // Fallback through Supabase client
       let query = admin.from("inspection_findings").select("*");
       if (options.inspectionId) query = query.eq("inspection_id", options.inspectionId);
