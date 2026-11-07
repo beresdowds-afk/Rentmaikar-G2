@@ -35,6 +35,7 @@ export const FUNCTION_ACCESS: Record<string, AccessLevel> = {
   "send-outbound-email": "admin",
   // Also invoked server-to-server (e.g. persona-send-reverification) with the service-role key.
   "send-email-notification": "service_or_admin",
+  "send-sms-notification": "service_or_admin",
   "google-sso-auth-email": "authenticated",
   "provision-user-account": "authenticated",
   // User-initiated operations

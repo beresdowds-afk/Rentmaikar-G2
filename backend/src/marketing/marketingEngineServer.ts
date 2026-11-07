@@ -312,9 +312,10 @@ export class MarketingEngineServer {
       result = { ok: res.success, externalId: res.messageId, error: res.error };
       effectiveProvider = res.provider;
     } else if (params.provider === 'sentdm') {
+      const channelParam = (((params.channel as string) === 'whatsapp') ? 'whatsapp' : 'sms') as 'whatsapp' | 'sms';
       const res = await this.sentdm.sendMessage({
         to: params.to,
-        channel: params.channel === 'whatsapp' ? 'whatsapp' : 'sms',
+        channel: channelParam,
         text: params.text || '',
         templateId: params.templateId,
         leadId: params.leadId,

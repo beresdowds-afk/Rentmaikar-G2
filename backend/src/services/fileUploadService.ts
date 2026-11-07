@@ -385,16 +385,18 @@ export async function handleFileUpload(
           [vehicleId, auth.userId]
         );
         if (authCheck.rowCount === 0) {
-          // Fallback check if user is associated
-          const isDriver = auth.role === "driver";
-          if (!isDriver) {
-            const err = new Error("Not authorized to upload inspection photos for this vehicle");
-            (err as any).statusCode = 403;
-            throw err;
-          }
+          const err = new Error("Not authorized to upload inspection photos for this vehicle");
+          (err as any).statusCode = 403;
+          throw err;
         }
-      } catch {
-        // Non-blocking in mock/fallback environments
+      } catch (err: any) {
+        if (err?.statusCode === 403) {
+          throw err;
+        }
+        console.error("[FileUpload] Inspection authorization query error:", err);
+        const forbiddenErr = new Error("Authorization verification failed");
+        (forbiddenErr as any).statusCode = 403;
+        throw forbiddenErr;
       }
     }
 
