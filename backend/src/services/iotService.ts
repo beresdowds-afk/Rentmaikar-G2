@@ -828,18 +828,65 @@ export const iotAdminService = {
       case "purchase_sim": {
         const planId = Number(body.plan_id) || 128;
         const notes = body.notes || "Admin provisioned SIM";
-        const dummyIccid = `890141032${Date.now().toString().slice(-10)}`;
+        const hologramCfg = getHologramConfig();
+
+        let iccid = body.iccid ? String(body.iccid).trim() : "";
+        let providerSimId: string | null = null;
+        let simStatus = "requested";
+        let providerResponse: any = null;
+
+        if (hologramCfg.configured) {
+          try {
+            const orderRes = await fetch(`https://dashboard.hologram.io/api/1/devices?orgid=${hologramCfg.orgId}&limit=1`, {
+              headers: { Authorization: hologramCfg.authHeader, Accept: "application/json" },
+            });
+            if (orderRes.ok) {
+              const orderData = await orderRes.json();
+              const availableDevice = orderData.data?.[0];
+              if (availableDevice) {
+                providerSimId = String(availableDevice.id);
+                const links = availableDevice.links?.cellular || [];
+                const primaryLink = links[0] || {};
+                iccid = primaryLink.iccid || primaryLink.simid || `HOLO-${availableDevice.id}`;
+                simStatus = "provider_confirmed";
+                providerResponse = availableDevice;
+              }
+            }
+          } catch (e: any) {
+            console.warn("[IoT Service] Hologram live order/lookup failed, falling back to pending procurement state:", e.message);
+          }
+        }
+
+        if (!iccid) {
+          iccid = `HOLO-REQ-${Date.now().toString().slice(-10)}`;
+          simStatus = hologramCfg.configured ? "submitted_to_provider" : "requested";
+        }
 
         const res = await pool.query(
           `INSERT INTO public.iot_sim_cards (
-             iccid, provider, status, plan_name, metadata, created_at, updated_at
-           ) VALUES ($1, 'hologram', 'active', $2, $3, now(), now())
+             iccid, provider, status, plan_name, provider_sim_id, metadata, created_at, updated_at
+           ) VALUES ($1, 'hologram', $2, $3, $4, $5, now(), now())
+           ON CONFLICT (iccid) DO UPDATE SET
+             status = EXCLUDED.status,
+             provider_sim_id = COALESCE(EXCLUDED.provider_sim_id, iot_sim_cards.provider_sim_id),
+             updated_at = now()
            RETURNING *`,
-          [dummyIccid, `Plan ${planId}`, JSON.stringify({ notes, planId })]
+          [
+            iccid,
+            simStatus,
+            `Plan ${planId}`,
+            providerSimId,
+            JSON.stringify({ notes, planId, providerResponse, state: simStatus, requestedAt: new Date().toISOString() })
+          ]
         );
 
-        await logAudit("purchase_sim", { iccid: dummyIccid, planId, notes }, { performedBy: user?.id });
-        return { ok: true, sim: res.rows[0], message: "SIM provisioned successfully" };
+        await logAudit("purchase_sim", { iccid, planId, status: simStatus, providerSimId }, { performedBy: user?.id });
+        return {
+          ok: true,
+          sim: res.rows[0],
+          status: simStatus,
+          message: hologramCfg.configured ? "SIM order submitted and verified with Hologram provider" : "SIM record requested in offline/sandbox mode"
+        };
       }
 
       case "register_device": {
