@@ -1304,7 +1304,7 @@ export const autoProvisionService = {
         try {
           await pool.query(
             `UPDATE public.iot_devices 
-             SET vehicle_id = $1::uuid, is_linked = true, installation_status = 'confirmed', telemetry_enabled = true, updated_at = now()
+             SET vehicle_id = $1::uuid, is_linked = true, installation_status = 'pending', telemetry_enabled = true, updated_at = now()
              WHERE id = $2::uuid`,
             [vId, dId]
           );
@@ -1313,25 +1313,65 @@ export const autoProvisionService = {
             [vId, dId]
           );
           await pool.query(
-            `INSERT INTO public.iot_provisioning_state (vehicle_id, device_id, stage, test_status, ready_at, updated_at)
-             VALUES ($1::uuid, $2::uuid, 'ready', 'passed', now(), now())
+            `INSERT INTO public.iot_provisioning_state (vehicle_id, device_id, stage, test_status, updated_at)
+             VALUES ($1::uuid, $2::uuid, 'provisioned', 'pending', now())
              ON CONFLICT (vehicle_id) DO UPDATE SET
                device_id = EXCLUDED.device_id,
-               stage = 'ready',
-               test_status = 'passed',
-               ready_at = now(),
+               stage = CASE WHEN iot_provisioning_state.stage = 'ready' THEN 'ready' ELSE 'provisioned' END,
                updated_at = now()`,
             [vId, dId]
           );
-          await pool.query(
-            `UPDATE public.vehicles SET gps_tracking_enabled = true, status = 'available', updated_at = now() WHERE id = $1::uuid`,
-            [vId]
-          );
           await pool.query(`SELECT public.sync_device_identity($1::uuid)`, [dId]);
           vehiclesLinked++;
-          vehiclesReady++;
         } catch (err: any) {
           errors.push({ step: "link_vehicle", vId, dId, error: err.message });
+        }
+      }
+
+      // Step 5: Test and evaluate telemetry readiness evidence for provisioned vehicles
+      const pendingProvisioning = await pool.query(
+        `SELECT p.id, p.vehicle_id, p.device_id 
+         FROM public.iot_provisioning_state p
+         WHERE p.stage IN ('provisioned', 'test_failed') LIMIT 50`
+      );
+
+      for (const prov of pendingProvisioning.rows) {
+        try {
+          const telRes = await pool.query(
+            `SELECT vehicle_id FROM public.vehicle_telemetry_state WHERE vehicle_id = $1::uuid LIMIT 1`,
+            [prov.vehicle_id]
+          );
+          const telemetrySeen = (telRes.rowCount || 0) > 0;
+
+          const devRes = await pool.query(
+            `SELECT status, telemetry_enabled, installation_status FROM public.iot_devices WHERE id = $1::uuid LIMIT 1`,
+            [prov.device_id]
+          );
+          const dev = devRes.rows[0];
+          const deviceActive = dev?.status === 'active' && dev?.telemetry_enabled === true;
+
+          if (telemetrySeen && deviceActive) {
+            await pool.query(
+              `UPDATE public.iot_provisioning_state 
+               SET stage = 'ready', test_status = 'passed', ready_at = now(), last_error = NULL, updated_at = now()
+               WHERE id = $1::uuid`,
+              [prov.id]
+            );
+            await pool.query(
+              `UPDATE public.vehicles SET gps_tracking_enabled = true, status = 'available', updated_at = now() WHERE id = $1::uuid`,
+              [prov.vehicle_id]
+            );
+            vehiclesReady++;
+          } else {
+            await pool.query(
+              `UPDATE public.iot_provisioning_state 
+               SET stage = 'test_failed', test_status = 'failed', last_error = $2, updated_at = now()
+               WHERE id = $1::uuid`,
+              [prov.id, telemetrySeen ? "Device inactive or telemetry disabled" : "Awaiting live telemetry reception from device"]
+            );
+          }
+        } catch (testErr: any) {
+          console.warn("[Auto-Provision] Telemetry test error for vehicle:", prov.vehicle_id, testErr.message);
         }
       }
 
