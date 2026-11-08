@@ -100,7 +100,7 @@ interface AuthContextType {
   twoFactorStatus: TwoFactorStatus | null;
   twoFactorVerified: boolean;
   setTwoFactorVerified: (verified: boolean) => void;
-  signUp: (email: string, password: string, fullName: string, role: AppRole) => Promise<{
+  signUp: (email: string, password: string, fullName: string, role: 'driver' | 'owner') => Promise<{
     error: Error | null;
     emailExists?: boolean;
     user?: User | null;
@@ -127,132 +127,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
   const [twoFactorVerified, setTwoFactorVerified] = useState(false);
 
-  const ADMIN_EMAILS = [
-    'adebayoolusola39@gmail.com',
-    'beresdowds@gmail.com',
-    'beresanddowds@gmail.com',
-  ];
-
-  const USER_ROLE_OVERRIDES: Record<string, { role: AppRole; fullName?: string; phone?: string }> = {
-    'adebayoolusola39@gmail.com': {
-      role: 'admin',
-      fullName: 'Olusola Adebayo',
-      phone: '+2348139051772',
-    },
-    'beresdowds@gmail.com': {
-      role: 'admin',
-      fullName: 'Beres & Dowds Admin',
-    },
-    'beresanddowds@gmail.com': {
-      role: 'admin',
-      fullName: 'Beres & Dowds Admin',
-    },
-    'eastfortemain@gmail.com': {
-      role: 'admin_assistant',
-      fullName: 'Olusola Adebayo',
-      phone: '+2348139051772',
-    },
-    'ibrahimganiyu026@gmail.com': {
-      role: 'admin_assistant',
-      fullName: 'Ibrahim Ganiyu',
-    },
-    'woleadebayo58@gmail.com': {
-      role: 'admin_assistant',
-      fullName: 'Wole Adebayo',
-    },
-    'wale@gmail.com': {
-      role: 'driver',
-      fullName: 'Wale',
-    },
-  };
-
-  const KNOWN_ADMINS: Record<string, { fullName: string; phone: string; role: AppRole }> = {
-    'eastfortemain@gmail.com': {
-      fullName: 'Olusola Adebayo',
-      phone: '+2348139051772',
-      role: 'admin_assistant',
-    },
-    'ibrahimganiyu026@gmail.com': {
-      fullName: 'Ibrahim Ganiyu',
-      phone: '',
-      role: 'admin_assistant',
-    },
-    'woleadebayo58@gmail.com': {
-      fullName: 'Wole Adebayo',
-      phone: '',
-      role: 'admin_assistant',
-    },
-    'adebayoolusola39@gmail.com': {
-      fullName: 'Olusola Adebayo',
-      phone: '+2348139051772',
-      role: 'admin',
-    },
-    'beresdowds@gmail.com': {
-      fullName: 'Beres & Dowds Admin',
-      phone: '',
-      role: 'admin',
-    },
-    'beresanddowds@gmail.com': {
-      fullName: 'Beres & Dowds Admin',
-      phone: '',
-      role: 'admin',
-    },
-  };
-
-  // Strictly enforce single role per user to preserve RBAC policies and prevent
-  // privilege escalation or inconsistent authorization states.
-  const ROLE_PRIORITY: AppRole[] = [
-    'admin',
-    'admin_assistant',
-    'legal_support',
-    'iot_support',
-    'vehicle_support',
-    'owner',
-    'driver',
-  ];
-
   const fetchUserRole = async (userId: string, userEmail?: string | null) => {
     try {
-      const normalizedEmail = userEmail?.trim().toLowerCase();
-      const predefined = normalizedEmail ? USER_ROLE_OVERRIDES[normalizedEmail] : null;
-
       const { data, error } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
         .maybeSingle();
-
       if (error) {
         console.error('Error fetching user role:', error);
-        if (predefined) return predefined.role;
         return null;
       }
 
       let assignedRole = (data?.role as AppRole) ?? null;
-      if (!assignedRole) {
-        // Also check admin_assistant_permissions in case user was provisioned as assistant
-        const { data: assistantRow } = await supabase
-          .from('admin_assistant_permissions')
-          .select('id')
-          .eq('user_id', userId)
-          .maybeSingle();
-        if (assistantRow) {
-          assignedRole = 'admin_assistant';
-        }
-      }
-      let effectiveRole: AppRole | null = predefined ? predefined.role : assignedRole;
+      let effectiveRole: AppRole | null = assignedRole;
 
       // Handle new OAuth / Google SSO users without an existing role assignment:
       // Read target role chosen during sign-up (defaults to driver) and provision it.
       if (!effectiveRole && userId) {
-        const storedRole = (typeof window !== 'undefined'
+        const storedRole = typeof window !== 'undefined'
           ? (sessionStorage.getItem('rentmaikar_oauth_role') || localStorage.getItem('rentmaikar_oauth_role'))
-          : null) as AppRole;
-        const targetRole: AppRole = storedRole === 'owner' ? 'owner' : 'driver';
+          : null;
+        const targetRole: 'driver' | 'owner' = storedRole === 'owner' ? 'owner' : 'driver';
         effectiveRole = targetRole;
 
         try {
-          await assignRole(userId, targetRole, normalizedEmail);
+          await assignRole(userId, targetRole);
         } catch (e) {
           console.warn('[AuthContext] Auto-assigning OAuth role failed:', e);
         }
@@ -284,114 +184,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUserRoles(effectiveRole ? [effectiveRole] : []);
       }
 
-      if (predefined) {
-        if (assignedRole !== predefined.role) {
-          // If the user already had another role in user_roles, prune old roles to migrate them cleanly
-          if (assignedRole) {
-            supabase
-              .from('user_roles')
-              .delete()
-              .eq('user_id', userId)
-              .neq('role', predefined.role as any)
-              .then(() => undefined, () => undefined);
-          }
-          assignRole(userId, predefined.role, normalizedEmail).catch(() => {
-            supabase
-              .from('user_roles')
-              .upsert({ user_id: userId, role: predefined.role as any }, { onConflict: 'user_id' })
-              .then(() => undefined, () => undefined);
-          });
-        }
-
-        // If the predefined role is admin_assistant, ensure a permissions row exists
-        if (predefined.role === 'admin_assistant') {
-          supabase
-            .from('admin_assistant_permissions')
-            .select('id')
-            .eq('user_id', userId)
-            .maybeSingle()
-            .then(({ data: hasPerms }) => {
-              if (!hasPerms) {
-                supabase
-                  .from('admin_assistant_permissions')
-                  .insert({
-                    user_id: userId,
-                    can_view_users: true,
-                    can_view_rentals: true,
-                    can_view_payments: true,
-                    can_view_vehicles: true,
-                    can_view_iot: true,
-                    can_view_reports: true,
-                    can_view_support_tasks: true,
-                    can_view_communications: true,
-                    can_view_audit_log: true,
-                    notes: 'Default Admin Assistant baseline permissions',
-                  })
-                  .then(() => undefined, () => undefined);
-              }
-            })
-            .then(() => undefined, () => undefined);
-        }
-
-        if (predefined.fullName) {
-          supabase
-            .from('profiles')
-            .upsert(
-              {
-                user_id: userId,
-                email: normalizedEmail,
-                full_name: predefined.fullName,
-                phone: predefined.phone,
-              },
-              { onConflict: 'user_id' }
-            )
-            .then(() => undefined, () => undefined);
-        }
-
-        if (predefined.phone) {
-          supabase
-            .from('two_factor_settings')
-            .upsert(
-              {
-                user_id: userId,
-                phone_number: predefined.phone,
-                preferred_channel: 'sms',
-                is_enabled: true,
-              },
-              { onConflict: 'user_id' }
-            )
-            .then(() => undefined, () => undefined);
-        }
-
-        if (typeof window !== 'undefined') {
-          try {
-            if (predefined.role === 'admin' || predefined.role === 'admin_assistant') {
-              localStorage.setItem('rentmaikar_admin_active', 'true');
-              localStorage.setItem('rentmaikar_admin_role', predefined.role);
-              localStorage.setItem('rentmaikar_admin_email', normalizedEmail!);
-              if (predefined.fullName) localStorage.setItem('rentmaikar_admin_name', predefined.fullName);
-              if (predefined.phone) localStorage.setItem('rentmaikar_admin_phone', predefined.phone);
-            } else {
-              localStorage.removeItem('rentmaikar_admin_active');
-              localStorage.removeItem('rentmaikar_admin_role');
-              localStorage.removeItem('rentmaikar_admin_email');
-              localStorage.removeItem('rentmaikar_admin_name');
-              localStorage.removeItem('rentmaikar_admin_phone');
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        return predefined.role;
-      }
-
       if (typeof window !== 'undefined') {
         try {
           if (effectiveRole === 'admin' || effectiveRole === 'admin_assistant') {
             localStorage.setItem('rentmaikar_admin_active', 'true');
             localStorage.setItem('rentmaikar_admin_role', effectiveRole);
-            localStorage.setItem('rentmaikar_admin_email', normalizedEmail || '');
+            localStorage.setItem('rentmaikar_admin_email', userEmail?.trim().toLowerCase() || '');
           } else {
             localStorage.removeItem('rentmaikar_admin_active');
             localStorage.removeItem('rentmaikar_admin_role');
@@ -407,12 +205,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return effectiveRole;
     } catch (err) {
       console.error('Error in fetchUserRole:', err);
-      if (userEmail) {
-        const normalized = userEmail.trim().toLowerCase();
-        if (USER_ROLE_OVERRIDES[normalized]) {
-          return USER_ROLE_OVERRIDES[normalized].role;
-        }
-      }
       return null;
     }
   };
@@ -702,10 +494,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const redirectUrl = `${window.location.origin}/`;
       const normalizedEmail = email.trim().toLowerCase();
-      const predefined = USER_ROLE_OVERRIDES[normalizedEmail];
-      const adminInfo = KNOWN_ADMINS[normalizedEmail];
-      const effectiveFullName = fullName.trim() || predefined?.fullName || adminInfo?.fullName || fullName;
-      const effectiveRole: AppRole = predefined ? predefined.role : (ADMIN_EMAILS.includes(normalizedEmail) ? 'admin' : role);
+      const effectiveFullName = fullName.trim();
+      const effectiveRole: 'driver' | 'owner' = role === 'owner' ? 'owner' : 'driver';
 
       // Server-side duplicate guard: authoritative check against auth.users
       // (rate limited) so a registered email is routed to sign-in instead of
@@ -781,7 +571,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Fail-closed verification: ensure profile exists and role is assigned in user_roles
       try {
-        await verifyProfileExists(uid, effectiveRole, normalizedEmail);
+        await verifyProfileExists(uid);
         await assignRole(uid, effectiveRole, normalizedEmail);
       } catch (provisionError) {
         console.error('Error provisioning account during signup:', provisionError);

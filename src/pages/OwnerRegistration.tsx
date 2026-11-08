@@ -95,9 +95,9 @@ const createOwnerSchema = (country: "usa" | "nigeria") => z.object({
   smsMarketingConsent: z.boolean().optional().default(false),
 });
 
-const ownerSchema = createOwnerSchema("usa");
-
-type OwnerFormData = z.infer<typeof ownerSchema>;
+type OwnerFormSchema = ReturnType<typeof createOwnerSchema>;
+type OwnerFormInput = z.input<OwnerFormSchema>;
+type OwnerFormData = z.output<OwnerFormSchema>;
 
 const usaCities = ["Washington DC", "Maryland", "Virginia"];
 const nigeriaCities = ["Lagos", "Abuja", "Port Harcourt"];
@@ -128,7 +128,7 @@ const OwnerRegistration = () => {
     watch,
     control,
     formState: { errors, isSubmitting, touchedFields },
-  } = useForm<OwnerFormData>({
+  } = useForm<OwnerFormInput, unknown, OwnerFormData>({
     resolver: zodResolver(createOwnerSchema(currentCountry)),
     defaultValues: {
       country: "usa",
