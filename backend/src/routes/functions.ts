@@ -2,7 +2,6 @@ import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { sendInboxReply } from "../services/inboxReplyService";
 import { sentBackendClient } from "../services/sentClient";
-import { sendApplicationMessage } from "../services/smsService";
 import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
 import { supabaseBackendService, EDGE_FUNCTIONS_SET } from "../services/supabaseService";
 import { getDbPool } from "../services/dbPool";
@@ -183,6 +182,12 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "owner-withdrawal-data",
   "initiate-owner-withdrawal",
   "submit-vehicle-for-review",
+]);
+
+const EDGE_ONLY_SMS_FUNCTIONS = new Set([
+  "send-sms-notification",
+  "case-send-sms",
+  "twilio-test-send",
 ]);
 
 const storageUpload = multer({
@@ -417,141 +422,33 @@ functionsRouter.all(
       if (upstreamResult.status !== 404 && upstreamResult.status !== 502 && upstreamResult.status !== 504) {
         return res.status(upstreamResult.status).json(upstreamResult.data ?? {});
       }
+
+      // Do not retry SMS aliases through the legacy Cloud Run dispatcher:
+      // the edge may have reached a provider before timing out, and its
+      // fallback accepts caller-supplied recipients for case messages.
+      if (EDGE_ONLY_SMS_FUNCTIONS.has(functionName)) {
+        return res.status(upstreamResult.status === 404 ? 503 : upstreamResult.status).json({
+          success: false,
+          error: "SMS service unavailable; the message was not retried",
+        });
+      }
     } catch (proxyErr: any) {
       console.warn(`[Backend Functions] Upstream Supabase dispatch for '${functionName}' failed, using local gateway:`, proxyErr?.message || proxyErr);
+      if (EDGE_ONLY_SMS_FUNCTIONS.has(functionName)) {
+        return res.status(502).json({
+          success: false,
+          error: "SMS service unavailable; the message was not retried",
+        });
+      }
     }
   }
   try {
     switch (functionName) {
-      // -----------------------------------------------------------------
-      // SMS & CPaaS Notification Handlers (SENT.dm primary, Twilio/Termii fallback)
-      // -----------------------------------------------------------------
-      case "send-sms-notification":
-      case "case-send-sms": {
-        const rawTo = body.phone || body.to || body.recipient || "";
-        const to = normalizeE164(rawTo);
-        if (!to) {
-          return res.status(400).json({ success: false, error: "Recipient phone number is required" });
-        }
-
-        const channel = body.channel === "whatsapp" ? "whatsapp" : "sms";
-        const messageText = body.customMessage || body.message || "You have an update from RentMaikar.";
-        const isSandbox = Boolean(body.sandbox || process.env.SENT_SANDBOX_MODE === "true");
-
-        const idempotencyKey =
-          body.idempotencyKey ||
-          body.idempotency_key ||
-          (req.headers["idempotency-key"] as string) ||
-          (req.headers["x-idempotency-key"] as string);
-
-        const result = await sendApplicationMessage({
-          to,
-          message: messageText,
-          channel,
-          sandbox: isSandbox,
-          whatsappTemplateId: body.whatsappTemplateId,
-          whatsappTemplateParams: body.whatsappTemplateParams,
-          notificationType: body.notificationType || functionName,
-          idempotencyKey: idempotencyKey ? String(idempotencyKey).trim() : undefined,
-          metadata: {
-            source: "backend_functions_gateway",
-            function: functionName,
-            ...body.metadata,
-          },
-        });
-
-        if (result.success) {
-          return res.status(200).json(result);
-        } else {
-          return res.status(502).json(result);
-        }
-      }
-
       case "reprocess-sms-dlq": {
         return res.status(200).json({
           success: true,
           count: 0,
           message: "No dead-letter messages pending reprocessing",
-        });
-      }
-
-      // Diagnostic probe only — strictly separate from production communications
-      case "twilio-test-send": {
-        const to = normalizeE164(body.to || "");
-        const channel = body.channel || "sms";
-        const accountSid = process.env.TWILIO_ACCOUNT_SID;
-        const authToken = process.env.TWILIO_AUTH_TOKEN;
-        const fromNumber = process.env.TWILIO_PHONE_NUMBER;
-
-        if (!to) {
-          return res.status(400).json({ success: false, error: "Recipient phone number required for Twilio diagnostic probe" });
-        }
-
-        if (!fromNumber) {
-          return res.status(503).json({ success: false, error: "No configured Twilio sender line in environment" });
-        }
-
-        if (accountSid && authToken) {
-          try {
-            const isWa = channel === "whatsapp";
-            const toFormatted = isWa && !to.startsWith("whatsapp:") ? `whatsapp:${to}` : to;
-            const fromFormatted = isWa && !fromNumber.startsWith("whatsapp:") ? `whatsapp:${fromNumber}` : fromNumber;
-
-            const params = new URLSearchParams();
-            params.append("To", toFormatted);
-            params.append("From", fromFormatted);
-            params.append("Body", body.message || "RentMaikar Twilio diagnostic probe");
-
-            const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
-              },
-              body: params.toString(),
-            });
-
-            if (twilioRes.ok) {
-              const data = await twilioRes.json();
-              return res.status(200).json({
-                success: true,
-                sid: data.sid,
-                channel,
-                to,
-                provider: "twilio",
-                deliveryStatus: "queued",
-                diagnostic: true,
-              });
-            } else {
-              const errData = await twilioRes.json().catch(() => ({}));
-              return res.status(502).json({
-                success: false,
-                error: errData?.message || "Twilio diagnostic probe rejected",
-                channel,
-                provider: "twilio",
-                deliveryStatus: "failed",
-                diagnostic: true,
-              });
-            }
-          } catch (e: any) {
-            return res.status(500).json({
-              success: false,
-              error: e.message,
-              channel,
-              provider: "twilio",
-              deliveryStatus: "failed",
-              diagnostic: true,
-            });
-          }
-        }
-
-        return res.status(503).json({
-          success: false,
-          error: "Twilio credentials not configured for diagnostic probe",
-          channel,
-          provider: "twilio",
-          deliveryStatus: "failed",
-          diagnostic: true,
         });
       }
 

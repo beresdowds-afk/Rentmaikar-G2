@@ -166,6 +166,94 @@ test("role policy denies ordinary users from administration and permits authoriz
   );
 });
 
+test("SMS dispatch aliases and provider diagnostics require an administrator", async () => {
+  const callers: Record<string, AuthContext> = {
+    driver: user,
+    owner: {
+      userId: "owner-1",
+      email: "owner@example.test",
+      role: "owner",
+      roles: ["owner"],
+      isAdmin: false,
+    },
+    support: {
+      userId: "support-1",
+      email: "support@example.test",
+      role: "support",
+      roles: ["support"],
+      isAdmin: false,
+    },
+    admin,
+  };
+  const authenticateSmsCaller = async (authorization: string) => {
+    const caller = callers[authorization];
+    if (caller) return caller;
+    const error = new Error("Invalid SMS test session") as Error & {
+      statusCode: number;
+    };
+    error.statusCode = 401;
+    throw error;
+  };
+
+  for (const functionName of ["case-send-sms", "twilio-test-send"]) {
+    assert.equal(getFunctionAccessLevel(functionName), "admin");
+    for (const authorization of ["driver", "owner", "support"]) {
+      await assert.rejects(
+        enforceFunctionAccess(
+          functionName,
+          { authorization, "x-user-id": "admin-1", to: "+15551234567" },
+          authenticateSmsCaller,
+        ),
+        (error: unknown) =>
+          error instanceof AccessDenied && error.statusCode === 403,
+      );
+    }
+    await assert.rejects(
+      enforceFunctionAccess(functionName, {}, authenticateSmsCaller),
+      (error: unknown) =>
+        error instanceof AccessDenied && error.statusCode === 401,
+    );
+    assert.equal(
+      (
+        await enforceFunctionAccess(
+          functionName,
+          { authorization: "admin" },
+          authenticateSmsCaller,
+        )
+      ).caller?.userId,
+      "admin-1",
+    );
+  }
+
+  assert.equal(getFunctionAccessLevel("send-sms-notification"), "service_or_admin");
+  for (const authorization of ["driver", "owner", "support"]) {
+    await assert.rejects(
+      enforceFunctionAccess(
+        "send-sms-notification",
+        { authorization, to: "+15551234567" },
+        authenticateSmsCaller,
+      ),
+      (error: unknown) =>
+        error instanceof AccessDenied && error.statusCode === 403,
+    );
+  }
+  assert.equal(
+    (
+      await enforceFunctionAccess(
+        "send-sms-notification",
+        { authorization: "admin" },
+        authenticateSmsCaller,
+      )
+    ).caller?.userId,
+    "admin-1",
+  );
+  await assert.rejects(
+    enforceFunctionAccess("send-sms-notification", {}, authenticateSmsCaller),
+    (error: unknown) =>
+      error instanceof AccessDenied && error.statusCode === 401,
+  );
+});
+
 test("resource ownership denies cross-user access", () => {
   assert.equal(isResourceOwner(user, "driver-1"), true);
   assert.equal(isResourceOwner(user, "driver-2"), false);

@@ -40,40 +40,40 @@ export class SentClient {
    * Aligned with OpenAPI v3 specification: POST https://api.sent.dm/v3/messages
    */
   async sendMessage(request: SentMessageRequest): Promise<SentMessageResponse> {
-    const isSandbox = request.sandbox ?? this.sandbox;
     const recipient = Array.isArray(request.to) ? request.to[0] : (request.to as unknown as string);
 
     // Dispatch server-side: the Sent.dm API key lives only in the backend.
-    try {
-      const { data, error } = await supabase.functions.invoke("send-sms-notification", {
-        body: {
-          phone: recipient,
-          channel: request.channel === "whatsapp" ? "whatsapp" : "sms",
-          notificationType: "general",
-          customMessage: request.text,
-          providerOverride: "sent",
-          metadata: request.metadata,
-        },
-      });
+    const { data, error } = await supabase.functions.invoke("send-sms-notification", {
+      body: {
+        phone: recipient,
+        channel: request.channel === "whatsapp" ? "whatsapp" : "sms",
+        notificationType: "general",
+        customMessage: request.text,
+        metadata: request.metadata,
+      },
+    });
 
-      if (error) throw error;
-      if (data && data.success === false) throw new Error(data.error || "Sent.dm dispatch failed");
-
-      return {
-        id: data?.messageId || `sent_${Date.now()}`,
-        status: "sent",
-        channel: request.channel,
-        to: Array.isArray(request.to) ? request.to : [recipient],
-        from: request.sender_id || this.senderId,
-        created_at: new Date().toISOString(),
-        cost: { amount: request.channel === "whatsapp" ? 0.005 : 0.015, currency: "USD" },
-        segments: 1,
-        sandbox: Boolean(data?.sandbox),
-      };
-    } catch (err: any) {
-      console.warn("[SentClient] Server dispatch failed, returning simulated telemetry:", err);
-      return this.generateSimulatedResponse(request, isSandbox, err?.message);
+    if (error || data?.success !== true) {
+      throw new Error("SENT.dm message dispatch failed");
     }
+    if (data.sandbox) {
+      throw new Error("Sandbox dispatch did not send an external message");
+    }
+    if (typeof data.messageId !== "string" || !data.messageId.trim()) {
+      throw new Error("SMS service returned an invalid dispatch result");
+    }
+
+    return {
+      id: data.messageId,
+      status: "sent",
+      channel: request.channel,
+      to: Array.isArray(request.to) ? request.to : [recipient],
+      from: request.sender_id || this.senderId,
+      created_at: new Date().toISOString(),
+      cost: { amount: request.channel === "whatsapp" ? 0.005 : 0.015, currency: "USD" },
+      segments: 1,
+      sandbox: false,
+    };
   }
 
 
@@ -215,28 +215,6 @@ export class SentClient {
     };
   }
 
-  private generateSimulatedResponse(
-    request: SentMessageRequest, 
-    isSandbox: boolean,
-    errorNote?: string
-  ): SentMessageResponse {
-    const id = `sent_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    return {
-      id,
-      status: "delivered",
-      channel: request.channel,
-      to: request.to,
-      from: request.sender_id || this.senderId,
-      created_at: new Date().toISOString(),
-      cost: {
-        amount: request.channel === "whatsapp" ? 0.005 : 0.012,
-        currency: "USD",
-      },
-      segments: 1,
-      sandbox: isSandbox,
-      ...(errorNote ? { error: { code: "SANDBOX_SIMULATION", message: errorNote } } : {}),
-    };
-  }
 }
 
 // Global shared singleton
