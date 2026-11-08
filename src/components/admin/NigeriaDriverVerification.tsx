@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getUploadedFileUrl } from '@/lib/file-upload-api';
 import { 
   Shield, 
   AlertTriangle, 
@@ -220,12 +221,15 @@ export const NigeriaDriverVerification = () => {
 
   const handleViewDocument = async (doc: DriverDocument) => {
     try {
-      const { data } = await supabase.storage
-        .from('user-documents')
-        .createSignedUrl(doc.file_path, 3600);
-      
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
+      const { url } = await getUploadedFileUrl({
+        purpose: 'user_document',
+        documentId: doc.id,
+        filePath: doc.file_path,
+        expiresIn: 300,
+      });
+
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
       } else {
         toast.error('Could not load document');
       }

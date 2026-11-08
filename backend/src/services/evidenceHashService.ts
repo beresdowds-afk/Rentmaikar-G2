@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { getDbPool } from "./dbPool";
+import type { PoolClient, QueryResult } from "pg";
+
+type EvidenceQueryable = Pick<PoolClient, "query">;
 
 /**
  * Authoritative cryptographic hash generator for files, documents, and payloads.
@@ -37,35 +40,59 @@ export interface RegisterArtifactInput {
 /**
  * Registers an authoritative evidence artifact into the cryptographic evidence store.
  */
-export async function registerEvidenceArtifact(input: RegisterArtifactInput): Promise<{
+export async function registerEvidenceArtifact(
+  input: RegisterArtifactInput,
+  queryable?: EvidenceQueryable,
+): Promise<{
   id: string;
   contentSha256: string;
   custodyHash: string;
 }> {
-  const pool = getDbPool();
+  const db = queryable || getDbPool();
   const contentHash = input.contentSha256 || (input.contentBuffer ? sha256(input.contentBuffer) : "");
   if (!contentHash) {
     throw new Error("Cannot register evidence artifact without valid content hash or buffer");
   }
 
-  // Fetch previous custody hash for hash-chaining
   let prevHash = "GENESIS_EVIDENCE_ROOT_0000000000000000000000000000000000000000000000000000000000000000";
-  try {
-    const prevRes = await pool.query(
-      `SELECT custody_hash FROM public.evidence_artifacts ORDER BY captured_at DESC LIMIT 1`
-    );
-    if (prevRes.rows[0]?.custody_hash) {
-      prevHash = prevRes.rows[0].custody_hash;
+  if (queryable) {
+    await db.query("SELECT pg_advisory_xact_lock(hashtext('evidence_artifacts_custody_chain'))");
+  }
+  const existing = await db.query(
+    `SELECT id, content_sha256, custody_hash, source_table, source_id, captured_by
+       FROM public.evidence_artifacts
+      WHERE storage_bucket = $1 AND storage_path = $2
+      LIMIT 1`,
+    [input.storageBucket || null, input.storagePath || null],
+  );
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    if (
+      row.content_sha256 !== contentHash ||
+      row.source_table !== input.sourceTable ||
+      String(row.source_id) !== input.sourceId ||
+      String(row.captured_by || "") !== String(input.capturedBy || "")
+    ) {
+      throw new Error("Evidence path is already registered to another artifact");
     }
-  } catch (err) {
-    console.warn("[evidenceHashService] Could not query previous custody hash, starting chain at genesis:", err);
+    return {
+      id: String(row.id),
+      contentSha256: contentHash,
+      custodyHash: String(row.custody_hash),
+    };
+  }
+  const prevRes = await db.query(
+    `SELECT custody_hash FROM public.evidence_artifacts ORDER BY captured_at DESC LIMIT 1`
+  );
+  if (prevRes.rows[0]?.custody_hash) {
+    prevHash = prevRes.rows[0].custody_hash;
   }
 
   const now = new Date();
   const artifactId = (await import("node:crypto")).randomUUID();
   const custodyHash = computeCustodyHash(artifactId, contentHash, now, input.capturedBy, prevHash);
 
-  await pool.query(
+  const insert: QueryResult = await db.query(
     `
       INSERT INTO public.evidence_artifacts (
         id,
@@ -81,6 +108,10 @@ export async function registerEvidenceArtifact(input: RegisterArtifactInput): Pr
         custody_hash,
         metadata
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ON CONFLICT (storage_bucket, storage_path)
+      WHERE storage_bucket IS NOT NULL AND storage_path IS NOT NULL
+      DO NOTHING
+      RETURNING id
     `,
     [
       artifactId,
@@ -97,6 +128,31 @@ export async function registerEvidenceArtifact(input: RegisterArtifactInput): Pr
       JSON.stringify(input.metadata || {}),
     ]
   );
+
+  if (insert.rowCount === 0) {
+    const conflict = await db.query(
+      `SELECT id, content_sha256, custody_hash, source_table, source_id, captured_by
+         FROM public.evidence_artifacts
+        WHERE storage_bucket = $1 AND storage_path = $2
+        LIMIT 1`,
+      [input.storageBucket || null, input.storagePath || null],
+    );
+    const row = conflict.rows[0];
+    if (
+      !row ||
+      row.content_sha256 !== contentHash ||
+      row.source_table !== input.sourceTable ||
+      String(row.source_id) !== input.sourceId ||
+      String(row.captured_by || "") !== String(input.capturedBy || "")
+    ) {
+      throw new Error("Evidence path is already registered to another artifact");
+    }
+    return {
+      id: String(row.id),
+      contentSha256: contentHash,
+      custodyHash: String(row.custody_hash),
+    };
+  }
 
   return {
     id: artifactId,

@@ -104,6 +104,16 @@ export const PHOTO_TYPES = [
 
 export type PhotoType = typeof PHOTO_TYPES[number]['key'];
 
+async function resolveReportPhotoUrls(report: InspectionReport): Promise<InspectionReport> {
+  const resolved = { ...report };
+  await Promise.all(PHOTO_TYPES.map(async ({ key }) => {
+    const pathOrUrl = resolved[key];
+    if (!pathOrUrl) return;
+    resolved[key] = await getInspectionImageUrl(pathOrUrl, 900);
+  }));
+  return resolved;
+}
+
 /**
  * Returns the start of the current 30-day inspection period based on the agreement's expiry.
  * If no agreement, falls back to the 1st of the current month.
@@ -297,12 +307,12 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
       if (error) throw error;
 
       const typedData = (data || []) as InspectionReport[];
-      setReports(typedData);
+      setReports(await Promise.all(typedData.map(resolveReportPhotoUrls)));
 
       // Find current 30-day period report
       const periodStart = get30DayPeriodStart(activeAgreement?.expires_at);
       const current = typedData.find(r => r.week_start_date >= periodStart);
-      setCurrentReport(current || null);
+      setCurrentReport(current ? await resolveReportPhotoUrls(current) : null);
     } catch (error) {
       console.error('Error fetching inspection reports:', error);
     } finally {
@@ -327,7 +337,7 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
         inspectionId: currentReport?.id,
       });
 
-      return uploadRes.signedUrl || uploadRes.filePath || null;
+      return uploadRes.filePath || null;
     } catch (uploadError: any) {
       console.error('Upload error via centralized gateway:', uploadError);
       toast.error(uploadError?.message || 'Failed to upload photo');
@@ -372,7 +382,7 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
         return null;
       }
 
-      setCurrentReport(data as InspectionReport);
+      setCurrentReport(await resolveReportPhotoUrls(data as InspectionReport));
       return data;
     } else {
       const { data, error } = await supabase
@@ -395,7 +405,7 @@ export function useWeeklyInspection(vehicleId?: string, driverId?: string) {
         return null;
       }
 
-      setCurrentReport(data as InspectionReport);
+      setCurrentReport(await resolveReportPhotoUrls(data as InspectionReport));
       return data;
     }
   };
@@ -552,7 +562,9 @@ export function useAllInspectionReports() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setReports((data || []) as InspectionReport[]);
+      setReports(await Promise.all(
+        ((data || []) as InspectionReport[]).map(resolveReportPhotoUrls),
+      ));
     } catch (error) {
       console.error('Error fetching all reports:', error);
     } finally {

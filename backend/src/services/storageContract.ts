@@ -33,7 +33,7 @@ export const PURPOSE_CONFIGS: Record<StoragePurpose, PurposeConfig> = {
       "image/webp",
       "application/pdf",
     ],
-    defaultSignedUrlExpirySeconds: 3600, // 1 hour
+    defaultSignedUrlExpirySeconds: 900,
   },
   vehicle_photo: {
     bucket: "vehicle-photos",
@@ -55,7 +55,7 @@ export const PURPOSE_CONFIGS: Record<StoragePurpose, PurposeConfig> = {
       "image/png",
       "image/webp",
     ],
-    defaultSignedUrlExpirySeconds: 86400, // 24 hours
+    defaultSignedUrlExpirySeconds: 900,
   },
   inspection_image: {
     bucket: "weekly-inspection-photos",
@@ -66,7 +66,7 @@ export const PURPOSE_CONFIGS: Record<StoragePurpose, PurposeConfig> = {
       "image/png",
       "image/webp",
     ],
-    defaultSignedUrlExpirySeconds: 86400, // 24 hours
+    defaultSignedUrlExpirySeconds: 900,
   },
   damage_evidence: {
     bucket: "weekly-inspection-photos",
@@ -77,7 +77,7 @@ export const PURPOSE_CONFIGS: Record<StoragePurpose, PurposeConfig> = {
       "image/png",
       "image/webp",
     ],
-    defaultSignedUrlExpirySeconds: 86400, // 24 hours
+    defaultSignedUrlExpirySeconds: 900,
   },
 };
 

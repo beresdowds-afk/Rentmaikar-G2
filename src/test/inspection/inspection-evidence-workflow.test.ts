@@ -41,7 +41,7 @@ describe("RentMaikar Connected Inspection-Evidence Workflow Test Suite", () => {
       expect(config.bucket).toBe("weekly-inspection-photos");
       expect(config.isPublic).toBe(false);
       expect(config.maxSizeBytes).toBe(10 * 1024 * 1024);
-      expect(config.defaultSignedUrlExpirySeconds).toBe(86400); // 24 hours
+      expect(config.defaultSignedUrlExpirySeconds).toBe(900);
     });
   });
 
