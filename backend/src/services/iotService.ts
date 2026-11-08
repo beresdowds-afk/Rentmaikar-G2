@@ -673,37 +673,52 @@ export const traccarService = {
         }
 
         // Supported Traccar commands: engineStop, engineResume, custom, positionSingle
-        if (config.configured) {
-          try {
-            const authHeader = config.token
-              ? `Bearer ${config.token}`
-              : `Basic ${Buffer.from(`${config.email}:${config.password}`).toString("base64")}`;
-
-            const res = await fetch(`${config.baseUrl}/api/commands/send`, {
-              method: "POST",
-              headers: {
-                Authorization: authHeader,
-                "Content-Type": "application/json",
-                Accept: "application/json",
-              },
-              body: JSON.stringify({
-                deviceId: Number(device_id),
-                type: command,
-                attributes: attributes || {},
-              }),
-            });
-
-            const resData = res.ok ? await res.json().catch(() => ({})) : null;
-            await logAudit("traccar_command", { device_id, command, attributes, status: res.status });
-            return { ok: res.ok, status: res.status, data: resData, command };
-          } catch (e: any) {
-            await logAudit("traccar_command_failed", { device_id, command, error: e.message });
-            return { ok: false, error: e.message };
-          }
+        if (!config.configured) {
+          await logAudit("traccar_command_rejected_unconfigured", { device_id, command });
+          return {
+            ok: false,
+            error: "Traccar telematics provider is unconfigured or unavailable. Vehicle control commands fail closed for safety and security.",
+            status: 503,
+            state: "failed",
+          };
         }
 
-        await logAudit("traccar_command_simulated", { device_id, command, attributes });
-        return { ok: true, simulated: true, command, message: `Command '${command}' queued for device ${device_id}` };
+        try {
+          const authHeader = config.token
+            ? `Bearer ${config.token}`
+            : `Basic ${Buffer.from(`${config.email}:${config.password}`).toString("base64")}`;
+
+          const res = await fetch(`${config.baseUrl}/api/commands/send`, {
+            method: "POST",
+            headers: {
+              Authorization: authHeader,
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              deviceId: Number(device_id),
+              type: command,
+              attributes: attributes || {},
+            }),
+          });
+
+          const resData = res.ok ? await res.json().catch(() => ({})) : null;
+          const success = res.ok;
+          const statusState = success ? "provider_accepted" : "failed";
+
+          await logAudit("traccar_command", { device_id, command, attributes, status: res.status, state: statusState });
+          return {
+            ok: success,
+            status: res.status,
+            state: statusState,
+            data: resData,
+            command,
+            message: success ? "Vehicle command successfully accepted and dispatched by Traccar." : "Vehicle command rejected by Traccar provider.",
+          };
+        } catch (e: any) {
+          await logAudit("traccar_command_failed", { device_id, command, error: e.message });
+          return { ok: false, error: `Traccar command dispatch failed: ${e.message}`, state: "failed" };
+        }
       }
 
       case "command_types": {
