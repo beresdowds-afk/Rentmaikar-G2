@@ -549,11 +549,11 @@ class PaymentService {
           params.callback_url ||
           "https://rentmaikar.com/payment-success",
         metadata: {
+          ...params.metadata,
           rental_id: params.rental_id,
           vehicle_id: params.vehicle_id,
           driver_id: params.driver_id,
           owner_id: params.owner_id,
-          ...params.metadata,
         },
       }),
     }
@@ -1026,20 +1026,34 @@ return {
     note?: string;
     idempotency_key?: string;
   }) {
+    return this.processOwnerPayout({ ...opts, provider: "paypal" });
+  }
+
+  async processOwnerPayout(opts: {
+    owner_id: string;
+    amount: number;
+    currency: string;
+    payout_account_id: string;
+    authorization_id: string;
+    provider: PayoutProvider;
+    note?: string;
+    idempotency_key?: string;
+  }) {
     const ownerId = String(opts.owner_id || "").trim();
     const currency = String(opts.currency || "USD").toUpperCase();
     const accountId = String(opts.payout_account_id || "").trim();
     const authorizationId = String(opts.authorization_id || "").trim();
 
     if (!ownerId) throw new PayoutError("invalid_request", "owner_id is required");
-    if (!accountId) {
-      throw new PayoutError("invalid_account", "PayPal payout account is required");
-    }
+    if (!accountId) throw new PayoutError("invalid_account", "Payout account is required");
     if (!authorizationId) {
       throw new PayoutError("authorization_required", "Withdrawal authorization is required");
     }
     const amount = assertTwoDecimalAmount(opts.amount, 1);
-    if (currency !== "USD") {
+    if (opts.provider !== "paypal" && opts.provider !== "paystack") {
+      throw new PayoutError("invalid_provider", "Unsupported payout provider");
+    }
+    if (opts.provider === "paypal" && currency !== "USD") {
       throw new PayoutError("invalid_request", "PayPal owner payouts currently support USD only");
     }
     const idempotencyKey = resolveIdempotencyKey(
@@ -1047,20 +1061,39 @@ return {
       { idempotencyKey: opts.idempotency_key },
     );
 
+    if (!isUuid(ownerId) || !isUuid(accountId) || !isUuid(authorizationId)) {
+      throw new PayoutError("invalid_request", "Owner, payout account and authorization must be valid identifiers");
+    }
+    const phone = await getDbPool().query(
+      `SELECT EXISTS (
+         SELECT 1 FROM public.profiles
+          WHERE user_id = $1 AND NULLIF(TRIM(phone), '') IS NOT NULL AND phone_verified IS TRUE
+         UNION ALL
+         SELECT 1 FROM auth.users
+          WHERE id = $1 AND NULLIF(TRIM(phone), '') IS NOT NULL AND phone_confirmed_at IS NOT NULL
+         UNION ALL
+         SELECT 1 FROM public.user_roles WHERE user_id = $1 AND role = 'admin'
+       ) AS verified`,
+      [ownerId],
+    );
+    if (!phone.rows[0]?.verified) {
+      throw new PayoutError("phone_verification_required", "Verify your phone number before withdrawing funds", 428);
+    }
+
     const created = await createSelfWithdrawal({
       ownerId,
       authorizationId,
       payoutAccountId: accountId,
       amount,
       currency,
-      provider: "paypal",
+      provider: opts.provider,
       idempotencyKey,
     });
 
-    return this.executePayPalPayoutRecord(
-      created.payoutId,
-      opts.note?.trim() || "Your RentMaikar owner earnings",
-    );
+    const note = opts.note?.trim() || "Your RentMaikar owner earnings";
+    return opts.provider === "paypal"
+      ? this.executePayPalPayoutRecord(created.payoutId, note)
+      : this.executePaystackPayoutRecord(created.payoutId, note);
   }
 
   /**
