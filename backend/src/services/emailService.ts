@@ -18,13 +18,14 @@ import {
 } from "./emailSenderPolicy";
 const RESEND_API_URL = "https://api.resend.com/emails";
 export const VERIFIED_DOMAIN = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
+export const VISIBLE_DOMAIN = "rentmaikar.com";
 export const INBOUND_DOMAIN = "backend.rentmaikar.com";
 
 export const SENDERS = {
-  security: `RentMaikar Security <security@${VERIFIED_DOMAIN}>`,
-  support: `RentMaikar Support <support@${VERIFIED_DOMAIN}>`,
-  noreply: `RentMaikar Notifications <noreply@${VERIFIED_DOMAIN}>`,
-  forwarder: `RentMaikar Forwarder <support@${VERIFIED_DOMAIN}>`,
+  security: `RentMaikar Security <security@${VISIBLE_DOMAIN}>`,
+  support: `RentMaikar Support <support@${VISIBLE_DOMAIN}>`,
+  noreply: `RentMaikar Notifications <noreply@${VISIBLE_DOMAIN}>`,
+  forwarder: `RentMaikar Forwarder <support@${VISIBLE_DOMAIN}>`,
 };
 
 // Lazy PostgreSQL pool for database queries
