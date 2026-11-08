@@ -1,5 +1,19 @@
 import { supabase } from '@/integrations/supabase/client';
 import { homeForRole, isStaffRole, type AppRole } from '@/lib/role-home';
+import { routeForStage } from '@/lib/onboarding-error';
+import type { RegistrationStage } from '@/hooks/useRegistrationProgress';
+
+const REGISTRATION_STAGES: RegistrationStage[] = [
+  'auth',
+  'account_opened',
+  'documents_submitted',
+  'verification_pending',
+  'approved',
+];
+
+function isRegistrationStage(stage: unknown): stage is RegistrationStage {
+  return typeof stage === 'string' && REGISTRATION_STAGES.includes(stage as RegistrationStage);
+}
 
 export async function resolvePostLoginDestination(
   userId: string,
@@ -11,28 +25,31 @@ export async function resolvePostLoginDestination(
     return homeForRole(role, fallbackPath);
   }
 
+  if (role !== 'driver' && role !== 'owner') {
+    return homeForRole(role, fallbackPath);
+  }
+
   try {
-    if (role === 'driver') {
-      // Check if agreement is pending
-      const { data: driver } = await supabase
-        .from('driver_profiles')
-        .select('agreement_signed')
-        .eq('user_id', userId)
-        .maybeSingle();
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (sessionData.session?.user.id !== userId) {
+      return homeForRole(role, fallbackPath);
+    }
 
-      if (driver && !driver.agreement_signed) {
-        return '/driver-agreement';
-      }
-    } else if (role === 'owner') {
-      const { data: owner } = await supabase
-        .from('owner_profiles')
-        .select('agreement_signed')
-        .eq('user_id', userId)
-        .maybeSingle();
+    const { data, error } = await supabase.rpc('get_my_registration_progress');
+    if (error) throw error;
 
-      if (owner && !owner.agreement_signed) {
-        return '/owner-agreement';
-      }
+    const progress = data as {
+      authenticated?: unknown;
+      role?: unknown;
+      stage?: unknown;
+    } | null;
+    if (
+      progress?.authenticated === true &&
+      progress.role === role &&
+      isRegistrationStage(progress.stage)
+    ) {
+      return routeForStage(role, progress.stage);
     }
   } catch (err) {
     console.warn('Error resolving post-login destination:', err);

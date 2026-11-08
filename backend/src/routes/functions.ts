@@ -87,6 +87,10 @@ import {
   sarekonService,
 } from "../services/iotService";
 import { paymentService } from "../services/paymentService";
+import {
+  canProvisionUserAccount,
+  isProvisionableUserRole,
+} from "../services/roleProvisioningAuthorization";
 import { resolveCheckoutAuthority, createWithAuthoritativeAmount, PaymentAuthorityError } from "../services/paymentAuthority";
 import { PayoutError, resolveIdempotencyKey } from "../services/ownerPayoutWorkflow";
 import {
@@ -2105,15 +2109,23 @@ case "reconcile-owner-payout": {
       case "provision-user-account": {
         if (!gatedCaller) return res.status(401).json({ ok: false, error: "Authentication required" });
         const targetUserId = String(body._user_id || body.userId || gatedCaller.userId);
-        const targetRole = body._role || body.role || "driver";
-        const targetEmail = body._email || body.email;
-        const selfService = targetUserId === gatedCaller.userId && ["driver", "owner"].includes(String(targetRole));
-        if (!gatedCaller.isAdmin && !selfService) {
+        const targetRole = String(body._role || body.role || "driver");
+        if (!isProvisionableUserRole(targetRole)) {
+          return res.status(400).json({ ok: false, error: "Unsupported role" });
+        }
+        const callerRoles = gatedCaller.roles?.length
+          ? gatedCaller.roles
+          : [gatedCaller.role];
+        if (!canProvisionUserAccount(
+          { userId: gatedCaller.userId, roles: callerRoles },
+          targetUserId,
+          targetRole,
+        )) {
           return res.status(403).json({ ok: false, error: "Forbidden" });
         }
-        // Invoke with the caller's JWT so database-level authorization also applies.
-        const userToken = String(clientAuth).replace(/^Bearer\s+/i, "").trim();
-        const { error: rpcErr } = await supabaseBackendService.getClient(userToken).rpc("provision_user_account", {
+        const selfService = targetUserId === gatedCaller.userId;
+        const targetEmail = selfService ? gatedCaller.email : body._email || body.email;
+        const { error: rpcErr } = await supabaseBackendService.getAdminClient().rpc("provision_user_account", {
           _user_id: targetUserId,
           _role: targetRole,
           _email: targetEmail,

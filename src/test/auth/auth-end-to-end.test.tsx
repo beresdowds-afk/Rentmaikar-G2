@@ -10,7 +10,7 @@ describe('Auth End-to-End Integration Suite', () => {
     vi.clearAllMocks();
     if (typeof window !== 'undefined') {
       window.sessionStorage.clear();
-      window.localStorage.clear();
+      window.localStorage?.clear();
     }
   });
 

@@ -15,6 +15,7 @@ import {
   handleVerifyPhone,
   getSupabase,
 } from "./communicationServices";
+import { createClient } from "@supabase/supabase-js";
 import {
   handleSendPasswordReset,
   handleGoogleSsoAuthEmail,
@@ -33,6 +34,10 @@ import {
   sarekonService,
 } from "../../backend/src/services/iotService";
 import { paymentService } from "../../backend/src/services/paymentService";
+import {
+  canProvisionUserAccount,
+  isProvisionableUserRole,
+} from "../../backend/src/services/roleProvisioningAuthorization";
 
 export interface FunctionsPayload {
   body?: any;
@@ -1430,26 +1435,57 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
 
     case "provision-user-account": {
       try {
-        const targetUserId = body._user_id || body.userId;
-        const targetRole = body._role || body.role || "driver";
-        const targetEmail = body._email || body.email;
-        if (!targetUserId) {
-          return { status: 400, data: { ok: false, error: "userId required" } };
+        if (!token) {
+          return { status: 401, data: { ok: false, error: "Authentication required" } };
         }
-        const admin = getSupabase();
+        const callerClient = getSupabase(token);
+        const { data: authData, error: authError } = await callerClient.auth.getUser(token);
+        const caller = authData.user;
+        if (authError || !caller?.id) {
+          return { status: 401, data: { ok: false, error: "Invalid authentication session" } };
+        }
+
+        const targetUserId = String(body._user_id || body.userId || caller.id);
+        const targetRole = String(body._role || body.role || "driver");
+        if (!isProvisionableUserRole(targetRole)) {
+          return { status: 400, data: { ok: false, error: "Unsupported role" } };
+        }
+
+        const { data: roleRows, error: roleError } = await callerClient
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", caller.id);
+        if (roleError) {
+          console.error("[functionsHandler] Caller role lookup failed", roleError);
+          return { status: 503, data: { ok: false, error: "Authorization service unavailable" } };
+        }
+        const callerRoles = roleRows?.map((row) => row.role) ?? [];
+        if (!canProvisionUserAccount(
+          { userId: caller.id, roles: callerRoles },
+          targetUserId,
+          targetRole,
+        )) {
+          return { status: 403, data: { ok: false, error: "Forbidden" } };
+        }
+        const selfService = targetUserId === caller.id;
+
+        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+        const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!supabaseUrl || !serviceRoleKey) {
+          console.error("[functionsHandler] Account provisioning service credentials are unavailable");
+          return { status: 503, data: { ok: false, error: "Account provisioning is unavailable" } };
+        }
+        const admin = createClient(supabaseUrl, serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const targetEmail = selfService ? caller.email : body._email || body.email;
         const { error: rpcErr } = await admin.rpc("provision_user_account", {
           _user_id: targetUserId,
           _role: targetRole,
           _email: targetEmail,
         });
         if (rpcErr) {
-          const { error: upsertErr } = await admin.from("user_roles").upsert(
-            { user_id: targetUserId, role: targetRole },
-            { onConflict: "user_id" }
-          );
-          if (upsertErr) {
-            return { status: 500, data: { ok: false, error: upsertErr.message } };
-          }
+          return { status: 500, data: { ok: false, error: rpcErr.message } };
         }
         return { status: 200, data: { ok: true, role: targetRole } };
       } catch (err: any) {

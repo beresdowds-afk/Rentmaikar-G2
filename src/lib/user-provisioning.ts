@@ -4,10 +4,8 @@ import type { AppRole } from '@/lib/role-home';
 /**
  * Single client-side entry point for role assignment.
  *
- * Every caller routes through the `provision_user_account` SECURITY DEFINER
- * RPC, which idempotently ensures profile + user_roles + two-factor settings +
- * wallet. Direct `user_roles` inserts/upserts from the UI are deprecated —
- * they duplicated logic and produced duplicate-key errors.
+ * Role assignment goes through the authenticated backend gateway, which applies
+ * the caller's self-service or administrative authorization before provisioning.
  *
  * Enforces fail-closed: verifies that user_roles actually contains the role
  * after provisioning attempts.
@@ -23,43 +21,17 @@ export async function assignRole(
 
   let lastError: unknown = null;
 
-  // 1. provision_user_account RPC
-  try {
-    const { error } = await supabase.rpc('provision_user_account', {
-      _user_id: userId,
-      _role: role,
-      ...(email ? { _email: email } : {}),
-    } as never);
-    if (error) {
-      lastError = error;
-    }
-  } catch (err) {
-    lastError = err;
-  }
-
-  // 2. Fallback to server function
   try {
     const { data, error: fnErr } = await supabase.functions.invoke('provision-user-account', {
       body: { userId, role, email },
     });
     if (fnErr) {
       lastError = fnErr;
+    } else if (!data?.ok) {
+      lastError = new Error('Account provisioning was not confirmed by the backend.');
     }
   } catch (err) {
     lastError = err;
-  }
-
-  // 3. Fallback to direct table upsert
-  try {
-    const { error: upsertErr } = await supabase.from('user_roles').upsert(
-      { user_id: userId, role: role as any },
-      { onConflict: 'user_id' }
-    );
-    if (upsertErr) {
-      lastError = upsertErr;
-    }
-  } catch (tableErr) {
-    lastError = tableErr;
   }
 
   // Mandatory durable state verification:
@@ -98,14 +70,12 @@ export async function assignRole(
 }
 
 /**
- * Verifies that a durable profile record exists for the given user.
- * Attempts idempotent recovery via provision_user_account if absent.
- * Fails closed if the profile cannot be confirmed.
+ * Verifies that the auth trigger created a durable profile for the user.
+ * Profile repair must use a server-authorized flow; the browser cannot invoke
+ * the privileged provisioning RPC directly.
  */
 export async function verifyProfileExists(
   userId: string,
-  requestedRole?: AppRole,
-  email?: string | null,
 ): Promise<void> {
   const { data: profile, error: profileErr } = await supabase
     .from('profiles')
@@ -113,34 +83,20 @@ export async function verifyProfileExists(
     .eq('user_id', userId)
     .maybeSingle();
 
-  if (profile) return;
-
-  // Attempt recovery via provision_user_account RPC
-  try {
-    await supabase.rpc('provision_user_account', {
-      _user_id: userId,
-      ...(requestedRole ? { _role: requestedRole } : {}),
-      ...(email ? { _email: email } : {}),
-    } as never);
-  } catch {
-    // ignore
-  }
-
-  // Re-verify after recovery attempt
-  const { data: retryProfile, error: retryErr } = await supabase
-    .from('profiles')
-    .select('user_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (!retryProfile) {
-    const err = new Error(
-      `Profile provisioning failed: durable profile record was not created for user ${userId}.`,
-    );
-    (err as any).code = 'PROFILE_PROVISIONING_FAILED';
-    (err as any).cause = retryErr || profileErr;
+  if (profileErr) {
+    const err = new Error(`Profile verification failed: ${profileErr.message}`);
+    (err as any).code = 'PROFILE_VERIFICATION_FAILED';
+    (err as any).cause = profileErr;
     throw err;
   }
+
+  if (profile) return;
+
+  const err = new Error(
+    `Profile provisioning failed: durable profile record was not created for user ${userId}.`,
+  );
+  (err as any).code = 'PROFILE_PROVISIONING_FAILED';
+  throw err;
 }
 
 /** Revoke a single role row. Provisioning never removes roles, so this stays direct. */
@@ -188,7 +144,7 @@ export async function ensureAuthUserForApplicant({
     await supabase.auth.signOut();
   } else if (currentEmail === normalizedEmail && sessionData.session?.user?.id) {
     const existingUserId = sessionData.session.user.id;
-    await verifyProfileExists(existingUserId, requestedRole, normalizedEmail);
+    await verifyProfileExists(existingUserId);
     if (requestedRole) {
       await assignRole(existingUserId, requestedRole, normalizedEmail);
     }
@@ -215,7 +171,7 @@ export async function ensureAuthUserForApplicant({
 
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
-        await verifyProfileExists(userId, requestedRole, normalizedEmail);
+        await verifyProfileExists(userId);
         if (requestedRole) {
           await assignRole(userId, requestedRole, normalizedEmail);
         }
@@ -263,7 +219,7 @@ export async function ensureAuthUserForApplicant({
       });
       if (!signInError && signInData?.user?.id) {
         const userId = signInData.user.id;
-        await verifyProfileExists(userId, requestedRole, normalizedEmail);
+        await verifyProfileExists(userId);
         if (requestedRole) {
           await assignRole(userId, requestedRole, normalizedEmail);
         }
@@ -294,7 +250,7 @@ export async function ensureAuthUserForApplicant({
     });
     if (!signInError && signInData?.user?.id) {
       const userId = signInData.user.id;
-      await verifyProfileExists(userId, requestedRole, normalizedEmail);
+      await verifyProfileExists(userId);
       if (requestedRole) {
         await assignRole(userId, requestedRole, normalizedEmail);
       }
@@ -316,7 +272,7 @@ export async function ensureAuthUserForApplicant({
   }
 
   // 5. Verify profile exists (fails closed if missing)
-  await verifyProfileExists(userId, requestedRole, normalizedEmail);
+  await verifyProfileExists(userId);
 
   // 6. Ensure role and account setup is immediately provisioned and verified in user_roles
   if (requestedRole) {
