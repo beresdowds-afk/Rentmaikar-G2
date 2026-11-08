@@ -1,0 +1,1023 @@
+RENTMAIKAR — GITHUB COPILOT REMEDIATION PROGRAMME
+
+GLOBAL INSTRUCTIONS — APPLY TO ALL 17 PROMPTS
+
+Repository: "beresdowds-afk/Rentmaikar-G2"
+
+You are acting as a senior application security engineer, backend architect, DevSecOps engineer and test engineer responsible for production remediation of Rentmaikar.
+
+Before changing code:
+
+1. Inspect the current branch, working tree, latest commit and relevant files.
+2. Trace the complete execution path, including frontend, Cloud Run backend, Supabase Edge Functions, database functions, migrations, webhooks and third-party providers.
+3. Identify existing implementations that can be corrected and reused.
+4. Do not assume that an earlier audit finding is still present. Verify it against the current code.
+5. Identify all callers and dependencies before changing a shared service or API contract.
+
+Mandatory engineering rules
+
+- Preserve the existing React, TypeScript, Supabase and Cloud Run architecture.
+- Do not perform unrelated refactoring.
+- Do not introduce duplicate authorities for identity, payments, communications, evidence or assets.
+- Do not bypass authentication, authorization, RLS, verification or approval controls to make a feature work.
+- Never trust caller-supplied user IDs, vehicle IDs, ownership claims, payment amounts, roles, phone numbers or approval states without server-side verification.
+- Never expose service-role credentials or provider secrets to the frontend.
+- Never treat a simulated, mocked, queued or locally recorded operation as a successful external provider transaction.
+- Preserve existing production data and migration compatibility.
+- Do not delete or automatically revoke existing user accounts during remediation.
+- Do not silently change production behaviour through database migrations.
+- Use additive, reversible migrations wherever possible.
+- Add regression tests for every security or business-rule correction.
+- Do not report a task as complete merely because TypeScript compilation succeeds.
+
+Required completion report
+
+For each remediation, report:
+
+1. Root cause confirmed.
+2. Files inspected.
+3. Files changed.
+4. Database migrations added, if any.
+5. Security controls implemented.
+6. Tests added and executed.
+7. Test results, including failures.
+8. Remaining risks and dependencies.
+9. Exact GitHub commit hash if a commit was created.
+
+Do not claim that a production deployment, live provider transaction or production database test succeeded unless it was actually performed and verified.
+
+---
+
+PROMPT 01 — P0: BACKEND BRIDGE AUTHENTICATION AND AUTHORIZATION
+
+You are to secure the Rentmaikar Cloud Run backend bridge.
+
+Objective
+
+Every invocation passing through the backend bridge must be authenticated, authorized and validated before it can execute a privileged operation.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/routes/bridge.ts"
+- "backend/src/routes/functions.ts"
+- "backend/src/services/functionAccessPolicy.ts"
+- "backend/src/services/supabaseService.ts"
+- Authentication middleware and JWT verification utilities.
+- All frontend consumers of the bridge.
+- All Supabase Edge Functions callable through the bridge.
+
+Pay particular attention to the generic "/call" endpoint and the service-role fallback in "supabaseService.invokeEdgeFunction()".
+
+Required implementation
+
+1. Require a valid authenticated session for every user-originated bridge invocation.
+2. Verify Supabase JWT signatures, issuer, audience, expiry and subject using the established authentication mechanism.
+3. Resolve the authenticated identity server-side.
+4. Never accept a caller-supplied user ID as proof of identity.
+5. Implement a central, default-deny function authorization policy.
+6. Explicitly classify functions as:
+   - Public and intentionally unauthenticated.
+   - Authenticated user operations.
+   - Owner-only operations.
+   - Driver-only operations.
+   - Support operations.
+   - Administrator operations.
+   - Internal service-to-service operations.
+7. Require role, ownership, region and resource-level checks where applicable.
+8. Restrict service-role invocation to explicitly approved backend operations.
+9. Do not allow arbitrary function names or unrestricted generic function execution.
+10. Apply request validation, payload size limits, rate limiting and safe error handling.
+11. Add audit logging containing the authenticated actor, function, authorization decision, correlation ID and outcome. Never log tokens or secrets.
+12. Ensure internal service calls use verifiable service identity and cannot be impersonated by ordinary users.
+13. Ensure unauthorized requests fail before privileged database or provider operations are executed.
+
+Tests
+
+Add tests for:
+
+- Missing authentication.
+- Invalid and expired JWTs.
+- Forged user IDs.
+- Unauthorized roles.
+- Cross-user resource access.
+- Cross-region access where region restrictions apply.
+- Unknown function names.
+- Service-role fallback misuse.
+- Authorized administrator operations.
+- Authorized ordinary user operations.
+- Internal service authentication.
+
+Acceptance criteria
+
+No generic bridge invocation can execute a privileged operation without explicit authorization. Default behaviour must be deny, not allow.
+
+Do not weaken existing authentication to accommodate failing tests.
+
+---
+
+PROMPT 02 — P0: MFA ACCOUNT AND VERIFIED-PHONE BINDING
+
+Objective
+
+Secure every MFA operation so that an authenticated user can only inspect, initiate, verify or manage MFA for their own account and a phone number that has been verified and bound to that account.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/routes/functions.ts"
+- "backend/src/services/phoneOtpService.ts"
+- "backend/src/services/functionAccessPolicy.ts"
+- Supabase Auth configuration and user metadata.
+- Profile and phone-verification tables.
+- All frontend MFA and OTP consumers.
+- SMS delivery integrations.
+
+Pay particular attention to "send-2fa-code", including its "status", "send_code" and "verify_code" operations.
+
+Required implementation
+
+1. Require authenticated identity for all account-specific MFA operations.
+2. Derive the account ID from the verified JWT, never from caller-supplied "user_id".
+3. Retrieve the registered phone number from the authoritative profile or verified-phone record.
+4. Confirm that the phone number belongs to the authenticated account and has completed phone verification.
+5. Reject caller-supplied alternative phone numbers for account MFA.
+6. Bind each challenge to:
+   - Authenticated account.
+   - Verified phone.
+   - Challenge ID.
+   - Purpose.
+   - Creation and expiry time.
+   - Relevant session or device context.
+7. Prevent OTP replay and reuse.
+8. Enforce attempt limits, resend limits, expiry and rate limiting.
+9. Ensure challenge verification cannot be transferred between accounts.
+10. Use cryptographically secure OTP generation and secure challenge storage.
+11. Keep OTP values and secrets out of logs and client responses.
+12. Ensure MFA status queries disclose only the authenticated user's information.
+13. Protect account recovery and phone-number-change flows separately.
+14. Ensure an unverified phone cannot be used to satisfy MFA.
+15. Review all aliases and alternate endpoints that can perform MFA actions.
+
+Tests
+
+Test cross-account access, forged user IDs, unverified phone numbers, expired OTPs, repeated OTPs, brute-force attempts, challenge reuse and legitimate MFA completion.
+
+Acceptance criteria
+
+A user cannot view another person's MFA status, send a challenge to an arbitrary phone number, or verify a challenge belonging to another account.
+
+Preserve existing legitimate authentication and recovery functionality.
+
+---
+
+PROMPT 03 — P0: TELEMETRY SOURCE AUTHENTICATION AND DEVICE OWNERSHIP
+
+Objective
+
+Ensure that telemetry accepted by Rentmaikar originates from an authenticated and registered device or trusted provider integration and is bound to the correct vehicle.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/iotService.ts"
+- Telemetry ingestion and dispatch routes.
+- "telemetry-ingest" and "telemetry-dispatch" functions.
+- Sarekon integration.
+- Traccar integration.
+- EMQX integration.
+- Device registry and vehicle tables.
+- All telemetry database functions and migrations.
+- Existing device credentials and webhook authentication mechanisms.
+
+Required implementation
+
+1. Identify every telemetry ingestion source.
+2. Classify sources as:
+   - Registered physical device.
+   - Authenticated IoT broker.
+   - Traccar provider.
+   - Sarekon provider.
+   - Other explicitly approved integrations.
+3. Authenticate each source before accepting telemetry.
+4. Do not trust a submitted vehicle ID or device ID without verifying the authoritative device-to-vehicle relationship.
+5. Enforce that a device can report only for its currently assigned vehicle.
+6. Reject unregistered, revoked, suspended or unassigned devices.
+7. Validate coordinates, timestamps, speed, heading and other telemetry fields.
+8. Record both provider event time and server receipt time.
+9. Reject replayed, duplicate, stale and implausible events using appropriate source-specific rules.
+10. Implement idempotent ingestion.
+11. Prevent one tenant, owner or vehicle from reading another tenant's private telemetry.
+12. Preserve immutable raw telemetry evidence where appropriate.
+13. Separate raw events, validated telemetry and derived vehicle state.
+14. Add authorization controls to telemetry administration and dispatch operations.
+15. Ensure Cloud Run and Supabase Edge Functions enforce equivalent security rules.
+
+Tests
+
+Test forged device IDs, forged vehicle IDs, device reassignment, revoked devices, invalid signatures, stale timestamps, replay attacks, duplicate messages, impossible coordinates and cross-vehicle access.
+
+Acceptance criteria
+
+No telemetry event can alter a vehicle's authoritative location or operational status unless its source is authenticated and its device-to-vehicle binding is valid.
+
+---
+
+PROMPT 04 — P0: SAREKON ADMINISTRATOR AND SERVICE AUTHORIZATION
+
+Objective
+
+Secure all Sarekon operations and prevent ordinary users or unauthenticated callers from executing privileged fleet-monitoring and vehicle-control operations.
+
+Starting investigation
+
+Inspect:
+
+- Sarekon routes and services.
+- "backend/src/services/iotService.ts"
+- "backend/src/services/functionAccessPolicy.ts"
+- "sarekon-admin" functions.
+- Telemetry resynchronization operations.
+- Vehicle monitoring dashboards.
+- Webhook and provider callback handlers.
+- All frontend Sarekon consumers.
+
+Required implementation
+
+1. Inventory every Sarekon-related endpoint and operation.
+2. Classify each operation as:
+   - Public provider webhook.
+   - Authenticated owner read.
+   - Authenticated driver read.
+   - Administrator operation.
+   - Internal service operation.
+3. Require administrator authorization for fleet-wide configuration, resynchronization, reassignment and sensitive device operations.
+4. Require internal service authentication for machine-to-machine operations.
+5. Verify webhook signatures and timestamps where supported.
+6. Prevent a caller from supplying an arbitrary vehicle or device identifier to access another owner's resources.
+7. Enforce ownership, region and role checks.
+8. Add Sarekon-related operations to the central default-deny access policy.
+9. Restrict credential and configuration access to privileged backend code.
+10. Audit sensitive actions and record the authenticated actor.
+11. Add rate limiting and safe error handling.
+12. Ensure that failed provider authentication cannot be mistaken for a successful operation.
+
+Tests
+
+Test unauthenticated access, ordinary-user access, owner access, administrator access, forged vehicle IDs, invalid webhooks and unauthorized resynchronization.
+
+Acceptance criteria
+
+Only properly authenticated administrators or explicitly authorized internal services can perform privileged Sarekon operations.
+
+---
+
+PROMPT 05 — P0: SECURE SMS ALIASES AND DIAGNOSTIC ENDPOINTS
+
+Objective
+
+Close all authorization gaps in Rentmaikar SMS endpoints, including aliases, testing routes and diagnostic functions.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/functionAccessPolicy.ts"
+- "backend/src/services/smsService.ts"
+- "backend/src/routes/functions.ts"
+- "send-sms-notification"
+- "case-send-sms"
+- "twilio-test-send"
+- SENT.dm, Twilio and Termii integrations.
+- All frontend and administrative consumers.
+
+Required implementation
+
+1. Enumerate every SMS sending endpoint and function alias.
+2. Apply the same security policy to equivalent aliases.
+3. Add "case-send-sms" and "twilio-test-send" to the central authorization review.
+4. Require appropriate administrator privileges for provider diagnostics.
+5. Prevent ordinary users from using diagnostic endpoints to send arbitrary SMS.
+6. Authenticate all user-originated messages.
+7. Resolve recipient identity from authoritative application records where the message relates to an account.
+8. Validate recipient ownership and consent where applicable.
+9. Enforce purpose-specific permissions for authentication, platform notifications and marketing/business messages.
+10. Prevent marketing messages from using authentication delivery privileges.
+11. Apply per-user, per-number and per-provider rate limits.
+12. Implement idempotency and duplicate-send prevention.
+13. Never expose provider credentials or sensitive provider responses.
+14. Log provider, message category, correlation ID, delivery status and failure reason without exposing OTPs.
+15. Preserve SENT.dm primary delivery and the configured Twilio/Termii fallback strategy.
+16. Do not mark a message delivered merely because a provider request was accepted.
+
+Tests
+
+Test every endpoint and alias with unauthenticated users, ordinary users, owners, drivers, support and administrators. Include arbitrary recipient numbers, rate limits and provider failure cases.
+
+Acceptance criteria
+
+There must be no unprotected SMS dispatch or diagnostic endpoint, including legacy aliases.
+
+---
+
+PROMPT 06 — P0: DOCUMENT OWNERSHIP AND AUTHORITATIVE EVIDENCE REGISTRATION
+
+Objective
+
+Make document uploads secure, ownership-aware and transactionally accountable in Rentmaikar.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/fileUploadService.ts"
+- Supabase Storage buckets and policies.
+- Vehicle photo upload routes.
+- User document upload routes.
+- "registerEvidenceArtifact()" and its callers.
+- Evidence tables and database functions.
+- KYC, insurance, licence and vehicle-document workflows.
+
+Required implementation
+
+1. Require authenticated identity for all private document uploads.
+2. Derive the user ID from the authenticated session.
+3. Verify ownership of the target vehicle before accepting a vehicle document or inspection image.
+4. Treat a missing vehicle record, failed ownership lookup or database error as authorization failure.
+5. Permit administrator exceptions only through explicit, auditable authorization.
+6. Ensure uploaded documents are stored in private buckets.
+7. Do not treat a public URL as an access mechanism for private documents.
+8. Store authoritative object paths and metadata.
+9. Generate short-lived signed URLs only after authorization.
+10. Register every authoritative document in the evidence registry.
+11. Do not silently continue when evidence registration fails.
+12. Use a durable pending/reconciliation state if storage and database registration cannot be completed atomically.
+13. Prevent orphaned files and duplicate evidence records.
+14. Validate MIME type, file extension, file size and actual file signature.
+15. Prevent path traversal and malicious object naming.
+16. Enforce document type and ownership rules for driver, owner and vehicle evidence.
+17. Record uploader, owner, resource, document category, timestamp, checksum and review status.
+18. Preserve evidence history and prevent unauthorized replacement or deletion.
+
+Tests
+
+Test cross-user uploads, nonexistent vehicles, database lookup failures, failed evidence registration, private URL access, malicious filenames, duplicate uploads and administrator exceptions.
+
+Acceptance criteria
+
+Every accepted private document must have verified ownership and an authoritative evidence record, or an explicit durable reconciliation state. Authorization failures must never result in successful uploads.
+
+---
+
+PROMPT 07 — P1: REPAIR AUTH, DRIVER AND OWNER REGISTRATION ERRORS
+
+Objective
+
+Resolve the current Auth, driver-registration and owner-registration TypeScript, validation and workflow failures without weakening identity or onboarding controls.
+
+Starting investigation
+
+Inspect:
+
+- "src/pages/Auth.tsx"
+- "src/pages/DriverRegistration.tsx"
+- "src/pages/OwnerRegistration.tsx"
+- "src/pages/DriverOnboarding.tsx"
+- "src/pages/OwnerOnboarding.tsx"
+- "src/lib/post-login-destination.ts"
+- Database-generated TypeScript types.
+- Zod schemas and React Hook Form resolver integrations.
+- Registration and approval migrations.
+- Relevant Playwright and Vitest tests.
+
+Known investigation leads
+
+Previous CI failures included:
+
+- Resolver incompatibilities in Auth and registration forms.
+- Invalid database column references.
+- Deep TypeScript instantiation in "post-login-destination.ts".
+- References to "agreement_signed" that may not match the current schema.
+
+Verify these against the current repository before modifying anything.
+
+Required implementation
+
+1. Correct TypeScript types and form resolver compatibility.
+2. Align frontend field names with the actual database schema.
+3. Regenerate or correctly update database types where necessary.
+4. Resolve invalid column references without inventing database fields.
+5. Preserve validation of required identity, contact, vehicle and legal information.
+6. Preserve existing authentication and verification requirements.
+7. Ensure driver and owner onboarding remain distinct where their business requirements differ.
+8. Correct registration-stage transitions.
+9. Prevent duplicate account creation and inconsistent profile records.
+10. Ensure authenticated users return to the correct role-specific destination.
+11. Prevent users from selecting or self-granting privileged roles.
+12. Preserve referee attestation and human-review requirements.
+13. Separate identity verification from commercial application approval.
+14. Do not automatically approve users because they have submitted documents or completed Persona verification.
+15. Add regression coverage for registration, login, verification and post-login routing.
+
+Tests
+
+Run targeted Vitest tests, TypeScript checking, registration Playwright tests and relevant authentication E2E tests.
+
+Acceptance criteria
+
+Auth, driver and owner registration must compile and complete their legitimate workflows without bypassing verification, approval or role assignment.
+
+---
+
+PROMPT 08 — P1: REPAIR PAYMENT AND WITHDRAWAL END-TO-END TESTS
+
+Objective
+
+Restore reliable payment, settlement, owner earning and withdrawal workflows without compromising financial authority.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/paymentAuthority.ts"
+- "backend/src/services/paymentService.ts"
+- "backend/src/services/ownerPayoutWorkflow.ts"
+- "src/server/functionsHandler.ts"
+- Payment Edge Functions.
+- PayPal, OPay and Paystack integrations.
+- Webhook handlers.
+- Wallet and ledger tables.
+- Payment migrations.
+- Driver checkout and owner withdrawal UI.
+- All payment-related Playwright and Vitest tests.
+
+Required implementation
+
+1. Identify the exact root cause of every failing payment and withdrawal test.
+2. Do not weaken security assertions or remove failing tests to obtain a green result.
+3. Preserve regional routing:
+   - USA: PayPal primary, Paystack alternative.
+   - Nigeria: OPay primary, Paystack alternative.
+   - Other supported regions: Paystack subject to provider availability.
+4. Ensure all amounts, currencies, fees, rental obligations and ownership relationships are resolved server-side.
+5. Ensure checkout requests are bound to the authenticated driver and authoritative rental.
+6. Verify provider orders and transactions server-side.
+7. Verify webhook authenticity.
+8. Match provider transactions to the correct payment obligation.
+9. Prevent duplicate capture, settlement and wallet credit.
+10. Enforce exactly-once ledger effects through idempotency and database transaction controls.
+11. Preserve owner earning calculations and wallet reservation rules.
+12. Ensure withdrawal requests are authenticated, authorized and adequately funded.
+13. Preserve payout state transitions, provider attempts and reconciliation records.
+14. Correct missing or inconsistent methods, including any genuine "processOwnerPayout" implementation gap.
+15. Repair undefined request variables and incorrect handler contracts in "functionsHandler.ts".
+16. Add failure, timeout, retry, duplicate-webhook and reconciliation tests.
+17. Never simulate successful payment or payout in production code.
+
+Tests
+
+Test checkout, provider verification, webhook processing, ledger updates, owner earning, withdrawal reservation, payout execution, failed payout, retry and reconciliation.
+
+Acceptance criteria
+
+A passing test suite must demonstrate that one real or correctly mocked provider transaction produces exactly one authoritative financial outcome, with no unauthorized credit, duplicate capture or double payout.
+
+---
+
+PROMPT 09 — P1: IMPLEMENT REAL HOLOGRAM SIM TRANSACTIONS
+
+Objective
+
+Replace synthetic Hologram SIM purchasing and activation behaviour with genuine provider-backed transactions.
+
+Starting investigation
+
+Inspect:
+
+- Hologram integration services.
+- "backend/src/services/iotService.ts"
+- SIM inventory tables.
+- Device registry.
+- SIM purchase and activation routes.
+- Provider credentials and configuration.
+- SIM allocation and provisioning workflows.
+
+Pay particular attention to operations currently named "purchase_sim" and "activate_sim".
+
+Required implementation
+
+1. Review the current Hologram API capabilities and the actual integration already present in the repository.
+2. Use documented provider endpoints and authenticated server-side requests.
+3. Remove synthetic ICCID generation from production purchase workflows.
+4. Never mark a SIM active merely because a local database update succeeded.
+5. Implement explicit transaction states:
+   - Requested.
+   - Submitted to provider.
+   - Provider confirmed.
+   - Provisioning.
+   - Active.
+   - Suspended.
+   - Failed.
+   - Reconciliation required.
+6. Persist provider transaction IDs and authoritative ICCIDs returned by Hologram.
+7. Implement idempotency to prevent duplicate purchases.
+8. Verify provider responses before updating local SIM state.
+9. Implement activation and suspension using actual provider operations where supported.
+10. Handle asynchronous provider confirmation and errors.
+11. Reconcile local inventory against provider inventory.
+12. Keep provider credentials in server-side secret storage.
+13. Add audit logs and safe operational diagnostics.
+14. Ensure SIM ownership and allocation are validated before association with a device.
+15. Support sandbox testing without allowing sandbox success to appear as production activation.
+
+Tests
+
+Test successful provider responses, rejected purchases, timeouts, duplicate requests, activation failures, suspension failures and inventory reconciliation.
+
+Acceptance criteria
+
+A SIM must never be represented as purchased or active unless the provider has confirmed that state.
+
+---
+
+PROMPT 10 — P1: ELIMINATE SYNTHETIC DEVICE AND VEHICLE READINESS
+
+Objective
+
+Make device provisioning and vehicle readiness evidence-based. No vehicle should become available merely because a software workflow claims that installation or testing succeeded.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/iotService.ts"
+- "autoProvisionService.runPipeline()"
+- Device and SIM registry services.
+- "confirm_installation".
+- Vehicle availability and publication workflows.
+- Vehicle approval and inspection records.
+- Telemetry readiness checks.
+
+Required implementation
+
+1. Identify every operation that can set installation confirmed, telemetry enabled, device active, provisioning tests passed or vehicle available.
+2. Remove synthetic success assignments from production workflows.
+3. Do not infer physical installation from database record creation.
+4. Require verified SIM allocation.
+5. Require a real registered device.
+6. Require explicit vehicle-device pairing.
+7. Require evidence of physical installation.
+8. Require authenticated device connectivity.
+9. Require valid telemetry received from the assigned device.
+10. Require successful provider or broker checks where applicable.
+11. Require the relevant human approval before publication.
+12. Separate these states:
+    - Device registered.
+    - SIM assigned.
+    - Installation pending.
+    - Installation verified.
+    - Connectivity verified.
+    - Telemetry verified.
+    - Operationally ready.
+    - Vehicle approved.
+    - Vehicle published.
+13. Ensure auto-provisioning selects only eligible, approved inventory and cannot pair devices merely by array position or result order.
+14. Prevent provisioning from automatically making a vehicle available.
+15. Record the evidence and actor responsible for each transition.
+16. Make failed checks visible to administrators with actionable failure reasons.
+
+Tests
+
+Test missing SIM, wrong device, wrong vehicle, failed connectivity, missing telemetry, unverified installation, unapproved vehicle and duplicate provisioning.
+
+Acceptance criteria
+
+A vehicle cannot become operationally ready or publicly available without verified installation, actual device connectivity, valid telemetry and the required approval.
+
+---
+
+PROMPT 11 — P1: IMPLEMENT ACTUAL EMQX BROKER CREDENTIAL PROVISIONING
+
+Objective
+
+Ensure that EMQX device credentials and topic permissions are actually created, validated, rotated and revoked at the broker rather than merely generated locally.
+
+Starting investigation
+
+Inspect:
+
+- EMQX integration services.
+- Device provisioning code.
+- MQTT credential generation.
+- Broker configuration.
+- Topic construction and ACL logic.
+- Device registry.
+- Secret storage and rotation workflows.
+
+Required implementation
+
+1. Determine the configured EMQX deployment model and supported authentication mechanism.
+2. Implement real broker-side credential provisioning through the supported EMQX API or configured authentication backend.
+3. Do not treat locally generated usernames or tokens as valid broker credentials without broker confirmation.
+4. Create unique device identities.
+5. Enforce device-specific topic ACLs.
+6. Restrict devices to their assigned vehicle and authorized topics.
+7. Prevent one device from publishing telemetry for another vehicle.
+8. Prevent devices from subscribing to administrative or unrelated private topics.
+9. Implement credential expiry, rotation, revocation and suspension.
+10. Store secrets securely and never expose them in application logs or frontend responses.
+11. Validate that newly provisioned credentials can authenticate with the actual broker.
+12. Test publish and subscribe permissions.
+13. Ensure reassignment and decommissioning invalidate previous permissions.
+14. Record provisioning status and provider/broker response.
+15. Implement failure and reconciliation states.
+
+Tests
+
+Test successful broker authentication, invalid credentials, unauthorized topics, cross-device access, revoked credentials, rotation and expired credentials.
+
+Acceptance criteria
+
+The application must not report a device as MQTT-ready until broker-side credentials and ACLs have been confirmed and an actual connection test has succeeded.
+
+---
+
+PROMPT 12 — P1: MAKE TRACCAR VEHICLE COMMANDS FAIL CLOSED
+
+Objective
+
+Prevent Rentmaikar from reporting a successful immobilization, engine-stop or vehicle-control command when Traccar is unavailable, unconfigured or has not acknowledged the command.
+
+Starting investigation
+
+Inspect:
+
+- Traccar integration service.
+- "backend/src/services/iotService.ts"
+- "send_command" and related handlers.
+- Vehicle command UI.
+- Command history and audit records.
+- Provider response and device acknowledgement handling.
+
+Required implementation
+
+1. Identify all vehicle-control commands.
+2. Remove simulated-success responses from production execution paths.
+3. Treat an unconfigured Traccar provider as unavailable.
+4. Reject commands for unregistered, unassigned or unauthorized devices.
+5. Verify that the authenticated actor has the required vehicle-control permission.
+6. Validate the vehicle's current operational and safety state.
+7. Submit commands through the actual provider API.
+8. Persist command IDs and provider responses.
+9. Distinguish:
+   - Requested.
+   - Submitted.
+   - Provider accepted.
+   - Device acknowledged.
+   - State confirmed.
+   - Failed.
+   - Timed out.
+10. Do not display a successful immobilization until the relevant device acknowledgement and subsequent state confirmation are obtained.
+11. Implement timeout, retry and reconciliation controls.
+12. Prevent duplicate or conflicting commands.
+13. Maintain immutable command audit history.
+14. Ensure vehicle control cannot be invoked by an ordinary user without explicit authorization.
+15. Implement appropriate operational safeguards for engine immobilization and restoration.
+
+Tests
+
+Test unconfigured provider, invalid credentials, unauthorized user, unknown device, provider rejection, timeout, acknowledgement, state confirmation and duplicate command.
+
+Acceptance criteria
+
+No simulated, queued or merely provider-accepted command may be presented as confirmed vehicle immobilization.
+
+---
+
+PROMPT 13 — P1: COMPLETE CENTRAL EMAIL DELIVERY CONSOLIDATION
+
+Objective
+
+Consolidate all Rentmaikar business and platform notification email delivery through the Cloud Run email gateway and Resend, while preserving the correct Supabase Auth email path.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/emailService.ts"
+- "backend/src/services/emailSenderPolicy.ts"
+- Supabase Auth email hook.
+- Notification queues.
+- Email templates.
+- Resend webhook handlers.
+- Edge Functions that send email.
+- Frontend email-related calls.
+- Domain and sender configuration.
+
+Required architecture
+
+Authentication email:
+
+Supabase Auth → authenticated/signed Auth hook → Cloud Run email gateway → Resend.
+
+Platform notification email:
+
+Application notification event → Cloud Run email gateway → Resend.
+
+Business and marketing email:
+
+Authorized application composer/campaign → Cloud Run email gateway → Resend.
+
+Delivery events:
+
+Resend webhook → signature verification → authoritative email delivery ledger.
+
+Required implementation
+
+1. Inventory every email-sending path.
+2. Identify and eliminate unauthorized direct frontend Resend calls.
+3. Route business and platform notification email through Cloud Run.
+4. Preserve the Supabase Auth integration, using a properly authenticated hook.
+5. Verify hook signatures and reject unauthenticated requests.
+6. Centralize templates, sender policy, recipient validation and provider dispatch.
+7. Enforce "*@rentmaikar.com" for visible sender addresses.
+8. Keep "notify.rentmaikar.com" as an infrastructure/transport domain where configured, not an accidental visible From address.
+9. Reconcile legacy sender constants that reference "notify.rentmaikar.com".
+10. Keep Resend API keys server-side.
+11. Verify Resend webhook signatures.
+12. Implement idempotent email event processing.
+13. Persist delivery, bounce, complaint, rejection and failure states.
+14. Ensure provider acceptance is not treated as final delivery.
+15. Prevent business email from falling back to direct frontend provider calls.
+16. Preserve authentication email behaviour unless a tested migration is explicitly required.
+
+Tests
+
+Test Auth hooks, invalid signatures, sender rejection, notification dispatch, business dispatch, provider failures, webhook events, duplicates and frontend attempts to bypass the gateway.
+
+Acceptance criteria
+
+There must be one governed Cloud Run delivery authority for business and platform email, with a secure and verified Supabase Auth integration.
+
+---
+
+PROMPT 14 — P1: RESTORE COMPLETE CI/CD
+
+Objective
+
+Restore a reliable, fully passing validation and deployment pipeline for the current Rentmaikar main branch.
+
+Starting investigation
+
+Inspect:
+
+- ".github/workflows/ci.yml"
+- ".github/workflows/deploy.yml"
+- All related GitHub Actions workflows.
+- Package scripts and lockfiles.
+- Backend and frontend build configuration.
+- Vitest and Playwright configuration.
+- Supabase migration checks.
+- Cloud Run deployment configuration.
+- GitHub Pages deployment.
+
+Known investigation leads
+
+Previous CI findings included:
+
+- Main CI failure.
+- Production CI/CD failure.
+- 58 Playwright passes, 20 failures and 3 skipped.
+- TypeScript failures in registration, Auth, "post-login-destination.ts" and "functionsHandler.ts".
+- Missing payout handler references.
+- Onboarding database E2E skipped due to missing Supabase credentials.
+- Deployment jobs skipped after validation failure.
+
+Verify current status before acting.
+
+Required implementation
+
+1. Identify every failing, skipped and conditionally bypassed validation job.
+2. Correct root causes instead of suppressing failures.
+3. Ensure the pipeline runs:
+   - Dependency installation.
+   - Lint.
+   - TypeScript checking.
+   - Unit tests.
+   - Backend tests.
+   - Security tests.
+   - Database migration validation.
+   - Integration tests.
+   - Playwright E2E.
+   - Production build.
+4. Correct all genuine TypeScript errors.
+5. Correct missing handlers and incorrect test assumptions.
+6. Configure secure CI secrets without printing their values.
+7. Separate tests that require production credentials from those that can use controlled test environments.
+8. Do not silently skip required tests because credentials are missing.
+9. Add clearly labelled test-environment configuration and actionable failure reporting.
+10. Ensure deployment is gated by successful validation.
+11. Ensure Cloud Run deployment targets the intended project, service, region and environment.
+12. Ensure GitHub Pages success cannot conceal a failed backend deployment.
+13. Add deployment health checks and post-deployment smoke tests.
+14. Preserve manual approval or other required production deployment controls.
+15. Provide a clear final pipeline status.
+
+Tests
+
+Run the complete pipeline and inspect the actual job logs. Do not report success based solely on a local build.
+
+Acceptance criteria
+
+All mandatory CI checks must pass. Production deployment must be blocked if a mandatory security, build or test check fails.
+
+---
+
+PROMPT 15 — P2: DURABLE MESSAGING OUTBOX, RETRIES AND DEAD-LETTER QUEUE
+
+Objective
+
+Create a durable, auditable messaging delivery mechanism for Rentmaikar SMS, WhatsApp and email without creating separate competing delivery authorities.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/smsService.ts"
+- "backend/src/services/emailService.ts"
+- Existing communication logs and notification tables.
+- SENT.dm, Twilio and Termii integrations.
+- Resend integration.
+- Notification and marketing dispatch functions.
+- Existing scheduled workers and retry mechanisms.
+
+Required implementation
+
+1. Design a shared durable outbound messaging outbox.
+2. Support message categories:
+   - Authentication.
+   - Platform notifications.
+   - Business communications.
+   - Marketing communications.
+3. Preserve the existing provider routing strategy.
+4. Store message intent before dispatch.
+5. Assign stable message and idempotency identifiers.
+6. Persist recipient, purpose, channel, template, consent/permission evidence and originating event.
+7. Implement controlled worker claiming and concurrent processing.
+8. Implement exponential backoff with jitter.
+9. Apply provider-specific retry policies.
+10. Prevent duplicate sends after process restarts and webhook retries.
+11. Implement a dead-letter queue for permanently failed or exhausted messages.
+12. Provide safe administrative inspection and replay controls.
+13. Prevent unauthorized replay or recipient changes.
+14. Preserve message status history.
+15. Process provider delivery webhooks idempotently.
+16. Distinguish queued, submitted, accepted, delivered, failed, bounced and undeliverable states.
+17. Ensure marketing consent and unsubscribe rules are enforced.
+18. Add monitoring for backlog, latency, retry rate and dead-letter volume.
+
+Tests
+
+Test process crashes, duplicate events, concurrent workers, provider outages, retry exhaustion, manual replay, webhook duplication and consent rejection.
+
+Acceptance criteria
+
+Messages must not disappear silently, duplicate unexpectedly or be marked delivered without provider delivery evidence.
+
+---
+
+PROMPT 16 — P2: FLEET TELEMETRY ANOMALY DETECTION AND MONITORING SLAs
+
+Objective
+
+Build an operational monitoring and anomaly-detection layer for Rentmaikar fleet telemetry that identifies stale, suspicious, missing and inconsistent vehicle data.
+
+Starting investigation
+
+Inspect:
+
+- Telemetry ingestion and dispatch.
+- "backend/src/services/iotService.ts"
+- Vehicle and device registry.
+- Traccar, EMQX and Sarekon integrations.
+- Existing monitoring dashboards.
+- Telemetry history and health tables.
+- Notification and alerting services.
+
+Required implementation
+
+1. Establish source-specific telemetry freshness expectations.
+2. Define configurable telemetry service-level objectives.
+3. Monitor:
+   - Last successful telemetry time.
+   - Device connectivity.
+   - SIM status.
+   - Provider availability.
+   - Position freshness.
+   - Ingestion latency.
+   - Missing telemetry.
+   - Duplicate and replay events.
+   - Implausible location jumps.
+   - Impossible speeds.
+   - Device-to-vehicle mismatch.
+4. Distinguish normal connectivity loss from suspicious telemetry behaviour.
+5. Create anomaly classifications with severity and confidence.
+6. Do not automatically immobilize vehicles or make financial decisions based solely on anomaly detection.
+7. Generate auditable alerts.
+8. Route alerts to the correct administrator or support workflow.
+9. Implement configurable thresholds by region, device type and operating conditions.
+10. Preserve raw telemetry and anomaly evidence.
+11. Provide dashboards for fleet health and unresolved incidents.
+12. Track detection time, acknowledgement time and resolution time.
+13. Add alert deduplication and escalation.
+14. Ensure monitoring failures do not silently disable telemetry ingestion.
+15. Avoid exposing sensitive vehicle location information to unauthorized users.
+
+Tests
+
+Test stale devices, missing events, duplicate messages, impossible movement, device reassignment, provider outage, alert deduplication and recovery.
+
+Acceptance criteria
+
+Administrators must be able to identify fleet telemetry health, detect significant anomalies and measure response against documented monitoring SLAs.
+
+---
+
+PROMPT 17 — P2: DOCUMENT MALWARE SCANNING AND RETENTION POLICIES
+
+Objective
+
+Introduce a secure document-processing and retention lifecycle for Rentmaikar's KYC, identity, licence, insurance, inspection and vehicle evidence.
+
+Starting investigation
+
+Inspect:
+
+- "backend/src/services/fileUploadService.ts"
+- Supabase Storage configuration.
+- Evidence registry and document metadata.
+- Driver and owner verification workflows.
+- Vehicle inspection and insurance workflows.
+- Existing background workers.
+- Retention and deletion migrations.
+- Administrative evidence review UI.
+
+Required implementation
+
+1. Inventory all document types and their security requirements.
+2. Introduce a quarantine state for newly uploaded files.
+3. Prevent quarantined files from being served to ordinary users or used as approved evidence.
+4. Integrate a real malware-scanning service or an explicitly configured scanning worker.
+5. Do not claim a document is scanned when scanning is unavailable.
+6. Validate file signatures, MIME types, file sizes and extensions.
+7. Detect suspicious or malformed documents.
+8. Calculate and persist file checksums.
+9. Register scan results against the authoritative evidence record.
+10. Define document lifecycle states:
+    - Uploaded.
+    - Quarantined.
+    - Scanning.
+    - Clean.
+    - Rejected.
+    - Submitted for review.
+    - Verified.
+    - Archived.
+    - Retention expired.
+11. Ensure malware-positive files cannot proceed into verification or publication workflows.
+12. Implement document-category-specific retention rules.
+13. Preserve records subject to active disputes, legal holds or regulatory obligations.
+14. Require appropriate authorization for deletion and archival.
+15. Record retention decisions and deletion events in an audit trail.
+16. Ensure expired documents cannot remain accessible through stale public URLs.
+17. Implement secure deletion or controlled archival as appropriate.
+18. Ensure re-uploading a document does not erase its previous review history.
+19. Add administrative visibility into scanning and retention failures.
+
+Tests
+
+Test infected files, unavailable scanner, clean files, malformed files, retention expiry, legal holds, unauthorized deletion, signed URL expiry and re-upload history.
+
+Acceptance criteria
+
+No unscanned or malware-positive document can become approved evidence. Retention and deletion must be enforceable, auditable and consistent with applicable legal obligations.
+
+---
+
+FINAL PROGRAMME INSTRUCTION
+
+Treat these 17 prompts as separate controlled remediation tasks.
+
+Do not combine them into one large implementation exercise.
+
+Complete each task with its tests and report before starting the next. Where one task depends on another, identify the dependency explicitly and avoid introducing temporary security bypasses.
+
+The priority order is:
+
+- P0: Restore security and authority boundaries first.
+- P1: Restore operational reliability and genuine provider integrations.
+- P2: Improve resilience, monitoring and document governance.
+
+The ultimate objective is to make Rentmaikar production-safe without sacrificing the functionality already built.
