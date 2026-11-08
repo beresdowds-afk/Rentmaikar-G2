@@ -143,7 +143,7 @@ export async function resolveCheckoutAuthority(
 
   const expectedCurrency = rentalCurrency ? rentalCurrency.toUpperCase() : regionCurrency(region);
   const requested = body.currency ? String(body.currency).toUpperCase() : null;
-  if (!expectedCurrency && !requested) {
+  if (!expectedCurrency) {
     throw new PaymentAuthorityError(422, "Currency could not be resolved");
   }
   if (expectedCurrency && requested && requested !== expectedCurrency) {
@@ -156,7 +156,7 @@ export async function resolveCheckoutAuthority(
     vehicleId,
     rentalId,
     region,
-    currency: (expectedCurrency || requested) as string,
+    currency: expectedCurrency,
   };
 }
 

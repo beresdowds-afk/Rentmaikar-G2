@@ -1,5 +1,21 @@
 # Financial Architecture Audit & Repair — 2026-08
 
+> **Current status:** This historical audit is not a production-readiness
+> report. The Cloud Run checkout and payout code references obligation and
+> payout workflow database functions that are not defined in the repository's
+> migrations. Wallet and ledger currency constraints also currently allow only
+> USD and NGN. Database-backed concurrency and provider reconciliation must be
+> implemented and verified before these workflows can be considered repaired.
+>
+> The frontend server's legacy payment dispatcher now rejects payment,
+> withdrawal, and payment-webhook requests with HTTP 503 rather than processing
+> caller-supplied financial data or returning simulated OPay or subscription
+> success. Route those requests and provider webhooks to the authenticated
+> Cloud Run payment service; verify the deployed routes before rollout. This
+> guard does not disable direct Supabase Edge Function endpoints, so those
+> endpoints and existing provider webhook destinations must be addressed as
+> part of the cutover. No exchange-rate-backed USD reporting is implemented yet.
+
 ## Summary
 
 Every payment on the platform now flows through **one settlement routine**,
