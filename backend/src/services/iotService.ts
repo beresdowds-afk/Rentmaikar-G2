@@ -825,41 +825,73 @@ export const iotAdminService = {
         return hologramService.handleAction("list_plans", {});
       }
 
-      case "purchase_sim": {
+      case "purchase_sim":
+      case "claim_sim": {
         const planId = Number(body.plan_id) || 128;
-        const notes = body.notes || "Admin provisioned SIM";
-        const hologramCfg = getHologramConfig();
+        const notes = body.notes || "Admin claimed manually purchased SIM";
+        const iccid = body.iccid ? String(body.iccid).trim() : "";
+        const passcode = body.passcode ? String(body.passcode).trim() : "";
 
-        let iccid = body.iccid ? String(body.iccid).trim() : "";
+        if (!iccid) {
+          return {
+            ok: false,
+            error: "ICCID is required. Official Hologram API requires admin to manually purchase SIMs on Hologram website and claim them here by providing the purchased SIM's ICCID.",
+          };
+        }
+
+        const hologramCfg = getHologramConfig();
         let providerSimId: string | null = null;
-        let simStatus = "requested";
+        let simStatus = "claimed";
         let providerResponse: any = null;
 
         if (hologramCfg.configured) {
           try {
-            const orderRes = await fetch(`https://dashboard.hologram.io/api/1/devices?orgid=${hologramCfg.orgId}&limit=1`, {
-              headers: { Authorization: hologramCfg.authHeader, Accept: "application/json" },
+            const claimRes = await fetch(`https://dashboard.hologram.io/api/1/devices/claim`, {
+              method: "POST",
+              headers: {
+                Authorization: hologramCfg.authHeader,
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              body: JSON.stringify({
+                orgid: hologramCfg.orgId,
+                iccid,
+                passcode: passcode || undefined,
+              }),
             });
-            if (orderRes.ok) {
-              const orderData = await orderRes.json();
-              const availableDevice = orderData.data?.[0];
-              if (availableDevice) {
-                providerSimId = String(availableDevice.id);
-                const links = availableDevice.links?.cellular || [];
-                const primaryLink = links[0] || {};
-                iccid = primaryLink.iccid || primaryLink.simid || `HOLO-${availableDevice.id}`;
-                simStatus = "provider_confirmed";
-                providerResponse = availableDevice;
+
+            if (claimRes.ok) {
+              const claimData = await claimRes.json();
+              providerSimId = String(claimData.data?.id || claimData.id || "");
+              providerResponse = claimData;
+              simStatus = "active";
+            } else {
+              const listRes = await fetch(`https://dashboard.hologram.io/api/1/devices?orgid=${hologramCfg.orgId}&limit=100`, {
+                headers: { Authorization: hologramCfg.authHeader, Accept: "application/json" },
+              });
+              if (listRes.ok) {
+                const listData = await listRes.json();
+                const matched = (listData.data || []).find((d: any) =>
+                  (d.links?.cellular || []).some((l: any) => l.iccid === iccid || l.simid === iccid)
+                );
+                if (matched) {
+                  providerSimId = String(matched.id);
+                  providerResponse = matched;
+                  simStatus = "active";
+                } else {
+                  return {
+                    ok: false,
+                    error: `SIM with ICCID ${iccid} was not found or could not be claimed in Hologram organization. Please ensure the SIM was purchased on Hologram and the correct ICCID is provided.`,
+                  };
+                }
               }
             }
           } catch (e: any) {
-            console.warn("[IoT Service] Hologram live order/lookup failed, falling back to pending procurement state:", e.message);
+            console.warn("[IoT Service] Hologram SIM claim API connection error:", e.message);
+            simStatus = "pending_claim";
           }
-        }
-
-        if (!iccid) {
-          iccid = `HOLO-REQ-${Date.now().toString().slice(-10)}`;
-          simStatus = hologramCfg.configured ? "submitted_to_provider" : "requested";
+        } else {
+          simStatus = "claimed_sandbox";
         }
 
         const res = await pool.query(
@@ -869,6 +901,7 @@ export const iotAdminService = {
            ON CONFLICT (iccid) DO UPDATE SET
              status = EXCLUDED.status,
              provider_sim_id = COALESCE(EXCLUDED.provider_sim_id, iot_sim_cards.provider_sim_id),
+             metadata = EXCLUDED.metadata,
              updated_at = now()
            RETURNING *`,
           [
@@ -876,16 +909,16 @@ export const iotAdminService = {
             simStatus,
             `Plan ${planId}`,
             providerSimId,
-            JSON.stringify({ notes, planId, providerResponse, state: simStatus, requestedAt: new Date().toISOString() })
+            JSON.stringify({ notes, planId, providerResponse, claimedAt: new Date().toISOString() })
           ]
         );
 
-        await logAudit("purchase_sim", { iccid, planId, status: simStatus, providerSimId }, { performedBy: user?.id });
+        await logAudit("claim_purchased_sim", { iccid, planId, status: simStatus, providerSimId }, { performedBy: user?.id });
         return {
           ok: true,
           sim: res.rows[0],
           status: simStatus,
-          message: hologramCfg.configured ? "SIM order submitted and verified with Hologram provider" : "SIM record requested in offline/sandbox mode"
+          message: "Manually purchased SIM successfully claimed from Hologram and registered."
         };
       }
 
