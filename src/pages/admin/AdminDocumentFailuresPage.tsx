@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, ExternalLink, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
+import { getUploadedFileUrl } from "@/lib/file-upload-api";
 
 type FailureRow = {
   id: string;
@@ -67,11 +68,14 @@ export default function AdminDocumentFailuresPage() {
   async function openDocument(row: FailureRow) {
     setOpeningId(row.id);
     try {
-      const { data, error } = await supabase.storage
-        .from("user-documents")
-        .createSignedUrl(row.file_path, 60 * 5);
-      if (error || !data?.signedUrl) throw error ?? new Error("No URL");
-      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+      const { url } = await getUploadedFileUrl({
+        purpose: "user_document",
+        documentId: row.id,
+        filePath: row.file_path,
+        expiresIn: 300,
+      });
+      if (!url) throw new Error("No URL");
+      window.open(url, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       toast.error(`Could not open document: ${e?.message ?? "unknown error"}`);
     } finally {

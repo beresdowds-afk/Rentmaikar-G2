@@ -69,6 +69,7 @@ interface UserDocument {
   vehicle_id: string | null;
   expires_at: string | null;
   created_at: string;
+  deleted_at?: string | null;
 }
 
 interface DocumentUploadProps {
@@ -158,7 +159,7 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
       
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-      return data as UserDocument[];
+      return (data as UserDocument[]).filter((document) => !document.deleted_at);
     },
     enabled: !!user,
   });
@@ -240,7 +241,7 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
         purpose: 'user_document',
         filePath,
         documentId: docId,
-        expiresIn: 3600,
+        expiresIn: 900,
       });
       return res.url || null;
     } catch {

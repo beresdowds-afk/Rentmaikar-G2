@@ -29,6 +29,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import JSZip from "jszip";
 import { saveZipBlob } from "@/lib/native-save";
+import { getUploadedFileUrl } from "@/lib/file-upload-api";
 
 export interface DocRow {
   id: string;
@@ -196,10 +197,18 @@ export const DocumentExportButton = ({
     return { done, failed, total: files.length, pct };
   }, [files]);
 
-  async function signOne(path: string) {
-    const { data, error } = await supabase.storage
-      .from("user-documents").createSignedUrl(path, 3600);
-    return { url: data?.signedUrl ?? null, error: error?.message ?? null };
+  async function signOne(path: string, documentId: string) {
+    try {
+      const { url } = await getUploadedFileUrl({
+        purpose: "user_document",
+        filePath: path,
+        documentId,
+        expiresIn: 900,
+      });
+      return { url: url ?? null, error: null };
+    } catch (error) {
+      return { url: null, error: error instanceof Error ? error.message : "Could not authorize document access" };
+    }
   }
 
   async function loadRows(): Promise<DocRow[]> {
@@ -237,7 +246,7 @@ export const DocumentExportButton = ({
   async function downloadSingle(fp: FileProgress, row: DocRow): Promise<FileProgress> {
     try {
       setFiles((cur) => cur.map((x) => x.id === fp.id ? { ...x, status: "downloading", attempts: x.attempts + 1 } : x));
-      const blob = await fetchSignedFile(row.file_path, signOne);
+      const blob = await fetchSignedFile(row.file_path, (filePath) => signOne(filePath, row.id));
       const updated: FileProgress = {
         ...fp, status: "done", blob, archive_path: `files/${archiveName(row)}`,
         error: undefined, attempts: fp.attempts + 1,

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getUploadedFileUrl } from '@/lib/file-upload-api';
 import { 
   Shield, 
   Clock, 
@@ -192,12 +193,15 @@ export const PoliceReportVerification = () => {
 
   const handleViewDocument = async (doc: PoliceReportDocument) => {
     try {
-      const { data } = await supabase.storage
-        .from('user-documents')
-        .createSignedUrl(doc.file_path, 3600);
-      
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
+      const { url } = await getUploadedFileUrl({
+        purpose: 'user_document',
+        documentId: doc.id,
+        filePath: doc.file_path,
+        expiresIn: 300,
+      });
+
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
       } else {
         toast.error('Could not load document');
       }

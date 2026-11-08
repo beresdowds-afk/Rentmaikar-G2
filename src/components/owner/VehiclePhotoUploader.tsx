@@ -102,7 +102,7 @@ export const VehiclePhotoUploader = forwardRef<VehiclePhotoUploaderHandle, Props
 
           const uploadResult = await uploadVehiclePhoto({
             file: optimised,
-            fileName: item.file.name,
+            fileName: optimised.name,
             thumbnailFile: thumb || undefined,
             draftId,
           });

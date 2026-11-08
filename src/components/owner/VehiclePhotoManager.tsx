@@ -105,7 +105,7 @@ export function VehiclePhotoManager({ vehicleId, ownerId, photoUrls, onChange, r
 
           const uploadResult = await uploadVehiclePhoto({
             file: optimised,
-            fileName: file.name,
+            fileName: optimised.name,
             thumbnailFile: thumb || undefined,
             vehicleId,
           });

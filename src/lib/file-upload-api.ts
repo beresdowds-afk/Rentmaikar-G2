@@ -207,20 +207,19 @@ export async function uploadDamageEvidence(
  */
 export async function getInspectionImageUrl(
   filePathOrUrl: string,
-  expiresIn: number = 86400
+  expiresIn: number = 900
 ): Promise<string | null> {
   if (!filePathOrUrl) return null;
-  // If it's already a valid signed URL with token, we can use it or refresh it
   try {
     const res = await getUploadedFileUrl({
       purpose: "inspection_image",
-      filePath: filePathOrUrl.includes("/") ? filePathOrUrl : undefined,
+      filePath: filePathOrUrl.startsWith("http") ? undefined : filePathOrUrl,
       fileUrl: filePathOrUrl.startsWith("http") ? filePathOrUrl : undefined,
       expiresIn,
     });
-    return res.signedUrl || res.fileUrl || filePathOrUrl;
+    return res.url || null;
   } catch {
-    return filePathOrUrl;
+    return null;
   }
 }
 
