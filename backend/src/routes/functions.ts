@@ -581,7 +581,7 @@ functionsRouter.all(
         const [profileResult, settingsResult] = await Promise.all([
           admin
             .from("profiles")
-            .select("phone, phone_verified")
+            .select("phone, phone_verified, email_verified")
             .eq("user_id", userId)
             .maybeSingle(),
           admin
@@ -619,6 +619,21 @@ functionsRouter.all(
         }
 
         if (action === "setup") {
+          const { data: roleData, error: roleError } = await admin
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", userId);
+          if (roleError) {
+            return res.status(500).json({ success: false, error: "Failed to load MFA account role" });
+          }
+          const isMandatory = (roleData ?? []).some(({ role }) => role === "admin" || role === "owner");
+          if (!isMandatory && profile?.email_verified !== true) {
+            return res.status(403).json({
+              success: false,
+              error: "Verify your email address and phone number before enabling optional MFA.",
+            });
+          }
+
           const phone = getVerifiedMfaPhone(profile, body.phone);
           if (!phone) {
             return res.status(400).json({

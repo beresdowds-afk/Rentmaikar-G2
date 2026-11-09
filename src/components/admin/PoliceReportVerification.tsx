@@ -23,6 +23,7 @@ import {
   MapPin
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesUpdate } from '@/integrations/supabase/types';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
@@ -161,7 +162,7 @@ export const PoliceReportVerification = () => {
     if (!selectedReport || !user) return;
 
     try {
-      const updateData: Record<string, any> = {
+      const updateData: TablesUpdate<'user_documents'> = {
         status,
         verified_at: status === 'verified' ? new Date().toISOString() : null,
         verified_by: status === 'verified' ? user.id : null,

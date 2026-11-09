@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   profile: {
     phone: "+18482035389",
     phone_verified: true,
-  } as { phone: string; phone_verified: boolean },
+    email_verified: true,
+  } as { phone: string; phone_verified: boolean; email_verified: boolean },
   settings: {
     is_enabled: true,
     phone_number: "+18482035389",
@@ -140,6 +141,7 @@ afterEach(() => {
   mocks.verifyPhoneOtp.mockReset();
   mocks.profile.phone = "+18482035389";
   mocks.profile.phone_verified = true;
+  mocks.profile.email_verified = true;
   mocks.settings.is_enabled = true;
   mocks.settings.phone_number = "+18482035389";
   mocks.settings.preferred_channel = "sms";
@@ -198,6 +200,45 @@ describe("send-2fa-code authenticated route", () => {
     });
     expect(unverified.status).toBe(400);
     expect(mocks.upsertCalls).toHaveLength(0);
+  });
+
+  it("requires verified email before enabling optional MFA", async () => {
+    mocks.roles = ["driver"];
+    mocks.profile.email_verified = false;
+
+    const response = await postMfa({
+      action: "setup",
+      phone: "+18482035389",
+    });
+
+    expect(response.status).toBe(403);
+    expect(mocks.upsertCalls).toHaveLength(0);
+  });
+
+  it("allows optional MFA setup after email and phone verification", async () => {
+    mocks.roles = ["driver"];
+    mocks.profile.email_verified = true;
+
+    const response = await postMfa({
+      action: "setup",
+      phone: "+18482035389",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertCalls).toHaveLength(1);
+  });
+
+  it("preserves mandatory MFA setup when email verification is still pending", async () => {
+    mocks.roles = ["owner"];
+    mocks.profile.email_verified = false;
+
+    const response = await postMfa({
+      action: "setup",
+      phone: "+18482035389",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.upsertCalls).toHaveLength(1);
   });
 
   it("sends only to the verified account phone and binds the challenge to its owner", async () => {
