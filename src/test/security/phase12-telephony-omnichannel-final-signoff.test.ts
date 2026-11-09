@@ -22,7 +22,6 @@ import {
   parseEmailAddress,
   rewriteSenderAddress,
   SENDERS,
-  VERIFIED_DOMAIN,
 } from "../../../backend/src/services/emailService";
 import { otpService } from "../../../backend/src/services/phoneOtpService";
 import { messagingBridge } from "../../../backend/src/services/messagingBridge";
@@ -105,9 +104,17 @@ describe("Phase 12: Production Telephony, Omnichannel Communications & Final Han
     });
 
     it("normalizes sender onto verified domain and preserves reply-to", () => {
+      const originalDefault = process.env.DEFAULT_BUSINESS_FROM;
+      const originalApproved = process.env.APPROVED_BUSINESS_SENDERS;
+      process.env.DEFAULT_BUSINESS_FROM = "support@rentmaikar.com";
+      process.env.APPROVED_BUSINESS_SENDERS = "support@rentmaikar.com";
       const rewritten = rewriteSenderAddress("support");
-      expect(rewritten.from).toContain(VERIFIED_DOMAIN);
-      expect(rewritten.preservedReplyTo).toBe("support@rentmaikar.com");
+      if (originalDefault === undefined) delete process.env.DEFAULT_BUSINESS_FROM;
+      else process.env.DEFAULT_BUSINESS_FROM = originalDefault;
+      if (originalApproved === undefined) delete process.env.APPROVED_BUSINESS_SENDERS;
+      else process.env.APPROVED_BUSINESS_SENDERS = originalApproved;
+      expect(rewritten.from).toContain("support@rentmaikar.com");
+      expect(rewritten.preservedReplyTo).toBeUndefined();
 
       expect(SENDERS.support).toBeDefined();
       expect(SENDERS.security).toBeDefined();

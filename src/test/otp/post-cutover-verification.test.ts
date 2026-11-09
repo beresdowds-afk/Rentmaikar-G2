@@ -8,13 +8,27 @@
  * 4. Supabase GoTrue Session Token Minting (Zero recovery_token tampering)
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { otpService, sendPhoneOtp, verifyPhoneOtp } from "../../../backend/src/services/phoneOtpService";
 import { messagingBridge } from "../../../backend/src/services/messagingBridge";
 import { authenticator } from "../../../backend/src/services/authenticator";
+import { sentBackendClient } from "../../../backend/src/services/sentClient";
 import { normalizeE164 } from "@/server/communicationServices";
+import { mockOutboundMessagingDb } from "../helpers/mockOutboundMessagingDb";
 
 describe("Phase 6: Post-Cutover Verification & End-to-End Hardening", () => {
+  beforeEach(() => {
+    vi.stubEnv("SENT_API_KEY", "test_sent_api_key");
+    mockOutboundMessagingDb();
+    vi.spyOn(sentBackendClient, "sendMessage").mockResolvedValue({
+      data: { id: "sent_otp_test", status: "queued" },
+    } as any);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe("1. Architectural Authority Verification", () => {
     it("confirms single authoritative instances for OtpService, MessagingBridge, and Authenticator", () => {
       expect(otpService).toBeDefined();

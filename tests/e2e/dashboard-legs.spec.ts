@@ -104,7 +104,10 @@ test.describe('Route health — no unexpected 404s', () => {
       // Guarded routes either bounce to /auth or render their own sign-in
       // prompt — both are acceptable; a 404 is not.
       const url = new URL(page.url()).pathname;
-      expect(url === path || url.startsWith('/auth')).toBe(true);
+      const signInPrompt = await page.getByRole('heading', {
+        name: /sign in to view your/i,
+      }).count();
+      expect(url === path || url.startsWith('/auth') || signInPrompt > 0).toBe(true);
     });
   }
 

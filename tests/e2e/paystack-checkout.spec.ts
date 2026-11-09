@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { hasE2eCredentials, signInAs } from "./helpers/auth";
 
 /**
  * These tests exercise the Paystack checkout UI end-to-end with the edge
@@ -69,6 +70,11 @@ async function stubPaystack(page: Page, opts: { outcome: "success" | "failure" |
 }
 
 test.describe("Paystack checkout", () => {
+  test.skip(!hasE2eCredentials("DRIVER"), "Requires configured E2E driver credentials.");
+  test.beforeEach(async ({ page }) => {
+    await signInAs(page, "DRIVER");
+  });
+
   test("successful payment shows Completed row and Receipt link", async ({ page }) => {
     await stubPaystack(page, { outcome: "success" });
     await page.goto(RENTAL_URL);

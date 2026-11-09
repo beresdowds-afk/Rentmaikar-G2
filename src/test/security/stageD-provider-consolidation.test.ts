@@ -24,8 +24,8 @@ describe("Stage D: Provider Consolidation", () => {
       const bridgePath = path.resolve(process.cwd(), "backend/src/services/messagingBridge.ts");
       const content = fs.readFileSync(bridgePath, "utf8");
 
-      expect(content).toContain('provider: "sent"');
-      expect(content).toContain("sentBackendClient");
+      expect(content).toContain("sendApplicationMessage");
+      expect(content).not.toContain("sentBackendClient");
     });
   });
 

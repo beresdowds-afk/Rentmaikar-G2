@@ -8,6 +8,7 @@ import { messagingBridge } from "../../../backend/src/services/messagingBridge";
 import { sendInboxReply } from "../../../backend/src/services/inboxReplyService";
 import { marketingEngineServer } from "../../../backend/src/marketing/marketingEngineServer";
 import { sentBackendClient } from "../../../backend/src/services/sentClient";
+import { mockOutboundMessagingDb } from "../helpers/mockOutboundMessagingDb";
 
 // Mock global fetch
 const originalFetch = global.fetch;
@@ -26,6 +27,7 @@ describe("RentMaikar Enterprise Messaging Unification Test Suite", () => {
     process.env.TERMII_API_KEY = "test_termii_api_key";
     process.env.TERMII_SENDER_ID = "Rentmaikar";
     vi.restoreAllMocks();
+    mockOutboundMessagingDb();
   });
 
   afterEach(() => {
