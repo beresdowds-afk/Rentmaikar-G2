@@ -40,6 +40,7 @@ import {
 
 type Channel = 'authenticator' | 'sms' | 'whatsapp';
 type VerifyChannel = 'sms' | 'whatsapp' | 'voice';
+const mandatoryRoles = ['admin', 'owner'];
 
 export const TwoFactorSetup = () => {
   const { user, userRole } = useAuth();
@@ -48,6 +49,7 @@ export const TwoFactorSetup = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isEnabled, setIsEnabled] = useState(false);
   const [isMandatory, setIsMandatory] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
   const [activeMethod, setActiveMethod] = useState<'authenticator' | 'phone'>('authenticator');
 
   // Phone state
@@ -76,7 +78,7 @@ export const TwoFactorSetup = () => {
   const [testCode, setTestCode] = useState('');
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
 
-  const mandatoryRoles = ['admin', 'owner'];
+  const canConfigureMfa = isMandatory || (emailVerified && phoneVerified);
 
   // Initialize a new Google Authenticator setup secret & QR code
   const initGoogleAuthenticatorSetup = useCallback(async () => {
@@ -103,6 +105,7 @@ export const TwoFactorSetup = () => {
     const fetchSettings = async () => {
       setIsLoading(true);
       setIsMandatory(mandatoryRoles.includes(userRole || ''));
+      setEmailVerified(!!user.email_confirmed_at);
 
       const [{ data }, { data: profile }] = await Promise.all([
         supabase
@@ -156,12 +159,12 @@ export const TwoFactorSetup = () => {
 
   // Generate initial QR if not yet enabled or reconfiguring
   useEffect(() => {
-    if (!isEnabled || isReconfiguringTotp) {
+    if ((!isEnabled || isReconfiguringTotp) && canConfigureMfa) {
       if (!totpSecret) {
         initGoogleAuthenticatorSetup();
       }
     }
-  }, [isEnabled, isReconfiguringTotp, totpSecret, initGoogleAuthenticatorSetup]);
+  }, [isEnabled, isReconfiguringTotp, canConfigureMfa, totpSecret, initGoogleAuthenticatorSetup]);
 
   // Phone cooldown timer
   useEffect(() => {
@@ -189,6 +192,10 @@ export const TwoFactorSetup = () => {
   // Verify and Enable Google Authenticator
   const handleVerifyAndEnableGoogleAuthenticator = async () => {
     if (!user || !totpSecret) return;
+    if (!isMandatory && (!emailVerified || !phoneVerified)) {
+      toast.error('Verify your email address and phone number before enabling optional MFA.');
+      return;
+    }
     if (totpVerifyCode.length !== 6) {
       toast.error('Please enter the 6-digit code from Google Authenticator');
       return;
@@ -367,6 +374,11 @@ export const TwoFactorSetup = () => {
   const handleSavePhone2FA = async () => {
     if (!user || !normalizedPhone) return;
 
+    if (!isMandatory && (!emailVerified || !phoneVerified)) {
+      toast.error('Verify your email address and phone number before enabling optional MFA.');
+      return;
+    }
+
     if (!phoneVerified) {
       toast.error(
         'Please verify your phone number before enabling 2FA.',
@@ -500,12 +512,19 @@ export const TwoFactorSetup = () => {
           </Alert>
         )}
 
-        {/* Method Switcher Tabs */}
-        <Tabs
-          value={activeMethod}
-          onValueChange={(val) => setActiveMethod(val as 'authenticator' | 'phone')}
-          className="space-y-4"
-        >
+        {!canConfigureMfa && !isEnabled ? (
+          <Alert>
+            <Shield className="h-4 w-4" />
+            <AlertDescription>
+              Optional two-factor authentication will be available after you verify both your email address and phone number.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Tabs
+            value={activeMethod}
+            onValueChange={(val) => setActiveMethod(val as 'authenticator' | 'phone')}
+            className="space-y-4"
+          >
           <TabsList className="grid grid-cols-2 w-full">
             <TabsTrigger value="authenticator" className="gap-1.5 text-xs">
               <Smartphone className="h-4 w-4 text-emerald-500" />
@@ -582,6 +601,7 @@ export const TwoFactorSetup = () => {
                       setIsReconfiguringTotp(true);
                       initGoogleAuthenticatorSetup();
                     }}
+                    disabled={!canConfigureMfa}
                     className="text-xs gap-1.5"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -685,7 +705,7 @@ export const TwoFactorSetup = () => {
                     />
                     <Button
                       onClick={handleVerifyAndEnableGoogleAuthenticator}
-                      disabled={isVerifyingTotp || totpVerifyCode.length !== 6}
+                      disabled={isVerifyingTotp || totpVerifyCode.length !== 6 || !canConfigureMfa}
                       className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
                     >
                       {isVerifyingTotp ? (
@@ -842,7 +862,7 @@ export const TwoFactorSetup = () => {
 
                 <Button
                   onClick={handleSavePhone2FA}
-                  disabled={isSaving || !phoneIsValid || !phoneVerified}
+                  disabled={isSaving || !phoneIsValid || !phoneVerified || !canConfigureMfa}
                   className="w-full text-xs"
                 >
                   {isSaving ? (
@@ -861,6 +881,7 @@ export const TwoFactorSetup = () => {
             )}
           </TabsContent>
         </Tabs>
+        )}
       </CardContent>
     </Card>
   );
