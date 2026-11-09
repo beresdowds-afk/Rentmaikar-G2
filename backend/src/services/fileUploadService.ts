@@ -6,6 +6,7 @@ import { getDbPool } from "./dbPool";
 import type { PoolClient } from "pg";
 import { registerEvidenceArtifact } from "./evidenceHashService";
 import { isRetentionExpired, scanDocument, type MalwareScanResult } from "./documentLifecycleService";
+import { recognizeLicenceExpiry } from "./licenceExpiryRecognition";
 import {
   StoragePurpose,
   PURPOSE_CONFIGS,
@@ -349,7 +350,44 @@ async function scanAndRecordUpload(
     );
   }
   const result = await scanDocument({ buffer: file.buffer, fileName, mimeType, sha256 });
-  return persistScanResult(pool, reconciliationId, documentId, result);
+  const outcome = await persistScanResult(pool, reconciliationId, documentId, result);
+  if (outcome.scanStatus === "clean" && documentId) {
+    await recordLicenceExpirySuggestion(pool, documentId, file);
+  }
+  return outcome;
+}
+
+async function recordLicenceExpirySuggestion(
+  pool: ReturnType<typeof getDbPool>,
+  documentId: string,
+  file: FilePayload,
+): Promise<void> {
+  try {
+    const eligible = await pool.query(
+      `SELECT id FROM public.user_documents
+        WHERE id = $1 AND document_type IN ('driver_license', 'drivers_license')
+          AND status = 'pending' AND scan_status = 'clean'
+          AND lifecycle_state = 'submitted_for_review' AND deleted_at IS NULL
+          AND (retention_until IS NULL OR retention_until > now())
+          AND expiry_recognition_status IS NULL`,
+      [documentId],
+    );
+    if (!eligible.rows.length) return;
+    const result = await recognizeLicenceExpiry(file.buffer, file.mimetype);
+    await pool.query(
+      `UPDATE public.user_documents
+          SET suggested_expiry_date = $2, expiry_recognition_status = $3,
+              expiry_recognized_at = now()
+        WHERE id = $1 AND status = 'pending' AND scan_status = 'clean'
+          AND lifecycle_state = 'submitted_for_review' AND deleted_at IS NULL
+          AND (retention_until IS NULL OR retention_until > now())
+          AND expiry_recognition_status IS NULL`,
+      [documentId, result.date, result.status],
+    );
+    if (result.status === "error") console.error("[fileUploadService] Local licence expiry recognition failed");
+  } catch (error) {
+    console.error("[fileUploadService] Could not store licence expiry recognition result:", error);
+  }
 }
 
 function hasExplicitAdminRole(auth: AuthContext): boolean {
@@ -1373,6 +1411,9 @@ export async function processDocumentLifecycle(): Promise<{
         sha256: record.content_sha256,
       });
       const state = await persistScanResult(pool, String(record.id), documentId, result);
+      if (state.scanStatus === "clean" && documentId) {
+        await recordLicenceExpirySuggestion(pool, documentId, file);
+      }
       counts.scanned += result.status === "clean" || result.status === "infected" ? 1 : 0;
       counts.quarantined += state.lifecycleState === "quarantined" ? 1 : 0;
       counts.rejected += state.lifecycleState === "rejected" ? 1 : 0;
@@ -1380,6 +1421,32 @@ export async function processDocumentLifecycle(): Promise<{
     } catch (error) {
       console.error("[fileUploadService] Quarantine scan retry failed:", error);
       counts.failures += 1;
+    }
+  }
+
+  const pendingRecognition = await pool.query(
+    `SELECT id, file_path, file_name, mime_type
+       FROM public.user_documents
+      WHERE document_type IN ('driver_license', 'drivers_license')
+        AND status = 'pending' AND scan_status = 'clean'
+        AND lifecycle_state = 'submitted_for_review' AND deleted_at IS NULL
+        AND (retention_until IS NULL OR retention_until > now())
+        AND expiry_recognition_status IS NULL
+      ORDER BY created_at LIMIT 5`,
+  );
+  for (const document of pendingRecognition.rows) {
+    try {
+      const { data, error } = await admin.storage.from("user-documents").download(document.file_path);
+      if (error || !data) throw new Error("Clean document could not be downloaded for expiry recognition");
+      await recordLicenceExpirySuggestion(pool, document.id, {
+        buffer: Buffer.from(await data.arrayBuffer()),
+        originalname: document.file_name,
+        mimetype: document.mime_type,
+        size: data.size,
+      });
+    } catch (error) {
+      counts.failures += 1;
+      console.error("[fileUploadService] Licence expiry recognition retry failed:", error);
     }
   }
 

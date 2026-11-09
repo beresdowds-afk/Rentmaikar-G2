@@ -71,6 +71,7 @@ interface UserDocument {
   rejection_reason: string | null;
   vehicle_id: string | null;
   expires_at: string | null;
+  expiry_recognition_status?: 'recognized' | 'not_found' | 'error' | null;
   created_at: string;
   deleted_at?: string | null;
 }
@@ -430,6 +431,12 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
                       Malware scanning is unavailable; this file cannot be reviewed or opened yet.
                     </p>
                   )}
+                  {config.type === 'driver_license' && existingDoc?.scan_status === 'clean' &&
+                    existingDoc.expiry_recognition_status === 'error' && (
+                      <p className="mt-1 text-xs text-amber-700">
+                        Automatic expiry recognition failed. Your document requires manual review.
+                      </p>
+                    )}
                 </div>
               </div>
               

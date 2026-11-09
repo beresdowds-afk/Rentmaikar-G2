@@ -10,6 +10,11 @@ If either setting is absent, the scanner times out, returns a non-success status
 
 Schedule the Cloud Run `POST /api/functions/process-document-lifecycle` endpoint with the `x-cron-secret` header set from the server-side `CRON_SECRET`. This worker retries quarantined scans and processes retention-expired files. It does not expose a caller-controlled document or user identifier.
 
+The worker also processes up to five clean, pending driver licence documents
+without an OCR result per run. Local Tesseract and Poppler suggest unambiguous
+labeled expiry dates for review; they never verify the licence or set its
+confirmed expiry. A recognition error or no match requires manual review.
+
 ## Retention and legal holds
 
 The migration creates disabled, category-specific rules for `identification`, `vehicle`, `inspection`, `damage`, and `rideshare`. No retention deadline or automatic archival is activated by default. An administrator must configure a positive `retention_days` value and a non-empty `legal_basis` before enabling a category. Policy changes are audited and apply to existing records in that category as well as future uploads.

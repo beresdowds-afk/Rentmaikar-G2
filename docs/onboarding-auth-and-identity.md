@@ -18,6 +18,38 @@ Distinction: Google SSO vs Persona
 
 Authentication and identity verification are independent processes. Authentication establishes access to an account, while Persona determines eligibility for protected marketplace features.
 
+Nigerian driver documents
+
+- Nigerian drivers must provide a driver's licence and police clearance; owners
+  retain the existing government-ID requirements and are not required to provide
+  a police clearance solely because they are owners.
+- Staff should validate each police certificate on the official POSSAP portal
+  using its PSS number and compare the result with the driver and uploaded
+  certificate. A QR code or a link to POSSAP is not itself a verification. The
+  police review screen asks the reviewer to confirm this manual check; this
+  confirmation is a UI safeguard, not an independently verifiable API result.
+- Prembly has been selected for future FRSC-backed licence checks, but this
+  repository does not yet integrate it. A provider agreement, approved API
+  contract, credentials, consent capture, server-side verification, and
+  authoritative expiry-based eligibility enforcement are still required.
+  Persona approval or a document upload must not be represented as an FRSC
+  database match. Do not scrape FRSC or POSSAP.
+- After malware scanning, the backend uses local Tesseract OCR and, for PDFs,
+  Poppler to propose an expiry date from the first page of a driver's licence.
+  Only labeled, unambiguous dates are recorded in `suggested_expiry_date`;
+  ambiguous, missing or unreadable dates require manual review. OCR does not
+  validate a licence or update the authoritative `expiry_date` / `expires_at`
+  fields, Persona status, or user profile. Staff must compare the original
+  document and enter the confirmed date; the Nigerian driver review screen
+  writes the confirmed licence date to both document expiry fields. Recognition failures remain visible
+  to the user and reviewer. Existing quarantined uploads are processed when
+  their malware scan is retried successfully. The scheduled document lifecycle
+  worker also processes up to five older clean pending licences per run.
+- Apply `20261109140000_driving_licence_expiry_recognition.sql` before deploying
+  the backend and client. The backend runtime requires Tesseract with English
+  data and `pdftoppm`; these are included in `backend/Dockerfile`. Recognition
+  executes locally, without sending licence files to an OCR provider.
+
 Account types, administrative roles, and existing contacts
 
 - An account may hold only one of the driver and owner account types. Eligible non-staff users can switch once in Profile Settings; the switch replaces the old account type, provisions the new role's wallet, and is audited. Staff roles cannot use this self-service switch.

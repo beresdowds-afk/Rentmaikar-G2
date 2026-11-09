@@ -27,6 +27,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-eng poppler-utils
+
 # Install production dependencies only
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --only=production; else npm install --only=production; fi

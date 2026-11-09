@@ -45,6 +45,8 @@ interface DriverDocument {
   rejection_reason: string | null;
   expires_at: string | null;
   expiry_date: string | null;
+  suggested_expiry_date?: string | null;
+  expiry_recognition_status?: 'recognized' | 'not_found' | 'error' | null;
   created_at: string;
   verified_at: string | null;
   verified_by: string | null;
@@ -192,6 +194,9 @@ export const NigeriaDriverVerification = () => {
 
       if (expiryDate && status === 'verified') {
         updateData.expiry_date = expiryDate;
+        if (['driver_license', 'drivers_license'].includes(selectedDocument.document_type)) {
+          updateData.expires_at = expiryDate;
+        }
       }
 
       const { error } = await supabase
@@ -714,6 +719,17 @@ export const NigeriaDriverVerification = () => {
                 value={expiryDate}
                 onChange={(e) => setExpiryDate(e.target.value)}
               />
+              {selectedDocument && ['driver_license', 'drivers_license'].includes(selectedDocument.document_type) && (
+                <p className="text-sm text-muted-foreground">
+                  {selectedDocument.expiry_recognition_status === 'recognized' && selectedDocument.suggested_expiry_date
+                    ? `OCR suggestion: ${selectedDocument.suggested_expiry_date}. Check the uploaded licence and enter the confirmed date above.`
+                    : selectedDocument.expiry_recognition_status === 'error'
+                      ? 'Automatic expiry recognition failed. Check the uploaded licence and enter the date manually.'
+                      : selectedDocument.expiry_recognition_status === 'not_found'
+                        ? 'No unambiguous expiry date was recognized. Check the uploaded licence and enter the date manually.'
+                        : 'Expiry recognition has not completed. Check the uploaded licence and enter the date manually.'}
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
