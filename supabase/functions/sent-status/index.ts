@@ -43,8 +43,8 @@ async function hmacHex(secret: string, body: string): Promise<string> {
 async function verifySignature(req: Request, raw: string): Promise<boolean> {
   const secret = Deno.env.get("SENT_WEBHOOK_SECRET") ?? "";
   if (!secret) {
-    console.warn("[sent-status] SENT_WEBHOOK_SECRET not set — accepting unverified");
-    return true;
+    console.error("[sent-status] SENT_WEBHOOK_SECRET not configured — rejecting callback");
+    return false;
   }
   const signature =
     req.headers.get("x-sent-signature") || req.headers.get("x-webhook-signature");
@@ -195,6 +195,29 @@ serve(async (req: Request): Promise<Response> => {
       raw_payload: event,
       metadata: { raw_status: rawStatus, source: "sent-status-webhook" },
     });
+
+    if (messageId) {
+      const outboxStatus = eventType === "delivered" || eventType === "read"
+        ? "delivered"
+        : FAILURE_STATUSES.has(eventType) ? "dead_letter" : null;
+      if (outboxStatus) {
+        let outboxUpdate = supabase
+          .from("outbound_message_outbox")
+          .update({
+            status: outboxStatus,
+            provider: "sent",
+            provider_message_id: messageId,
+            last_error: FAILURE_STATUSES.has(eventType) ? errorMessage : null,
+            delivered_at: outboxStatus === "delivered" ? new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("provider", "sent")
+          .eq("provider_message_id", messageId);
+        if (outboxStatus === "dead_letter") outboxUpdate = outboxUpdate.neq("status", "delivered");
+        const { error: outboxError } = await outboxUpdate;
+        if (outboxError) throw new Error(`Failed to update outbound message receipt: ${outboxError.message}`);
+      }
+    }
 
     return json({ received: true, handled: true, status: eventType });
   } catch (error) {

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import express from "express";
 import type { AddressInfo } from "node:net";
 import { functionsRouter } from "../../../backend/src/routes/functions";
+import { createFunctionsTestServer } from "../../../backend/src/test-utils/createFunctionsTestServer";
 
 const mocks = vi.hoisted(() => ({
   accountId: "3651f931-c180-4521-9b44-2e47815bbca9",
@@ -74,10 +74,7 @@ vi.mock("../../../backend/src/services/supabaseService", () => ({
   EDGE_FUNCTIONS_SET: new Set<string>(),
 }));
 
-const app = express();
-app.use(express.json());
-app.use("/api/functions", functionsRouter);
-let server: ReturnType<typeof app.listen>;
+let server: ReturnType<typeof createFunctionsTestServer>;
 let baseUrl = "";
 
 function sessionToken() {
@@ -120,7 +117,7 @@ beforeAll(async () => {
     success: true,
     user_id: mocks.accountId,
   });
-  server = app.listen(0);
+  server = createFunctionsTestServer(functionsRouter);
   await new Promise<void>((resolve) => server.once("listening", resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/functions`;
 });

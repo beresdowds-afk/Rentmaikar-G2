@@ -84,3 +84,23 @@ Resend, or domain authentication is configured in the live Supabase project.
 
 Public DNS lookups were attempted during this review but returned `EREFUSED`;
 no SPF, DKIM, or DMARC record status can be concluded from that result.
+
+## Durable outbound message lifecycle
+
+The source now defines `public.outbound_message_outbox` as the shared durable
+record for email, SMS, and WhatsApp dispatch. Email continues to use PGMQ as
+its delivery queue; `enqueue_email` records the outbox row and enqueues the
+message in one database transaction. Queue workers claim eligible records
+before dispatch, use bounded attempts and `next_attempt_at`, and record the
+provider receipt before acknowledging queue work. Signed Resend and messaging
+provider callbacks update final delivery state when a provider message ID is
+available. Email and SMS DLQ reprocessors remain separate, controlled paths;
+authentication emails and OTPs expire and are not automatically reprocessed.
+
+The follow-up migration
+`supabase/migrations/20261109120000_durable_message_outbox_and_telemetry_lifecycle.sql`
+is code only until it is applied to the intended Supabase project. Do not deploy
+workers that require its outbox tables and RPCs before applying and validating
+the migration. Live migration state, provider callback delivery, sender
+verification, and production retry behavior have not been verified by this
+repository change.
