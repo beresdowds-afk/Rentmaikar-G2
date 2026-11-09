@@ -728,6 +728,92 @@ serve(async (req) => {
         return json(200, { entries: data });
       }
 
+      case "get_telemetry_anomalies": {
+        const limit = Math.min(Number(body?.limit) || 50, 200);
+        const { data, error } = await admin
+          .from("telemetry_anomalies")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (error) {
+          // Fallback to audit log
+          const { data: auditData } = await admin
+            .from("iot_audit_log")
+            .select("*")
+            .eq("action", "telemetry_anomaly_detected")
+            .order("created_at", { ascending: false })
+            .limit(limit);
+          return json(200, { ok: true, anomalies: auditData || [], total: (auditData || []).length });
+        }
+        return json(200, { ok: true, anomalies: data || [], total: (data || []).length });
+      }
+
+      case "acknowledge_telemetry_anomaly": {
+        const { anomaly_id, resolution_notes } = body || {};
+        if (!anomaly_id) return json(400, { error: "anomaly_id is required" });
+        const { data, error } = await admin
+          .from("telemetry_anomalies")
+          .update({
+            acknowledged: true,
+            acknowledged_by: user.id,
+            acknowledged_at: new Date().toISOString(),
+            resolution_notes: resolution_notes || "Acknowledged",
+          })
+          .eq("id", anomaly_id)
+          .select()
+          .single();
+        if (error) return json(400, { error: error.message });
+        await audit(admin, user.id, "acknowledge_telemetry_anomaly", {
+          details: { anomaly_id, resolution_notes },
+        });
+        return json(200, { ok: true, anomaly: data });
+      }
+
+      case "get_fleet_sla_summary":
+      case "evaluate_fleet_sla": {
+        const { data: devices } = await admin
+          .from("iot_devices")
+          .select("id, serial_number, imei, provider, last_ping, status, vehicle_id")
+          .eq("status", "active")
+          .not("vehicle_id", "is", null);
+
+        const totalTracked = (devices || []).length;
+        let compliant = 0;
+        let delayed = 0;
+        let degraded = 0;
+        let breached = 0;
+        const now = Date.now();
+
+        (devices || []).forEach((d: any) => {
+          const lastPingTime = d.last_ping ? new Date(d.last_ping).getTime() : 0;
+          const ageMinutes = lastPingTime > 0 ? Math.round((now - lastPingTime) / 60000) : 999999;
+          if (ageMinutes <= 15) compliant++;
+          else if (ageMinutes <= 120) delayed++;
+          else if (ageMinutes <= 360) degraded++;
+          else breached++;
+        });
+
+        const compliancePercentage = totalTracked > 0 ? Number(((compliant / totalTracked) * 100).toFixed(1)) : 100.0;
+        return json(200, {
+          ok: true,
+          evaluated_at: new Date().toISOString(),
+          summary: {
+            total_tracked_vehicles: totalTracked,
+            compliant_count: compliant,
+            compliance_percentage: compliancePercentage,
+            delayed_count: delayed,
+            degraded_count: degraded,
+            breached_count: breached,
+            sla_health_status: compliancePercentage >= 95 ? "optimal" : compliancePercentage >= 80 ? "warning" : "critical",
+          },
+          thresholds: {
+            active_vehicle_freshness_minutes: 15,
+            idle_vehicle_freshness_minutes: 120,
+            critical_breach_hours: 6,
+          },
+        });
+      }
+
       default:
         return json(400, { error: `Unknown action: ${action}` });
     }

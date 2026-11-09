@@ -166,6 +166,74 @@ async function logSyncActivity(
   }
 }
 
+function calculateHaversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function recordTelemetryAnomaly(params: {
+  vehicleId?: string | null;
+  deviceId?: string | null;
+  provider?: string | null;
+  anomalyType: string;
+  severity: "info" | "warning" | "critical";
+  details: Record<string, any>;
+}) {
+  const pool = getDbPool();
+  if (pool) {
+    try {
+      await pool.query(
+        `INSERT INTO public.telemetry_anomalies (
+           vehicle_id, device_id, provider, anomaly_type, severity, details, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, now())`,
+        [
+          params.vehicleId || null,
+          params.deviceId || null,
+          params.provider || null,
+          params.anomalyType,
+          params.severity,
+          JSON.stringify(params.details),
+        ]
+      );
+    } catch {
+      // Direct SQL insert fallback to audit log
+    }
+  }
+
+  await logAudit(
+    "telemetry_anomaly_detected",
+    {
+      anomaly_type: params.anomalyType,
+      severity: params.severity,
+      provider: params.provider,
+      ...params.details,
+    },
+    {
+      vehicleId: params.vehicleId || undefined,
+      deviceId: params.deviceId || undefined,
+    }
+  );
+
+  if (params.severity === "critical" || params.severity === "warning") {
+    await logSyncActivity(
+      params.provider || "telemetry",
+      "anomaly_alert",
+      params.severity === "critical" ? "error" : "warn",
+      `[${params.severity.toUpperCase()}] ${params.anomalyType}: ${params.details.reason || "Telemetry SLA / Anomaly Alert"}`,
+      params.details
+    );
+  }
+}
+
 async function updateSyncState(
   provider: string,
   state: "ok" | "syncing" | "error",
@@ -1270,6 +1338,196 @@ export const iotAdminService = {
         return { ok: true, logs: res.rows, total: res.rows.length };
       }
 
+      case "get_telemetry_anomalies": {
+        const limit = Math.min(Number(body.limit) || 50, 200);
+        const offset = Math.max(Number(body.offset) || 0, 0);
+        const severity = body.severity ? String(body.severity) : null;
+        const vehicleId = body.vehicle_id ? String(body.vehicle_id) : null;
+        const deviceId = body.device_id ? String(body.device_id) : null;
+        const unacknowledgedOnly = body.unacknowledged === true || body.unacknowledged === "true";
+
+        const conditions: string[] = [];
+        const params: any[] = [];
+        let paramIdx = 1;
+
+        if (severity) {
+          conditions.push(`a.severity = $${paramIdx++}`);
+          params.push(severity);
+        }
+        if (vehicleId) {
+          conditions.push(`a.vehicle_id = $${paramIdx++}::uuid`);
+          params.push(vehicleId);
+        }
+        if (deviceId) {
+          conditions.push(`a.device_id = $${paramIdx++}::uuid`);
+          params.push(deviceId);
+        }
+        if (unacknowledgedOnly) {
+          conditions.push(`a.acknowledged = false`);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+        let rows: any[] = [];
+        let total = 0;
+
+        try {
+          const countRes = await pool.query(
+            `SELECT COUNT(*) as count FROM public.telemetry_anomalies a ${whereClause}`,
+            params
+          );
+          total = Number(countRes.rows[0]?.count || 0);
+
+          const queryParams = [...params, limit, offset];
+          const dataRes = await pool.query(
+            `SELECT a.*, v.license_plate, v.make, v.model, d.serial_number, d.imei
+             FROM public.telemetry_anomalies a
+             LEFT JOIN public.vehicles v ON a.vehicle_id = v.id
+             LEFT JOIN public.iot_devices d ON a.device_id = d.id
+             ${whereClause}
+             ORDER BY a.created_at DESC
+             LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+            queryParams
+          );
+          rows = dataRes.rows;
+        } catch {
+          // Fallback: search in iot_audit_log
+          const auditRes = await pool.query(
+            `SELECT * FROM public.iot_audit_log WHERE action = 'telemetry_anomaly_detected' ORDER BY created_at DESC LIMIT $1`,
+            [limit]
+          );
+          rows = auditRes.rows.map((r: any) => ({
+            id: r.id,
+            vehicle_id: r.vehicle_id,
+            device_id: r.device_id,
+            anomaly_type: r.details?.anomaly_type || "anomaly",
+            severity: r.details?.severity || "warning",
+            details: r.details,
+            acknowledged: false,
+            created_at: r.created_at,
+          }));
+          total = rows.length;
+        }
+
+        return { ok: true, anomalies: rows, total, limit, offset };
+      }
+
+      case "acknowledge_telemetry_anomaly": {
+        const { anomaly_id, resolution_notes } = body;
+        if (!anomaly_id) return { ok: false, error: "anomaly_id is required" };
+
+        try {
+          const res = await pool.query(
+            `UPDATE public.telemetry_anomalies
+             SET acknowledged = true, acknowledged_by = $1, acknowledged_at = now(), resolution_notes = $2
+             WHERE id = $3::uuid
+             RETURNING *`,
+            [user?.id || null, resolution_notes || "Acknowledged by operations", anomaly_id]
+          );
+          await logAudit("acknowledge_telemetry_anomaly", { anomaly_id, resolution_notes }, { performedBy: user?.id });
+          return { ok: true, anomaly: res.rows[0], message: "Telemetry anomaly acknowledged" };
+        } catch (e: any) {
+          return { ok: false, error: e.message };
+        }
+      }
+
+      case "get_fleet_sla_summary":
+      case "evaluate_fleet_sla": {
+        // SLA Freshness monitoring:
+        // Active/rented vehicle expected ping: within 15 minutes.
+        // Idle/available vehicle expected ping: within 2 hours.
+        // Degradation / Breach: > 6 hours.
+        const activeVehiclesRes = await pool.query(
+          `SELECT 
+             v.id as vehicle_id, v.make, v.model, v.license_plate, v.status as vehicle_status,
+             d.id as device_id, d.serial_number, d.imei, d.provider, d.status as device_status,
+             s.gps_timestamp, s.received_at, s.speed, s.battery, s.fuel,
+             EXTRACT(EPOCH FROM (now() - COALESCE(s.gps_timestamp, d.last_ping, '1970-01-01'::timestamptz))) / 60 as ping_age_minutes
+           FROM public.vehicles v
+           JOIN public.iot_devices d ON d.vehicle_id = v.id
+           LEFT JOIN public.vehicle_telemetry_state s ON s.vehicle_id = v.id
+           WHERE v.gps_tracking_enabled = true AND d.status = 'active'
+           ORDER BY ping_age_minutes DESC`
+        );
+
+        const totalTracked = activeVehiclesRes.rows.length;
+        let compliant = 0;
+        let delayed = 0;
+        let degraded = 0;
+        let breached = 0;
+        const breachedVehicles: any[] = [];
+
+        for (const row of activeVehiclesRes.rows) {
+          const ageMinutes = Math.round(Number(row.ping_age_minutes) || 999999);
+          const isRentedOrActive = row.vehicle_status === "active" || row.vehicle_status === "rented";
+          const thresholdMinutes = isRentedOrActive ? 15 : 120;
+          const breachThreshold = isRentedOrActive ? 360 : 720;
+
+          if (ageMinutes <= thresholdMinutes) {
+            compliant++;
+          } else if (ageMinutes <= 120) {
+            delayed++;
+          } else if (ageMinutes <= breachThreshold) {
+            degraded++;
+          } else {
+            breached++;
+            breachedVehicles.push({
+              vehicle_id: row.vehicle_id,
+              license_plate: row.license_plate,
+              vehicle_name: `${row.make} ${row.model}`,
+              device_serial: row.serial_number || row.imei,
+              provider: row.provider,
+              ping_age_minutes: ageMinutes,
+              last_ping: row.gps_timestamp || row.received_at || null,
+              severity: ageMinutes > 1440 ? "critical" : "warning",
+              sla_breach_reason: `No telemetry received for ${Math.round(ageMinutes / 60)} hours (Threshold: ${thresholdMinutes}m)`,
+            });
+          }
+        }
+
+        const complianceRate = totalTracked > 0 ? Number(((compliant / totalTracked) * 100).toFixed(1)) : 100.0;
+
+        let activeAnomaliesCount = { critical: 0, warning: 0, info: 0, total: 0 };
+        try {
+          const anomRes = await pool.query(
+            `SELECT severity, COUNT(*) as count 
+             FROM public.telemetry_anomalies 
+             WHERE acknowledged = false 
+             GROUP BY severity`
+          );
+          anomRes.rows.forEach((r: any) => {
+            const count = Number(r.count || 0);
+            if (r.severity === "critical") activeAnomaliesCount.critical = count;
+            if (r.severity === "warning") activeAnomaliesCount.warning = count;
+            if (r.severity === "info") activeAnomaliesCount.info = count;
+            activeAnomaliesCount.total += count;
+          });
+        } catch {
+          // Table may not yet be present
+        }
+
+        return {
+          ok: true,
+          evaluated_at: new Date().toISOString(),
+          summary: {
+            total_tracked_vehicles: totalTracked,
+            compliant_count: compliant,
+            compliance_percentage: complianceRate,
+            delayed_count: delayed,
+            degraded_count: degraded,
+            breached_count: breached,
+            sla_health_status: complianceRate >= 95 ? "optimal" : complianceRate >= 80 ? "warning" : "critical",
+          },
+          thresholds: {
+            active_vehicle_freshness_minutes: 15,
+            idle_vehicle_freshness_minutes: 120,
+            critical_breach_hours: 6,
+          },
+          active_anomalies: activeAnomaliesCount,
+          breached_vehicles: breachedVehicles.slice(0, 50),
+        };
+      }
+
       default: {
         return { ok: false, error: `Unknown IoT admin action '${action}'` };
       }
@@ -1548,6 +1806,19 @@ export const telemetryService = {
           record.vehicleId || record.vehicle_id || payload.vehicleId || payload.vehicle_id || "",
         );
         if (claimedVehicleId && claimedVehicleId !== vehicleId) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "device_vehicle_mismatch",
+            severity: "critical",
+            details: {
+              claimed_vehicle_id: claimedVehicleId,
+              registered_vehicle_id: vehicleId,
+              device_serial: device.serial_number,
+              reason: `Device ${deviceId} registered to vehicle ${vehicleId} but incoming telemetry claimed ${claimedVehicleId}`,
+            },
+          }).catch(() => {});
           skipped++;
           continue;
         }
@@ -1566,6 +1837,34 @@ export const telemetryService = {
           : rawSpeed;
         const heading = Number(payload.heading ?? payload.course ?? 0);
         const altitude = Number(payload.altitude ?? 0);
+
+        // Anomaly Evaluation: Coordinate and Speed boundaries
+        if ((lat === 0 && lng === 0) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "invalid_coordinates",
+            severity: "warning",
+            details: { lat, lng, reason: "Zero (Null Island) or non-finite GPS coordinates" },
+          }).catch(() => {});
+        }
+
+        if (speed > 200) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "impossible_speed",
+            severity: speed > 250 ? "critical" : "warning",
+            details: {
+              speed_kmh: Math.round(speed),
+              threshold_kmh: 200,
+              reason: `Vehicle speed ${Math.round(speed)} km/h exceeds maximum physical operating threshold`,
+            },
+          }).catch(() => {});
+        }
+
         if (
           !Number.isFinite(lat) || lat < -90 || lat > 90 ||
           !Number.isFinite(lng) || lng < -180 || lng > 180 ||
@@ -1589,6 +1888,47 @@ export const telemetryService = {
         );
         const eventTimeMs = Date.parse(eventTime);
         const now = Date.now();
+
+        // Anomaly Evaluation: Critical battery drain
+        if (battery > 0 && battery < 10) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "sensor_critical_battery",
+            severity: "warning",
+            details: { battery_level: battery, threshold: 10, reason: `Tracker battery level at critical ${battery}%` },
+          }).catch(() => {});
+        }
+
+        // Anomaly Evaluation: Engine overheating
+        if (temperature > 115) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "engine_overheat",
+            severity: "warning",
+            details: { temperature, threshold: 115, reason: `Engine temperature ${temperature}°C indicates severe overheat condition` },
+          }).catch(() => {});
+        }
+
+        // Anomaly Evaluation: Future clock skew
+        if (Number.isFinite(eventTimeMs) && eventTimeMs > now + 5 * 60_000) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "future_timestamp_rejected",
+            severity: "warning",
+            details: {
+              event_time: eventTime,
+              skew_minutes: Math.round((eventTimeMs - now) / 60000),
+              reason: "Incoming telemetry timestamp is skewed >5 minutes into future",
+            },
+          }).catch(() => {});
+        }
+
         if (
           !Number.isFinite(battery) || battery < 0 || battery > 100 ||
           !Number.isFinite(fuel) || fuel < 0 || fuel > 100 ||
@@ -1601,13 +1941,81 @@ export const telemetryService = {
         }
 
         const currentState = await pool.query(
-          `SELECT gps_timestamp FROM public.vehicle_telemetry_state WHERE vehicle_id = $1::uuid`,
+          `SELECT gps_timestamp, latitude, longitude, speed, fuel FROM public.vehicle_telemetry_state WHERE vehicle_id = $1::uuid`,
           [vehicleId],
         );
+        const prevState = currentState.rows[0];
+
+        // Anomaly Evaluation: Teleportation / Implausible Position Jump
+        if (prevState?.gps_timestamp && prevState?.latitude != null && prevState?.longitude != null) {
+          const prevTimeMs = Date.parse(String(prevState.gps_timestamp));
+          const timeDeltaHours = (eventTimeMs - prevTimeMs) / 3600000;
+          if (timeDeltaHours > 0) {
+            const distKm = calculateHaversineDistanceKm(
+              Number(prevState.latitude),
+              Number(prevState.longitude),
+              lat,
+              lng,
+            );
+            const impliedSpeed = distKm / timeDeltaHours;
+            if ((impliedSpeed > 250 && distKm > 10) || (distKm > 500 && timeDeltaHours < 0.1)) {
+              await recordTelemetryAnomaly({
+                vehicleId,
+                deviceId: device.id,
+                provider: source,
+                anomalyType: "position_jump_teleportation",
+                severity: "critical",
+                details: {
+                  dist_km: Number(distKm.toFixed(2)),
+                  time_delta_seconds: Math.round(timeDeltaHours * 3600),
+                  implied_speed_kmh: Math.round(impliedSpeed),
+                  from: [prevState.latitude, prevState.longitude],
+                  to: [lat, lng],
+                  reason: `Implausible position jump of ${distKm.toFixed(1)} km in ${Math.round(timeDeltaHours * 3600)}s (implied speed: ${Math.round(impliedSpeed)} km/h)`,
+                },
+              }).catch(() => {});
+            }
+          }
+
+          // Anomaly Evaluation: Sudden fuel jump while ignition off
+          if (prevState.fuel != null && fuel > 0 && !ignition) {
+            const fuelDrop = Number(prevState.fuel) - fuel;
+            if (fuelDrop > 30) {
+              await recordTelemetryAnomaly({
+                vehicleId,
+                deviceId: device.id,
+                provider: source,
+                anomalyType: "sensor_fuel_jump",
+                severity: "warning",
+                details: {
+                  previous_fuel: prevState.fuel,
+                  current_fuel: fuel,
+                  drop_percentage: fuelDrop,
+                  ignition,
+                  reason: `Sudden fuel level decrease of ${fuelDrop}% while vehicle ignition is off`,
+                },
+              }).catch(() => {});
+            }
+          }
+        }
+
+        // Anomaly Evaluation: Stale timestamp replay / out of order points
         if (
-          currentState.rows[0]?.gps_timestamp &&
-          Date.parse(String(currentState.rows[0].gps_timestamp)) >= eventTimeMs
+          prevState?.gps_timestamp &&
+          Date.parse(String(prevState.gps_timestamp)) >= eventTimeMs
         ) {
+          await recordTelemetryAnomaly({
+            vehicleId,
+            deviceId: device.id,
+            provider: source,
+            anomalyType: "stale_timestamp_replay",
+            severity: "warning",
+            details: {
+              incoming_event_time: eventTime,
+              current_state_timestamp: prevState.gps_timestamp,
+              reason: "Incoming telemetry timestamp is older than current state timestamp (replay or out-of-order packet)",
+            },
+          }).catch(() => {});
           skipped++;
           continue;
         }
@@ -1708,6 +2116,18 @@ export const telemetryService = {
       skipped,
       vehicles: [...new Set(vehicleIds)],
     };
+  },
+
+  getFleetSlaSummary() {
+    return iotAdminService.handleAction("get_fleet_sla_summary", {});
+  },
+
+  getAnomalies(options: Record<string, any> = {}) {
+    return iotAdminService.handleAction("get_telemetry_anomalies", options);
+  },
+
+  acknowledgeAnomaly(anomalyId: string, notes?: string, user?: { id: string }) {
+    return iotAdminService.handleAction("acknowledge_telemetry_anomaly", { anomaly_id: anomalyId, resolution_notes: notes }, user);
   },
 };
 

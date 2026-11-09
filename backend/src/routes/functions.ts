@@ -147,6 +147,8 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "iot-scheduled-sync",
   "telemetry-ingest",
   "telemetry-dispatch",
+  "telemetry-anomalies",
+  "fleet-sla-summary",
   "emqx-monitoring",
   "emqx-secret-rotation",
   "generate-vehicle-mqtt-token",
@@ -1386,6 +1388,16 @@ functionsRouter.all(
 
       case "telemetry-dispatch":
         return res.status(501).json({ ok: false, error: "Use the authenticated telemetry provider dispatcher" });
+
+      case "telemetry-anomalies": {
+        const result = await telemetryService.getAnomalies(body);
+        return res.status(200).json(result);
+      }
+
+      case "fleet-sla-summary": {
+        const result = await telemetryService.getFleetSlaSummary();
+        return res.status(200).json(result);
+      }
 
       case "emqx-monitoring":
       case "emqx-secret-rotation": {
