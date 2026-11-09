@@ -584,7 +584,7 @@ export async function sendApplicationMessage(
   }
 
   // -----------------------------------------------------------------
-  // 4. ALL PROVIDERS FAILED OR UNAVAILABLE (Fail Closed)
+  // 4. ALL PROVIDERS FAILED OR UNAVAILABLE (Fail Closed + DLQ Enlistment)
   // -----------------------------------------------------------------
   const failureError = `All communications providers failed: SENT.dm (${sentFailureReason}), Twilio (${twilioFailureReason}), Termii (${termiiFailureReason})`;
 
@@ -599,6 +599,36 @@ export async function sendApplicationMessage(
     metadata: { ...metadataWithKey, notificationType: payload.notificationType },
   });
 
+  // Enlist into durable sms_dlq_retry_state outbox for administrative inspection and scheduled recovery
+  try {
+    const pool = getDbPool();
+    if (pool) {
+      const messageKey = idempotencyKey || `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+      await pool.query(
+        `INSERT INTO public.sms_dlq_retry_state (
+           message_key, channel, recipient_phone, body, template_name, region,
+           attempts, last_error, next_attempt_at, paused, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, NOW() + INTERVAL '5 minutes', false, NOW(), NOW())
+         ON CONFLICT (message_key) DO UPDATE SET
+           attempts = sms_dlq_retry_state.attempts + 1,
+           last_error = EXCLUDED.last_error,
+           next_attempt_at = NOW() + (POWER(2, LEAST(sms_dlq_retry_state.attempts, 6)) * INTERVAL '2 minutes'),
+           updated_at = NOW()`,
+        [
+          messageKey,
+          channel,
+          to,
+          messageText,
+          (payload as any).templateName || payload.whatsappTemplateId || null,
+          region,
+          failureError,
+        ]
+      ).catch(() => {});
+    }
+  } catch (dlqErr: any) {
+    console.warn("[smsService] Failed to enlist into DLQ retry state:", dlqErr.message);
+  }
+
   const failureResult: SendApplicationMessageResult = {
     success: false,
     channel,
@@ -610,3 +640,65 @@ export async function sendApplicationMessage(
 
   return failureResult;
 }
+
+/**
+ * Reprocesses pending dead-letter SMS entries from sms_dlq_retry_state
+ */
+export async function reprocessSmsDlq(maxBatch = 25): Promise<{ processed: number; recovered: number; errors: number }> {
+  const pool = getDbPool();
+  if (!pool) return { processed: 0, recovered: 0, errors: 0 };
+
+  const pending = await pool.query(
+    `SELECT id, message_key, channel, recipient_phone, body, template_name, attempts
+       FROM public.sms_dlq_retry_state
+      WHERE resolved_at IS NULL
+        AND paused = false
+        AND next_attempt_at <= NOW()
+      ORDER BY next_attempt_at ASC
+      LIMIT $1`,
+    [maxBatch]
+  );
+
+  let recovered = 0;
+  let errors = 0;
+
+  for (const row of pending.rows) {
+    try {
+      const res = await sendApplicationMessage({
+        to: row.recipient_phone,
+        message: row.body || "",
+        channel: row.channel === "whatsapp" ? "whatsapp" : "sms",
+        idempotencyKey: row.message_key,
+      });
+
+      if (res.success) {
+        await pool.query(
+          `UPDATE public.sms_dlq_retry_state
+              SET resolved_at = NOW(), updated_at = NOW()
+            WHERE id = $1`,
+          [row.id]
+        );
+        recovered++;
+      } else {
+        const nextAttempts = (row.attempts || 1) + 1;
+        const isExhausted = nextAttempts >= 5;
+        await pool.query(
+          `UPDATE public.sms_dlq_retry_state
+              SET attempts = $1,
+                  paused = $2,
+                  last_error = $3,
+                  next_attempt_at = NOW() + (POWER(2, LEAST($1, 6)) * INTERVAL '5 minutes'),
+                  updated_at = NOW()
+            WHERE id = $4`,
+          [nextAttempts, isExhausted, res.error || "Retry failed", row.id]
+        );
+        errors++;
+      }
+    } catch (e: any) {
+      errors++;
+    }
+  }
+
+  return { processed: pending.rows.length, recovered, errors };
+}
+

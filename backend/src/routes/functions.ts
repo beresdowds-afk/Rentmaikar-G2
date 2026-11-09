@@ -3,6 +3,7 @@ import { Router, Request, Response } from "express";
 import { sendInboxReply } from "../services/inboxReplyService";
 import { sentBackendClient } from "../services/sentClient";
 import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
+import { reprocessSmsDlq } from "../services/smsService";
 import { supabaseBackendService, EDGE_FUNCTIONS_SET } from "../services/supabaseService";
 import { getDbPool } from "../services/dbPool";
 import {
@@ -449,10 +450,16 @@ functionsRouter.all(
   try {
     switch (functionName) {
       case "reprocess-sms-dlq": {
+        const batchSize = Math.max(1, Math.min(100, Number(body.batchSize || body.limit) || 25));
+        const dlqResult = await reprocessSmsDlq(batchSize);
         return res.status(200).json({
           success: true,
-          count: 0,
-          message: "No dead-letter messages pending reprocessing",
+          count: dlqResult.recovered,
+          processed: dlqResult.processed,
+          errors: dlqResult.errors,
+          message: dlqResult.processed > 0
+            ? `Reprocessed ${dlqResult.processed} dead-letter messages (${dlqResult.recovered} recovered, ${dlqResult.errors} failed)`
+            : "No dead-letter messages pending reprocessing",
         });
       }
 
