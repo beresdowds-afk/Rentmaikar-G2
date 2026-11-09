@@ -45,6 +45,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { IoTLivenessCommandBar } from "@/components/admin/IoTLivenessCommandBar";
 import { IoTAuditLogFeed } from "@/components/admin/IoTAuditLogFeed";
 import { ServiceDisruptionDialog } from "@/components/admin/ServiceDisruptionDialog";
+import { IoTBarcodeScannerDialog } from "@/components/admin/hardware/IoTBarcodeScannerDialog";
 import {
   Car,
   Search,
@@ -71,6 +72,8 @@ import {
   CheckSquare,
   Sliders,
   EyeOff,
+  QrCode,
+  Scan,
 } from "lucide-react";
 
 import { toast } from "sonner";
@@ -222,6 +225,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
   const [countryFilter, setCountryFilter] = useState("all");
   const [makeFilter, setMakeFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   // Batch selection and availability management state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1010,18 +1014,31 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
 
           <Card>
             <CardContent className="pt-6 space-y-4">
-              {/* Single search bar */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search make, model, year, plate, VIN, or city..."
-                  value={q}
-                  onChange={(e) => {
-                    setQ(e.target.value);
-                    setPage(1);
-                  }}
-                  className="pl-9"
-                />
+              {/* Search bar with camera barcode / QR scanner */}
+              <div className="flex gap-2 items-center">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search make, model, year, plate, VIN, or city..."
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setPage(1);
+                    }}
+                    className="pl-9"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setScannerOpen(true)}
+                  className="gap-1.5 border-primary/30 text-primary hover:bg-primary/5 hover:border-primary shrink-0"
+                  title="Scan IoT Hardware Barcode / QR Code"
+                >
+                  <QrCode className="h-4 w-4 text-primary" />
+                  <span className="hidden sm:inline">Scan IoT Hardware</span>
+                  <span className="sm:hidden">Scan</span>
+                </Button>
               </div>
 
               {/* Quick filter chips */}
@@ -1797,6 +1814,22 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
     </Dialog>
   );
 
+  const scannerDialog = (
+    <IoTBarcodeScannerDialog
+      open={scannerOpen}
+      onOpenChange={setScannerOpen}
+      vehicles={vehicles ?? []}
+      onSelectVehicle={(match) => {
+        setQ(match);
+        setPage(1);
+      }}
+      onHardwareLogged={() => {
+        refetchVehicles();
+        refetchDevices();
+      }}
+    />
+  );
+
   if (embedded) {
     return (
       <>
@@ -1806,6 +1839,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
         {addDialog}
         {disruptionDialog}
         {batchStatusDialog}
+        {scannerDialog}
       </>
     );
   }
@@ -1820,6 +1854,7 @@ export default function AdminVehicleCataloguePage({ embedded = false }: Props) {
       {addDialog}
       {disruptionDialog}
       {batchStatusDialog}
+      {scannerDialog}
     </div>
   );
 }
