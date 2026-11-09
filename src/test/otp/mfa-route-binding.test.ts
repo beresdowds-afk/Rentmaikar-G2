@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     preferred_channel: "sms",
   } as { is_enabled: boolean; phone_number: string; preferred_channel: string },
   role: { role: "owner" } as { role: string },
+  roles: ["owner"] as string[],
   eqCalls: [] as Array<{ table: string; column: string; value: unknown }>,
   upsertCalls: [] as Array<{ table: string; value: Record<string, unknown> }>,
   authenticateCaller: vi.fn(),
@@ -61,6 +62,10 @@ vi.mock("../../../backend/src/services/supabaseService", () => ({
                   : mocks.role,
             error: null,
           })),
+          then: (resolve: (result: unknown) => void) => resolve({
+            data: mocks.roles.map((role) => ({ role })),
+            error: null,
+          }),
           upsert: vi.fn(async (value: Record<string, unknown>) => {
             mocks.upsertCalls.push({ table, value });
             return { error: null };
@@ -139,6 +144,7 @@ afterEach(() => {
   mocks.settings.phone_number = "+18482035389";
   mocks.settings.preferred_channel = "sms";
   mocks.role.role = "owner";
+  mocks.roles = ["owner"];
   mocks.sendPhoneOtp.mockResolvedValue({
     success: true,
     challengeId: "c9d8b113-627d-4c79-930c-fde45cc2f660",
@@ -151,6 +157,16 @@ afterEach(() => {
 });
 
 describe("send-2fa-code authenticated route", () => {
+  it("requires MFA when any assigned role requires it", async () => {
+    mocks.settings.is_enabled = false;
+    mocks.roles = ["driver", "admin_assistant", "owner"];
+    const response = await postMfa({ action: "status" });
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.requires_2fa).toBe(true);
+    expect(data.is_mandatory).toBe(true);
+  });
+
   it("returns status only for the authenticated account, ignoring forged user IDs", async () => {
     const response = await postMfa({
       action: "status",

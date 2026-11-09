@@ -10,8 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Plus, Edit2, Trash2, Truck, Phone, MapPin, Star, Clock, Zap, CheckCircle2, RefreshCw } from "lucide-react";
-import { DEFAULT_ROADSIDE_PROVIDERS } from "./ServiceProvidersHub";
+import { Plus, Edit2, Trash2, Truck, Phone, MapPin, Star, Clock } from "lucide-react";
 
 interface RoadsidePartner {
   id: string;
@@ -39,7 +38,6 @@ const SERVICE_TYPES = [
 export const RoadsidePartnerManagement = () => {
   const [partners, setPartners] = useState<RoadsidePartner[]>([]);
   const [loading, setLoading] = useState(true);
-  const [enablingAll, setEnablingAll] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<RoadsidePartner | null>(null);
 
@@ -53,58 +51,26 @@ export const RoadsidePartnerManagement = () => {
   const fetchPartners = async () => {
     setLoading(true);
     const { data, error } = await supabase.from("roadside_partners").select("*").order("name");
-    if (!error && data && data.length > 0) {
-      setPartners(data);
-    } else {
-      // Fallback certified default partners
-      setPartners(
-        DEFAULT_ROADSIDE_PROVIDERS.map((p, idx) => ({
-          ...p,
-          id: `certified-${idx + 1}`,
-        }))
-      );
-    }
+    if (error) {
+      console.error("Failed to load roadside partners:", error);
+      setPartners([]);
+      toast.error("Failed to load roadside partners");
+    } else setPartners(data ?? []);
     setLoading(false);
-  };
-
-  const handleEnableAll = async () => {
-    setEnablingAll(true);
-    try {
-      const { error } = await supabase
-        .from("roadside_partners")
-        .update({ is_active: true })
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-
-      // Check if rows exist; if not seed them
-      const { count } = await supabase
-        .from("roadside_partners")
-        .select("id", { count: "exact", head: true });
-
-      if (count === 0) {
-        for (const p of DEFAULT_ROADSIDE_PROVIDERS) {
-          await supabase.from("roadside_partners").insert(p);
-        }
-      }
-
-      setPartners((prev) => prev.map((p) => ({ ...p, is_active: true })));
-      toast.success("All roadside service providers are now enabled and active!");
-    } catch (e: any) {
-      setPartners((prev) => prev.map((p) => ({ ...p, is_active: true })));
-      toast.success("All roadside service providers activated");
-    } finally {
-      setEnablingAll(false);
-    }
   };
 
   const toggleActiveStatus = async (id: string, current: boolean) => {
     const nextState = !current;
-    setPartners((prev) => prev.map((p) => (p.id === id ? { ...p, is_active: nextState } : p)));
     try {
-      await supabase.from("roadside_partners").update({ is_active: nextState }).eq("id", id);
+      const { data, error } = await supabase.from("roadside_partners").update({ is_active: nextState }).eq("id", id).select("id").maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("Partner was not updated");
+      setPartners((prev) => prev.map((p) => (p.id === id ? { ...p, is_active: nextState } : p)));
+      toast.success(`Partner ${nextState ? "activated" : "deactivated"}`);
     } catch (e) {
-      /* local updated */
+      console.error("Failed to update roadside partner:", e);
+      toast.error("Failed to update roadside partner");
     }
-    toast.success(`Partner ${nextState ? "activated" : "deactivated"}`);
   };
 
   const handleSave = async () => {
@@ -123,10 +89,12 @@ export const RoadsidePartnerManagement = () => {
 
     if (editing) {
       const { error } = await supabase.from("roadside_partners").update(payload).eq("id", editing.id);
-      if (error) toast.error("Failed to update partner"); else toast.success("Partner updated");
+      if (error) { toast.error("Failed to update partner"); return; }
+      toast.success("Partner updated");
     } else {
       const { error } = await supabase.from("roadside_partners").insert(payload);
-      if (error) toast.error("Failed to add partner"); else toast.success("Partner added");
+      if (error) { toast.error("Failed to add partner"); return; }
+      toast.success("Partner added");
     }
 
     setDialogOpen(false);
@@ -138,8 +106,8 @@ export const RoadsidePartnerManagement = () => {
     const { error } = await supabase.from("roadside_partners").delete().eq("id", id);
     if (!error) { toast.success("Partner removed"); fetchPartners(); }
     else {
-      setPartners((prev) => prev.filter((p) => p.id !== id));
-      toast.success("Partner removed");
+      console.error("Failed to remove roadside partner:", error);
+      toast.error("Failed to remove partner");
     }
   };
 
@@ -176,21 +144,11 @@ export const RoadsidePartnerManagement = () => {
                 {activeCount} / {partners.length} Active
               </Badge>
             </div>
-            <p className="text-sm text-muted-foreground">Manage certified service providers for emergency roadside support (USA &amp; Nigeria)</p>
+            <p className="text-sm text-muted-foreground">Manage roadside partner records (USA &amp; Nigeria)</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="default"
-            onClick={handleEnableAll}
-            disabled={enablingAll}
-            className="gap-2 bg-orange-600 hover:bg-orange-700 text-white shadow-xs"
-          >
-            <Zap className={`h-4 w-4 ${enablingAll ? "animate-spin" : "fill-current"}`} />
-            {enablingAll ? "Enabling..." : "Enable All Service Providers"}
-          </Button>
-
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <Button variant="outline" className="gap-2"><Plus className="h-4 w-4" /> Add Partner</Button>
@@ -249,9 +207,6 @@ export const RoadsidePartnerManagement = () => {
         <div className="text-center py-12 text-muted-foreground">
           <Truck className="h-12 w-12 mx-auto mb-3 opacity-50" />
           <p>No roadside partners yet.</p>
-          <Button onClick={handleEnableAll} className="mt-3 gap-2">
-            <Zap className="h-4 w-4" /> Seed &amp; Enable Certified Providers
-          </Button>
         </div>
       ) : (
         <div className="grid md:grid-cols-2 gap-4">
@@ -293,4 +248,3 @@ export const RoadsidePartnerManagement = () => {
     </Card>
   );
 };
-

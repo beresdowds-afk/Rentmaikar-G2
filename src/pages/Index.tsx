@@ -35,19 +35,8 @@ useEffect(() => {
 
     if (!user) return;
 
-    const email = user.email?.trim().toLowerCase();
-    const isAdminByEmail = email
-      ? [
-          'adebayoolusola39@gmail.com',
-          'beresdowds@gmail.com',
-          'beresanddowds@gmail.com',
-          'eastfortemain@gmail.com',
-        ].includes(email)
-      : false;
-    const effectiveRole = userRole || (isAdminByEmail ? 'admin' : null);
-
-    if (effectiveRole) {
-      const target = homeForRole(effectiveRole, "/");
+    if (userRole) {
+      const target = homeForRole(userRole, "/");
       if (target !== "/") {
         navigate(target, { replace: true });
       }

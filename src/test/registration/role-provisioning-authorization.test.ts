@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 import { canProvisionUserAccount } from "../../../backend/src/services/roleProvisioningAuthorization";
 
 describe("role provisioning authorization", () => {
+  const staffRoles = [
+    "admin", "admin_assistant", "legal_support", "iot_support",
+    "vehicle_support", "insurance_support",
+  ];
+
+  it.each(staffRoles)("permits an administrator to provision %s", (role) => {
+    expect(canProvisionUserAccount({ userId: "admin-1", roles: ["admin"] }, "user-2", role)).toBe(true);
+  });
+
+  it.each(staffRoles)("rejects an applicant attempting to self-provision %s", (role) => {
+    expect(canProvisionUserAccount({ userId: "user-1", roles: ["driver"] }, "user-1", role)).toBe(false);
+  });
+
+  it.each(staffRoles.filter((role) => role !== "admin"))(
+    "rejects %s attempting to upgrade another user",
+    (role) => {
+      expect(canProvisionUserAccount({ userId: "staff-1", roles: [role] }, "user-2", "admin")).toBe(false);
+    },
+  );
+
   it.each(["driver", "owner"])("allows an authenticated user to self-provision %s", (role) => {
     expect(
       canProvisionUserAccount({ userId: "user-1", roles: [] }, "user-1", role),
@@ -34,5 +54,9 @@ describe("role provisioning authorization", () => {
     expect(
       canProvisionUserAccount({ userId: "admin-1", roles: ["admin"] }, "user-2", "superuser"),
     ).toBe(false);
+  });
+
+  it("rejects the nonexistent customer account role", () => {
+    expect(canProvisionUserAccount({ userId: "admin-1", roles: ["admin"] }, "user-2", "customer")).toBe(false);
   });
 });

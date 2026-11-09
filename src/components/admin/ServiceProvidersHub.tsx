@@ -42,106 +42,6 @@ export interface ServiceProviderItem {
   details?: Record<string, any>;
 }
 
-// Certified default roadside service providers
-export const DEFAULT_ROADSIDE_PROVIDERS = [
-  {
-    name: "DMV Premier Towing & Recovery",
-    phone: "+12025550110",
-    email: "dispatch@dmvpremiertow.com",
-    service_type: "towing",
-    coverage_area: "Washington DC, Maryland, Northern Virginia",
-    region: "USA",
-    is_active: true,
-    rating: 4.9,
-    response_time_minutes: 25,
-    notes: "24/7 heavy duty & flatbed roadside assistance and accident recovery",
-  },
-  {
-    name: "Capital Roadside & Battery Service",
-    phone: "+12025550144",
-    email: "service@capitalroadside.com",
-    service_type: "battery_jump",
-    coverage_area: "Washington DC Metro & Arlington",
-    region: "USA",
-    is_active: true,
-    rating: 4.8,
-    response_time_minutes: 20,
-    notes: "Mobile battery diagnostics, jump starts, and alternator testing",
-  },
-  {
-    name: "Chesapeake Mobile Tire & Wheel Repair",
-    phone: "+13015550188",
-    email: "tires@chesapeaketire.com",
-    service_type: "tire_change",
-    coverage_area: "Baltimore, Annapolis, Montgomery County MD",
-    region: "USA",
-    is_active: true,
-    rating: 4.9,
-    response_time_minutes: 30,
-    notes: "On-site tire replacements, flat tire patching, and balance",
-  },
-  {
-    name: "Metro Rapid Lockout & Key Assist",
-    phone: "+17035550162",
-    email: "support@metrolockout.com",
-    service_type: "lockout",
-    coverage_area: "DC, Bethesda, Silver Spring, Alexandria",
-    region: "USA",
-    is_active: true,
-    rating: 5.0,
-    response_time_minutes: 15,
-    notes: "Damage-free vehicle lockouts and emergency remote re-entry",
-  },
-  {
-    name: "Express Emergency Fuel Delivery",
-    phone: "+17035550199",
-    email: "fuel@expressfuelroadside.com",
-    service_type: "fuel_delivery",
-    coverage_area: "I-95, I-495 Beltway, I-66 Corridor",
-    region: "USA",
-    is_active: true,
-    rating: 4.7,
-    response_time_minutes: 25,
-    notes: "Emergency gasoline and diesel delivery directly to stranded vehicles",
-  },
-  {
-    name: "Lagos Island Rapid Tow & Recovery",
-    phone: "+2348025550101",
-    email: "dispatch@lagostow.ng",
-    service_type: "towing",
-    coverage_area: "Lagos Island, Victoria Island, Lekki, Ikoyi",
-    region: "Nigeria",
-    is_active: true,
-    rating: 4.8,
-    response_time_minutes: 35,
-    notes: "Hydraulic flatbed haulage and emergency breakdown recovery in Lagos",
-  },
-  {
-    name: "Mainland Auto Rescue & Jumpstart",
-    phone: "+2348035550122",
-    email: "help@mainlandrescue.ng",
-    service_type: "battery_jump",
-    coverage_area: "Ikeja, Yaba, Surulere, Maryland, Gbagada",
-    region: "Nigeria",
-    is_active: true,
-    rating: 4.9,
-    response_time_minutes: 30,
-    notes: "Quick motorcycle response units for rapid battery jumps and mechanical triage",
-  },
-  {
-    name: "Abuja Federal Capital Roadside Rescue",
-    phone: "+2348095550177",
-    email: "rescue@abujafctroadside.ng",
-    service_type: "general",
-    coverage_area: "Garki, Wuse, Maitama, Asokoro, Airport Road",
-    region: "Nigeria",
-    is_active: true,
-    rating: 4.9,
-    response_time_minutes: 25,
-    notes: "Full-service roadside assistance across Abuja Municipal Area Council",
-  },
-];
-
 export function ServiceProvidersHub() {
   const [loading, setLoading] = useState(true);
   const [enablingAll, setEnablingAll] = useState(false);
@@ -180,22 +80,15 @@ export function ServiceProvidersHub() {
     setLoading(true);
     try {
       // 1. Load roadside partners
-      const { data: roadsideData } = await supabase
+      const { data: roadsideData, error: roadsideError } = await supabase
         .from("roadside_partners")
         .select("*")
         .order("name");
-
-      if (roadsideData && roadsideData.length > 0) {
-        setRoadsidePartners(roadsideData);
-      } else {
-        // Use default certified list if database is empty
-        setRoadsidePartners(
-          DEFAULT_ROADSIDE_PROVIDERS.map((p, idx) => ({
-            ...p,
-            id: `certified-partner-${idx + 1}`,
-          }))
-        );
-      }
+      if (roadsideError) {
+        console.error("Could not load roadside partners:", roadsideError);
+        toast.error("Could not load roadside partners");
+        setRoadsidePartners([]);
+      } else setRoadsidePartners(roadsideData ?? []);
 
       // 2. Load telemetry providers
       const { data: telemetryData } = await supabase
@@ -229,34 +122,6 @@ export function ServiceProvidersHub() {
     let successCount = 0;
 
     try {
-      // 1. Enable Roadside Partners
-      try {
-        const { error: roadsideErr } = await supabase
-          .from("roadside_partners")
-          .update({ is_active: true })
-          .neq("id", "00000000-0000-0000-0000-000000000000");
-
-        if (!roadsideErr) {
-          successCount++;
-        }
-
-        // If table was empty, seed all certified partners
-        const { count } = await supabase
-          .from("roadside_partners")
-          .select("id", { count: "exact", head: true });
-
-        if (count === 0) {
-          for (const partner of DEFAULT_ROADSIDE_PROVIDERS) {
-            await supabase.from("roadside_partners").insert(partner);
-          }
-        }
-      } catch (e) {
-        console.warn("Roadside update notice:", e);
-      }
-
-      // Update local roadside state
-      setRoadsidePartners((prev) => prev.map((p) => ({ ...p, is_active: true })));
-
       // 2. Enable All Telemetry Providers
       try {
         const { error: telErr } = await supabase
@@ -330,7 +195,7 @@ export function ServiceProvidersHub() {
 
       toast.success("All Service Providers Enabled!", {
         description:
-          "Roadside Assistance, Telemetry, CPaaS messaging, Payment Gateways, and Cellular IoT are all active.",
+          "Roadside providers require individual review; other provider categories were processed separately.",
         duration: 6000,
       });
     } catch (err: any) {
@@ -341,26 +206,6 @@ export function ServiceProvidersHub() {
   };
 
   // Category-specific enable all actions
-  const enableCategoryRoadside = async () => {
-    try {
-      await supabase
-        .from("roadside_partners")
-        .update({ is_active: true })
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-
-      // If empty, insert defaults
-      if (roadsidePartners.length === 0) {
-        for (const p of DEFAULT_ROADSIDE_PROVIDERS) {
-          await supabase.from("roadside_partners").insert(p);
-        }
-      }
-    } catch (e) {
-      /* ignore */
-    }
-    setRoadsidePartners((prev) => prev.map((p) => ({ ...p, is_active: true })));
-    toast.success("All Roadside Service Providers enabled");
-  };
-
   const enableCategoryTelemetry = async () => {
     try {
       await supabase
@@ -393,15 +238,18 @@ export function ServiceProvidersHub() {
   // Toggle individual items
   const toggleRoadsidePartner = async (id: string, currentActive: boolean) => {
     const nextState = !currentActive;
-    setRoadsidePartners((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, is_active: nextState } : p))
-    );
     try {
-      await supabase.from("roadside_partners").update({ is_active: nextState }).eq("id", id);
+      const { data, error } = await supabase.from("roadside_partners").update({ is_active: nextState }).eq("id", id).select("id").maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("Partner was not updated");
+      setRoadsidePartners((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, is_active: nextState } : p))
+      );
+      toast.success(`Roadside partner ${nextState ? "activated" : "deactivated"}`);
     } catch (e) {
-      /* local state updated */
+      console.error("Failed to update roadside partner:", e);
+      toast.error("Failed to update roadside partner");
     }
-    toast.success(`Roadside partner ${nextState ? "activated" : "deactivated"}`);
   };
 
   const toggleTelemetryProvider = async (id: string, currentActive: boolean) => {
@@ -591,15 +439,6 @@ export function ServiceProvidersHub() {
                     Roadside Support Partners ({roadsidePartners.filter((p) => p.is_active).length}/{roadsidePartners.length} Active)
                   </CardTitle>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={enableCategoryRoadside}
-                  className="text-xs h-8 gap-1"
-                >
-                  <Zap className="w-3 h-3 text-orange-600" />
-                  Enable All Roadside
-                </Button>
               </div>
             </CardHeader>
             <CardContent className="p-4 grid md:grid-cols-2 gap-3">
@@ -843,11 +682,8 @@ export function ServiceProvidersHub() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold">Roadside Assistance Partners</h3>
-              <p className="text-sm text-muted-foreground">Certified mobile technicians, tow operators, and lockout services across USA &amp; Nigeria.</p>
+              <p className="text-sm text-muted-foreground">Roadside partner records across USA &amp; Nigeria.</p>
             </div>
-            <Button onClick={enableCategoryRoadside} className="gap-2">
-              <Zap className="w-4 h-4" /> Enable All Roadside Partners
-            </Button>
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             {roadsidePartners.map((p) => (

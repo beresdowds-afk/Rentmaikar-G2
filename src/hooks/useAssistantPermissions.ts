@@ -31,11 +31,7 @@ export interface AssistantPermissionsResult {
 export function useAssistantPermissions(): AssistantPermissionsResult {
   const { user, userRole } = useAuth();
 
-  const normalizedEmail = user?.email?.trim().toLowerCase();
-  const isDeclaredFullAdmin =
-    userRole === 'admin' ||
-    (normalizedEmail &&
-      ['adebayoolusola39@gmail.com', 'beresdowds@gmail.com', 'beresanddowds@gmail.com'].includes(normalizedEmail));
+  const isDeclaredFullAdmin = userRole === 'admin';
 
   const { data, isLoading } = useQuery({
     queryKey: ['assistant-permissions', user?.id ?? null, userRole],

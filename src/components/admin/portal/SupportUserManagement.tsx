@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -95,7 +94,6 @@ export const SupportUserManagement = () => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [newUser, setNewUser] = useState({
     email: '',
-    password: '',
     fullName: '',
     phone: '',
     supportType: '' as SupportTaskType,
@@ -143,58 +141,52 @@ export const SupportUserManagement = () => {
     }
   };
 
+  const revokeUnusedSupportRole = async (userId: string, role: AppRole) => {
+    const { data, error } = await supabase
+      .from('support_staff')
+      .select('support_type')
+      .eq('user_id', userId);
+    if (error) throw error;
+    if (!(data || []).some((row) => roleForSupportType(row.support_type) === role)) {
+      await revokeRole(userId, role);
+    }
+  };
+
   useEffect(() => {
     fetchStaff();
   }, []);
 
   // Register new support user
   const handleRegisterUser = async () => {
-    if (!newUser.email || !newUser.password || !newUser.fullName || !newUser.supportType || !newUser.assignedCity) {
+    if (!newUser.email || !newUser.fullName || !newUser.supportType || !newUser.assignedCity) {
       toast.error('Please fill in all required fields');
       return;
     }
 
     setIsRegistering(true);
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newUser.email,
-        password: newUser.password,
-        options: {
-          data: {
-            full_name: newUser.fullName,
+      const role = roleForSupportType(newUser.supportType);
+      if (!role) throw new Error('Unsupported support type');
+      const { data, error } = await supabase.functions.invoke('admin-create-user', {
+        body: {
+          email: newUser.email,
+          full_name: newUser.fullName,
+          role,
+          phone: newUser.phone || undefined,
+          support_assignment: {
+            support_type: newUser.supportType,
+            assigned_city: newUser.assignedCity,
+            assigned_region: newUser.assignedRegion,
           },
         },
       });
-
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('User creation failed');
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const { error: staffError } = await supabase
-        .from('support_staff')
-        .insert([{
-          user_id: authData.user.id,
-          support_type: newUser.supportType,
-          assigned_city: newUser.assignedCity,
-          assigned_region: newUser.assignedRegion,
-          phone: newUser.phone || null,
-          is_active: true,
-        }]);
-
-      if (staffError) throw staffError;
-
-
-      const role = roleForSupportType(newUser.supportType);
-      if (role) {
-        await assignRole(authData.user.id, role, newUser.email);
-      }
-
-      toast.success('Support user registered successfully');
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (data?.email_sent) toast.success('Support user created', { description: data.message });
+      else toast.warning('Support user created, but verification email failed', { description: data?.email_error || 'Resend verification from Role Management.' });
       setIsRegisterOpen(false);
       setNewUser({
         email: '',
-        password: '',
         fullName: '',
         phone: '',
         supportType: '' as SupportTaskType,
@@ -219,6 +211,8 @@ export const SupportUserManagement = () => {
 
     setIsOnboarding(true);
     try {
+      const role = roleForSupportType(onboardUser.supportType);
+      if (!role) throw new Error('Unsupported support type');
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('user_id, email')
@@ -258,10 +252,7 @@ export const SupportUserManagement = () => {
       if (staffError) throw staffError;
 
 
-      const role = roleForSupportType(onboardUser.supportType);
-      if (role) {
-        await assignRole(profileData.user_id, role, profileData.email);
-      }
+      await assignRole(profileData.user_id, role, profileData.email);
 
       toast.success('User onboarded as support staff');
       setIsOnboardOpen(false);
@@ -313,7 +304,7 @@ export const SupportUserManagement = () => {
       
       const role = roleForSupportType(supportType);
       if (role) {
-        await revokeRole(userId, role);
+        await revokeUnusedSupportRole(userId, role);
       }
 
       toast.success('Support staff removed');
@@ -349,6 +340,7 @@ export const SupportUserManagement = () => {
       if (editForm.assigned_region !== member.assigned_region) updates.assigned_region = editForm.assigned_region;
       if (editForm.phone !== (member.phone || '')) updates.phone = editForm.phone || null;
       if (editForm.support_type !== member.support_type) {
+        if (!roleForSupportType(editForm.support_type)) throw new Error('Unsupported support type');
         updates.support_type = editForm.support_type;
         roleChanged = true;
       }
@@ -372,7 +364,7 @@ export const SupportUserManagement = () => {
         const newRole = roleForSupportType(editForm.support_type);
 
         if (oldRole && oldRole !== newRole) {
-          await revokeRole(member.user_id, oldRole);
+          await revokeUnusedSupportRole(member.user_id, oldRole);
         }
         if (newRole) {
           await assignRole(member.user_id, newRole);
@@ -622,15 +614,7 @@ export const SupportUserManagement = () => {
                       onChange={(e) => setNewUser(prev => ({ ...prev, email: e.target.value }))}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Password *</Label>
-                    <PasswordInput
-                      placeholder="Minimum 8 characters"
-                      autoComplete="new-password"
-                      value={newUser.password}
-                      onChange={(e) => setNewUser(prev => ({ ...prev, password: e.target.value }))}
-                    />
-                  </div>
+                  <p className="text-sm text-muted-foreground">The user verifies their email and sets their own password.</p>
                   <div className="space-y-2">
                     <Label>Phone (Optional)</Label>
                     <PhoneNumberInput

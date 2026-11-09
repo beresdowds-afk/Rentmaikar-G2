@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Lock, LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,7 +25,7 @@ interface GateArgs {
  * vehicle fields) never evaluates for unauthenticated users.
  */
 export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNode | null {
-  const { user, isLoading, userRole, isRoleLoading } = useAuth();
+  const { user, isLoading, userRole, isRoleLoading, twoFactorVerified, hasRole } = useAuth();
   const location = useLocation();
 
   // A user who already registered must never be pushed back into a fresh
@@ -59,6 +59,10 @@ export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNo
         </div>
       </div>
     );
+  }
+
+  if (user && !twoFactorVerified) {
+    return <Navigate to="/auth" replace state={{ from: location }} />;
   }
 
   // If viewing via administrative impersonation or staff role, allow access
@@ -113,7 +117,7 @@ export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNo
 
   // A signed-in account with no role row must NOT fall through to the
   // dashboard — treat "no role" the same as "wrong role".
-  if (!userRole || !effectiveAllowed.includes(userRole)) {
+  if (!effectiveAllowed.some(hasRole)) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <Header />

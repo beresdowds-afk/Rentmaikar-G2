@@ -26,7 +26,7 @@ interface ContextUser {
   name: string;
   phone: string | null;
   email: string | null;
-  role: 'driver' | 'owner' | 'customer' | 'staff';
+  role: 'driver' | 'owner' | 'staff';
   subtitle?: string;
 }
 

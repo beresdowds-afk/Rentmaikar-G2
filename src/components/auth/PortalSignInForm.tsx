@@ -63,28 +63,14 @@ export default function PortalSignInForm({
         return;
       }
 
-      const { data: roles } = await supabase
+      const { data: roles, error: roleError } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId);
 
-      const normalized = email.trim().toLowerCase();
-      const isAdminByEmail = [
-        'adebayoolusola39@gmail.com',
-        'beresdowds@gmail.com',
-        'beresanddowds@gmail.com',
-        'eastfortemain@gmail.com',
-      ].includes(normalized);
-      const isAssistantByEmail = ['ibrahimganiyu026@gmail.com', 'eastfortemain@gmail.com', 'woleadebayo58@gmail.com'].includes(normalized);
+      if (roleError) throw roleError;
       const held = (roles ?? []).map((r) => r.role as AppRole);
-      if (isAdminByEmail && !held.includes('admin')) {
-        held.push('admin');
-      }
-      if (isAssistantByEmail && !held.includes('admin_assistant')) {
-        held.push('admin_assistant');
-      }
-      const isPlatformAdmin = held.includes('admin') || isAdminByEmail;
-      const match = isPlatformAdmin || held.find((r) => allowedRoles.includes(r));
+      const match = held.includes('admin') ? 'admin' : held.find((r) => allowedRoles.includes(r));
       if (!match) {
         await supabase.auth.signOut();
         setError('This account does not have access to this portal.');

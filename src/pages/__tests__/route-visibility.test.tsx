@@ -13,6 +13,8 @@ const authState: {
   userRole: any;
   isRoleLoading: boolean;
   twoFactorVerified: boolean;
+  hasRole: (role: string) => boolean;
+  userRoles: string[];
 } = {
   user: null,
   session: null,
@@ -21,6 +23,8 @@ const authState: {
   userRole: null,
   isRoleLoading: false,
   twoFactorVerified: false,
+  userRoles: [],
+  hasRole: (role: string) => authState.userRole === 'admin' || authState.userRole === role || authState.userRoles.includes(role),
 };
 
 vi.mock("@/contexts/AuthContext", () => ({
@@ -76,6 +80,7 @@ const resetAuth = () =>
     twoFactorStatus: null,
     isLoading: false,
     userRole: null,
+    userRoles: [],
     isRoleLoading: false,
     twoFactorVerified: false,
   });
@@ -148,6 +153,58 @@ describe("ProtectedRoute redirects unauthenticated users to /auth", () => {
 });
 
 describe("ProtectedRoute allows the correct role and redirects wrong roles", () => {
+  it.each([
+    "admin", "admin_assistant", "driver", "owner", "legal_support",
+    "iot_support", "vehicle_support", "insurance_support",
+  ] as const)("allows the assigned %s role through its role gate", (role) => {
+    setAuth({
+      user: { id: "u1" },
+      session: { access_token: "t" },
+      userRole: role,
+      userRoles: [role],
+      twoFactorVerified: true,
+    });
+    renderAt(
+      "/role-test",
+      <Route path="/role-test" element={<ProtectedRoute allowedRoles={[role]}><div>ROLE GATE</div></ProtectedRoute>} />,
+    );
+    expect(screen.getByText("ROLE GATE")).toBeTruthy();
+  });
+
+  it("allows an assigned secondary role without granting unrelated roles", () => {
+    setAuth({
+      user: { id: "u1" },
+      session: { access_token: "t" },
+      userRole: "legal_support",
+      userRoles: ["legal_support", "iot_support"],
+      twoFactorVerified: true,
+    });
+    renderAt(
+      "/iot",
+      <Route path="/iot" element={<ProtectedRoute allowedRoles={["iot_support"]}><div>IOT PORTAL</div></ProtectedRoute>} />
+    );
+    expect(screen.getByText("IOT PORTAL")).toBeTruthy();
+  });
+
+  it("does not grant access while two-factor status is still unknown", () => {
+    setAuth({
+      user: { id: "u1" },
+      session: { access_token: "t" },
+      userRole: "admin",
+      twoFactorStatus: null,
+      twoFactorVerified: false,
+    });
+    renderAt(
+      "/admin/audit-log",
+      <Route
+        path="/admin/audit-log"
+        element={<ProtectedRoute allowedRoles={["admin"]}><div>SECRET</div></ProtectedRoute>}
+      />
+    );
+    expect(screen.getByText("SIGN IN PAGE")).toBeTruthy();
+    expect(screen.queryByText("SECRET")).toBeNull();
+  });
+
   it("admin sees /admin/audit-log", () => {
     setAuth({
       user: { id: "u1" },
