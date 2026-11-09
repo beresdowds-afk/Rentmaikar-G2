@@ -18,6 +18,7 @@ export default function AdminSignIn() {
           title="Admin console"
           description="Staff sign-in for operations, communications and delivery monitoring."
           destination="/admin"
+          destinationByRole={{ admin_assistant: '/admin-assistant' }}
         />
       </div>
     </div>
