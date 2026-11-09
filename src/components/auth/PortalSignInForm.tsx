@@ -26,6 +26,8 @@ interface PortalSignInFormProps {
   description: string;
   /** Where to land after a successful, role-checked sign-in. */
   destination: string;
+  /** Optional landing-page overrides for specific roles in a shared portal. */
+  destinationByRole?: Partial<Record<AppRole, string>>;
   /** Optional sign-up route shown under the form. */
   signUpHref?: string;
   signUpLabel?: string;
@@ -42,6 +44,7 @@ export default function PortalSignInForm({
   title,
   description,
   destination,
+  destinationByRole,
   signUpHref,
   signUpLabel,
 }: PortalSignInFormProps) {
@@ -77,15 +80,18 @@ export default function PortalSignInForm({
         return;
       }
 
+      const signInDestination =
+        destinationByRole?.[match] || destination || ROLE_HOME[match] || '/';
+
       // Mandatory 2FA (admins/owners) is challenged on the main auth screen.
       const status = await check2FAStatus(userId);
       if (status?.requires_2fa) {
-        rememberReturnTo(destination);
+        rememberReturnTo(signInDestination);
         navigate('/auth', { replace: true });
         return;
       }
 
-      navigate(destination || ROLE_HOME[match] || '/', { replace: true });
+      navigate(signInDestination, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-in failed. Please try again.');
     } finally {
