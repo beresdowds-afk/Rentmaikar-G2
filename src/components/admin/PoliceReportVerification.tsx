@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { getUploadedFileUrl } from '@/lib/file-upload-api';
 import { 
   Shield, 
@@ -87,6 +88,8 @@ export const PoliceReportVerification = () => {
   const [selectedReport, setSelectedReport] = useState<PoliceReportWithDriver | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
+  const [possapConfirmed, setPossapConfirmed] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchPoliceReports();
@@ -155,12 +158,22 @@ export const PoliceReportVerification = () => {
     setSelectedReport(report);
     setRejectionReason('');
     setExpiryDate(report.expiry_date || '');
+    setPossapConfirmed(false);
     setVerifyDialogOpen(true);
   };
 
   const handleVerifyDocument = async (status: 'verified' | 'rejected') => {
     if (!selectedReport || !user) return;
+    if (status === 'verified' && !possapConfirmed) {
+      toast.error('Confirm the POSSAP validation before verifying this report');
+      return;
+    }
+    if (status === 'rejected' && !rejectionReason.trim()) {
+      toast.error('Provide a reason for rejection');
+      return;
+    }
 
+    setSaving(true);
     try {
       const updateData: TablesUpdate<'user_documents'> = {
         status,
@@ -168,12 +181,10 @@ export const PoliceReportVerification = () => {
         verified_by: status === 'verified' ? user.id : null,
       };
 
-      if (status === 'rejected') {
-        updateData.rejection_reason = rejectionReason;
-      }
+      updateData.rejection_reason = status === 'rejected' ? rejectionReason.trim() : null;
 
-      if (expiryDate && status === 'verified') {
-        updateData.expiry_date = expiryDate;
+      if (status === 'verified') {
+        updateData.expiry_date = expiryDate || null;
       }
 
       const { error } = await supabase
@@ -189,6 +200,8 @@ export const PoliceReportVerification = () => {
     } catch (error) {
       console.error('Error updating document status:', error);
       toast.error('Failed to update document status');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -487,6 +500,32 @@ export const PoliceReportVerification = () => {
                 View Document
               </Button>
 
+              <div className="space-y-3 rounded-md border p-3 text-sm">
+                <p>
+                  Open POSSAP and use Validate Document with the certificate's PSS number.
+                  Compare the result and holder details with the submitted report before approval.
+                  Scanning a QR code alone does not verify the certificate.
+                </p>
+                <a
+                  href="https://possap.gov.ng/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline"
+                >
+                  Open the official POSSAP portal
+                </a>
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="possapConfirmed"
+                    checked={possapConfirmed}
+                    onCheckedChange={(checked) => setPossapConfirmed(checked === true)}
+                  />
+                  <Label htmlFor="possapConfirmed">
+                    I checked the POSSAP validation result and matched it to this driver and report.
+                  </Label>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="expiryDate">Expiry Date (if applicable)</Label>
                 <Input
@@ -513,7 +552,7 @@ export const PoliceReportVerification = () => {
             <Button
               variant="destructive"
               onClick={() => handleVerifyDocument('rejected')}
-              disabled={!rejectionReason.trim()}
+              disabled={saving || !rejectionReason.trim()}
             >
               <XCircle className="h-4 w-4 mr-1" />
               Reject
@@ -521,6 +560,7 @@ export const PoliceReportVerification = () => {
             <Button
               onClick={() => handleVerifyDocument('verified')}
               className="bg-green-600 hover:bg-green-700"
+              disabled={saving || !possapConfirmed}
             >
               <CheckCircle className="h-4 w-4 mr-1" />
               Verify

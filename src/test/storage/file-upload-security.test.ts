@@ -11,6 +11,7 @@ import {
 } from "../../../backend/src/services/fileUploadService";
 import { supabaseBackendService } from "../../../backend/src/services/supabaseService";
 import { isRetentionExpired } from "../../../backend/src/services/documentLifecycleService";
+import * as licenceRecognition from "../../../backend/src/services/licenceExpiryRecognition";
 
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -228,6 +229,7 @@ describe("authoritative private file uploads", () => {
 
   it("rejects infected documents and never creates a signed URL", async () => {
     const harness = createHarness();
+    const recognize = vi.spyOn(licenceRecognition, "recognizeLicenceExpiry");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
       JSON.stringify({ verdict: "infected", scanner: "test-scanner" }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -243,10 +245,12 @@ describe("authoritative private file uploads", () => {
     expect(result.scanStatus).toBe("infected");
     expect(result.signedUrl).toBeUndefined();
     expect(harness.bucket.createSignedUrl).not.toHaveBeenCalled();
+    expect(recognize).not.toHaveBeenCalled();
   });
 
   it("keeps documents quarantined and unsigned when the malware scanner is unavailable", async () => {
     const harness = createHarness();
+    const recognize = vi.spyOn(licenceRecognition, "recognizeLicenceExpiry");
     delete process.env.DOCUMENT_SCANNER_URL;
     delete process.env.DOCUMENT_SCANNER_TOKEN;
 
@@ -260,10 +264,13 @@ describe("authoritative private file uploads", () => {
     expect(result.scanStatus).toBe("unavailable");
     expect(result.signedUrl).toBeUndefined();
     expect(harness.bucket.createSignedUrl).not.toHaveBeenCalled();
+    expect(recognize).not.toHaveBeenCalled();
   });
 
   it("submits a clean document for review and increments its immutable version", async () => {
     const harness = createHarness();
+    vi.spyOn(licenceRecognition, "recognizeLicenceExpiry")
+      .mockResolvedValue({ status: "recognized", date: "2030-10-25" });
     const result = await handleFileUpload(caller, file(), {
       purpose: "user_document",
       documentType: "driver_license",
@@ -273,6 +280,10 @@ describe("authoritative private file uploads", () => {
     expect(result.lifecycleState).toBe("submitted_for_review");
     expect(result.scanStatus).toBe("clean");
     expect(result.signedUrl).toContain("https://signed.example.test");
+    expect(harness.poolQuery).toHaveBeenCalledWith(
+      expect.stringContaining("SET suggested_expiry_date = $2"),
+      [DOCUMENT_ID, "2030-10-25", "recognized"],
+    );
     expect(harness.transactionQuery).toHaveBeenCalledWith(
       expect.stringContaining("COALESCE(MAX(document_version), 0) + 1"),
       expect.any(Array),
@@ -280,6 +291,22 @@ describe("authoritative private file uploads", () => {
     expect(harness.transactionQuery).toHaveBeenCalledWith(
       "SELECT pg_advisory_xact_lock(hashtext($1))",
       [`user_document:${USER_ID}:driver_license:`],
+    );
+  });
+
+  it("records OCR failure without treating it as a verified expiry or failing the upload", async () => {
+    const harness = createHarness();
+    vi.spyOn(licenceRecognition, "recognizeLicenceExpiry")
+      .mockResolvedValue({ status: "error", date: null });
+    const result = await handleFileUpload(caller, file(), {
+      purpose: "user_document",
+      documentType: "driver_license",
+      documentCategory: "identification",
+    });
+    expect(result.lifecycleState).toBe("submitted_for_review");
+    expect(harness.poolQuery).toHaveBeenCalledWith(
+      expect.stringContaining("SET suggested_expiry_date = $2"),
+      [DOCUMENT_ID, null, "error"],
     );
   });
 
@@ -293,6 +320,7 @@ describe("authoritative private file uploads", () => {
   it("archives expired documents, removes their storage objects, and retains audit history", async () => {
     const harness = createHarness();
     harness.poolQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never)
       .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never)
       .mockResolvedValueOnce({
         rows: [{

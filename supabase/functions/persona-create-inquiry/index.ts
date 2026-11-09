@@ -135,7 +135,10 @@ Deno.serve(async (req) => {
         .from("user_documents")
         .select("id")
         .eq("user_id", userData.user.id)
-        .eq("document_type", "drivers_license")
+        .in("document_type", ["driver_license", "drivers_license", "driving_licence", "driver_licence"])
+        .is("deleted_at", null)
+        .eq("scan_status", "clean")
+        .in("lifecycle_state", ["submitted_for_review", "verified"])
         .limit(1);
       if (parsed.data.drivers_license_document_id) {
         dlQuery = dlQuery.eq("id", parsed.data.drivers_license_document_id);
