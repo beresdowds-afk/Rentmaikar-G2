@@ -247,6 +247,7 @@ const LOCAL_GATEWAY_FUNCTIONS = new Set([
   "upload-file",
   "delete-file",
   "get-file-url",
+  "list-document-lifecycle-issues",
   // Inspection & Visual Damage Evidence Operations
   "detect-inspection-damage",
   "compare-inspections",

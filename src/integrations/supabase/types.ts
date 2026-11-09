@@ -9956,8 +9956,13 @@ export type Database = {
       }
       user_documents: {
         Row: {
+          access_classification: string | null
+          content_sha256: string | null
           created_at: string
+          deleted_at: string | null
+          deleted_by: string | null
           document_category: string
+          document_version: number
           document_type: string
           expires_at: string | null
           expiry_date: string | null
@@ -9965,8 +9970,14 @@ export type Database = {
           file_path: string
           file_size: number | null
           id: string
+          lifecycle_state: string
           mime_type: string | null
+          retention_until: string | null
           rejection_reason: string | null
+          scan_error: string | null
+          scan_provider: string | null
+          scan_status: string
+          scanned_at: string | null
           status: string
           updated_at: string
           user_id: string
@@ -9975,8 +9986,13 @@ export type Database = {
           verified_by: string | null
         }
         Insert: {
+          access_classification?: string | null
+          content_sha256?: string | null
           created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           document_category: string
+          document_version?: number
           document_type: string
           expires_at?: string | null
           expiry_date?: string | null
@@ -9984,8 +10000,14 @@ export type Database = {
           file_path: string
           file_size?: number | null
           id?: string
+          lifecycle_state?: string
           mime_type?: string | null
+          retention_until?: string | null
           rejection_reason?: string | null
+          scan_error?: string | null
+          scan_provider?: string | null
+          scan_status?: string
+          scanned_at?: string | null
           status?: string
           updated_at?: string
           user_id: string
@@ -9994,8 +10016,13 @@ export type Database = {
           verified_by?: string | null
         }
         Update: {
+          access_classification?: string | null
+          content_sha256?: string | null
           created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           document_category?: string
+          document_version?: number
           document_type?: string
           expires_at?: string | null
           expiry_date?: string | null
@@ -10003,8 +10030,14 @@ export type Database = {
           file_path?: string
           file_size?: number | null
           id?: string
+          lifecycle_state?: string
           mime_type?: string | null
+          retention_until?: string | null
           rejection_reason?: string | null
+          scan_error?: string | null
+          scan_provider?: string | null
+          scan_status?: string
+          scanned_at?: string | null
           status?: string
           updated_at?: string
           user_id?: string

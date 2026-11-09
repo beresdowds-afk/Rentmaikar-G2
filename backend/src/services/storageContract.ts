@@ -160,6 +160,8 @@ export interface UploadFileResponse {
   thumbnailUrl?: string;
   documentId?: string;
   submissionId?: string;
+  lifecycleState?: "quarantined" | "rejected" | "submitted_for_review";
+  scanStatus?: "clean" | "infected" | "unavailable" | "error";
 }
 
 export interface DeleteFileResponse {

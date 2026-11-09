@@ -5,6 +5,7 @@ import { supabaseBackendService } from "./supabaseService";
 import { getDbPool } from "./dbPool";
 import type { PoolClient } from "pg";
 import { registerEvidenceArtifact } from "./evidenceHashService";
+import { isRetentionExpired, scanDocument, type MalwareScanResult } from "./documentLifecycleService";
 import {
   StoragePurpose,
   PURPOSE_CONFIGS,
@@ -226,6 +227,18 @@ function validateFile(file: FilePayload, purpose: StoragePurpose): {
             ? bytes.subarray(0, 5).toString("ascii") === "%PDF-"
             : false;
   if (!validSignature) throw uploadError("File signature does not match the declared type");
+  if (
+    (mimeType === "application/pdf" &&
+      (bytes.length < 15 || !bytes.subarray(Math.max(0, bytes.length - 2048)).includes(Buffer.from("%%EOF")))) ||
+    (mimeType === "image/jpeg" &&
+      (bytes.length < 4 || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9)) ||
+    (mimeType === "image/png" &&
+      (bytes.length < 20 || bytes.subarray(bytes.length - 8, bytes.length - 4).toString("ascii") !== "IEND")) ||
+    (mimeType === "image/webp" &&
+      bytes.readUInt32LE(4) + 8 !== bytes.length)
+  ) {
+    throw uploadError("Malformed document or image file");
+  }
 
   return {
     fileName,
@@ -234,6 +247,109 @@ function validateFile(file: FilePayload, purpose: StoragePurpose): {
     size,
     sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
   };
+}
+
+async function getRetentionDeadline(
+  pool: ReturnType<typeof getDbPool>,
+  category: string,
+): Promise<string | null> {
+  const result = await pool.query(
+    `SELECT now() + make_interval(days => retention_days) AS retention_until
+       FROM public.document_retention_policies
+      WHERE document_category = $1 AND enabled = true
+        AND retention_days IS NOT NULL AND retention_days > 0`,
+    [category],
+  );
+  return result.rows[0]?.retention_until
+    ? new Date(result.rows[0].retention_until).toISOString()
+    : null;
+}
+
+async function persistScanResult(
+  pool: ReturnType<typeof getDbPool>,
+  reconciliationId: string,
+  documentId: string | undefined,
+  result: MalwareScanResult,
+): Promise<{
+  lifecycleState: "quarantined" | "rejected" | "submitted_for_review";
+  scanStatus: "clean" | "infected" | "unavailable" | "error";
+}> {
+  const clean = result.status === "clean";
+  const infected = result.status === "infected";
+  const lifecycleState = clean ? "clean" : infected ? "rejected" : "quarantined";
+  const scanStatus = clean ? "clean" : infected ? "infected" : result.status;
+  await pool.query(
+    `UPDATE public.storage_upload_reconciliation
+        SET lifecycle_state = $2, scan_status = $3, scan_provider = $4,
+            scanned_at = CASE WHEN $3 IN ('clean', 'infected') THEN now() ELSE NULL END,
+            scan_error = $5, last_error = $5, updated_at = now()
+      WHERE id = $1`,
+    [reconciliationId, lifecycleState, scanStatus, result.provider, clean || infected ? null : result.details],
+  );
+  if (documentId) {
+    await pool.query(
+      `UPDATE public.user_documents
+          SET lifecycle_state = $2, scan_status = $3, scan_provider = $4,
+              scanned_at = CASE WHEN $3 IN ('clean', 'infected') THEN now() ELSE NULL END,
+              scan_error = $5,
+              status = CASE WHEN $3 = 'infected' THEN 'rejected' ELSE status END,
+              rejection_reason = CASE WHEN $3 = 'infected' THEN 'Malware detected by configured scanner' ELSE rejection_reason END,
+              updated_at = now()
+        WHERE id = $1`,
+      [documentId, lifecycleState, scanStatus, result.provider, clean || infected ? null : result.details],
+    );
+  }
+  if (clean) {
+    await pool.query(
+      `UPDATE public.storage_upload_reconciliation
+          SET lifecycle_state = 'submitted_for_review', updated_at = now()
+        WHERE id = $1 AND scan_status = 'clean'`,
+      [reconciliationId],
+    );
+    if (documentId) {
+      await pool.query(
+        `UPDATE public.user_documents
+            SET lifecycle_state = 'submitted_for_review', updated_at = now()
+          WHERE id = $1 AND scan_status = 'clean'`,
+        [documentId],
+      );
+    }
+    return { lifecycleState: "submitted_for_review", scanStatus: "clean" };
+  }
+  return {
+    lifecycleState: infected ? "rejected" : "quarantined",
+    scanStatus,
+  };
+}
+
+async function scanAndRecordUpload(
+  pool: ReturnType<typeof getDbPool>,
+  reconciliationId: string,
+  documentId: string | undefined,
+  file: FilePayload,
+  fileName: string,
+  mimeType: string,
+  sha256: string,
+): Promise<{
+  lifecycleState: "quarantined" | "rejected" | "submitted_for_review";
+  scanStatus: "clean" | "infected" | "unavailable" | "error";
+}> {
+  await pool.query(
+    `UPDATE public.storage_upload_reconciliation
+        SET lifecycle_state = 'scanning', scan_status = 'scanning', updated_at = now()
+      WHERE id = $1`,
+    [reconciliationId],
+  );
+  if (documentId) {
+    await pool.query(
+      `UPDATE public.user_documents
+          SET lifecycle_state = 'scanning', scan_status = 'scanning', updated_at = now()
+        WHERE id = $1`,
+      [documentId],
+    );
+  }
+  const result = await scanDocument({ buffer: file.buffer, fileName, mimeType, sha256 });
+  return persistScanResult(pool, reconciliationId, documentId, result);
 }
 
 function hasExplicitAdminRole(auth: AuthContext): boolean {
@@ -384,6 +500,10 @@ export async function handleFileUpload(
   let thumbnailUrl: string | undefined;
   let reconciliationId: string | undefined;
   let resourceKey = "";
+  let documentCategoryForRetention = "identification";
+  let retentionUntil: string | null = null;
+  let lifecycleState: "quarantined" | "rejected" | "submitted_for_review" | undefined;
+  let scanStatus: "clean" | "infected" | "unavailable" | "error" | undefined;
 
   if (purpose === "user_document") {
     const documentType = String(metadata.documentType || "").trim();
@@ -401,6 +521,7 @@ export async function handleFileUpload(
       }
     }
     if (metadata.expiresAt) parseDate(metadata.expiresAt, "expiresAt");
+    documentCategoryForRetention = documentCategory;
     resourceKey = documentType;
     filePath = `${verifiedVehicle?.ownerId || auth.userId}/${documentType}/${nowKey}${validated.extension}`;
   } else if (purpose === "vehicle_photo") {
@@ -431,10 +552,12 @@ export async function handleFileUpload(
     }
     const ownerId = verifiedVehicle?.ownerId || auth.userId;
     if (purpose === "rideshare_profile") {
+      documentCategoryForRetention = "rideshare";
       const weekStartDate = parseDate(metadata.weekStartDate, "weekStartDate");
       resourceKey = weekStartDate;
       filePath = `${auth.userId}/${weekStartDate}/rideshare-profile_${nowKey}${validated.extension}`;
     } else if (purpose === "inspection_image") {
+      documentCategoryForRetention = "inspection";
       const weekStartDate = parseDate(metadata.weekStartDate, "weekStartDate", true);
       const rawSlot = String(metadata.photoType || "photo_front_view");
       const slot = rawSlot.startsWith("photo_") ? rawSlot : `photo_${rawSlot}`;
@@ -444,6 +567,7 @@ export async function handleFileUpload(
       metadata.photoType = slot;
       metadata.weekStartDate = weekStartDate;
     } else {
+      documentCategoryForRetention = "damage";
       const findingId = String(metadata.findingId || "").trim();
       if (findingId && !/^[a-zA-Z0-9_-]{1,100}$/.test(findingId)) {
         throw uploadError("Invalid findingId");
@@ -455,21 +579,22 @@ export async function handleFileUpload(
   }
 
   if (purpose !== "vehicle_photo") {
+    retentionUntil = await getRetentionDeadline(pool, documentCategoryForRetention);
     const resourceType =
       purpose === "user_document" ? "user_document" :
       purpose === "rideshare_profile" ? "rideshare_profile_submission" :
       purpose === "inspection_image" ? "weekly_inspection_report" : "damage_evidence";
     const documentCategory =
-      purpose === "user_document" ? metadata.documentCategory! :
-      purpose === "inspection_image" || purpose === "damage_evidence" ? "vehicle" : "identification";
+      purpose === "user_document" ? metadata.documentCategory! : documentCategoryForRetention;
     let staged;
     try {
       staged = await pool.query(
       `INSERT INTO public.storage_upload_reconciliation (
          uploader_id, owner_id, vehicle_id, purpose, resource_type, resource_key,
          document_category, document_type, storage_bucket, storage_path,
-         file_name, file_size, mime_type, content_sha256, review_status, state
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 'pending_storage')
+         file_name, file_size, mime_type, content_sha256, review_status, state,
+         lifecycle_state, scan_status, retention_until
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', 'pending_storage', 'uploaded', 'pending', $15)
        RETURNING id`,
       [
         auth.userId,
@@ -486,6 +611,7 @@ export async function handleFileUpload(
         validated.size,
         validated.mimeType,
         validated.sha256,
+        retentionUntil,
       ],
       );
     } catch (error) {
@@ -552,17 +678,29 @@ export async function handleFileUpload(
       await client.query("BEGIN");
       if (purpose === "user_document") {
         const documentOwnerId = verifiedVehicle?.ownerId || auth.userId;
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtext($1))",
+          [`user_document:${documentOwnerId}:${metadata.documentType}:${vehicleId || ""}`],
+        );
         const docResult = await client.query(
           `INSERT INTO public.user_documents (
              user_id, document_type, document_category, file_path, file_name,
              file_size, mime_type, vehicle_id, expires_at, status,
-             content_sha256, document_version, access_classification
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, 1, 'restricted')
+             content_sha256, document_version, access_classification,
+             lifecycle_state, scan_status, retention_until
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10,
+             (SELECT COALESCE(MAX(document_version), 0) + 1
+                FROM public.user_documents
+               WHERE user_id = $1 AND document_type = $2
+                 AND vehicle_id IS NOT DISTINCT FROM $8),
+             'restricted', 'quarantined', 'pending', $11
+           )
            RETURNING id`,
           [
             documentOwnerId, metadata.documentType, metadata.documentCategory, filePath,
             validated.fileName, validated.size, validated.mimeType, vehicleId || null,
-            metadata.expiresAt || null, validated.sha256,
+            metadata.expiresAt || null, validated.sha256, retentionUntil,
           ],
         );
         documentId = String(docResult.rows[0]?.id || "");
@@ -570,6 +708,13 @@ export async function handleFileUpload(
         evidenceSourceTable = "user_documents";
         evidenceSourceId = documentId;
       } else if (purpose === "rideshare_profile") {
+        const existingSubmission = await client.query(
+          `SELECT id, status, submitted_at, admin_reviewed_at, admin_reviewed_by, admin_notes
+             FROM public.rideshare_profile_submissions
+            WHERE driver_id = $1 AND week_start_date = $2
+            FOR UPDATE`,
+          [auth.userId, metadata.weekStartDate],
+        );
         const submission = await client.query(
           `INSERT INTO public.rideshare_profile_submissions (
              driver_id, vehicle_id, week_start_date, rating_screenshot_url,
@@ -580,6 +725,11 @@ export async function handleFileUpload(
              rating_screenshot_url = EXCLUDED.rating_screenshot_url,
              platform = COALESCE(EXCLUDED.platform, rideshare_profile_submissions.platform),
              current_rating = COALESCE(EXCLUDED.current_rating, rideshare_profile_submissions.current_rating),
+             status = 'pending',
+             submitted_at = NULL,
+             admin_reviewed_at = NULL,
+             admin_reviewed_by = NULL,
+             admin_notes = NULL,
              updated_at = now()
            RETURNING id`,
           [
@@ -589,13 +739,35 @@ export async function handleFileUpload(
         );
         submissionId = String(submission.rows[0]?.id || "");
         if (!submissionId) throw new Error("Rideshare evidence metadata was not persisted");
+        if (existingSubmission.rows[0]) {
+          await client.query(
+            `INSERT INTO public.document_lifecycle_events (
+               reconciliation_id, event_type, actor_id, previous_state, next_state, details
+             ) VALUES ($1, 'rideshare_evidence_reuploaded', $2, $3, 'pending', $4::jsonb)`,
+            [
+              reconciliationId,
+              auth.userId,
+              existingSubmission.rows[0].status,
+              JSON.stringify({
+                submissionId,
+                previousSubmittedAt: existingSubmission.rows[0].submitted_at,
+                previousReviewedAt: existingSubmission.rows[0].admin_reviewed_at,
+                previousReviewerId: existingSubmission.rows[0].admin_reviewed_by,
+                previousReviewNotes: existingSubmission.rows[0].admin_notes,
+              }),
+            ],
+          );
+        }
         evidenceSourceTable = "rideshare_profile_submissions";
         evidenceSourceId = submissionId;
       } else if (purpose === "inspection_image") {
         const slot = String(metadata.photoType);
         const weekStartDate = String(metadata.weekStartDate);
         const reports = await client.query(
-          `SELECT id, driver_id, owner_id, photo_timestamps
+          `SELECT id, driver_id, owner_id, photo_timestamps, status, admin_decision,
+                  admin_reviewed_at, admin_id, admin_notes, owner_action,
+                  owner_reviewed_at, owner_notes, driver_responded_at,
+                  driver_accepted_withdrawal
              FROM public.weekly_inspection_reports
             WHERE vehicle_id = $1 AND week_start_date = $2
             LIMIT 1 FOR UPDATE`,
@@ -616,8 +788,35 @@ export async function handleFileUpload(
             [slot]: timestamp,
           };
           await client.query(
+            `INSERT INTO public.document_lifecycle_events (
+               reconciliation_id, event_type, actor_id, previous_state, next_state, details
+             ) VALUES ($1, 'inspection_evidence_reuploaded', $2, $3, 'pending', $4::jsonb)`,
+            [
+              reconciliationId,
+              auth.userId,
+              report.status,
+              JSON.stringify({
+                reportId: report.id,
+                photoType: slot,
+                previousAdminDecision: report.admin_decision,
+                previousAdminReviewedAt: report.admin_reviewed_at,
+                previousAdminId: report.admin_id,
+                previousAdminNotes: report.admin_notes,
+                previousOwnerAction: report.owner_action,
+                previousOwnerReviewedAt: report.owner_reviewed_at,
+                previousOwnerNotes: report.owner_notes,
+                previousDriverRespondedAt: report.driver_responded_at,
+                previousDriverAcceptedWithdrawal: report.driver_accepted_withdrawal,
+              }),
+            ],
+          );
+          await client.query(
             `UPDATE public.weekly_inspection_reports
-                SET ${slot} = $1, photo_timestamps = $2, updated_at = now()
+                SET ${slot} = $1, photo_timestamps = $2, status = 'pending',
+                    admin_decision = NULL, admin_reviewed_at = NULL, admin_id = NULL,
+                    admin_notes = NULL, owner_action = NULL, owner_reviewed_at = NULL,
+                    owner_notes = NULL, driver_responded_at = NULL,
+                    driver_accepted_withdrawal = false, updated_at = now()
               WHERE id = $3`,
             [filePath, JSON.stringify(timestamps), report.id],
           );
@@ -643,7 +842,8 @@ export async function handleFileUpload(
 
       await client.query(
         `UPDATE public.storage_upload_reconciliation
-            SET resource_id = $2, state = 'registered', last_error = NULL, updated_at = now()
+            SET resource_id = $2, state = 'registered', lifecycle_state = 'quarantined',
+                scan_status = 'pending', last_error = NULL, updated_at = now()
           WHERE id = $1`,
         [reconciliationId, evidenceSourceId],
       );
@@ -672,6 +872,8 @@ export async function handleFileUpload(
             fileSize: validated.size,
             mimeType: validated.mimeType,
             reviewStatus: "pending",
+            scanStatus: "pending",
+            lifecycleState: "quarantined",
           },
         },
         client,
@@ -709,13 +911,26 @@ export async function handleFileUpload(
       client?.release();
     }
 
-    const signed = await admin.storage
-      .from(config.bucket)
-      .createSignedUrl(filePath, Math.min(config.defaultSignedUrlExpirySeconds, MAX_SIGNED_URL_SECONDS));
-    if (signed.error || !signed.data?.signedUrl) {
-      throw uploadError(`Failed to create authorized file URL: ${signed.error?.message || "unknown error"}`, 502);
+    const scanOutcome = await scanAndRecordUpload(
+      pool,
+      reconciliationId!,
+      documentId,
+      file,
+      validated.fileName,
+      validated.mimeType,
+      validated.sha256,
+    );
+    lifecycleState = scanOutcome.lifecycleState;
+    scanStatus = scanOutcome.scanStatus;
+    if (lifecycleState === "submitted_for_review") {
+      const signed = await admin.storage
+        .from(config.bucket)
+        .createSignedUrl(filePath, Math.min(config.defaultSignedUrlExpirySeconds, MAX_SIGNED_URL_SECONDS));
+      if (signed.error || !signed.data?.signedUrl) {
+        throw uploadError(`Failed to create authorized file URL: ${signed.error?.message || "unknown error"}`, 502);
+      }
+      signedUrl = signed.data.signedUrl;
     }
-    signedUrl = signed.data.signedUrl;
   }
 
   return {
@@ -732,6 +947,8 @@ export async function handleFileUpload(
     thumbnailUrl,
     documentId,
     submissionId,
+    lifecycleState,
+    scanStatus: purpose === "vehicle_photo" ? undefined : scanStatus,
   };
 }
 
@@ -768,18 +985,59 @@ export async function handleDeleteFile(
     if (doc.status !== "pending" && !isAdmin) {
       throw uploadError("Reviewed evidence cannot be deleted", 403);
     }
-    if (isAdmin) {
-      await auditAdminOverride(pool, auth, "user_documents", String(doc.id), "delete");
-    }
-    await pool.query(
-      `UPDATE public.user_documents
-          SET deleted_at = now(), deleted_by = $2, updated_at = now()
-        WHERE id = $1 AND deleted_at IS NULL`,
+    const activeHold = await pool.query(
+      `SELECT 1 FROM public.document_legal_holds h
+        WHERE h.active = true AND (
+          h.document_id = $1 OR h.reconciliation_id IN (
+            SELECT r.id FROM public.storage_upload_reconciliation r
+             WHERE r.resource_type = 'user_document' AND r.resource_id = $1::text
+          )
+        )
+        LIMIT 1`,
+      [doc.id],
+    );
+    if (activeHold.rows[0]) throw uploadError("Document is protected by an active legal hold", 409);
+    if (isAdmin) await auditAdminOverride(pool, auth, "user_documents", String(doc.id), "delete");
+    const archived = await pool.query(
+      `WITH archived AS (
+         UPDATE public.user_documents
+            SET deleted_at = now(), deleted_by = $2, lifecycle_state = 'archived',
+                status = CASE WHEN status = 'verified' THEN 'pending' ELSE status END,
+                updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM public.document_legal_holds h
+               WHERE h.active = true AND (
+                 h.document_id = $1 OR h.reconciliation_id IN (
+                   SELECT r.id FROM public.storage_upload_reconciliation r
+                    WHERE r.resource_type = 'user_document' AND r.resource_id = $1::text
+                 )
+               )
+            )
+          RETURNING id, lifecycle_state
+       )
+       INSERT INTO public.document_lifecycle_events (
+         document_id, event_type, actor_id, previous_state, next_state, details
+       )
+       SELECT id, 'document_archived', $2, 'active', lifecycle_state,
+              jsonb_build_object('reason', 'authorized_user_request')
+         FROM archived`,
       [doc.id, auth.userId],
     );
+    if (!archived.rowCount) throw uploadError("Document is protected by an active legal hold", 409);
+    const admin = supabaseBackendService.getAdminClient();
+    const { error: removeError } = await admin.storage.from(config.bucket).remove([doc.file_path]);
+    if (removeError) {
+      await pool.query(
+        `INSERT INTO public.document_lifecycle_events (document_id, event_type, actor_id, details)
+         VALUES ($1, 'document_storage_deletion_failed', $2, $3::jsonb)`,
+        [doc.id, auth.userId, JSON.stringify({ error: removeError.message })],
+      );
+      throw uploadError("Document access was revoked, but secure storage deletion failed", 502);
+    }
     await pool.query(
       `UPDATE public.storage_upload_reconciliation
-          SET state = 'revoked', updated_at = now()
+          SET state = 'revoked', lifecycle_state = 'archived', updated_at = now()
         WHERE resource_type = 'user_document' AND resource_id = $1`,
       [doc.id],
     );
@@ -899,7 +1157,7 @@ export async function handleGetFileUrl(
   if (params.documentId) {
     if (purpose !== "user_document") throw uploadError("documentId is only valid for user documents");
     const docRes = await pool.query(
-      `SELECT id, user_id, file_path, deleted_at
+      `SELECT id, user_id, file_path, deleted_at, lifecycle_state, scan_status, retention_until
          FROM public.user_documents WHERE id = $1 LIMIT 1`,
       [params.documentId],
     );
@@ -907,6 +1165,13 @@ export async function handleGetFileUrl(
     const doc = docRes.rows[0];
     if (String(doc.user_id) !== auth.userId && !hasExplicitAdminRole(auth)) {
       throw uploadError("Not authorized to access this document", 403);
+    }
+    if (
+      doc.scan_status !== "clean" ||
+      !["submitted_for_review", "verified"].includes(String(doc.lifecycle_state)) ||
+      (doc.retention_until && new Date(doc.retention_until).getTime() <= Date.now())
+    ) {
+      throw uploadError("Document is quarantined, expired, archived, or not cleanly scanned", 404);
     }
     if (hasExplicitAdminRole(auth) && String(doc.user_id) !== auth.userId) {
       await auditAdminOverride(pool, auth, "user_documents", String(doc.id), "signed_url");
@@ -963,16 +1228,25 @@ export async function handleGetFileUrl(
   }
 
   const registered = await pool.query(
-    `SELECT id, uploader_id, owner_id, vehicle_id, resource_type, resource_id
+    `SELECT id, uploader_id, owner_id, vehicle_id, resource_type, resource_id,
+            lifecycle_state, scan_status, retention_until
        FROM public.storage_upload_reconciliation
       WHERE storage_bucket = $1 AND storage_path = $2 AND state = 'registered'
       LIMIT 1`,
     [config.bucket, targetPath],
   );
   const artifact = registered.rows[0];
+  if (
+    artifact &&
+    (artifact.scan_status !== "clean" ||
+      !["submitted_for_review", "verified"].includes(String(artifact.lifecycle_state)) ||
+      (artifact.retention_until && new Date(artifact.retention_until).getTime() <= Date.now()))
+  ) {
+    throw uploadError("Evidence is quarantined, expired, archived, or not cleanly scanned", 404);
+  }
   if (purpose === "user_document") {
     const document = await pool.query(
-      `SELECT id, user_id, deleted_at
+      `SELECT id, user_id, deleted_at, lifecycle_state, scan_status, retention_until
          FROM public.user_documents
         WHERE file_path = $1 AND ($2::uuid IS NULL OR id = $2::uuid)
         LIMIT 1`,
@@ -981,6 +1255,13 @@ export async function handleGetFileUrl(
     if (!document.rows[0] || document.rows[0].deleted_at) throw uploadError("Document is not available", 404);
     if (String(document.rows[0].user_id) !== auth.userId && !hasExplicitAdminRole(auth)) {
       throw uploadError("Not authorized to access this document", 403);
+    }
+    if (
+      document.rows[0].scan_status !== "clean" ||
+      !["submitted_for_review", "verified"].includes(String(document.rows[0].lifecycle_state)) ||
+      (document.rows[0].retention_until && new Date(document.rows[0].retention_until).getTime() <= Date.now())
+    ) {
+      throw uploadError("Document is quarantined, expired, archived, or not cleanly scanned", 404);
     }
     if (hasExplicitAdminRole(auth) && String(document.rows[0].user_id) !== auth.userId) {
       await auditAdminOverride(pool, auth, "user_documents", String(document.rows[0].id), "signed_url");
@@ -1020,5 +1301,288 @@ export async function handleGetFileUrl(
     url: signedData.signedUrl,
     isPublic: false,
     expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+  };
+}
+
+export async function processDocumentLifecycle(): Promise<{
+  scanned: number;
+  quarantined: number;
+  rejected: number;
+  archived: number;
+  failures: number;
+}> {
+  const pool = getDbPool();
+  const admin = supabaseBackendService.getAdminClient();
+  const counts = { scanned: 0, quarantined: 0, rejected: 0, archived: 0, failures: 0 };
+  const pendingScans = await pool.query(
+    `SELECT id, resource_type, resource_id, storage_bucket, storage_path,
+            file_name, mime_type, content_sha256
+       FROM public.storage_upload_reconciliation
+      WHERE (
+          lifecycle_state = 'quarantined'
+          AND scan_status IN ('not_scanned', 'pending', 'unavailable', 'error')
+        ) OR (
+          lifecycle_state = 'scanning' AND scan_status = 'scanning'
+          AND updated_at < now() - interval '15 minutes'
+        )
+      ORDER BY created_at
+      LIMIT 25`,
+  );
+
+  for (const record of pendingScans.rows) {
+    try {
+      const { data, error } = await admin.storage
+        .from(record.storage_bucket)
+        .download(record.storage_path);
+      if (error || !data) {
+        const result: MalwareScanResult = {
+          status: "unavailable",
+          provider: null,
+          details: error?.message || "Quarantined object could not be downloaded",
+        };
+        const documentId = record.resource_type === "user_document" ? String(record.resource_id) : undefined;
+        await persistScanResult(pool, String(record.id), documentId, result);
+        counts.failures += 1;
+        continue;
+      }
+      const file: FilePayload = {
+        buffer: Buffer.from(await data.arrayBuffer()),
+        originalname: record.file_name,
+        mimetype: record.mime_type,
+        size: Number(data.size),
+      };
+      await pool.query(
+        `UPDATE public.storage_upload_reconciliation
+            SET lifecycle_state = 'scanning', scan_status = 'scanning', updated_at = now()
+          WHERE id = $1`,
+        [record.id],
+      );
+      const documentId = record.resource_type === "user_document" ? String(record.resource_id) : undefined;
+      if (documentId) {
+        await pool.query(
+          `UPDATE public.user_documents
+              SET lifecycle_state = 'scanning', scan_status = 'scanning', updated_at = now()
+            WHERE id = $1`,
+          [documentId],
+        );
+      }
+      const result = await scanDocument({
+        buffer: file.buffer,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        sha256: record.content_sha256,
+      });
+      const state = await persistScanResult(pool, String(record.id), documentId, result);
+      counts.scanned += result.status === "clean" || result.status === "infected" ? 1 : 0;
+      counts.quarantined += state.lifecycleState === "quarantined" ? 1 : 0;
+      counts.rejected += state.lifecycleState === "rejected" ? 1 : 0;
+      if (state.lifecycleState === "quarantined") counts.failures += 1;
+    } catch (error) {
+      console.error("[fileUploadService] Quarantine scan retry failed:", error);
+      counts.failures += 1;
+    }
+  }
+
+  const expiredDocuments = await pool.query(
+    `SELECT d.id, d.file_path, d.retention_until
+       FROM public.user_documents d
+       JOIN public.document_retention_policies p
+         ON p.document_category = d.document_category AND p.enabled = true
+      WHERE d.retention_until <= now()
+        AND d.deleted_at IS NULL
+        AND d.lifecycle_state <> 'archived'
+        AND NOT EXISTS (
+          SELECT 1 FROM public.document_legal_holds h
+           WHERE h.active = true AND (
+             h.document_id = d.id OR h.reconciliation_id IN (
+               SELECT r.id FROM public.storage_upload_reconciliation r
+                WHERE r.resource_type = 'user_document' AND r.resource_id = d.id::text
+             )
+           )
+        )
+      ORDER BY d.retention_until
+      LIMIT 50`,
+  );
+  for (const doc of expiredDocuments.rows) {
+    if (!isRetentionExpired(doc.retention_until, false, false)) continue;
+    const transitioned = await pool.query(
+      `UPDATE public.user_documents
+          SET lifecycle_state = 'retention_expired',
+              status = CASE WHEN status = 'verified' THEN 'pending' ELSE status END,
+              updated_at = now()
+        WHERE id = $1 AND deleted_at IS NULL AND retention_until <= now()
+          AND EXISTS (
+            SELECT 1 FROM public.document_retention_policies p
+             WHERE p.document_category = public.user_documents.document_category
+               AND p.enabled = true
+               AND retention_until = created_at + make_interval(days => p.retention_days)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM public.document_legal_holds h
+             WHERE h.active = true AND (
+               h.document_id = $1 OR h.reconciliation_id IN (
+                 SELECT r.id FROM public.storage_upload_reconciliation r
+                  WHERE r.resource_type = 'user_document' AND r.resource_id = $1::text
+               )
+             )
+          )
+        RETURNING id`,
+      [doc.id],
+    );
+    if (!transitioned.rowCount) continue;
+    await pool.query(
+      `INSERT INTO public.document_lifecycle_events (
+        document_id, event_type, previous_state, next_state, details
+      ) VALUES ($1, 'retention_expired', 'active', 'retention_expired', $2::jsonb)`,
+      [doc.id, JSON.stringify({ retention_until: doc.retention_until })],
+    );
+    const { error } = await admin.storage.from("user-documents").remove([doc.file_path]);
+    if (error) {
+      console.error("[fileUploadService] Expired document deletion failed:", error);
+      await pool.query(
+        `INSERT INTO public.document_lifecycle_events (document_id, event_type, details)
+         VALUES ($1, 'retention_deletion_failed', $2::jsonb)`,
+        [doc.id, JSON.stringify({ error: error.message })],
+      );
+      counts.failures += 1;
+      continue;
+    }
+    await pool.query(
+      `UPDATE public.user_documents
+          SET lifecycle_state = 'archived', deleted_at = now(), updated_at = now()
+        WHERE id = $1`,
+      [doc.id],
+    );
+    await pool.query(
+      `INSERT INTO public.document_lifecycle_events (
+        document_id, event_type, previous_state, next_state, details
+      ) VALUES ($1, 'retention_archived', 'retention_expired', 'archived', $2::jsonb)`,
+      [doc.id, JSON.stringify({ storage_object_deleted: true, retention_until: doc.retention_until })],
+    );
+    counts.archived += 1;
+  }
+
+  const expiredEvidence = await pool.query(
+    `SELECT r.id, r.storage_bucket, r.storage_path, r.retention_until
+       FROM public.storage_upload_reconciliation r
+       JOIN public.document_retention_policies p
+         ON p.document_category = r.document_category AND p.enabled = true
+      WHERE r.retention_until <= now()
+        AND r.resource_type <> 'user_document'
+        AND r.state = 'registered'
+        AND r.lifecycle_state <> 'archived'
+        AND NOT EXISTS (
+          SELECT 1 FROM public.document_legal_holds h
+           WHERE h.reconciliation_id = r.id AND h.active = true
+        )
+      ORDER BY r.retention_until
+      LIMIT 50`,
+  );
+  for (const evidence of expiredEvidence.rows) {
+    if (!isRetentionExpired(evidence.retention_until, false, false)) continue;
+    const transitioned = await pool.query(
+      `UPDATE public.storage_upload_reconciliation
+          SET lifecycle_state = 'retention_expired', updated_at = now()
+        WHERE id = $1 AND state = 'registered' AND retention_until <= now()
+          AND EXISTS (
+            SELECT 1 FROM public.document_retention_policies p
+             WHERE p.document_category = public.storage_upload_reconciliation.document_category
+               AND p.enabled = true
+               AND retention_until = created_at + make_interval(days => p.retention_days)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM public.document_legal_holds h
+             WHERE h.reconciliation_id = $1 AND h.active = true
+          )
+        RETURNING id`,
+      [evidence.id],
+    );
+    if (!transitioned.rowCount) continue;
+    const { error } = await admin.storage
+      .from(evidence.storage_bucket)
+      .remove([evidence.storage_path]);
+    if (error) {
+      console.error("[fileUploadService] Expired evidence deletion failed:", error);
+      await pool.query(
+        `INSERT INTO public.document_lifecycle_events (reconciliation_id, event_type, details)
+         VALUES ($1, 'retention_deletion_failed', $2::jsonb)`,
+        [evidence.id, JSON.stringify({ error: error.message })],
+      );
+      counts.failures += 1;
+      continue;
+    }
+    await pool.query(
+      `UPDATE public.storage_upload_reconciliation
+          SET lifecycle_state = 'archived', state = 'revoked', updated_at = now()
+        WHERE id = $1`,
+      [evidence.id],
+    );
+    await pool.query(
+      `INSERT INTO public.document_lifecycle_events (reconciliation_id, event_type, details)
+       VALUES ($1, 'evidence_retention_archived', $2::jsonb)`,
+      [evidence.id, JSON.stringify({ retention_until: evidence.retention_until })],
+    );
+    counts.archived += 1;
+  }
+
+  return counts;
+}
+
+export async function listDocumentLifecycleIssues(auth: AuthContext): Promise<{
+  records: Array<Record<string, unknown>>;
+}> {
+  if (!hasExplicitAdminRole(auth)) {
+    throw uploadError("Administrator role required", 403);
+  }
+  const pool = getDbPool();
+  await pool.query(
+    `INSERT INTO public.admin_audit_log (admin_id, action, target_table, target_id, details)
+     VALUES ($1, 'document_lifecycle_failure_list', 'document_lifecycle', 'all', '{}'::jsonb)`,
+    [auth.userId],
+  );
+  const [documents, evidence] = await Promise.all([
+    pool.query(
+      `SELECT id, user_id, document_type, document_category, file_path, file_name,
+              rejection_reason, vehicle_id, verified_at, updated_at, lifecycle_state,
+              scan_status, scan_provider, scan_error, retention_until, 'user_document' AS purpose
+         FROM public.user_documents
+        WHERE deleted_at IS NULL
+          AND (
+            lifecycle_state IN ('quarantined', 'rejected', 'retention_expired')
+            OR scan_status IN ('unavailable', 'error', 'infected')
+          )
+        ORDER BY updated_at DESC
+        LIMIT 500`,
+    ),
+    pool.query(
+      `SELECT id, uploader_id AS user_id, resource_type AS document_type,
+              document_category, storage_path AS file_path, file_name, last_error AS scan_error,
+              vehicle_id, updated_at, lifecycle_state, scan_status, scan_provider,
+              retention_until, purpose
+         FROM public.storage_upload_reconciliation
+        WHERE resource_type <> 'user_document'
+          AND (
+            state = 'reconciliation_required'
+            OR (
+              state = 'registered'
+              AND (
+                lifecycle_state IN ('quarantined', 'rejected', 'retention_expired')
+                OR scan_status IN ('unavailable', 'error', 'infected')
+              )
+            )
+          )
+        ORDER BY updated_at DESC
+        LIMIT 500`,
+    ),
+  ]);
+  return {
+    records: [...documents.rows, ...evidence.rows]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 500)
+      .map((row) => ({
+        ...row,
+        id: String(row.id),
+        sourceType: row.purpose === "user_document" ? "user_document" : "registered_evidence",
+      })),
   };
 }

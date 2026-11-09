@@ -3,11 +3,14 @@ import * as dbPool from "../../../backend/src/services/dbPool";
 import * as evidenceHashService from "../../../backend/src/services/evidenceHashService";
 import {
   handleFileUpload,
+  handleDeleteFile,
   handleGetFileUrl,
+  processDocumentLifecycle,
   type AuthContext,
   type FilePayload,
 } from "../../../backend/src/services/fileUploadService";
 import { supabaseBackendService } from "../../../backend/src/services/supabaseService";
+import { isRetentionExpired } from "../../../backend/src/services/documentLifecycleService";
 
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -15,7 +18,7 @@ const VEHICLE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const DOCUMENT_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const RECONCILIATION_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01]);
-const PDF = Buffer.from("%PDF-1.7\nfile");
+const PDF = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n");
 
 const caller: AuthContext = {
   userId: USER_ID,
@@ -49,12 +52,24 @@ function createHarness() {
           vehicle_id: null,
           resource_type: "user_document",
           resource_id: DOCUMENT_ID,
+          lifecycle_state: "submitted_for_review",
+          scan_status: "clean",
         }],
         rowCount: 1,
       };
     }
     if (query.includes("FROM public.user_documents")) {
-      return { rows: [{ id: DOCUMENT_ID, user_id: USER_ID, file_path: `${USER_ID}/driver_license/doc.pdf` }], rowCount: 1 };
+      return {
+        rows: [{
+          id: DOCUMENT_ID,
+          user_id: USER_ID,
+          file_path: `${USER_ID}/driver_license/doc.pdf`,
+          lifecycle_state: "submitted_for_review",
+          scan_status: "clean",
+          retention_until: null,
+        }],
+        rowCount: 1,
+      };
     }
     return { rows: [], rowCount: 1 };
   });
@@ -97,9 +112,18 @@ function createHarness() {
 describe("authoritative private file uploads", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    process.env.DOCUMENT_SCANNER_URL = "https://scanner.example.test/scan";
+    process.env.DOCUMENT_SCANNER_TOKEN = "test-scanner-token";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ verdict: "clean", scanner: "test-scanner" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.DOCUMENT_SCANNER_URL;
+    delete process.env.DOCUMENT_SCANNER_TOKEN;
     vi.restoreAllMocks();
   });
 
@@ -165,7 +189,9 @@ describe("authoritative private file uploads", () => {
   it("does not accept duplicate document evidence after a content-key conflict", async () => {
     const harness = createHarness();
     const duplicateError = Object.assign(new Error("duplicate key"), { code: "23505" });
-    harness.poolQuery.mockRejectedValueOnce(duplicateError);
+    harness.poolQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      .mockRejectedValueOnce(duplicateError);
 
     await expect(handleFileUpload(caller, file(), {
       purpose: "user_document",
@@ -190,12 +216,160 @@ describe("authoritative private file uploads", () => {
     expect(harness.bucket.upload).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed documents even when the declared signature matches", async () => {
+    const harness = createHarness();
+    await expect(handleFileUpload(caller, file("broken.pdf", "application/pdf", Buffer.from("%PDF-1.7 broken")), {
+      purpose: "user_document",
+      documentType: "driver_license",
+      documentCategory: "identification",
+    })).rejects.toThrow(/Malformed/i);
+    expect(harness.bucket.upload).not.toHaveBeenCalled();
+  });
+
+  it("rejects infected documents and never creates a signed URL", async () => {
+    const harness = createHarness();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ verdict: "infected", scanner: "test-scanner" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+
+    const result = await handleFileUpload(caller, file(), {
+      purpose: "user_document",
+      documentType: "driver_license",
+      documentCategory: "identification",
+    });
+
+    expect(result.lifecycleState).toBe("rejected");
+    expect(result.scanStatus).toBe("infected");
+    expect(result.signedUrl).toBeUndefined();
+    expect(harness.bucket.createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("keeps documents quarantined and unsigned when the malware scanner is unavailable", async () => {
+    const harness = createHarness();
+    delete process.env.DOCUMENT_SCANNER_URL;
+    delete process.env.DOCUMENT_SCANNER_TOKEN;
+
+    const result = await handleFileUpload(caller, file(), {
+      purpose: "user_document",
+      documentType: "driver_license",
+      documentCategory: "identification",
+    });
+
+    expect(result.lifecycleState).toBe("quarantined");
+    expect(result.scanStatus).toBe("unavailable");
+    expect(result.signedUrl).toBeUndefined();
+    expect(harness.bucket.createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("submits a clean document for review and increments its immutable version", async () => {
+    const harness = createHarness();
+    const result = await handleFileUpload(caller, file(), {
+      purpose: "user_document",
+      documentType: "driver_license",
+      documentCategory: "identification",
+    });
+
+    expect(result.lifecycleState).toBe("submitted_for_review");
+    expect(result.scanStatus).toBe("clean");
+    expect(result.signedUrl).toContain("https://signed.example.test");
+    expect(harness.transactionQuery).toHaveBeenCalledWith(
+      expect.stringContaining("COALESCE(MAX(document_version), 0) + 1"),
+      expect.any(Array),
+    );
+    expect(harness.transactionQuery).toHaveBeenCalledWith(
+      "SELECT pg_advisory_xact_lock(hashtext($1))",
+      [`user_document:${USER_ID}:driver_license:`],
+    );
+  });
+
+  it("does not expire documents under active legal holds or disputes", () => {
+    const expiredAt = new Date(Date.now() - 60_000);
+    expect(isRetentionExpired(expiredAt, false, false)).toBe(true);
+    expect(isRetentionExpired(expiredAt, true, false)).toBe(false);
+    expect(isRetentionExpired(expiredAt, false, true)).toBe(false);
+  });
+
+  it("archives expired documents, removes their storage objects, and retains audit history", async () => {
+    const harness = createHarness();
+    harness.poolQuery
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 } as never)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: DOCUMENT_ID,
+          file_path: `${USER_ID}/driver_license/expired.pdf`,
+          retention_until: new Date(Date.now() - 60_000).toISOString(),
+        }],
+        rowCount: 1,
+      } as never)
+      .mockResolvedValueOnce({ rows: [{ id: DOCUMENT_ID }], rowCount: 1 } as never);
+
+    const result = await processDocumentLifecycle();
+
+    expect(result.archived).toBe(1);
+    expect(harness.bucket.remove).toHaveBeenCalledWith([
+      `${USER_ID}/driver_license/expired.pdf`,
+    ]);
+    expect(harness.poolQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'retention_archived'"),
+      expect.any(Array),
+    );
+  });
+
+  it("denies signed URLs for retention-expired documents", async () => {
+    const harness = createHarness();
+    harness.poolQuery.mockResolvedValueOnce({
+      rows: [{
+        id: DOCUMENT_ID,
+        user_id: USER_ID,
+        file_path: `${USER_ID}/driver_license/doc.pdf`,
+        lifecycle_state: "verified",
+        scan_status: "clean",
+        retention_until: new Date(Date.now() - 60_000).toISOString(),
+      }],
+      rowCount: 1,
+    } as never);
+    await expect(handleGetFileUrl(caller, {
+      purpose: "user_document",
+      documentId: DOCUMENT_ID,
+    })).rejects.toMatchObject({ statusCode: 404 });
+    expect(harness.bucket.createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthorized document deletion", async () => {
+    const harness = createHarness();
+    harness.poolQuery.mockResolvedValueOnce({
+      rows: [{ id: DOCUMENT_ID, user_id: OTHER_USER_ID, file_path: "other/file.pdf", status: "pending" }],
+      rowCount: 1,
+    } as never);
+    await expect(handleDeleteFile(caller, {
+      purpose: "user_document",
+      documentId: DOCUMENT_ID,
+    })).rejects.toMatchObject({ statusCode: 403 });
+    expect(harness.bucket.remove).not.toHaveBeenCalled();
+  });
+
+  it("preserves documents under legal hold from user deletion", async () => {
+    const harness = createHarness();
+    harness.poolQuery
+      .mockResolvedValueOnce({
+        rows: [{ id: DOCUMENT_ID, user_id: USER_ID, file_path: "user/document.pdf", status: "pending" }],
+        rowCount: 1,
+      } as never)
+      .mockResolvedValueOnce({ rows: [{ id: "hold-id" }], rowCount: 1 } as never);
+    await expect(handleDeleteFile(caller, {
+      purpose: "user_document",
+      documentId: DOCUMENT_ID,
+    })).rejects.toMatchObject({ statusCode: 409 });
+    expect(harness.bucket.remove).not.toHaveBeenCalled();
+  });
+
   it("does not sign another user's private document path", async () => {
     const harness = createHarness();
     harness.poolQuery.mockResolvedValueOnce({
       rows: [{ id: DOCUMENT_ID, user_id: OTHER_USER_ID, file_path: `${OTHER_USER_ID}/driver_license/doc.pdf` }],
       rowCount: 1,
-    });
+    } as never);
 
     await expect(handleGetFileUrl(caller, {
       purpose: "user_document",
@@ -272,7 +446,7 @@ describe("authoritative private file uploads", () => {
             captured_by: USER_ID,
           }],
           rowCount: 1,
-        });
+        } as never);
     const result = await evidenceHashService.registerEvidenceArtifact(
       {
         evidenceType: "document",

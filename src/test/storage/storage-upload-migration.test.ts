@@ -123,6 +123,7 @@ describe("RentMaikar Storage Operation & File Upload Migration Test Suite", () =
     });
 
     it("registers upload-file, delete-file, and get-file-url in backend AUTHORITATIVE_BACKEND_FUNCTIONS", () => {
+      const clientPath = path.resolve(process.cwd(), "src/integrations/supabase/client.ts");
       const functionsPath = path.resolve(process.cwd(), "backend/src/routes/functions.ts");
       const functionsContent = fs.readFileSync(functionsPath, "utf8");
 
@@ -132,6 +133,46 @@ describe("RentMaikar Storage Operation & File Upload Migration Test Suite", () =
       expect(functionsContent).toContain("case \"upload-file\":");
       expect(functionsContent).toContain("case \"delete-file\":");
       expect(functionsContent).toContain("case \"get-file-url\":");
+      expect(functionsContent).toContain('"process-document-lifecycle"');
+      expect(functionsContent).toContain('"list-document-lifecycle-issues"');
+      expect(functionsContent).toContain("verifyCronSecret(req.headers)");
+      expect(fs.readFileSync(clientPath, "utf8")).toContain('"list-document-lifecycle-issues"');
+    });
+  });
+
+  describe("4A. Document lifecycle approval boundaries", () => {
+    it("requires clean registered evidence before inspection and rideshare approval", () => {
+      const migrationPath = path.resolve(
+        process.cwd(),
+        "supabase/migrations/20261109130000_document_malware_and_retention_lifecycle.sql",
+      );
+      const migration = fs.readFileSync(migrationPath, "utf8");
+
+      expect(migration).toContain("guard_weekly_inspection_evidence_approval");
+      expect(migration).toContain("guard_rideshare_evidence_approval");
+      expect(migration).toContain("r.state = 'registered'");
+      expect(migration).toContain("r.scan_status = 'clean'");
+      expect(migration).toContain("r.lifecycle_state IN ('submitted_for_review', 'verified')");
+      expect(migration).toContain("r.retention_until IS NULL OR r.retention_until > now()");
+      expect(migration).toContain("BEFORE INSERT OR UPDATE ON public.weekly_inspection_reports");
+      expect(migration).toContain("BEFORE INSERT OR UPDATE ON public.rideshare_profile_submissions");
+      expect(migration).toContain("'legacy_inspection_evidence_quarantined'");
+      expect(migration).toContain("'legacy_rideshare_evidence_quarantined'");
+    });
+
+    it("withdraws prior approval and records the review history when evidence is re-uploaded", () => {
+      const servicePath = path.resolve(
+        process.cwd(),
+        "backend/src/services/fileUploadService.ts",
+      );
+      const service = fs.readFileSync(servicePath, "utf8");
+
+      expect(service).toContain("status = 'pending',\n             submitted_at = NULL");
+      expect(service).toContain("'rideshare_evidence_reuploaded'");
+      expect(service).toContain("'inspection_evidence_reuploaded'");
+      expect(service).toContain("admin_decision = NULL, admin_reviewed_at = NULL");
+      expect(service).toContain("previousAdminDecision");
+      expect(service).toContain("previousReviewerId");
     });
   });
 
