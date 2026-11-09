@@ -10,6 +10,7 @@ import { Loader2, ExternalLink, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { getUploadedFileUrl } from "@/lib/file-upload-api";
+import type { StoragePurpose } from "@/types/storageContract";
 
 type FailureRow = {
   id: string;
@@ -22,6 +23,13 @@ type FailureRow = {
   vehicle_id: string | null;
   verified_at: string | null;
   updated_at: string;
+  lifecycle_state: string;
+  scan_status: string;
+  scan_provider: string | null;
+  scan_error: string | null;
+  retention_until: string | null;
+  purpose: StoragePurpose;
+  sourceType: "user_document" | "registered_evidence";
   profile?: { full_name: string | null; email: string | null } | null;
 };
 
@@ -33,21 +41,14 @@ export default function AdminDocumentFailuresPage() {
 
   async function load() {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("user_documents")
-      .select(
-        "id,user_id,document_type,document_category,file_path,file_name,rejection_reason,vehicle_id,verified_at,updated_at"
-      )
-      .eq("status", "rejected")
-      .order("updated_at", { ascending: false })
-      .limit(500);
+    const { data, error } = await supabase.functions.invoke("list-document-lifecycle-issues");
 
     if (error) {
       toast.error("Failed to load document failures");
       setLoading(false);
       return;
     }
-    const list = (data ?? []) as FailureRow[];
+    const list = ((data?.records ?? []) as FailureRow[]);
     const userIds = Array.from(new Set(list.map((r) => r.user_id))).filter(Boolean);
     if (userIds.length) {
       const { data: profiles } = await supabase
@@ -66,11 +67,15 @@ export default function AdminDocumentFailuresPage() {
   }, []);
 
   async function openDocument(row: FailureRow) {
+    if (row.scan_status !== "clean") {
+      toast.error("Only cleanly scanned documents can be opened");
+      return;
+    }
     setOpeningId(row.id);
     try {
       const { url } = await getUploadedFileUrl({
-        purpose: "user_document",
-        documentId: row.id,
+        purpose: row.purpose,
+        documentId: row.sourceType === "user_document" ? row.id : undefined,
         filePath: row.file_path,
         expiresIn: 300,
       });
@@ -105,10 +110,10 @@ export default function AdminDocumentFailuresPage() {
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-2">
               <AlertTriangle className="h-7 w-7 text-destructive" />
-              Document Verification Failures
+              Document Scanning & Verification Issues
             </h1>
             <p className="text-muted-foreground mt-1">
-              All rejected documents across users and vehicles.
+              Quarantined, scan-failed, infected, and rejected documents. Only clean scans can be opened.
             </p>
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
@@ -142,7 +147,8 @@ export default function AdminDocumentFailuresPage() {
                   <tr>
                     <th className="p-3 font-medium">User</th>
                     <th className="p-3 font-medium">Document</th>
-                    <th className="p-3 font-medium">Reason</th>
+                    <th className="p-3 font-medium">Lifecycle / Scan</th>
+                    <th className="p-3 font-medium">Failure detail</th>
                     <th className="p-3 font-medium">Rejected</th>
                     <th className="p-3 font-medium text-right">Action</th>
                   </tr>
@@ -161,7 +167,7 @@ export default function AdminDocumentFailuresPage() {
                       <td className="p-3 align-top">
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">{r.document_type}</Badge>
-                          {r.document_category && (
+                          {r.document_category && r.purpose === "user_document" && (
                             <span className="text-xs text-muted-foreground">
                               {r.document_category}
                             </span>
@@ -174,8 +180,21 @@ export default function AdminDocumentFailuresPage() {
                         )}
                       </td>
                       <td className="p-3 align-top max-w-md">
+                        <Badge variant={r.scan_status === "clean" ? "outline" : "destructive"}>
+                          {r.lifecycle_state}
+                        </Badge>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Scan: {r.scan_status}{r.scan_provider ? ` (${r.scan_provider})` : ""}
+                        </div>
+                        {r.retention_until && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Retention until {new Date(r.retention_until).toLocaleDateString()}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3 align-top max-w-md">
                         <span className="text-destructive">
-                          {r.rejection_reason ?? "No reason recorded"}
+                          {r.scan_error ?? r.rejection_reason ?? "No reason recorded"}
                         </span>
                       </td>
                       <td className="p-3 align-top whitespace-nowrap text-muted-foreground">
@@ -189,7 +208,7 @@ export default function AdminDocumentFailuresPage() {
                           size="sm"
                           variant="outline"
                           onClick={() => openDocument(r)}
-                          disabled={openingId === r.id}
+                          disabled={openingId === r.id || r.scan_status !== "clean"}
                         >
                           {openingId === r.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />

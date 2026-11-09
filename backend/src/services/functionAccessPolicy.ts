@@ -63,11 +63,14 @@ classify("authenticated", [
   "upload-file",
   "delete-file",
   "get-file-url",
+  "process-document-lifecycle",
+  "list-document-lifecycle-issues",
   "initiate-owner-withdrawal",
   "owner-withdrawal-data",
   "submit-vehicle-for-review",
 ]);
 classify("support", ["get-inspection-findings", "update-inspection-finding"]);
+classify("cron_or_admin", ["process-document-lifecycle"]);
 classify("public", ["phone-otp-custom", "verify-phone"]);
 classify("public", ["get-vapid-public-key"]);
 classify("admin", [
@@ -97,6 +100,7 @@ classify("admin", [
   "get-paypal-config",
   "get-psp-config",
   "list-inbound-emails",
+  "list-document-lifecycle-issues",
   "get-inbound-email",
   "get-inbound-attachment-url",
   "retry-inbound-email",

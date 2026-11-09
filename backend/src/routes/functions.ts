@@ -36,6 +36,8 @@ import {
   handleFileUpload,
   handleDeleteFile,
   handleGetFileUrl,
+  processDocumentLifecycle,
+  listDocumentLifecycleIssues,
 } from "../services/fileUploadService";
 import { visualDamageDetectionService } from "../services/visualDamageDetectionService";
 import { inspectionReminderService } from "../services/inspectionReminderService";
@@ -184,6 +186,8 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "upload-file",
   "delete-file",
   "get-file-url",
+  "process-document-lifecycle",
+  "list-document-lifecycle-issues",
   // Billing, Withdrawal & Vehicle Review Operations
   "billing-reconciliation",
   "owner-withdrawal-data",
@@ -1037,6 +1041,34 @@ functionsRouter.all(
             ok: false,
             success: false,
             error: err.message || "Failed to retrieve file URL",
+          });
+        }
+      }
+
+      case "process-document-lifecycle": {
+        if (!verifyCronSecret(req.headers) && !gatedCaller?.isAdmin) {
+          return res.status(401).json({ ok: false, error: "Unauthorized" });
+        }
+        try {
+          const result = await processDocumentLifecycle();
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err) {
+          console.error("[Backend Functions] Document lifecycle worker failed:", err);
+          return res.status(503).json({ ok: false, error: "Document lifecycle processing failed" });
+        }
+      }
+
+      case "list-document-lifecycle-issues": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await listDocumentLifecycleIssues(auth);
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "Document lifecycle issues could not be loaded",
           });
         }
       }

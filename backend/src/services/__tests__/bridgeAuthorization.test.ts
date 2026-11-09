@@ -4,6 +4,7 @@ import {
   AccessDenied,
   enforceFunctionAccess,
   getFunctionAccessLevel,
+  isAuthorizedForAccessLevel,
   isResourceParticipant,
   isResourceOwner,
 } from "../functionAccessPolicy";
@@ -277,6 +278,14 @@ test("inspection access is limited to the recorded driver or vehicle owner", asy
     ),
     true,
   );
+});
+
+test("document lifecycle worker and issue listing require privileged access", () => {
+  assert.equal(getFunctionAccessLevel("process-document-lifecycle"), "cron_or_admin");
+  assert.equal(getFunctionAccessLevel("list-document-lifecycle-issues"), "admin");
+  assert.equal(isAuthorizedForAccessLevel("cron_or_admin", user), false);
+  assert.equal(isAuthorizedForAccessLevel("cron_or_admin", admin), true);
+  assert.equal(isAuthorizedForAccessLevel("admin", user), false);
 });
 
 test("unknown function names are denied and function policies are exact", async () => {

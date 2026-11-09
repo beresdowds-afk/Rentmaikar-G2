@@ -65,6 +65,9 @@ interface UserDocument {
   file_size: number;
   mime_type: string;
   status: 'pending' | 'verified' | 'rejected';
+  lifecycle_state: string;
+  scan_status: string;
+  scan_error: string | null;
   rejection_reason: string | null;
   vehicle_id: string | null;
   expires_at: string | null;
@@ -181,9 +184,15 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
       setUploadProgress(100);
       return res;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['user-documents'] });
-      toast.success('Document uploaded successfully');
+      if (result.lifecycleState === 'submitted_for_review') {
+        toast.success('Document scanned and submitted for review');
+      } else if (result.lifecycleState === 'rejected') {
+        toast.error('The malware scanner rejected this document');
+      } else {
+        toast.warning('Document is quarantined until malware scanning is available');
+      }
       setUploadingType(null);
       setUploadProgress(0);
     },
@@ -264,7 +273,9 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
   const requiredDocs = documentConfigs.filter(d => d.required);
   const completedDocs = requiredDocs.filter(d => {
     const doc = getDocumentByType(d.type);
-    return doc && doc.status !== 'rejected';
+    return doc && doc.status !== 'rejected' &&
+      ['submitted_for_review', 'verified'].includes(doc.lifecycle_state) &&
+      doc.scan_status === 'clean';
   });
   const completionPercent = requiredDocs.length > 0 
     ? Math.round((completedDocs.length / requiredDocs.length) * 100) 
@@ -377,7 +388,11 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
       <CardContent className="space-y-4">
         {documentConfigs.map((config) => {
           const existingDoc = getDocumentByType(config.type);
-          const status = existingDoc ? statusConfig[existingDoc.status] : null;
+          const status = existingDoc
+            ? existingDoc.lifecycle_state === 'quarantined' || existingDoc.lifecycle_state === 'scanning'
+              ? { label: 'Quarantined - awaiting malware scan', color: 'bg-amber-100 text-amber-800', icon: <Shield className="h-3 w-3" /> }
+              : statusConfig[existingDoc.status]
+            : null;
           const isUploading = uploadingType === config.type;
           
           return (
@@ -409,6 +424,11 @@ export const DocumentUpload = ({ userType, vehicleId, vehicleName }: DocumentUpl
                         {existingDoc.rejection_reason}
                       </AlertDescription>
                     </Alert>
+                  )}
+                  {existingDoc?.lifecycle_state === 'quarantined' && existingDoc.scan_error && (
+                    <p className="mt-1 text-xs text-amber-700">
+                      Malware scanning is unavailable; this file cannot be reviewed or opened yet.
+                    </p>
                   )}
                 </div>
               </div>
