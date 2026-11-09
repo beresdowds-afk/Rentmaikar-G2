@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
         for (const msg of messages) {
           summary.inspected++;
           const payload = (msg.message ?? {}) as Record<string, unknown>;
-          const messageKey = String(payload.message_id ?? payload.idempotency_key ?? msg.msg_id);
+          const messageKey = String(payload.idempotency_key ?? payload.message_id ?? msg.msg_id);
           const recipient = typeof payload.to === "string" ? payload.to : null;
           const template = typeof payload.label === "string" ? payload.label : null;
 
@@ -206,6 +206,43 @@ Deno.serve(async (req) => {
           const attempts = (state?.attempts ?? 0) + 1;
           const lastError = typeof payload.last_error === "string" ? payload.last_error : null;
 
+          if (queue === "auth_emails") {
+            const expiredAt = new Date().toISOString();
+            const { error: outboxError } = await supa.from("outbound_message_outbox").upsert({
+              idempotency_key: `email:${messageKey}`,
+              channel: "email",
+              provider: "resend",
+              recipient: recipient || "unknown",
+              template_reference: template || queue,
+              message_class: "authentication",
+              status: "expired",
+              max_attempts: 1,
+              expires_at: expiredAt,
+              last_error: "Authentication email expired and cannot be reprocessed",
+              updated_at: expiredAt,
+            }, { onConflict: "idempotency_key" });
+            if (outboxError) throw new Error(`Failed to expire authentication email: ${outboxError.message}`);
+            const { error: stateError } = await supa.from("email_dlq_retry_state").upsert({
+              queue_name: dlq,
+              message_key: messageKey,
+              recipient_email: recipient,
+              template_name: template,
+              attempts: 1,
+              paused: true,
+              last_error: "Authentication email expired and cannot be reprocessed",
+              updated_at: expiredAt,
+            }, { onConflict: "queue_name,message_key" });
+            if (stateError) throw new Error(`Failed to record expired authentication email: ${stateError.message}`);
+            const { error: deleteError } = await supa.rpc("delete_email", {
+              queue_name: dlq,
+              message_id: msg.msg_id,
+            });
+            if (deleteError) throw new Error(`Failed to remove expired authentication email: ${deleteError.message}`);
+            perQueue.paused++;
+            summary.paused++;
+            continue;
+          }
+
           if (attempts > MAX_ATTEMPTS) {
             await supa.from("email_dlq_retry_state").upsert({
               queue_name: dlq,
@@ -229,6 +266,7 @@ Deno.serve(async (req) => {
           const retryPayload = {
             ...payload,
             message_id: `${messageKey}:r${attempts}`,
+            idempotency_key: `${messageKey}:r${attempts}`,
             queued_at: new Date().toISOString(),
             metadata: {
               ...(typeof payload.metadata === "object" && payload.metadata

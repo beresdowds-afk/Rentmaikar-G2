@@ -77,21 +77,23 @@ const handler = async (req: Request): Promise<Response> => {
 
         // Update device status to offline if currently active
         if (device.status === 'active') {
-          await supabase
+          const { error: statusError } = await supabase
             .from('iot_devices')
             .update({ status: 'offline' as any })
             .eq('id', device.id);
+          if (statusError) throw new Error(`Failed to mark device ${device.id} offline: ${statusError.message}`);
         }
       }
     }
 
     // 2. Check for low battery devices
-    const { data: lowBatteryDevices } = await supabase
+    const { data: lowBatteryDevices, error: batteryError } = await supabase
       .from('iot_devices')
       .select('id, vehicle_id, serial_number, battery_level')
       .eq('is_linked', true)
       .lt('battery_level', LOW_BATTERY_THRESHOLD)
       .not('battery_level', 'is', null);
+    if (batteryError) throw new Error(`Failed to query low-battery devices: ${batteryError.message}`);
 
     for (const device of lowBatteryDevices || []) {
       alerts.push({
@@ -102,6 +104,30 @@ const handler = async (req: Request): Promise<Response> => {
         message: `IoT device battery critical: ${device.battery_level}% (device ${device.serial_number})`,
       });
     }
+
+    // Persist each detected condition through the idempotent database function.
+    for (const alert of alerts) {
+      const { error } = await supabase.rpc("record_telemetry_anomaly", {
+        _vehicle_id: alert.vehicleId,
+        _device_id: alert.deviceId,
+        _provider: "telemetry-health-monitor",
+        _anomaly_type: alert.type,
+        _severity: alert.severity,
+        _details: { message: alert.message, checked_at: now.toISOString() },
+      });
+      if (error) throw new Error(`Failed to persist ${alert.type} anomaly: ${error.message}`);
+    }
+
+    const escalationCutoff = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
+    const { data: escalatedAnomalies, error: escalationError } = await supabase
+      .from("telemetry_anomalies")
+      .update({ escalated_at: now.toISOString() })
+      .eq("severity", "critical")
+      .neq("status", "resolved")
+      .is("escalated_at", null)
+      .lt("created_at", escalationCutoff)
+      .select("id, vehicle_id, device_id, anomaly_type, details");
+    if (escalationError) throw new Error(`Failed to escalate critical anomalies: ${escalationError.message}`);
 
     // 3. Log telemetry health events
     if (alerts.length > 0) {
@@ -122,7 +148,7 @@ const handler = async (req: Request): Promise<Response> => {
         .insert(telemetryLogs);
 
       if (logError) {
-        console.error("[TelemetryMonitor] Failed to log alerts:", logError);
+        throw new Error(`Failed to log telemetry health events: ${logError.message}`);
       }
 
       // Generate admin daily tasks for critical alerts
@@ -137,14 +163,14 @@ const handler = async (req: Request): Promise<Response> => {
           source_id: alert.deviceId,
         }));
 
-        await supabase.from('admin_daily_tasks').insert(tasks);
+        const { error: taskError } = await supabase.from('admin_daily_tasks').insert(tasks);
+        if (taskError) throw new Error(`Failed to create critical telemetry tasks: ${taskError.message}`);
       }
 
-      // Send notification for offline vehicles
-      const offlineAlerts = alerts.filter(a => a.type === 'vehicle_offline');
-      if (offlineAlerts.length > 0) {
+      const criticalAlertsForNotification = alerts.filter(a => a.severity === 'critical');
+      if (criticalAlertsForNotification.length > 0 || (escalatedAnomalies || []).length > 0) {
         try {
-          await fetch(`${supabaseUrl}/functions/v1/send-task-notification`, {
+          const response = await fetch(`${supabaseUrl}/functions/v1/send-task-notification`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -152,15 +178,38 @@ const handler = async (req: Request): Promise<Response> => {
             },
             body: JSON.stringify({
               type: 'telemetry_health',
-              title: `${offlineAlerts.length} vehicle(s) offline`,
-              body: offlineAlerts.map(a => a.message).join('\n'),
+              title: `${criticalAlertsForNotification.length + (escalatedAnomalies || []).length} critical telemetry alert(s)`,
+              body: [
+                ...criticalAlertsForNotification.map(a => a.message),
+                ...(escalatedAnomalies || []).map(a => `${a.anomaly_type}: ${JSON.stringify(a.details)}`),
+              ].join('\n'),
               priority: 'high',
             }),
           });
+          if (!response.ok) throw new Error(`Notification service returned HTTP ${response.status}`);
         } catch (notifErr) {
-          console.error("[TelemetryMonitor] Notification failed:", notifErr);
+          console.error("[TelemetryMonitor] Critical notification failed:", notifErr);
+          throw new Error("Critical telemetry notification failed");
         }
       }
+    }
+
+    if (alerts.length === 0 && (escalatedAnomalies || []).length > 0) {
+      const response = await fetch(`${supabaseUrl}/functions/v1/send-task-notification`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          type: "telemetry_health",
+          title: `${escalatedAnomalies.length} unresolved critical telemetry alert(s) escalated`,
+          body: escalatedAnomalies.map((anomaly) =>
+            `${anomaly.anomaly_type}: ${JSON.stringify(anomaly.details)}`).join("\n"),
+          priority: "high",
+        }),
+      });
+      if (!response.ok) throw new Error(`Critical telemetry notification failed with HTTP ${response.status}`);
     }
 
     const summary = {
@@ -169,6 +218,7 @@ const handler = async (req: Request): Promise<Response> => {
       lowBatteryDevices: lowBatteryDevices?.length || 0,
       totalAlerts: alerts.length,
       criticalAlerts: alerts.filter(a => a.severity === 'critical').length,
+      escalatedCriticalAnomalies: escalatedAnomalies?.length || 0,
     };
 
     console.log("[TelemetryMonitor] Health check complete:", summary);

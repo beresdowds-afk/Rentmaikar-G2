@@ -265,6 +265,29 @@ serve(async (req) => {
       });
 
       if (messageSid) {
+        const outboxStatus = messageStatus === "delivered" || messageStatus === "read"
+          ? "delivered"
+          : messageStatus === "failed" || messageStatus === "undelivered"
+            ? "dead_letter"
+            : null;
+        if (outboxStatus) {
+          let outboxUpdate = supabase
+            .from("outbound_message_outbox")
+            .update({
+              status: outboxStatus,
+              provider: "twilio",
+              provider_message_id: messageSid,
+              last_error: outboxStatus === "dead_letter" ? errorMessage || `Twilio reported ${messageStatus}` : null,
+              delivered_at: outboxStatus === "delivered" ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("provider", "twilio")
+            .eq("provider_message_id", messageSid);
+          if (outboxStatus === "dead_letter") outboxUpdate = outboxUpdate.neq("status", "delivered");
+          const { error: outboxError } = await outboxUpdate;
+          if (outboxError) throw new Error(`Failed to update outbound message receipt: ${outboxError.message}`);
+        }
+
         const { data: existingMsg } = await supabase
           .from("inbox_messages")
           .select("id, metadata")

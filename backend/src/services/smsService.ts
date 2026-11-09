@@ -16,6 +16,13 @@
 
 import { sentBackendClient } from "./sentClient";
 import { getDbPool } from "./dbPool";
+import {
+  enqueueAndClaimOutboundMessage,
+  requeueOutboundMessage,
+  retryDelayMs,
+  updateOutboundMessage,
+} from "./outboundMessageOutbox";
+import { randomUUID } from "node:crypto";
 
 export interface SendApplicationMessagePayload {
   to: string;
@@ -39,28 +46,6 @@ export interface SendApplicationMessageResult {
   region: "USA" | "Nigeria" | "Global";
   error?: string;
   simulation?: boolean;
-}
-
-// In-memory idempotency cache for deduplication within process lifetime
-const idempotencyCache = new Map<string, { result: SendApplicationMessageResult; expiresAt: number }>();
-
-function getCachedIdempotentResult(key: string): SendApplicationMessageResult | null {
-  const cached = idempotencyCache.get(key);
-  if (!cached) return null;
-  if (Date.now() > cached.expiresAt) {
-    idempotencyCache.delete(key);
-    return null;
-  }
-  return cached.result;
-}
-
-function setCachedIdempotentResult(key: string, result: SendApplicationMessageResult, ttlMs = 300_000): void {
-  // Bounded cache (max 2000 items)
-  if (idempotencyCache.size > 2000) {
-    const firstKey = idempotencyCache.keys().next().value;
-    if (firstKey) idempotencyCache.delete(firstKey);
-  }
-  idempotencyCache.set(key, { result, expiresAt: Date.now() + ttlMs });
 }
 
 export function normalizeE164(phone: string): string {
@@ -99,7 +84,7 @@ async function resolveCanonicalMessagingRoute(
   if (!pool) {
     const isNg = phone.startsWith("+234");
     return {
-      region: isNg ? "Nigeria" : "USA",
+      region: isNg ? "Nigeria" : "Global",
       fallbackProvider: isNg ? "termii" : "twilio",
     };
   }
@@ -174,7 +159,7 @@ async function resolveCanonicalMessagingRoute(
   } catch (err) {
     const isNg = normalized.startsWith("+234");
     return {
-      region: isNg ? "Nigeria" : "USA",
+      region: isNg ? "Nigeria" : "Global",
       fallbackProvider: isNg ? "termii" : "twilio",
     };
   }
@@ -240,55 +225,146 @@ export async function sendApplicationMessage(
     };
   }
 
-  // -----------------------------------------------------------------
-  // 0. IDEMPOTENCY CHECK
-  // -----------------------------------------------------------------
-  const idempotencyKey = payload.idempotencyKey?.trim();
-  if (idempotencyKey) {
-    const cached = getCachedIdempotentResult(idempotencyKey);
-    if (cached) {
-      console.log(`[smsService] Idempotency match in cache for key '${idempotencyKey}': returning prior outcome`);
-      return cached;
-    }
-
-    try {
-      const pool = getDbPool();
-      if (pool) {
-        const existing = await pool.query(
-          `SELECT provider, provider_message_id, delivery_status, error_message, metadata
-             FROM public.unified_message_log
-            WHERE metadata->>'idempotencyKey' = $1
-              AND delivery_status IN ('queued', 'submitted', 'sent', 'delivered', 'simulation')
-            ORDER BY created_at DESC
-            LIMIT 1`,
-          [idempotencyKey]
-        );
-        if (existing.rows.length > 0) {
-          const row = existing.rows[0];
-          const priorResult: SendApplicationMessageResult = {
-            success: row.delivery_status !== "failed",
-            messageId: row.provider_message_id || `dedup_${idempotencyKey}`,
-            channel,
-            provider: (row.provider as any) || "sent",
-            deliveryStatus: row.delivery_status,
-            region,
-            simulation: row.delivery_status === "simulation",
-          };
-          setCachedIdempotentResult(idempotencyKey, priorResult);
-          console.log(`[smsService] Idempotency match in database for key '${idempotencyKey}': deduplicated duplicate send`);
-          return priorResult;
-        }
-      }
-    } catch (err: any) {
-      console.warn("[smsService] Idempotency check warning:", err.message);
-    }
+  const messageText = payload.message || "You have an update from RentMaikar.";
+  const idempotencyKey = payload.idempotencyKey?.trim() || randomUUID();
+  const override = payload.providerOverride;
+  const isAuthenticationMessage = payload.notificationType === "phone_otp" ||
+    payload.notificationType === "authentication_otp";
+  const pool = getDbPool();
+  let outbox;
+  try {
+    outbox = await enqueueAndClaimOutboundMessage(pool, {
+      idempotencyKey,
+      channel,
+      provider: override || "sent",
+      recipient: to,
+      templateReference: payload.whatsappTemplateId ||
+        String(payload.metadata?.templateName || "") || undefined,
+      messageClass: isAuthenticationMessage ? "authentication" : "transactional",
+      maxAttempts: isAuthenticationMessage ? 1 : 5,
+      expiresAt: isAuthenticationMessage ? new Date(Date.now() + 5 * 60_000) : null,
+      payload: {
+        message: messageText,
+        notificationType: payload.notificationType || "general",
+        metadata: payload.metadata || {},
+      },
+    });
+  } catch (error: any) {
+    const reason = error instanceof Error ? error.message : "Outbound message persistence failed";
+    console.error("[smsService] Durable message persistence failed; provider dispatch refused", {
+      channel,
+      error: reason,
+    });
+    return {
+      success: false,
+      channel,
+      provider: "none",
+      deliveryStatus: "failed",
+      region,
+      error: `Message was not dispatched because durable persistence failed: ${reason}`,
+    };
   }
 
-  const messageText = payload.message || "You have an update from RentMaikar.";
-  const override = payload.providerOverride;
+  if (!outbox.claimed) {
+    const provider = ["sent", "twilio", "termii"].includes(outbox.provider || "")
+      ? outbox.provider as SendApplicationMessageResult["provider"]
+      : "none";
+    const duplicateSuccess = ["accepted", "delivered", "simulated"].includes(outbox.status);
+    return {
+      success: duplicateSuccess,
+      messageId: outbox.providerMessageId,
+      channel,
+      provider,
+      deliveryStatus: outbox.status === "simulated"
+        ? "simulation"
+        : duplicateSuccess
+          ? outbox.status === "delivered" ? "sent" : "queued"
+          : "failed",
+      region,
+      error: duplicateSuccess
+        ? undefined
+        : outbox.lastError || "Message is already being processed or requires administrative reprocessing.",
+      simulation: outbox.status === "simulated",
+    };
+  }
+
+  try {
+    const consent = await pool.query(
+      `SELECT public.is_messaging_opted_out($1::text, $2::text) AS opted_out`,
+      [to, channel],
+    );
+    if (consent.rows[0]?.opted_out === true) {
+      await updateOutboundMessage(pool, idempotencyKey, {
+        status: "suppressed",
+        lastError: "Recipient opted out of this messaging channel",
+      });
+      await logMessageDispatch({
+        phone: to,
+        region,
+        provider: "none",
+        channel,
+        message: messageText,
+        deliveryStatus: "suppressed",
+        error: "Recipient opted out of this messaging channel",
+        metadata: { notificationType: payload.notificationType, idempotencyKey },
+      });
+      return {
+        success: false,
+        channel,
+        provider: "none",
+        deliveryStatus: "failed",
+        region,
+        error: "Recipient opted out of this messaging channel",
+      };
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    try {
+      await updateOutboundMessage(pool, idempotencyKey, {
+        status: "failed",
+        lastError: `Unable to verify messaging consent: ${reason}`,
+      });
+    } catch (persistenceError) {
+      console.error("[smsService] Consent verification and outbox update both failed", {
+        channel,
+        error: persistenceError instanceof Error ? persistenceError.message : String(persistenceError),
+      });
+    }
+    return {
+      success: false,
+      channel,
+      provider: "none",
+      deliveryStatus: "failed",
+      region,
+      error: `Message was not dispatched because consent could not be verified: ${reason}`,
+    };
+  }
+
   const metadataWithKey = {
     ...payload.metadata,
-    idempotencyKey: idempotencyKey || undefined,
+    idempotencyKey,
+  };
+  const persistProviderAcceptance = async (
+    provider: "sent" | "twilio" | "termii",
+    providerMessageId: string,
+    simulated = false,
+  ): Promise<boolean> => {
+    try {
+      await updateOutboundMessage(pool, idempotencyKey, {
+        status: simulated ? "simulated" : "accepted",
+        provider,
+        providerMessageId,
+      });
+      return true;
+    } catch (error: any) {
+      console.error("[smsService] Provider accepted message but outbox receipt persistence failed", {
+        channel,
+        provider,
+        providerMessageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   };
 
   // -----------------------------------------------------------------
@@ -320,6 +396,18 @@ export async function sendApplicationMessage(
         const messageId = sentRes?.data?.id || sentRes?.id || `sent_${Date.now()}`;
         const deliveryStatus = isSandbox ? "simulation" : "queued";
 
+        if (!(await persistProviderAcceptance("sent", messageId, isSandbox))) {
+          return {
+            success: false,
+            messageId,
+            channel,
+            provider: "sent",
+            deliveryStatus: "failed",
+            region,
+            error: "Provider accepted the message, but its receipt could not be persisted; reconciliation is required.",
+          };
+        }
+
         await logMessageDispatch({
           phone: to,
           region,
@@ -340,10 +428,6 @@ export async function sendApplicationMessage(
           region,
           simulation: isSandbox,
         };
-
-        if (idempotencyKey) {
-          setCachedIdempotentResult(idempotencyKey, successResult);
-        }
 
         return successResult;
       } else {
@@ -421,6 +505,18 @@ export async function sendApplicationMessage(
           const messageId = twilioData.sid || `tw_${Date.now()}`;
           const deliveryStatus = twilioData.status || "queued";
 
+          if (!(await persistProviderAcceptance("twilio", messageId))) {
+            return {
+              success: false,
+              messageId,
+              channel,
+              provider: "twilio",
+              deliveryStatus: "failed",
+              region,
+              error: "Provider accepted the message, but its receipt could not be persisted; reconciliation is required.",
+            };
+          }
+
           await logMessageDispatch({
             phone: to,
             region,
@@ -440,10 +536,6 @@ export async function sendApplicationMessage(
             deliveryStatus: "queued",
             region,
           };
-
-          if (idempotencyKey) {
-            setCachedIdempotentResult(idempotencyKey, twilioResult);
-          }
 
           return twilioResult;
         } else {
@@ -521,6 +613,18 @@ export async function sendApplicationMessage(
       if (termiiRes.ok && (termiiData.code === "ok" || termiiData.message_id)) {
         const messageId = termiiData.message_id || `termii_${Date.now()}`;
 
+        if (!(await persistProviderAcceptance("termii", messageId))) {
+          return {
+            success: false,
+            messageId,
+            channel,
+            provider: "termii",
+            deliveryStatus: "failed",
+            region,
+            error: "Provider accepted the message, but its receipt could not be persisted; reconciliation is required.",
+          };
+        }
+
         await logMessageDispatch({
           phone: to,
           region,
@@ -540,10 +644,6 @@ export async function sendApplicationMessage(
           deliveryStatus: "queued",
           region,
         };
-
-        if (idempotencyKey) {
-          setCachedIdempotentResult(idempotencyKey, termiiResult);
-        }
 
         return termiiResult;
       } else {
@@ -587,6 +687,24 @@ export async function sendApplicationMessage(
   // 4. ALL PROVIDERS FAILED OR UNAVAILABLE (Fail Closed + DLQ Enlistment)
   // -----------------------------------------------------------------
   const failureError = `All communications providers failed: SENT.dm (${sentFailureReason}), Twilio (${twilioFailureReason}), Termii (${termiiFailureReason})`;
+  let finalFailureError = failureError;
+
+  try {
+    await updateOutboundMessage(pool, idempotencyKey, {
+      status: isAuthenticationMessage ? "expired" : "failed",
+      lastError: failureError,
+      nextAttemptAt: isAuthenticationMessage
+        ? undefined
+        : new Date(Date.now() + retryDelayMs(outbox.attemptCount)),
+    });
+  } catch (error: any) {
+    const persistenceError = error instanceof Error ? error.message : String(error);
+    console.error("[smsService] Failed to persist provider failure state", {
+      channel,
+      error: persistenceError,
+    });
+    finalFailureError += `; outbox state update failed: ${persistenceError}`;
+  }
 
   await logMessageDispatch({
     phone: to,
@@ -595,15 +713,13 @@ export async function sendApplicationMessage(
     channel,
     message: messageText,
     deliveryStatus: "failed",
-    error: failureError,
+    error: finalFailureError,
     metadata: { ...metadataWithKey, notificationType: payload.notificationType },
   });
 
   // Enlist into durable sms_dlq_retry_state outbox for administrative inspection and scheduled recovery
-  try {
-    const pool = getDbPool();
-    if (pool) {
-      const messageKey = idempotencyKey || `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+  if (!isAuthenticationMessage) {
+    try {
       await pool.query(
         `INSERT INTO public.sms_dlq_retry_state (
            message_key, channel, recipient_phone, body, template_name, region,
@@ -615,18 +731,23 @@ export async function sendApplicationMessage(
            next_attempt_at = NOW() + (POWER(2, LEAST(sms_dlq_retry_state.attempts, 6)) * INTERVAL '2 minutes'),
            updated_at = NOW()`,
         [
-          messageKey,
+         idempotencyKey,
           channel,
           to,
           messageText,
           (payload as any).templateName || payload.whatsappTemplateId || null,
           region,
-          failureError,
+         finalFailureError,
         ]
-      ).catch(() => {});
+      );
+    } catch (dlqErr: any) {
+      const reason = dlqErr instanceof Error ? dlqErr.message : String(dlqErr);
+      console.error("[smsService] Failed to enlist message in SMS recovery queue", {
+        idempotencyKey,
+        error: reason,
+      });
+      finalFailureError += `; SMS recovery queue persistence failed: ${reason}`;
     }
-  } catch (dlqErr: any) {
-    console.warn("[smsService] Failed to enlist into DLQ retry state:", dlqErr.message);
   }
 
   const failureResult: SendApplicationMessageResult = {
@@ -635,7 +756,7 @@ export async function sendApplicationMessage(
     provider: "none",
     deliveryStatus: "failed",
     region,
-    error: failureError,
+    error: finalFailureError,
   };
 
   return failureResult;
@@ -646,17 +767,10 @@ export async function sendApplicationMessage(
  */
 export async function reprocessSmsDlq(maxBatch = 25): Promise<{ processed: number; recovered: number; errors: number }> {
   const pool = getDbPool();
-  if (!pool) return { processed: 0, recovered: 0, errors: 0 };
-
   const pending = await pool.query(
-    `SELECT id, message_key, channel, recipient_phone, body, template_name, attempts
-       FROM public.sms_dlq_retry_state
-      WHERE resolved_at IS NULL
-        AND paused = false
-        AND next_attempt_at <= NOW()
-      ORDER BY next_attempt_at ASC
-      LIMIT $1`,
-    [maxBatch]
+    `SELECT id, message_key, channel, recipient_phone, body, template_name, attempts, max_attempts
+       FROM public.claim_sms_dlq_retry_batch($1)`,
+    [maxBatch],
   );
 
   let recovered = 0;
@@ -664,6 +778,7 @@ export async function reprocessSmsDlq(maxBatch = 25): Promise<{ processed: numbe
 
   for (const row of pending.rows) {
     try {
+      await requeueOutboundMessage(pool, row.message_key);
       const res = await sendApplicationMessage({
         to: row.recipient_phone,
         message: row.body || "",
@@ -674,31 +789,65 @@ export async function reprocessSmsDlq(maxBatch = 25): Promise<{ processed: numbe
       if (res.success) {
         await pool.query(
           `UPDATE public.sms_dlq_retry_state
-              SET resolved_at = NOW(), updated_at = NOW()
+              SET resolved_at = NOW(), claimed_at = NULL, updated_at = NOW()
             WHERE id = $1`,
           [row.id]
         );
         recovered++;
       } else {
-        const nextAttempts = (row.attempts || 1) + 1;
-        const isExhausted = nextAttempts >= 5;
+        const nextAttempts = Number(row.attempts || 1);
+        const isExhausted = nextAttempts >= Number(row.max_attempts || 5);
         await pool.query(
           `UPDATE public.sms_dlq_retry_state
-              SET attempts = $1,
-                  paused = $2,
-                  last_error = $3,
-                  next_attempt_at = NOW() + (POWER(2, LEAST($1, 6)) * INTERVAL '5 minutes'),
+              SET paused = $1,
+                  claimed_at = NULL,
+                  last_error = $2,
+                  next_attempt_at = NOW() + ($3 * INTERVAL '1 millisecond'),
                   updated_at = NOW()
             WHERE id = $4`,
-          [nextAttempts, isExhausted, res.error || "Retry failed", row.id]
+          [
+            isExhausted,
+            res.error || "Retry failed",
+            retryDelayMs(nextAttempts, 5 * 60_000),
+            row.id,
+          ]
         );
+        if (isExhausted) {
+          await updateOutboundMessage(pool, row.message_key, {
+            status: "dead_letter",
+            lastError: res.error || "Retry limit exhausted",
+          });
+        }
         errors++;
       }
     } catch (e: any) {
       errors++;
+      const error = e instanceof Error ? e.message : String(e);
+      console.error("[smsService] SMS DLQ reprocessing failed", {
+        messageKey: row.message_key,
+        error,
+      });
+      const isExhausted = Number(row.attempts || 0) >= Number(row.max_attempts || 5);
+      const stateUpdate = await pool.query(
+        `UPDATE public.sms_dlq_retry_state
+            SET paused = $1,
+                claimed_at = NULL,
+                last_error = $2,
+                updated_at = NOW()
+          WHERE id = $3`,
+        [isExhausted, error, row.id],
+      );
+      if (stateUpdate.rowCount !== 1) {
+        throw new Error(`SMS DLQ retry state could not be persisted for ${row.message_key}`);
+      }
+      if (isExhausted) {
+        await updateOutboundMessage(pool, row.message_key, {
+          status: "dead_letter",
+          lastError: error,
+        });
+      }
     }
   }
 
   return { processed: pending.rows.length, recovered, errors };
 }
-

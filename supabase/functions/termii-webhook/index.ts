@@ -239,6 +239,27 @@ serve(async (req) => {
         raw_payload: payload,
       });
 
+      const outboxStatus = eventType === "delivered"
+        ? "delivered"
+        : eventType === "failed" ? "dead_letter" : null;
+      if (outboxStatus) {
+        let outboxUpdate = supabase
+          .from("outbound_message_outbox")
+          .update({
+            status: outboxStatus,
+            provider: "termii",
+            provider_message_id: messageId,
+            last_error: outboxStatus === "dead_letter" ? status : null,
+            delivered_at: outboxStatus === "delivered" ? new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("provider", "termii")
+          .eq("provider_message_id", messageId);
+        if (outboxStatus === "dead_letter") outboxUpdate = outboxUpdate.neq("status", "delivered");
+        const { error: outboxError } = await outboxUpdate;
+        if (outboxError) throw new Error(`Failed to update outbound message receipt: ${outboxError.message}`);
+      }
+
       const { data: existingMsg } = await supabase
         .from("inbox_messages")
         .select("id, metadata")

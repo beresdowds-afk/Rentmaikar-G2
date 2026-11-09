@@ -733,18 +733,9 @@ serve(async (req) => {
         const { data, error } = await admin
           .from("telemetry_anomalies")
           .select("*")
-          .order("created_at", { ascending: false })
+          .order("last_seen_at", { ascending: false })
           .limit(limit);
-        if (error) {
-          // Fallback to audit log
-          const { data: auditData } = await admin
-            .from("iot_audit_log")
-            .select("*")
-            .eq("action", "telemetry_anomaly_detected")
-            .order("created_at", { ascending: false })
-            .limit(limit);
-          return json(200, { ok: true, anomalies: auditData || [], total: (auditData || []).length });
-        }
+        if (error) return json(500, { ok: false, error: `Failed to load telemetry anomalies: ${error.message}` });
         return json(200, { ok: true, anomalies: data || [], total: (data || []).length });
       }
 
@@ -757,41 +748,144 @@ serve(async (req) => {
             acknowledged: true,
             acknowledged_by: user.id,
             acknowledged_at: new Date().toISOString(),
+            acknowledged_notes: resolution_notes || "Acknowledged",
             resolution_notes: resolution_notes || "Acknowledged",
+            status: "acknowledged",
           })
           .eq("id", anomaly_id)
+          .neq("status", "resolved")
           .select()
-          .single();
+          .maybeSingle();
         if (error) return json(400, { error: error.message });
+        if (!data) return json(404, { error: "Open anomaly not found" });
         await audit(admin, user.id, "acknowledge_telemetry_anomaly", {
           details: { anomaly_id, resolution_notes },
         });
         return json(200, { ok: true, anomaly: data });
       }
 
+      case "resolve_telemetry_anomaly": {
+        const { anomaly_id, resolution_notes } = body || {};
+        if (!anomaly_id || typeof resolution_notes !== "string" || !resolution_notes.trim()) {
+          return json(400, { error: "anomaly_id and resolution_notes are required" });
+        }
+        const { data, error } = await admin
+          .from("telemetry_anomalies")
+          .update({
+            acknowledged: true,
+            acknowledged_by: user.id,
+            acknowledged_at: new Date().toISOString(),
+            resolved_by: user.id,
+            resolved_at: new Date().toISOString(),
+            resolution_notes: resolution_notes.trim(),
+            status: "resolved",
+            active_dedupe_key: null,
+          })
+          .eq("id", anomaly_id)
+          .neq("status", "resolved")
+          .select()
+          .maybeSingle();
+        if (error) return json(400, { error: error.message });
+        if (!data) return json(404, { error: "Unresolved anomaly not found" });
+        await audit(admin, user.id, "resolve_telemetry_anomaly", {
+          details: { anomaly_id, resolution_notes: resolution_notes.trim() },
+        });
+        return json(200, { ok: true, anomaly: data });
+      }
+
       case "get_fleet_sla_summary":
       case "evaluate_fleet_sla": {
-        const { data: devices } = await admin
+        const { data: devices, error: devicesError } = await admin
           .from("iot_devices")
-          .select("id, serial_number, imei, provider, last_ping, status, vehicle_id")
-          .eq("status", "active")
+          .select("id, serial_number, imei, provider, last_ping, status, vehicle_id, vehicles!inner(id, make, model, license_plate, status, telemetry_class, owner_id)")
+          .in("status", ["active", "offline"])
+          .eq("telemetry_enabled", true)
           .not("vehicle_id", "is", null);
+        if (devicesError) return json(500, { ok: false, error: `Failed to load fleet telemetry: ${devicesError.message}` });
+
+        const owners = [...new Set((devices || []).map((device: any) => device.vehicles?.owner_id).filter(Boolean))];
+        const { data: profiles, error: profilesError } = owners.length
+          ? await admin.from("profiles").select("id, preferred_country").in("id", owners)
+          : { data: [], error: null };
+        if (profilesError) return json(500, { ok: false, error: `Failed to load fleet regions: ${profilesError.message}` });
+        const regions = new Map((profiles || []).map((profile: any) => [profile.id, profile.preferred_country]));
+        const { data: configurations, error: configError } = await admin
+          .from("fleet_telemetry_sla_config")
+          .select("*");
+        if (configError) return json(500, { ok: false, error: `Failed to load fleet SLA thresholds: ${configError.message}` });
 
         const totalTracked = (devices || []).length;
         let compliant = 0;
         let delayed = 0;
         let degraded = 0;
         let breached = 0;
+        const delayedVehicles: any[] = [];
+        const degradedVehicles: any[] = [];
+        const breachedVehicles: any[] = [];
         const now = Date.now();
 
-        (devices || []).forEach((d: any) => {
-          const lastPingTime = d.last_ping ? new Date(d.last_ping).getTime() : 0;
-          const ageMinutes = lastPingTime > 0 ? Math.round((now - lastPingTime) / 60000) : 999999;
-          if (ageMinutes <= 15) compliant++;
-          else if (ageMinutes <= 120) delayed++;
-          else if (ageMinutes <= 360) degraded++;
-          else breached++;
-        });
+        for (const device of devices || []) {
+          const vehicle: any = device.vehicles;
+          const region = regions.get(vehicle.owner_id) || "*";
+          const vehicleClass = vehicle.telemetry_class || "standard";
+          const matching = (configurations || [])
+            .filter((entry: any) =>
+              (entry.region === region || entry.region === "*") &&
+              (entry.vehicle_class === vehicleClass || entry.vehicle_class === "*"))
+            .sort((a: any, b: any) =>
+              Number(b.region === region) + Number(b.vehicle_class === vehicleClass) -
+              Number(a.region === region) - Number(a.vehicle_class === vehicleClass))[0];
+          const active = ["active", "rented"].includes(String(vehicle.status).toLowerCase());
+          const delayedLimit = Number(active ? matching?.active_delayed_minutes : matching?.idle_delayed_minutes) || (active ? 15 : 120);
+          const degradedLimit = Number(active ? matching?.active_degraded_minutes : matching?.idle_degraded_minutes) || (active ? 60 : 360);
+          const breachLimit = Number(active ? matching?.active_breach_minutes : matching?.idle_breach_minutes) || (active ? 360 : 720);
+          const pingTime = device.last_ping ? new Date(device.last_ping).getTime() : 0;
+          const ageMinutes = pingTime > 0 ? Math.round((now - pingTime) / 60000) : 999999;
+          const slaStatus = ageMinutes < 0 ? "breached"
+            : ageMinutes <= delayedLimit ? "compliant"
+            : ageMinutes <= degradedLimit ? "delayed"
+            : ageMinutes <= breachLimit ? "degraded"
+            : "breached";
+          const row = {
+            vehicle_id: device.vehicle_id,
+            license_plate: vehicle.license_plate,
+            vehicle_name: `${vehicle.make || ""} ${vehicle.model || ""}`.trim(),
+            device_serial: device.serial_number || device.imei,
+            provider: device.provider,
+            region: regions.get(vehicle.owner_id) || null,
+            vehicle_class: vehicleClass,
+            ping_age_minutes: ageMinutes,
+            last_ping: device.last_ping,
+            sla_status: slaStatus,
+          };
+          if (slaStatus === "compliant") compliant++;
+          else if (slaStatus === "delayed") {
+            delayed++;
+            delayedVehicles.push(row);
+          } else if (slaStatus === "degraded") {
+            degraded++;
+            degradedVehicles.push(row);
+          } else {
+            breached++;
+            breachedVehicles.push({
+              ...row,
+              severity: ageMinutes > 1440 ? "critical" : "warning",
+              sla_breach_reason: `No telemetry within the ${breachLimit}-minute breach threshold`,
+            });
+          }
+        }
+
+        const { data: anomalies, error: anomalyError } = await admin
+          .from("telemetry_anomalies")
+          .select("severity")
+          .neq("status", "resolved");
+        if (anomalyError) return json(500, { ok: false, error: `Failed to summarize anomalies: ${anomalyError.message}` });
+        const activeAnomalies = { critical: 0, warning: 0, info: 0, total: anomalies?.length || 0 };
+        for (const anomaly of anomalies || []) {
+          if (anomaly.severity === "critical") activeAnomalies.critical++;
+          else if (anomaly.severity === "warning") activeAnomalies.warning++;
+          else if (anomaly.severity === "info") activeAnomalies.info++;
+        }
 
         const compliancePercentage = totalTracked > 0 ? Number(((compliant / totalTracked) * 100).toFixed(1)) : 100.0;
         return json(200, {
@@ -806,10 +900,12 @@ serve(async (req) => {
             breached_count: breached,
             sla_health_status: compliancePercentage >= 95 ? "optimal" : compliancePercentage >= 80 ? "warning" : "critical",
           },
+          active_anomalies: activeAnomalies,
+          delayed_vehicles: delayedVehicles.slice(0, 50),
+          degraded_vehicles: degradedVehicles.slice(0, 50),
+          breached_vehicles: breachedVehicles.slice(0, 50),
           thresholds: {
-            active_vehicle_freshness_minutes: 15,
-            idle_vehicle_freshness_minutes: 120,
-            critical_breach_hours: 6,
+            configuration: "fleet_telemetry_sla_config",
           },
         });
       }

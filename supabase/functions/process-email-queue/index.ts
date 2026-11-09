@@ -25,7 +25,7 @@ class ProviderSendError extends Error {
 
 // Send one message directly through the Direct Resend connector.
 // The `from` domain is normalized onto the verified sending domain.
-async function sendViaResend(payload: Record<string, unknown>): Promise<void> {
+async function sendViaResend(payload: Record<string, unknown>): Promise<{ providerMessageId: string | null }> {
   const resendKey = Deno.env.get('RESEND_API_KEY')
   if (!resendKey) {
     throw new Error('Direct Resend connector not configured (missing RESEND_API_KEY)')
@@ -49,6 +49,13 @@ async function sendViaResend(payload: Record<string, unknown>): Promise<void> {
       Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null
     )
   }
+  const receipt = await res.json().catch(() => ({})) as Record<string, unknown>
+  const providerMessageId = typeof receipt.id === 'string'
+    ? receipt.id
+    : typeof receipt.email_id === 'string'
+      ? receipt.email_id
+      : null
+  return { providerMessageId }
 }
 
 // Check if an error is a rate-limit (429) response.
@@ -96,17 +103,67 @@ function parseJwtClaims(token: string): Record<string, unknown> | null {
   }
 }
 
+async function ensureOutboxRecord(
+  supabase: ReturnType<typeof createClient>,
+  queue: string,
+  msg: { msg_id: number; message: Record<string, unknown> },
+  ttlMinutes: number,
+): Promise<string> {
+  const payload = msg.message
+  const messageId = typeof payload.message_id === 'string' && payload.message_id
+    ? payload.message_id
+    : `legacy-${queue}-${msg.msg_id}`
+  payload.message_id = messageId
+  const messageKey = typeof payload.idempotency_key === 'string' && payload.idempotency_key
+    ? payload.idempotency_key
+    : messageId
+  const idempotencyKey = `email:${messageKey}`
+  const { error } = await supabase.from('outbound_message_outbox').upsert({
+    idempotency_key: idempotencyKey,
+    channel: 'email',
+    provider: 'resend',
+    recipient: typeof payload.to === 'string' ? payload.to : 'unknown',
+    template_reference: String(payload.label || queue),
+    message_class: queue === 'auth_emails' ? 'authentication' : 'transactional',
+    status: 'queued',
+    max_attempts: queue === 'auth_emails' ? 1 : MAX_RETRIES,
+    expires_at: new Date(Date.now() + ttlMinutes * 60_000).toISOString(),
+    queue_name: queue,
+    queue_message_id: msg.msg_id,
+    payload,
+  }, { onConflict: 'idempotency_key', ignoreDuplicates: true })
+  if (error) throw new Error(`Failed to persist queued email before dispatch: ${error.message}`)
+  return idempotencyKey
+}
+
+async function updateOutbox(
+  supabase: ReturnType<typeof createClient>,
+  idempotencyKey: string,
+  update: Record<string, unknown>,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('outbound_message_outbox')
+    .update({ ...update, claimed_at: null, updated_at: new Date().toISOString() })
+    .eq('idempotency_key', idempotencyKey)
+    .select('id')
+    .maybeSingle()
+  if (error || !data) {
+    throw new Error(`Failed to persist outbound email state: ${error?.message || 'message row not found'}`)
+  }
+}
+
 // Move a message to the dead letter queue and log the reason.
 async function moveToDlq(
   supabase: ReturnType<typeof createClient>,
   queue: string,
   msg: { msg_id: number; message: Record<string, unknown> },
   reason: string,
-  correlationId?: string
+  correlationId?: string,
+  finalStatus: 'dead_letter' | 'expired' = 'dead_letter'
 ): Promise<boolean> {
   const payload = msg.message
   try {
-    await supabase.from('email_send_log').insert({
+    const { error: logError } = await supabase.from('email_send_log').insert({
       message_id: payload.message_id,
       template_name: (payload.label || queue) as string,
       recipient_email: payload.to,
@@ -118,6 +175,7 @@ async function moveToDlq(
         moved_at: new Date().toISOString(),
       },
     })
+    if (logError) throw new Error(`Failed to log email dead-letter event: ${logError.message}`)
     const { error } = await supabase.rpc('move_to_dlq', {
       source_queue: queue,
       dlq_name: `${queue}_dlq`,
@@ -135,6 +193,14 @@ async function moveToDlq(
       })
       return false
     }
+    const messageKey = typeof payload.idempotency_key === 'string' && payload.idempotency_key
+      ? payload.idempotency_key
+      : String(payload.message_id)
+    await updateOutbox(supabase, `email:${messageKey}`, {
+      status: finalStatus,
+      last_error: reason,
+      next_attempt_at: new Date().toISOString(),
+    })
     return true
   } catch (err: any) {
     console.error('moveToDlq unhandled exception', {
@@ -203,8 +269,8 @@ async function handleRequest(req: Request): Promise<Response> {
   const batchSize = state?.batch_size ?? DEFAULT_BATCH_SIZE
   const sendDelayMs = state?.send_delay_ms ?? DEFAULT_SEND_DELAY_MS
   const ttlMinutes: Record<string, number> = {
-    auth_emails: state?.auth_email_ttl_minutes ?? DEFAULT_AUTH_TTL_MINUTES,
-    transactional_emails: state?.transactional_email_ttl_minutes ?? DEFAULT_TRANSACTIONAL_TTL_MINUTES,
+    auth_emails: Math.min(15, Math.max(1, state?.auth_email_ttl_minutes ?? DEFAULT_AUTH_TTL_MINUTES)),
+    transactional_emails: Math.min(1440, Math.max(1, state?.transactional_email_ttl_minutes ?? DEFAULT_TRANSACTIONAL_TTL_MINUTES)),
   }
 
   const correlationId = req.headers.get('x-correlation-id') || crypto.randomUUID()
@@ -277,6 +343,8 @@ async function handleRequest(req: Request): Promise<Response> {
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i]
       const payload = msg.message
+      const outboxKey = await ensureOutboxRecord(supabase, queue, msg, ttlMinutes[queue])
+      const maxRetries = queue === 'auth_emails' ? 1 : MAX_RETRIES
       const failedAttempts =
         payload?.message_id && typeof payload.message_id === 'string'
           ? (failedAttemptsByMessageId.get(payload.message_id) ?? 0)
@@ -302,7 +370,8 @@ async function handleRequest(req: Request): Promise<Response> {
             queue,
             msg,
             `TTL exceeded (${ttlMinutes[queue]} minutes)`,
-            correlationId
+            correlationId,
+            'expired'
           )
           if (moved) totalDlq++
           else totalFailed++
@@ -311,7 +380,7 @@ async function handleRequest(req: Request): Promise<Response> {
       }
 
       // Move to DLQ if max failed send attempts reached.
-      if (failedAttempts >= MAX_RETRIES) {
+      if (failedAttempts >= maxRetries) {
         const moved = await moveToDlq(
           supabase,
           queue,
@@ -354,21 +423,83 @@ async function handleRequest(req: Request): Promise<Response> {
             })
             totalFailed++
           }
+          await updateOutbox(supabase, outboxKey, { status: 'accepted', last_error: null })
           continue
         }
       }
 
+      const { data: claimed, error: claimError } = await supabase.rpc('claim_outbound_message', {
+        _idempotency_key: outboxKey,
+      })
+      if (claimError) throw new Error(`Failed to claim queued email: ${claimError.message}`)
+      if (!claimed) {
+        const { data: outboxState, error: outboxStateError } = await supabase
+          .from('outbound_message_outbox')
+          .select('status, attempt_count, max_attempts, last_error')
+          .eq('idempotency_key', outboxKey)
+          .maybeSingle()
+        if (outboxStateError) throw new Error(`Failed to inspect outbound email state: ${outboxStateError.message}`)
+        if (
+          outboxState?.status === 'failed' &&
+          outboxState.attempt_count >= outboxState.max_attempts
+        ) {
+          const moved = await moveToDlq(
+            supabase,
+            queue,
+            msg,
+            outboxState.last_error || `Maximum retries (${outboxState.max_attempts}) exhausted`,
+            correlationId,
+          )
+          if (moved) totalDlq++
+          else totalFailed++
+          continue
+        }
+        if (outboxState && ['accepted', 'delivered', 'simulated', 'suppressed', 'dead_letter', 'expired'].includes(outboxState.status)) {
+          const { error: deleteError } = await supabase.rpc('delete_email', {
+            queue_name: queue,
+            message_id: msg.msg_id,
+          })
+          if (deleteError) throw new Error(`Failed to remove terminal email from queue: ${deleteError.message}`)
+        }
+        continue
+      }
+
+      let providerAccepted = false
+      let providerMessageId: string | null = null
       try {
-        await sendViaResend(payload)
+        const receipt = await sendViaResend(payload)
+        providerAccepted = true
+        providerMessageId = receipt.providerMessageId
+        await updateOutbox(supabase, outboxKey, {
+          status: 'accepted',
+          provider: 'resend',
+          provider_message_id: providerMessageId,
+          last_error: null,
+        })
 
         // Log success
-        await supabase.from('email_send_log').insert({
+        const { error: sendLogError } = await supabase.from('email_send_log').insert({
           message_id: payload.message_id,
           template_name: payload.label || queue,
           recipient_email: payload.to,
           status: 'sent',
-          metadata: { provider: 'resend-direct', correlation_id: correlationId },
+          metadata: {
+            provider: 'resend-direct',
+            provider_message_id: providerMessageId,
+            idempotency_key: typeof payload.idempotency_key === 'string'
+              ? payload.idempotency_key
+              : payload.message_id,
+            correlation_id: correlationId,
+          },
         })
+        if (sendLogError) {
+          console.error('Provider accepted email but send-log persistence failed', {
+            message_id: payload.message_id,
+            provider_message_id: providerMessageId,
+            error: sendLogError.message,
+          })
+          totalFailed++
+        }
 
         // Delete from queue
         const { error: delError } = await supabase.rpc('delete_email', {
@@ -388,6 +519,37 @@ async function handleRequest(req: Request): Promise<Response> {
         totalProcessed++
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
+        if (providerAccepted) {
+          console.error('Provider accepted email but receipt persistence failed; queue retry suppressed', {
+            message_id: payload.message_id,
+            provider_message_id: providerMessageId,
+            correlation_id: correlationId,
+            error: errorMsg,
+          })
+          const { error: logError } = await supabase.from('email_send_log').insert({
+            message_id: payload.message_id,
+            template_name: payload.label || queue,
+            recipient_email: payload.to,
+            status: 'sent',
+            metadata: {
+              provider: 'resend-direct',
+              provider_message_id: providerMessageId,
+              idempotency_key: typeof payload.idempotency_key === 'string'
+                ? payload.idempotency_key
+                : payload.message_id,
+              correlation_id: correlationId,
+              receipt_persistence_failed: true,
+            },
+          })
+          if (logError) console.error('Accepted email receipt could not be recorded', { error: logError.message })
+          const { error: deleteError } = await supabase.rpc('delete_email', {
+            queue_name: queue,
+            message_id: msg.msg_id,
+          })
+          if (deleteError) console.error('Failed to remove accepted message from queue', { error: deleteError.message })
+          totalFailed++
+          continue
+        }
         console.error('Email send failed', {
           queue,
           msg_id: msg.msg_id,
@@ -398,7 +560,12 @@ async function handleRequest(req: Request): Promise<Response> {
         })
 
         if (isRateLimited(error)) {
-          await supabase.from('email_send_log').insert({
+          await updateOutbox(supabase, outboxKey, {
+            status: 'failed',
+            last_error: errorMsg.slice(0, 1000),
+            next_attempt_at: new Date(Date.now() + getRetryAfterSeconds(error) * 1000).toISOString(),
+          })
+          const { error: rateLimitLogError } = await supabase.from('email_send_log').insert({
             message_id: payload.message_id,
             template_name: payload.label || queue,
             recipient_email: payload.to,
@@ -406,6 +573,7 @@ async function handleRequest(req: Request): Promise<Response> {
             error_message: errorMsg.slice(0, 1000),
             metadata: { correlation_id: correlationId },
           })
+          if (rateLimitLogError) throw new Error(`Failed to persist rate-limited email attempt: ${rateLimitLogError.message}`)
 
           const retryAfterSecs = getRetryAfterSeconds(error)
           await supabase
@@ -452,13 +620,26 @@ async function handleRequest(req: Request): Promise<Response> {
         }
 
         // Log non-429 failures to track real retry attempts.
-        await supabase.from('email_send_log').insert({
+        const { error: failureLogError } = await supabase.from('email_send_log').insert({
           message_id: payload.message_id,
           template_name: payload.label || queue,
           recipient_email: payload.to,
           status: 'failed',
           error_message: errorMsg.slice(0, 1000),
           metadata: { correlation_id: correlationId },
+        })
+        if (failureLogError) {
+          console.error('Failed to persist email provider failure', {
+            message_id: payload.message_id,
+            error: failureLogError.message,
+          })
+        }
+        await updateOutbox(supabase, outboxKey, {
+          status: 'failed',
+          last_error: errorMsg.slice(0, 1000),
+          next_attempt_at: new Date(
+            Date.now() + Math.min(60_000 * 2 ** failedAttempts, 6 * 60 * 60_000)
+          ).toISOString(),
         })
         if (payload?.message_id && typeof payload.message_id === 'string') {
           failedAttemptsByMessageId.set(payload.message_id, failedAttempts + 1)

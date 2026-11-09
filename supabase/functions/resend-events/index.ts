@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
 
     const { data: existing } = await admin
       .from("email_send_log")
-      .select("message_id, template_name")
+      .select("message_id, template_name, metadata")
       .or(
         [
           providerId ? `message_id.eq.${providerId}` : null,
@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
 
     // Append the latest status; every dashboard query dedupes by message_id and
     // keeps the newest row, so this becomes the final outcome.
-    await admin.from("email_send_log").insert({
+    const { error: sendLogError } = await admin.from("email_send_log").insert({
       message_id: messageId,
       template_name: templateName,
       recipient_email: recipient || "unknown",
@@ -133,6 +133,33 @@ Deno.serve(async (req) => {
         raw: data,
       },
     });
+    if (sendLogError) throw new Error(`Failed to persist Resend delivery event: ${sendLogError.message}`);
+
+    const { data: outboxMessage, error: outboxLookupError } = await admin
+      .from("outbound_message_outbox")
+      .select("idempotency_key")
+      .eq(
+        "idempotency_key",
+        `email:${String(
+          (existing?.metadata as Record<string, unknown> | null)?.idempotency_key ?? messageId,
+        )}`,
+      )
+      .maybeSingle();
+    if (outboxLookupError) throw new Error(`Failed to locate outbound email state: ${outboxLookupError.message}`);
+    if (outboxMessage) {
+      const { error: outboxUpdateError } = await admin
+        .from("outbound_message_outbox")
+        .update({
+          status: status === "sent" ? "delivered" : "dead_letter",
+          provider: "resend",
+          provider_message_id: providerId || null,
+          last_error: status === "sent" ? null : reason || `Resend reported ${status}`,
+          delivered_at: status === "sent" ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("idempotency_key", outboxMessage.idempotency_key);
+      if (outboxUpdateError) throw new Error(`Failed to update outbound email receipt: ${outboxUpdateError.message}`);
+    }
 
     // Keep the queue table in sync where we can match on the provider id.
     if (providerId) {
