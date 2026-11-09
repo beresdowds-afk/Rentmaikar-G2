@@ -59,6 +59,9 @@ export async function assignRole(
     }
 
     if (!hasRoleRpc) {
+      if (lastError instanceof Error && lastError.message) {
+        throw lastError;
+      }
       const roleFailError = new Error(
         `Role verification failed: user_roles does not contain role "${role}" for user "${userId}".`,
       );
@@ -158,11 +161,16 @@ export async function ensureAuthUserForApplicant({
   }
 
   // 2. Pre-check if email is already registered using email_signup_status RPC
+  let registered = false;
   try {
     const { data: statusData } = await (supabase.rpc as any)('email_signup_status', {
       _email: normalizedEmail,
     });
-    if (statusData && typeof statusData === 'object' && (statusData as any).registered === true) {
+    registered = !!(statusData && typeof statusData === 'object' && (statusData as any).registered === true);
+  } catch (rpcErr) {
+    console.warn('Registration email precheck unavailable:', rpcErr);
+  }
+  if (registered) {
       // Email is already registered. Attempt sign-in with the password provided.
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -184,12 +192,6 @@ export async function ensureAuthUserForApplicant({
       );
       (duplicateError as any).code = 'EMAIL_ALREADY_EXISTS';
       throw duplicateError;
-    }
-  } catch (rpcErr: any) {
-    if (rpcErr?.code === 'EMAIL_ALREADY_EXISTS' || rpcErr?.message?.includes('already exists')) {
-      throw rpcErr;
-    }
-    // Rate limited or RPC unavailable, continue to signUp attempt
   }
 
   // 3. Attempt to sign up the new user
@@ -209,8 +211,7 @@ export async function ensureAuthUserForApplicant({
     const msg = signUpError.message.toLowerCase();
     if (
       msg.includes('already registered') ||
-      msg.includes('already exists') ||
-      signUpError.status === 422
+      msg.includes('already exists')
     ) {
       // Attempt sign-in with password in case account was already created
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -269,6 +270,14 @@ export async function ensureAuthUserForApplicant({
     const missingUserErr = new Error('Authentication failed: Supabase Auth did not return a valid user identity.');
     (missingUserErr as any).code = 'AUTH_USER_MISSING';
     throw missingUserErr;
+  }
+
+  if (!signUpData.session) {
+    const confirmationError = new Error(
+      'Account created. Please verify your email, then sign in and submit your registration again.',
+    );
+    (confirmationError as Error & { code?: string }).code = 'EMAIL_CONFIRMATION_REQUIRED';
+    throw confirmationError;
   }
 
   // 5. Verify profile exists (fails closed if missing)

@@ -36,7 +36,7 @@ interface Props {
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const BookingRequestDialog = ({ open, onOpenChange, vehicle, price }: Props) => {
-  const { user, userRole, isRoleLoading } = useAuth();
+  const { user, userRole, isRoleLoading, hasRole } = useAuth();
   const { country, currencySymbol } = useRegion();
   const navigate = useNavigate();
   const submit = useSubmitBookingRequest();
@@ -53,7 +53,7 @@ const BookingRequestDialog = ({ open, onOpenChange, vehicle, price }: Props) => 
   );
   const unavailable = availability.data && !availability.data.available;
 
-  const canBook = Boolean(user) && (userRole === "driver" || userRole === "admin");
+  const canBook = Boolean(user) && hasRole("driver");
 
   const days = useMemo(() => {
     if (!startDate || !endDate) return 0;

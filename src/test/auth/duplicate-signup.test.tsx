@@ -53,7 +53,11 @@ const Harness = ({ email }: { email: string }) => {
         onClick={async () => {
           const r = await signUp(email, "S3cur3-pass!", "Test User", "driver");
           setResult(
-            JSON.stringify({ exists: Boolean(r.emailExists), message: r.error?.message ?? null })
+            JSON.stringify({
+              exists: Boolean(r.emailExists),
+              message: r.error?.message ?? null,
+              confirmationRequired: Boolean(r.confirmationRequired),
+            })
           );
         }}
       >
@@ -75,6 +79,7 @@ const renderAndSubmit = async (email = "taken@example.com") => {
   return JSON.parse(screen.getByTestId("result").textContent as string) as {
     exists: boolean;
     message: string | null;
+    confirmationRequired: boolean;
   };
 };
 
@@ -144,7 +149,7 @@ describe("duplicate sign-up routing", () => {
     authSignUp.mockResolvedValue({
       data: {
         user: { id: "user-2", email: "fresh@example.com", identities: [{ id: "i-1" }] },
-        session: null,
+        session: { access_token: "token" },
       },
       error: null,
     });
@@ -154,6 +159,25 @@ describe("duplicate sign-up routing", () => {
     expect(result.exists).toBe(false);
     expect(result.message).toBeNull();
     expect(assignRole).toHaveBeenCalledWith("user-2", "driver", "fresh@example.com");
+  });
+
+  it("requests email confirmation without trying authenticated provisioning", async () => {
+    mockRpc({ registered: false, rate_limited: false });
+    authSignUp.mockResolvedValue({
+      data: {
+        user: { id: "user-5", identities: [{ id: "i-5" }] },
+        session: null,
+      },
+      error: null,
+    });
+
+    const result = await renderAndSubmit("  Fresh@Example.com ");
+
+    expect(result.message).toBeNull();
+    expect(result.confirmationRequired).toBe(true);
+    expect(authSignUp).toHaveBeenCalledWith(expect.objectContaining({ email: "fresh@example.com" }));
+    expect(verifyProfileExists).not.toHaveBeenCalled();
+    expect(assignRole).not.toHaveBeenCalled();
   });
 
   it("falls through to Supabase handling when the precheck is unavailable", async () => {
@@ -177,7 +201,7 @@ describe("duplicate sign-up routing", () => {
     authSignUp.mockResolvedValue({
       data: {
         user: { id: "user-4", email: "fresh2@example.com", identities: [{ id: "i-2" }] },
-        session: null,
+        session: { access_token: "token" },
       },
       error: null,
     });

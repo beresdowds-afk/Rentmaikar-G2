@@ -24,12 +24,15 @@ export function AlternativeAuthOptions({
 
   useEffect(() => {
     const handleAuthMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
       if (
         event.data?.type === 'OAUTH_AUTH_SUCCESS' ||
         event.data?.type === 'GOOGLE_OAUTH_SUCCESS'
       ) {
         setGoogleLoading(false);
         setBlockedAuthUrl(null);
+      } else if (event.data?.type === 'GOOGLE_OAUTH_ERROR') {
+        setGoogleLoading(false);
       }
     };
     window.addEventListener('message', handleAuthMessage);

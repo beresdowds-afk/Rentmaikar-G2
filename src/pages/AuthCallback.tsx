@@ -24,18 +24,21 @@ export default function AuthCallback() {
         if (error) {
           throw error;
         }
+        if (!session) {
+          throw new Error('No authenticated session was established. Please try signing in again.');
+        }
 
         const isPopup = typeof window !== 'undefined' && window.opener && window.opener !== window;
 
         if (isPopup) {
           try {
             window.opener.postMessage(
-              { type: 'OAUTH_AUTH_SUCCESS', provider: 'google', session },
-              '*'
+              { type: 'OAUTH_AUTH_SUCCESS', provider: 'google' },
+              window.location.origin
             );
             window.opener.postMessage(
-              { type: 'GOOGLE_OAUTH_SUCCESS', provider: 'google', session },
-              '*'
+              { type: 'GOOGLE_OAUTH_SUCCESS', provider: 'google' },
+              window.location.origin
             );
           } catch {
             // cross-origin messaging fallback
@@ -63,7 +66,7 @@ export default function AuthCallback() {
           try {
             window.opener.postMessage(
               { type: 'GOOGLE_OAUTH_ERROR', error: msg },
-              '*'
+              window.location.origin
             );
           } catch {
             // ignore

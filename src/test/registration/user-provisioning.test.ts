@@ -6,11 +6,19 @@ const mocks = vi.hoisted(() => ({
   roleRows: [{ role: 'owner' as string }],
   profile: { user_id: 'user-1' as string | null } as { user_id: string } | null,
   profileError: null as Error | null,
+  getSession: vi.fn(),
+  signUp: vi.fn(),
+  signIn: vi.fn(),
 }));
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     functions: { invoke: mocks.invoke },
+    auth: {
+      getSession: mocks.getSession,
+      signUp: mocks.signUp,
+      signInWithPassword: mocks.signIn,
+    },
     rpc: mocks.rpc,
     from: vi.fn(() => {
       const builder: Record<string, unknown> = {};
@@ -27,7 +35,7 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 
-import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
+import { assignRole, ensureAuthUserForApplicant, verifyProfileExists } from '@/lib/user-provisioning';
 
 const { invoke, rpc, roleRows } = mocks;
 
@@ -38,6 +46,36 @@ describe('account role provisioning', () => {
     mocks.profile = { user_id: 'user-1' };
     mocks.profileError = null;
     invoke.mockResolvedValue({ data: { ok: true }, error: null });
+  });
+
+  describe('applicant sign-up', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
+      rpc.mockResolvedValue({ data: { registered: false }, error: null });
+    });
+
+    it('asks for confirmation before attempting authenticated registration', async () => {
+      mocks.signUp.mockResolvedValue({
+        data: { user: { id: 'new-user', identities: [{ id: 'identity' }] }, session: null },
+        error: null,
+      });
+      await expect(ensureAuthUserForApplicant({
+        email: 'new@example.com', password: 'Password123!', fullName: 'New User', requestedRole: 'owner',
+      })).rejects.toMatchObject({ code: 'EMAIL_CONFIRMATION_REQUIRED' });
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it('preserves non-duplicate 422 errors instead of claiming the account exists', async () => {
+      mocks.signUp.mockResolvedValue({
+        data: { user: null, session: null },
+        error: { status: 422, message: 'Password is too weak' },
+      });
+      await expect(ensureAuthUserForApplicant({
+        email: 'new@example.com', password: 'Password123!', fullName: 'New User', requestedRole: 'driver',
+      })).rejects.toMatchObject({ message: 'Password is too weak' });
+      expect(mocks.signIn).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the authorized backend and never writes roles directly from the client', async () => {
@@ -54,7 +92,7 @@ describe('account role provisioning', () => {
     roleRows.splice(0, roleRows.length);
     rpc.mockResolvedValue({ data: false, error: null });
 
-    await expect(assignRole('user-1', 'admin')).rejects.toThrow(/Role verification failed/);
+    await expect(assignRole('user-1', 'admin')).rejects.toThrow(/Forbidden/);
     expect(invoke).toHaveBeenCalledWith('provision-user-account', {
       body: { userId: 'user-1', role: 'admin', email: undefined },
     });

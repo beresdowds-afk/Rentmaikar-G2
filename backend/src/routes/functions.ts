@@ -602,12 +602,11 @@ functionsRouter.all(
           const { data: roleData, error: roleError } = await admin
             .from("user_roles")
             .select("role")
-            .eq("user_id", userId)
-            .maybeSingle();
+            .eq("user_id", userId);
           if (roleError) {
             return res.status(500).json({ success: false, error: "Failed to load MFA account role" });
           }
-          const isMandatory = roleData?.role === "admin" || roleData?.role === "owner";
+          const isMandatory = (roleData ?? []).some(({ role }) => role === "admin" || role === "owner");
           return res.status(200).json({
             success: true,
             requires_2fa: !!settings?.is_enabled || isMandatory,

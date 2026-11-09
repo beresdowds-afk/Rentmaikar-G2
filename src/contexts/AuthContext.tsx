@@ -1,10 +1,10 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { backendBridge } from '@/lib/backend-bridge';
 import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 import { useAuthTabSync } from '@/hooks/useAuthTabSync';
-import type { AppRole } from '@/lib/role-home';
+import { primaryRole, type AppRole } from '@/lib/role-home';
 import { guardedPasswordSignIn } from '@/lib/auth-password-sign-in';
 
 
@@ -96,6 +96,7 @@ interface AuthContextType {
   isLoading: boolean;
   userRole: AppRole | null;
   userRoles: AppRole[];
+  hasAccountTypeConflict: boolean;
   isRoleLoading: boolean;
   twoFactorStatus: TwoFactorStatus | null;
   twoFactorVerified: boolean;
@@ -105,11 +106,13 @@ interface AuthContextType {
     emailExists?: boolean;
     user?: User | null;
     userId?: string | null;
+    confirmationRequired?: boolean;
     status?: 'success' | 'rejected' | 'ambiguous';
   }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null; userId?: string }>;
   signOut: () => Promise<void>;
   hasRole: (role: AppRole) => boolean;
+  refreshRoles: () => Promise<void>;
   check2FAStatus: (userId: string) => Promise<TwoFactorStatus | null>;
   sendPasswordReset: (email: string, options?: { redirectOrigin?: string; maxAttempts?: number }) => Promise<{ error: Error | null; success: boolean }>;
   sendGoogleSsoAuthEmail: (params: { email: string; fullName?: string; isNewUser?: boolean; device?: string; location?: string; origin?: string }) => Promise<{ success: boolean; error?: Error }>;
@@ -123,66 +126,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [userRole, setUserRole] = useState<AppRole | null>(null);
   const [userRoles, setUserRoles] = useState<AppRole[]>([]);
+  const [hasAccountTypeConflict, setHasAccountTypeConflict] = useState(false);
   const [isRoleLoading, setIsRoleLoading] = useState(true);
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
   const [twoFactorVerified, setTwoFactorVerified] = useState(false);
+  const twoFactorStatusRef = useRef<TwoFactorStatus | null>(null);
+  twoFactorStatusRef.current = twoFactorStatus;
+  const authGeneration = useRef(0);
+  const activeUserId = useRef<string | null>(null);
 
-  const fetchUserRole = async (userId: string, userEmail?: string | null) => {
+  const fetchUserRole = async (userId: string, userEmail?: string | null, generation = authGeneration.current) => {
     try {
       const { data, error } = await supabase
         .from('user_roles')
         .select('role')
-        .eq('user_id', userId)
-        .maybeSingle();
+        .eq('user_id', userId);
       if (error) {
         console.error('Error fetching user role:', error);
+        if (generation === authGeneration.current && activeUserId.current === userId) {
+          setUserRoles([]);
+        }
         return null;
       }
 
-      let assignedRole = (data?.role as AppRole) ?? null;
-      let effectiveRole: AppRole | null = assignedRole;
-
-      // Handle new OAuth / Google SSO users without an existing role assignment:
-      // Read target role chosen during sign-up (defaults to driver) and provision it.
-      if (!effectiveRole && userId) {
-        const storedRole = typeof window !== 'undefined'
-          ? (sessionStorage.getItem('rentmaikar_oauth_role') || localStorage.getItem('rentmaikar_oauth_role'))
-          : null;
-        const targetRole: 'driver' | 'owner' = storedRole === 'owner' ? 'owner' : 'driver';
-        effectiveRole = targetRole;
-
-        try {
-          await assignRole(userId, targetRole);
-        } catch (e) {
-          console.warn('[AuthContext] Auto-assigning OAuth role failed:', e);
-        }
-
-        if (typeof window !== 'undefined') {
-          try {
-            sessionStorage.removeItem('rentmaikar_oauth_role');
-            localStorage.removeItem('rentmaikar_oauth_role');
-          } catch {
-            // ignore
-          }
-        }
+      let roles = (data ?? []).map((row) => row.role as AppRole);
+      const conflictingTypes = roles.includes('driver') && roles.includes('owner');
+      if (conflictingTypes) {
+        roles = roles.filter((role) => role !== 'driver' && role !== 'owner');
       }
+      let effectiveRole = primaryRole(roles);
 
-      // Administrators possess general platform access across workspaces and roles
-      if (effectiveRole === 'admin') {
-        setUserRoles([
-          'admin',
-          'driver',
-          'owner',
-          'admin_assistant',
-          'legal_support',
-          'iot_support',
-          'vehicle_support',
-          'insurance_support',
-          'customer',
-        ]);
-      } else {
-        setUserRoles(effectiveRole ? [effectiveRole] : []);
-      }
+      if (generation !== authGeneration.current || activeUserId.current !== userId) return null;
+
+      setHasAccountTypeConflict(conflictingTypes);
+      setUserRoles(roles);
 
       if (typeof window !== 'undefined') {
         try {
@@ -210,6 +187,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const check2FAStatus = async (userId: string): Promise<TwoFactorStatus | null> => {
+    const generation = authGeneration.current;
     try {
       const hasStoredTotp = typeof window !== 'undefined' && !!localStorage.getItem(`rentmaikar:totp:${userId}`);
       const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', {
@@ -232,9 +210,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         preferred_channel: isAuthenticator ? 'authenticator' : data.preferred_channel || 'sms',
         phone: data.has_phone ? data.phone : undefined,
       };
-      setTwoFactorStatus(status);
-      if (!requires2FA) {
-        setTwoFactorVerified(true);
+      if (generation === authGeneration.current && activeUserId.current === userId) {
+        setTwoFactorStatus(status);
+        if (!requires2FA) {
+          setTwoFactorVerified(true);
+        }
       }
       return status;
     } catch (err) {
@@ -250,8 +230,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         preferred_channel: 'sms',
         check_failed: true,
       };
-      setTwoFactorStatus(failed);
-      setTwoFactorVerified(false);
+      if (generation === authGeneration.current && activeUserId.current === userId) {
+        setTwoFactorStatus(failed);
+        setTwoFactorVerified(false);
+      }
       return failed;
     }
   };
@@ -280,29 +262,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const { broadcastSession, broadcastSignOut } = useAuthTabSync({
     session,
     onSessionSynced: (syncedSession) => {
+      const changedUser = activeUserId.current !== syncedSession.user.id;
+      activeUserId.current = syncedSession.user.id;
+      const generation = ++authGeneration.current;
+      if (changedUser) {
+        setUserRole(null);
+        setUserRoles([]);
+        setHasAccountTypeConflict(false);
+        setTwoFactorStatus(null);
+        setTwoFactorVerified(false);
+      }
       setSession(syncedSession);
       setUser(syncedSession.user);
       if (syncedSession.user) {
         setIsRoleLoading(true);
-        fetchUserRole(syncedSession.user.id, syncedSession.user.email)
-          .then((role) => setUserRole(role))
-          .catch(() => setUserRole(null))
-          .finally(() => setIsRoleLoading(false));
-
-        check2FAStatus(syncedSession.user.id)
-          .then((status) => {
-            if (!status || !status.requires_2fa) {
-              setTwoFactorVerified(true);
-            }
+        fetchUserRole(syncedSession.user.id, syncedSession.user.email, generation)
+          .then((role) => {
+            if (generation === authGeneration.current) setUserRole(role);
           })
-          .catch(() => setTwoFactorVerified(false));
+          .finally(() => {
+            if (generation === authGeneration.current) setIsRoleLoading(false);
+          });
+
+        void check2FAStatus(syncedSession.user.id);
       }
     },
     onSignedOut: () => {
+      activeUserId.current = null;
+      ++authGeneration.current;
       setSession(null);
       setUser(null);
       setUserRole(null);
       setUserRoles([]);
+      setHasAccountTypeConflict(false);
       setTwoFactorStatus(null);
       setTwoFactorVerified(false);
       setIsRoleLoading(false);
@@ -324,35 +316,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Set up auth state listener FIRST — synchronous state, deferred side effects.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        const uid = session?.user?.id ?? null;
+        const changedUser = activeUserId.current !== uid;
+        activeUserId.current = uid;
+        const generation = ++authGeneration.current;
+        if (changedUser || event === 'SIGNED_IN') {
+          setUserRole(null);
+          setUserRoles([]);
+          setHasAccountTypeConflict(false);
+          setTwoFactorStatus(null);
+          setTwoFactorVerified(false);
+        }
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
           setIsRoleLoading(true);
-          const uid = session.user.id;
           const uemail = session.user.email;
-          fetchUserRole(uid, uemail)
-            .then((role) => {
-              setUserRole(role);
-            })
-            .catch((err) => {
-              console.error('Failed to fetch role:', err);
-              setUserRole(null);
-            })
-            .finally(() => {
-              setIsRoleLoading(false);
-            });
-
-          check2FAStatus(uid).then((status) => {
-            if (!status || !status.requires_2fa) {
-              setTwoFactorVerified(true);
-            }
-          }).catch(() => {
-            setTwoFactorVerified(false);
-          });
+          // Supabase auth callbacks run under its session lock.
+          setTimeout(() => {
+            if (generation !== authGeneration.current) return;
+            fetchUserRole(session.user.id, uemail, generation)
+              .then((role) => {
+                if (generation === authGeneration.current) setUserRole(role);
+              })
+              .finally(() => {
+                if (generation === authGeneration.current) setIsRoleLoading(false);
+              });
+            void check2FAStatus(session.user.id);
+          }, 0);
         } else {
           setUserRole(null);
           setUserRoles([]);
+          setHasAccountTypeConflict(false);
           setIsRoleLoading(false);
           setTwoFactorStatus(null);
           setTwoFactorVerified(false);
@@ -372,9 +368,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // defense against session fixation; we simply record the transitions.
         // Pull auth-layer email/phone changes into profiles (no auth-schema
         // triggers are permitted, so this is the UPDATE-side sync path).
-        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
           setTimeout(() => {
+            if (!session?.user) return;
             supabase.functions.invoke('sync-auth-identity').catch(() => {});
+            void Promise.resolve(supabase.rpc('link_my_verified_email_contacts' as never))
+              .then(({ error }) => {
+                if (error) console.error('[AuthContext] Contact correlation failed:', error);
+              })
+              .catch((error) => console.error('[AuthContext] Contact correlation failed:', error));
           }, 0);
         }
 
@@ -422,7 +424,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Multi-tab resilience: When multiple tabs open concurrently, another tab might
     // be actively rotating/refreshing the session token. Avoid wiping local storage
     // prematurely during concurrent tab initialization.
+    const initialGeneration = authGeneration.current;
     supabase.auth.getSession().then(async ({ data: { session: initialSession }, error }) => {
+      if (initialGeneration !== authGeneration.current) return;
       let activeSession = initialSession;
       const staleToken =
         !!error &&
@@ -431,8 +435,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (staleToken) {
         // Multi-tab grace period: Check if another tab recently refreshed or has a valid session
         await new Promise((resolve) => setTimeout(resolve, 500));
+        if (initialGeneration !== authGeneration.current) return;
         try {
           const retryRes = await supabase.auth.getSession();
+          if (initialGeneration !== authGeneration.current) return;
           if (retryRes?.data?.session) {
             activeSession = retryRes.data.session;
           } else {
@@ -445,6 +451,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setUser(null);
             setUserRole(null);
             setUserRoles([]);
+            setHasAccountTypeConflict(false);
             setIsRoleLoading(false);
             setIsLoading(false);
             return;
@@ -454,6 +461,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       }
 
+      if (initialGeneration !== authGeneration.current) return;
+      activeUserId.current = activeSession?.user.id ?? null;
+      const generation = ++authGeneration.current;
       setSession(activeSession);
       setUser(activeSession?.user ?? null);
 
@@ -462,25 +472,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsRoleLoading(true);
         const uid = activeSession.user.id;
         const uemail = activeSession.user.email;
-        fetchUserRole(uid, uemail)
+        fetchUserRole(uid, uemail, generation)
           .then((role) => {
-            setUserRole(role);
+            if (generation === authGeneration.current) setUserRole(role);
           })
           .catch((err) => {
             console.error('Error fetching user role in getSession:', err);
-            setUserRole(null);
+            if (generation === authGeneration.current) setUserRole(null);
           })
           .finally(() => {
-            setIsRoleLoading(false);
+            if (generation === authGeneration.current) setIsRoleLoading(false);
           });
 
-        check2FAStatus(uid).then((status) => {
-          if (!status || !status.requires_2fa) {
-            setTwoFactorVerified(true);
-          }
-        }).catch(() => {
-          setTwoFactorVerified(false);
-        });
+        void check2FAStatus(uid);
       } else {
         setIsRoleLoading(false);
       }
@@ -488,11 +492,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      ++authGeneration.current;
+      activeUserId.current = null;
+      subscription.unsubscribe();
+    };
   }, [broadcastSession, broadcastSignOut]);
   const signUp: AuthContextType['signUp'] = async (email, password, fullName, role) => {
     try {
-      const redirectUrl = `${window.location.origin}/`;
+      const redirectUrl = `${window.location.origin}/auth`;
       const normalizedEmail = email.trim().toLowerCase();
       const effectiveFullName = fullName.trim();
       const effectiveRole: 'driver' | 'owner' = role === 'owner' ? 'owner' : 'driver';
@@ -521,7 +529,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: normalizedEmail,
         password,
 
         options: {
@@ -569,6 +577,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       const uid = data.user.id;
 
+      // The database trigger provisions the account during sign-up. With
+      // email confirmation enabled there is no authenticated session yet, so
+      // RLS prevents client-side profile and role verification until sign-in.
+      if (!data.session) {
+        return { error: null, user: data.user, userId: uid, confirmationRequired: true, status: 'success' };
+      }
+
       // Fail-closed verification: ensure profile exists and role is assigned in user_roles
       try {
         await verifyProfileExists(uid);
@@ -603,12 +618,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (/rate.*limit/i.test(msg)) {
           return { error: new Error('Too many attempts. Please wait a few minutes and try again.') };
         }
+        if (isTransientAuthError(error) || Number((error as { status?: number }).status) >= 500) {
+          return { error: new Error('Sign-in is temporarily unavailable. Please check your connection and try again.') };
+        }
         // Generic error text — avoid account enumeration for bad credentials.
         return { error: new Error('Invalid email or password.') };
       }
 
-      // 2FA challenge handled by the Auth page.
-      setTwoFactorVerified(false);
       return { error: null, userId: data.user?.id };
     } catch (err) {
       return { error: err as Error };
@@ -641,10 +657,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 
   const hasRole = (role: AppRole) => {
-    // Admin has general platform access across all roles and workspaces
-    if (userRole === 'admin') return true;
-    return userRole === role;
+    return userRoles.includes('admin') || userRoles.includes(role);
   };
+
+  const refreshRoles = async () => {
+    const uid = activeUserId.current;
+    if (!uid) return;
+    const generation = authGeneration.current;
+    setIsRoleLoading(true);
+    try {
+      const role = await fetchUserRole(uid, user?.email, generation);
+      if (generation === authGeneration.current) setUserRole(role);
+      const previouslyRequired = twoFactorStatusRef.current?.requires_2fa;
+      const status = await check2FAStatus(uid);
+      if (generation === authGeneration.current && status?.requires_2fa && !previouslyRequired) {
+        setTwoFactorVerified(false);
+      }
+    } finally {
+      if (generation === authGeneration.current) setIsRoleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase.channel(`auth-roles:${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_roles',
+        filter: `user_id=eq.${user.id}`,
+      }, () => {
+        setUserRole(null);
+        setUserRoles([]);
+        void refreshRoles();
+      })
+      .subscribe();
+    const refreshOnFocus = () => { void refreshRoles(); };
+    window.addEventListener('focus', refreshOnFocus);
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   /**
    * Sends Google SSO welcome or sign-in alert email with automatic exponential backoff retries
@@ -738,6 +792,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoading,
         userRole,
         userRoles,
+        hasAccountTypeConflict,
         isRoleLoading,
         twoFactorStatus,
         twoFactorVerified,
@@ -746,6 +801,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         signIn,
         signOut,
         hasRole,
+        refreshRoles,
         check2FAStatus,
         sendPasswordReset,
         sendGoogleSsoAuthEmail,

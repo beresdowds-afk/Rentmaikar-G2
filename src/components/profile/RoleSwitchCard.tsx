@@ -24,10 +24,11 @@ interface RoleChangeStatus {
   current_role: SwitchableRole | null;
   role_change_used: boolean;
   role_changed_at: string | null;
+  conflicting_roles?: boolean;
 }
 
 export function RoleSwitchCard() {
-  const { user } = useAuth();
+  const { user, refreshRoles } = useAuth();
   const [status, setStatus] = useState<RoleChangeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -55,6 +56,9 @@ export function RoleSwitchCard() {
     );
   }
 
+  if (status?.conflicting_roles) {
+    return <Card><CardContent className="py-6">This account has conflicting account types. Contact support to resolve them.</CardContent></Card>;
+  }
   if (!status?.current_role) return null;
 
   const current = status.current_role;
@@ -76,9 +80,10 @@ export function RoleSwitchCard() {
       return;
     }
 
+    await refreshRoles();
     toast({
       title: `You are now registered as ${target === 'owner' ? 'a vehicle owner' : 'a driver'}`,
-      description: 'Sign out and back in to refresh your dashboard.',
+      description: 'Your dashboard access has been updated.',
     });
     await load();
   };
@@ -108,7 +113,7 @@ export function RoleSwitchCard() {
             update your active profile and dashboard access.
           </AlertDescription>
         </Alert>
-        <Button variant="outline" onClick={() => setConfirmOpen(true)} disabled={isSaving}>
+        <Button variant="outline" onClick={() => setConfirmOpen(true)} disabled={isSaving || used}>
           {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Switch to {target === 'owner' ? 'vehicle owner' : 'driver'}
         </Button>

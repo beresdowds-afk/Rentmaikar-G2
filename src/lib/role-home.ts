@@ -6,8 +6,18 @@ export type AppRole =
   | 'legal_support'
   | 'iot_support'
   | 'vehicle_support'
-  | 'insurance_support'
-  | 'customer';
+  | 'insurance_support';
+
+// Primary role controls the default landing page only; authorization must
+// consider every assigned role.
+const ROLE_PRIORITY: AppRole[] = [
+  'admin', 'admin_assistant', 'legal_support', 'iot_support',
+  'vehicle_support', 'insurance_support', 'owner', 'driver',
+];
+
+export function primaryRole(roles: readonly AppRole[]): AppRole | null {
+  return ROLE_PRIORITY.find((role) => roles.includes(role)) ?? null;
+}
 
 export const ROLE_HOME: Record<string, string> = {
   admin: '/admin',
@@ -18,7 +28,6 @@ export const ROLE_HOME: Record<string, string> = {
   insurance_support: '/admin',
   owner: '/owner/dashboard',
   driver: '/driver/dashboard',
-  customer: '/',
 };
 
 export const ROLE_ONBOARDING: Record<string, string> = {

@@ -161,121 +161,17 @@ export function RoleManagement() {
 
       if (rolesError) throw rolesError;
 
-      const { data: assistantPerms } = await supabase
-        .from('admin_assistant_permissions')
-        .select('user_id');
-
-      const usersWithRoles: UserWithRole[] = (profiles || [])
-        .map(profile => {
-          const userRole = roles?.find(r => r.user_id === profile.user_id);
-          const normalizedEmail = profile.email?.trim().toLowerCase();
-          const isEastforte = normalizedEmail === 'eastfortemain@gmail.com';
-          const isAdebayo = normalizedEmail === 'adebayoolusola39@gmail.com';
-          const isBeresDowds = normalizedEmail === 'beresdowds@gmail.com' || normalizedEmail === 'beresanddowds@gmail.com';
-          const isIbrahim = normalizedEmail === 'ibrahimganiyu026@gmail.com';
-          const isWole = normalizedEmail === 'woleadebayo58@gmail.com';
-          const hasAssistantPerm = assistantPerms?.some(a => a.user_id === profile.user_id);
-
-          let effectiveRole: AppRole | null = (userRole?.role as AppRole) ?? null;
-          if (isAdebayo || isBeresDowds) {
-            effectiveRole = 'admin';
-          } else if (isEastforte || isIbrahim || isWole || hasAssistantPerm) {
-            effectiveRole = 'admin_assistant';
-          }
-
-          if (!effectiveRole) return null;
-          return {
-            id: profile.id,
+      const usersWithRoles: UserWithRole[] = (profiles || []).flatMap(profile =>
+        (roles || []).filter(r => r.user_id === profile.user_id).map(role => ({
+            id: `${profile.id}:${role.role}`,
             user_id: profile.user_id,
-            full_name: (isEastforte || isAdebayo)
-              ? 'Olusola Adebayo'
-              : isBeresDowds
-                ? (profile.full_name || 'Beres & Dowds Admin')
-                : isIbrahim
-                  ? (profile.full_name || 'Ibrahim Ganiyu')
-                  : isWole
-                    ? (profile.full_name || 'Wole Adebayo')
-                    : profile.full_name,
+            full_name: profile.full_name,
             email: profile.email,
-            role: effectiveRole,
+            role: role.role as AppRole,
             created_at: profile.created_at || '',
             is_active: profile.is_active !== false,
-          };
-        })
-        .filter((u): u is UserWithRole => u !== null);
-
-      // Ensure Olusola Adebayo at adebayoolusola39@gmail.com is listed as active Admin
-      const hasAdebayo = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'adebayoolusola39@gmail.com');
-      if (!hasAdebayo) {
-        usersWithRoles.unshift({
-          id: 'admin-adebayo',
-          user_id: 'admin-adebayo-1',
-          full_name: 'Olusola Adebayo',
-          email: 'adebayoolusola39@gmail.com',
-          role: 'admin',
-          created_at: new Date().toISOString(),
-          is_active: true,
-        });
-      }
-
-      // Ensure Beres & Dowds at beresdowds@gmail.com is listed as active Admin
-      const hasBeresDowds = usersWithRoles.some(u => {
-        const email = u.email?.trim().toLowerCase();
-        return email === 'beresdowds@gmail.com' || email === 'beresanddowds@gmail.com';
-      });
-      if (!hasBeresDowds) {
-        usersWithRoles.splice(1, 0, {
-          id: 'admin-beresdowds',
-          user_id: 'admin-beresdowds-1',
-          full_name: 'Beres & Dowds Admin',
-          email: 'beresdowds@gmail.com',
-          role: 'admin',
-          created_at: new Date().toISOString(),
-          is_active: true,
-        });
-      }
-
-      // Ensure Ibrahim Ganiyu at ibrahimganiyu026@gmail.com is listed as Admin Assistant
-      const hasIbrahim = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'ibrahimganiyu026@gmail.com');
-      if (!hasIbrahim) {
-        usersWithRoles.push({
-          id: 'assistant-ibrahim',
-          user_id: 'assistant-ibrahim-1',
-          full_name: 'Ibrahim Ganiyu',
-          email: 'ibrahimganiyu026@gmail.com',
-          role: 'admin_assistant',
-          created_at: new Date().toISOString(),
-          is_active: true,
-        });
-      }
-
-      // Ensure Eastforte at eastfortemain@gmail.com is listed as Admin Assistant
-      const hasEastforte = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'eastfortemain@gmail.com');
-      if (!hasEastforte) {
-        usersWithRoles.push({
-          id: 'assistant-eastforte',
-          user_id: 'assistant-eastforte-1',
-          full_name: 'Olusola Adebayo',
-          email: 'eastfortemain@gmail.com',
-          role: 'admin_assistant',
-          created_at: new Date().toISOString(),
-          is_active: true,
-        });
-      }
-
-      // Ensure Wole Adebayo at woleadebayo58@gmail.com is listed as Admin Assistant
-      const hasWole = usersWithRoles.some(u => u.email?.trim().toLowerCase() === 'woleadebayo58@gmail.com');
-      if (!hasWole) {
-        usersWithRoles.push({
-          id: 'assistant-wole',
-          user_id: 'assistant-wole-1',
-          full_name: 'Wole Adebayo',
-          email: 'woleadebayo58@gmail.com',
-          role: 'admin_assistant',
-          created_at: new Date().toISOString(),
-          is_active: true,
-        });
-      }
+        }))
+      );
 
       setUsers(usersWithRoles);
     } catch (error: any) {
@@ -395,7 +291,8 @@ export function RoleManagement() {
         instructions: data.instructions,
       });
 
-      toast.success('User created', { description: data.message });
+      if (data.email_sent) toast.success('User created', { description: data.message });
+      else toast.warning('User created, but verification email failed', { description: data.email_error });
 
       // Reset input fields but keep the dialog open to display result.
       setNewUserEmail('');
@@ -449,6 +346,27 @@ export function RoleManagement() {
     } catch (err: any) {
       console.error('Resend reset failed:', err);
       toast.error('Could not resend reset link', { description: err.message });
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const handleResendVerification = async (target: UserWithRole) => {
+    if (!target.email) {
+      toast.error('This user has no email on file');
+      return;
+    }
+    setResendingId(target.user_id);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: target.email,
+        options: { emailRedirectTo: `${window.location.origin}/reset-password` },
+      });
+      if (error) throw error;
+      toast.success('Verification email requested', { description: `Check ${target.email} for the confirmation link.` });
+    } catch (err) {
+      toast.error('Could not resend verification', { description: err instanceof Error ? err.message : 'Please try again.' });
     } finally {
       setResendingId(null);
     }
@@ -522,16 +440,14 @@ export function RoleManagement() {
   };
 
   const isProtectedAdminUser = (u?: UserWithRole | null) => {
-    if (!u?.email) return false;
-    const email = u.email.trim().toLowerCase();
-    return ['adebayoolusola39@gmail.com', 'beresdowds@gmail.com', 'beresanddowds@gmail.com'].includes(email);
+    return !!u && u.user_id === user?.id;
   };
 
   const handleChangeRole = async () => {
     if (!selectedUser || !newRole) return;
 
     if (isProtectedAdminUser(selectedUser)) {
-      toast.error('Cannot modify primary Platform Administrator accounts');
+      toast.error('Cannot modify your own role');
       setChangeRoleDialogOpen(false);
       return;
     }
@@ -540,12 +456,16 @@ export function RoleManagement() {
     try {
       const oldRole = selectedUser.role;
       
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from('user_roles')
         .update({ role: newRole })
-        .eq('user_id', selectedUser.user_id);
+        .eq('user_id', selectedUser.user_id)
+        .eq('role', oldRole)
+        .select('role')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!updated) throw new Error('Role was not updated. Refresh the roster and try again.');
 
       // Log the audit entry
       await logAuditEntry(
@@ -578,7 +498,7 @@ export function RoleManagement() {
     if (!selectedUser) return;
 
     if (isProtectedAdminUser(selectedUser)) {
-      toast.error('Cannot remove primary Platform Administrator accounts');
+      toast.error('Cannot remove your own role');
       setDeleteRoleDialogOpen(false);
       return;
     }
@@ -587,12 +507,16 @@ export function RoleManagement() {
     try {
       const oldRole = selectedUser.role;
       
-      const { error } = await supabase
+      const { data: removed, error } = await supabase
         .from('user_roles')
         .delete()
-        .eq('user_id', selectedUser.user_id);
+        .eq('user_id', selectedUser.user_id)
+        .eq('role', oldRole)
+        .select('role')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!removed) throw new Error('Role was not removed. Refresh the roster and try again.');
 
       // Log the audit entry
       await logAuditEntry(
@@ -718,6 +642,7 @@ export function RoleManagement() {
                     <SelectItem value="legal_support">Legal Support ({roleCounts.legal_support || 0})</SelectItem>
                     <SelectItem value="iot_support">IoT Support ({roleCounts.iot_support || 0})</SelectItem>
                     <SelectItem value="vehicle_support">Vehicle Support ({roleCounts.vehicle_support || 0})</SelectItem>
+                    <SelectItem value="insurance_support">Insurance Support ({roleCounts.insurance_support || 0})</SelectItem>
                   </SelectContent>
                 </Select>
                 <div className="relative flex-1">
@@ -817,7 +742,7 @@ export function RoleManagement() {
                                     </Button>
                                     {isProtectedAdminUser(user) ? (
                                       <Badge variant="outline" className="border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs py-0.5">
-                                        Primary Admin
+                                        Current user
                                       </Badge>
                                     ) : (
                                       <>
@@ -896,6 +821,16 @@ export function RoleManagement() {
                           <Button
                             variant="outline"
                             size="sm"
+                            onClick={() => handleResendVerification(selectedUser)}
+                            disabled={resendingId === selectedUser.user_id || !selectedUser.email}
+                            className="gap-1"
+                          >
+                            <Mail className="h-4 w-4" />
+                            Resend verification
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => handleResendReset(selectedUser)}
                             disabled={resendingId === selectedUser.user_id || !selectedUser.email}
                             className="gap-1"
@@ -909,7 +844,7 @@ export function RoleManagement() {
                           </Button>
                           {isProtectedAdminUser(selectedUser) ? (
                             <Badge variant="outline" className="border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs py-1 px-2.5">
-                              Primary Platform Administrator (Protected)
+                              Current user (protected)
                             </Badge>
                           ) : (
                             <>
@@ -1197,9 +1132,9 @@ export function RoleManagement() {
                     )}
                     <Mail className="h-4 w-4 text-muted-foreground" />
                     <span>
-                      Password-reset email to{' '}
+                      Verification email to{' '}
                       <strong>{createResult.email}</strong>:{' '}
-                      {createResult.email_sent ? 'sent' : 'failed'}
+                      {createResult.email_sent ? 'requested' : 'failed'}
                     </span>
                   </div>
                   {createResult.email_error && (
@@ -1302,10 +1237,8 @@ export function RoleManagement() {
                     <strong className="text-foreground">
                       No initial password needed.
                     </strong>{' '}
-                    The new user will receive an email (and SMS if a phone is
-                    provided) asking them to sign in as soon as possible and
-                    set their own password via the <em>Forgot password</em>{' '}
-                    flow.
+                    The new user will receive a verification email (and SMS if a phone is
+                    provided). The verification link lets them confirm their address and set their own password.
                   </p>
                 </div>
                 <div className="space-y-2">

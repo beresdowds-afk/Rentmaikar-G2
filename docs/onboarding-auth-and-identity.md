@@ -18,6 +18,14 @@ Distinction: Google SSO vs Persona
 
 Authentication and identity verification are independent processes. Authentication establishes access to an account, while Persona determines eligibility for protected marketplace features.
 
+Account types, administrative roles, and existing contacts
+
+- An account may hold only one of the driver and owner account types. Eligible non-staff users can switch once in Profile Settings; the switch replaces the old account type, provisions the new role's wallet, and is audited. Staff roles cannot use this self-service switch.
+- Administrative roles are independent grants and may coexist. Portal access considers all assigned roles; the primary role is only a deterministic default landing role. Staff upgrades require administrator authorization.
+- Existing accounts with both driver and owner roles are not automatically modified. Account-type access is suspended until an administrator resolves the conflict; administrative role grants are retained.
+- A pre-registration outreach contact or marketing lead is not an authentication account and does not prevent sign-up. Existing contacts are linked only to a verified matching email, without moving records already linked to another user or clearing opt-outs. Existing verified accounts are reconciled during migration; newly confirmed accounts are reconciled on sign-in or session restoration.
+- Apply `20261109110000_account_roles_and_verified_contacts.sql` before deploying the client and backend changes. The migration does not add triggers to the managed `auth` schema.
+
 Marketplace gating — real-time
 
 "MarketplaceGate" ("src/components/onboarding/MarketplaceGate.tsx") shall evaluate access only after authentication initialization, account bootstrap, profile retrieval, onboarding status, and identity verification state have been successfully resolved.
@@ -87,3 +95,25 @@ Extending the gate
 - Additional verification requirements (for example address verification or enhanced due diligence) shall be incorporated into Persona templates without requiring changes to marketplace routing logic.
 - All future onboarding layers shall follow the same deterministic routing, timeout, retry, recovery, logging, and region-aware rendering policies defined in this document.
 - This onboarding architecture shall remain the single source of truth for authentication, onboarding progression, identity verification, marketplace access, deep links, session restoration, and future protected feature expansion.
+# Administrative staff accounts
+
+Platform administrators create administrative assistants and legal, IoT, vehicle,
+and insurance support accounts using a specific email address. Their role and
+any support assignment are granted explicitly; new staff accounts are not
+automatically drivers or owners. Existing users may retain an independently
+assigned driver or owner account type alongside staff roles.
+
+The recipient must confirm the assigned email before setting their password.
+Email request failures are reported to the administrator and can be retried
+using **Resend verification** in Role Management. A successful request does
+not guarantee mailbox delivery. Portal responsibilities
+remain subject to the existing role and permission policy. Removing a role
+does not delete the user's account or other assigned roles.
+Removing a support role deactivates its matching support assignments; shared
+permission records do not grant access without an administrative staff role.
+
+Deploy `20261109120000_admin_staff_account_seed.sql` before deploying the
+updated `admin-create-user` function, and apply `20261109130000_staff_role_revocation.sql`
+before relying on staff-role removal. Configure the Supabase confirmation
+redirect allowlist for the site's `/reset-password` URL and test confirmation
+delivery and password setup in an isolated staging project.

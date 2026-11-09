@@ -17,9 +17,9 @@ export const ProtectedRoute = ({
     user,
     session,
     userRole,
+    hasRole,
     isLoading,
     isRoleLoading,
-    twoFactorStatus,
     twoFactorVerified,
   } = useAuth();
 
@@ -45,7 +45,7 @@ export const ProtectedRoute = ({
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }
 
-  if (twoFactorStatus?.requires_2fa && !twoFactorVerified) {
+  if (!twoFactorVerified) {
     rememberReturnTo(fullPath);
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }
@@ -57,7 +57,7 @@ export const ProtectedRoute = ({
       ? ([...allowedRoles, "admin"] as AppRole[])
       : allowedRoles;
 
-  if (effectiveAllowed && (!userRole || !effectiveAllowed.includes(userRole))) {
+  if (effectiveAllowed && !effectiveAllowed.some(hasRole)) {
     return <Navigate to={(userRole && ROLE_HOME[userRole]) ?? "/"} replace />;
   }
 

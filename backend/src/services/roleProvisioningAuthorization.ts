@@ -7,7 +7,6 @@ export const PROVISIONABLE_USER_ROLES = [
   "iot_support",
   "vehicle_support",
   "insurance_support",
-  "customer",
 ] as const;
 
 export type ProvisionableUserRole = typeof PROVISIONABLE_USER_ROLES[number];

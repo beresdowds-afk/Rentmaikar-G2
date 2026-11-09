@@ -7,21 +7,30 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-type AppRole =
-  | "admin"
-  | "admin_assistant"
-  | "owner"
-  | "driver"
-  | "legal_support"
-  | "iot_support"
-  | "vehicle_support";
+const STAFF_ROLES = [
+  "admin", "admin_assistant", "legal_support", "iot_support",
+  "vehicle_support", "insurance_support",
+] as const;
 
 interface CreateUserBody {
   email: string;
   full_name: string;
-  role: AppRole;
+  role: string;
   phone?: string;
+  support_assignment?: {
+    support_type: string;
+    assigned_city: string;
+    assigned_region: string;
+  };
 }
+
+const SUPPORT_ROLES: Record<string, string> = {
+  legal: "legal_support",
+  iot_installation: "iot_support",
+  iot_maintenance: "iot_support",
+  vehicle_recall: "vehicle_support",
+  vehicle_maintenance: "vehicle_support",
+};
 
 function generateTempPassword(): string {
   const bytes = new Uint8Array(24);
@@ -82,17 +91,25 @@ serve(async (req) => {
     }
 
     const body = (await req.json()) as CreateUserBody;
-    const { email, full_name, role } = body;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const full_name = typeof body.full_name === "string" ? body.full_name.trim() : "";
+    const { role } = body;
     if (!email || !full_name || !role) {
       return jsonResponse({ error: "email, full_name and role are required" }, 400);
     }
-
-    // Drivers and owners must self-register to complete identity verification.
-    if (role === "driver" || role === "owner") {
-      return jsonResponse({
-        error:
-          "Drivers and owners must self-register through the public signup so they complete identity verification themselves.",
-      }, 400);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return jsonResponse({ error: "A valid email address is required" }, 400);
+    }
+    if (!STAFF_ROLES.some((allowed) => allowed === role)) {
+      return jsonResponse({ error: "Only approved administrative and support roles can be created here." }, 400);
+    }
+    const assignment = body.support_assignment;
+    if (assignment && (
+      SUPPORT_ROLES[assignment.support_type] !== role ||
+      typeof assignment.assigned_city !== "string" || !assignment.assigned_city.trim() ||
+      typeof assignment.assigned_region !== "string" || !assignment.assigned_region.trim()
+    )) {
+      return jsonResponse({ error: "A valid support type, city and region matching the role are required." }, 400);
     }
 
     let normalizedPhone: string | null = null;
@@ -109,9 +126,10 @@ serve(async (req) => {
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,
       password: tempPassword,
-      email_confirm: true,
+      email_confirm: false,
       phone: normalizedPhone || undefined,
       user_metadata: { full_name },
+      app_metadata: { admin_staff_creation: true },
     });
 
     if (createErr || !created?.user) {
@@ -121,13 +139,38 @@ serve(async (req) => {
 
     const newUserId = created.user.id;
 
+    if (created.user.email_confirmed_at) {
+      const { error: rollbackError } = await admin.auth.admin.deleteUser(newUserId);
+      if (rollbackError) console.error("Failed to roll back prematurely confirmed staff account:", rollbackError);
+      return jsonResponse({
+        error: rollbackError
+          ? `Email was confirmed without verification; account ${newUserId} requires manual cleanup.`
+          : "Email was confirmed without verification. Check the authentication provider configuration.",
+      }, 500);
+    }
+
+    const { data: seededRoles, error: seededRoleError } = await admin
+      .from("user_roles").select("role").eq("user_id", newUserId);
+    if (seededRoleError || seededRoles?.length) {
+      const { error: rollbackError } = await admin.auth.admin.deleteUser(newUserId);
+      if (rollbackError) console.error("Failed to roll back incorrectly seeded staff account:", rollbackError);
+      return jsonResponse({
+        error: rollbackError
+          ? `Staff role verification failed; account ${newUserId} requires manual cleanup.`
+          : "Staff role verification failed. Ensure the staff account migration is deployed.",
+      }, 500);
+    }
+
     const { error: roleErr } = await admin
       .from("user_roles")
       .insert({ user_id: newUserId, role });
     if (roleErr) {
       console.error("Role insert failed:", roleErr);
-      // Roll back the auth user so this call is idempotent-safe.
-      await admin.auth.admin.deleteUser(newUserId).catch(() => {});
+      const { error: rollbackError } = await admin.auth.admin.deleteUser(newUserId);
+      if (rollbackError) {
+        console.error("Failed to roll back user after role insert failure:", rollbackError);
+        return jsonResponse({ error: `Role insert failed; account ${newUserId} requires manual cleanup.` }, 500);
+      }
       return jsonResponse({ error: `Role insert failed: ${roleErr.message}` }, 500);
     }
 
@@ -148,40 +191,37 @@ serve(async (req) => {
       // Non-fatal — the profile row is normally created by the auth trigger.
     }
 
-    const siteUrl =
-      req.headers.get("origin") ||
-      Deno.env.get("SITE_URL") ||
-      "https://rentmaikar.com";
+    if (assignment) {
+      const { error: assignmentError } = await admin.from("support_staff").insert({
+        user_id: newUserId,
+        support_type: assignment.support_type,
+        assigned_city: assignment.assigned_city.trim(),
+        assigned_region: assignment.assigned_region.trim(),
+        phone: normalizedPhone,
+        is_active: true,
+      });
+      if (assignmentError) {
+        console.error("Support assignment failed:", assignmentError);
+        const { error: rollbackError } = await admin.auth.admin.deleteUser(newUserId);
+        if (rollbackError) {
+          console.error("Failed to roll back user after support assignment failure:", rollbackError);
+          return jsonResponse({ error: `Support assignment failed; account ${newUserId} requires manual cleanup.` }, 500);
+        }
+        return jsonResponse({ error: `Support assignment failed: ${assignmentError.message}` }, 500);
+      }
+    }
 
-    const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: { redirectTo: `${siteUrl}/reset-password` },
-    });
-    if (linkErr) console.error("generateLink failed:", linkErr);
-    const resetLink = linkData?.properties?.action_link || `${siteUrl}/auth`;
+    const siteUrl = (Deno.env.get("SITE_URL") || "https://rentmaikar.com").replace(/\/+$/, "");
 
-    // Single branded email via our template — do NOT also call
-    // resetPasswordForEmail (that would trigger the auth-email-hook and
-    // deliver a second, redundant reset email).
+    // Confirmation proves mailbox ownership before the initial password is set.
     let emailSent = false;
     let emailError: string | null = null;
 
     try {
-      const { error: sendErr } = await admin.functions.invoke("send-outbound-email", {
-        body: {
-          action: "send",
-          to: email,
-          templateName: "password_reset",
-          category: "auth",
-          priority: "high",
-          data: {
-            firstName: String(full_name || "there").split(" ")[0],
-            resetUrl: resetLink,
-            expiresIn: "24 hours",
-            note: `An administrator created your Rentmaikar ${role.replace("_", " ")} account. Please sign in as soon as possible and set your password using this link.`,
-          },
-        },
+      const { error: sendErr } = await userClient.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: `${siteUrl}/reset-password` },
       });
       if (sendErr) throw sendErr;
       emailSent = true;
@@ -202,7 +242,7 @@ serve(async (req) => {
               channel: "sms",
               notificationType: "general",
               name: full_name,
-              customMessage: `Welcome to Rentmaikar, ${full_name}! Your ${role.replace("_", " ")} account was created by an administrator. Sign in at ${siteUrl}/auth and use "Forgot password" to set your own password.`,
+              customMessage: `Welcome to Rentmaikar, ${full_name}! Your ${role.replace("_", " ")} account was created by an administrator. Verify the email sent to ${email} to set your password.`,
             },
           },
         );
@@ -215,9 +255,9 @@ serve(async (req) => {
     }
 
     const instructions = [
-      `1. Ask ${full_name} to open ${siteUrl}/auth and click "Forgot password".`,
-      `2. They will receive a reset link at ${email}${normalizedPhone ? ` and an SMS at ${normalizedPhone}` : ""}.`,
-      `3. Once they set a new password, they can sign in as ${role.replace("_", " ")}.`,
+      `1. Ask ${full_name} to open the verification email sent to ${email}.`,
+      `2. Follow its link to verify the email and set a password.`,
+      `3. Sign in as ${role.replace("_", " ")} after verification.`,
     ].join("\n");
 
     const { error: auditError } = await admin.from("role_audit_log").insert({
@@ -226,7 +266,7 @@ serve(async (req) => {
       action: "created",
       new_role: role,
       notes: JSON.stringify({
-        summary: `Created by administrator ${userData.user.email || userData.user.id}. Pending password reset.`,
+        summary: `Created by administrator ${userData.user.email || userData.user.id}. Pending email verification.`,
         email,
         phone: normalizedPhone,
         email_sent: emailSent,
@@ -246,7 +286,7 @@ serve(async (req) => {
       sms_sent: smsSent,
       email_error: emailError,
       sms_error: smsError,
-      message: `User created. Password-reset email ${emailSent ? "sent" : "FAILED"}${normalizedPhone ? `; SMS ${smsSent ? "sent" : "FAILED"}.` : "; no phone provided so no SMS was sent."}`,
+      message: `User created. Verification email ${emailSent ? "requested" : "FAILED"}${normalizedPhone ? `; SMS ${smsSent ? "sent" : "FAILED"}.` : "; no phone provided so no SMS was sent."}`,
       instructions,
     });
   } catch (err) {

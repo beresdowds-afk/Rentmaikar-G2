@@ -26,7 +26,7 @@ import { EmailVerification } from '@/components/auth/EmailVerification';
 import { ResendButton } from '@/components/auth/ResendButton';
 import { ROLE_HOME, ROLE_ONBOARDING, isStaffRole, type AppRole } from '@/lib/role-home';
 import { resolvePostLoginDestination } from '@/lib/post-login-destination';
-import { isRestorablePath, readReturnTo, clearReturnTo } from '@/lib/return-to';
+import { isRestorablePath, readReturnTo, clearReturnTo, rememberReturnTo } from '@/lib/return-to';
 import { logRegistrationEvent } from '@/lib/registration-audit';
 import { recordSmsConsentPair } from '@/lib/sms-consent';
 import { marketingEngine } from '@/services/marketingEngine';
@@ -71,6 +71,8 @@ const Auth = () => {
     user,
     isLoading: authLoading,
     userRole,
+    hasAccountTypeConflict,
+    twoFactorStatus,
     twoFactorVerified,
     setTwoFactorVerified,
     signUp,
@@ -82,6 +84,7 @@ const Auth = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showEmailVerification, setShowEmailVerification] = useState(false);
+  const [signupConfirmationPending, setSignupConfirmationPending] = useState(false);
   const [unverifiedEmail, setUnverifiedEmail] = useState<string>('');
   const [activeTab, setActiveTab] = useState('login');
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -93,7 +96,19 @@ const Auth = () => {
   const [show2FA, setShow2FA] = useState(false);
   const [twoFAUserId, setTwoFAUserId] = useState<string>('');
   const [twoFAPhone, setTwoFAPhone] = useState<string>('');
-  const [twoFAChannel, setTwoFAChannel] = useState<string>('sms');
+  const [twoFAChannel, setTwoFAChannel] = useState<'authenticator' | 'sms' | 'whatsapp'>('sms');
+
+  useEffect(() => {
+    if (!user || twoFactorVerified || !twoFactorStatus?.requires_2fa || twoFactorStatus.check_failed) return;
+    setTwoFAUserId(user.id);
+    setTwoFAPhone(twoFactorStatus.phone || '');
+    setTwoFAChannel(
+      twoFactorStatus.preferred_channel === 'authenticator' || twoFactorStatus.preferred_channel === 'whatsapp'
+        ? twoFactorStatus.preferred_channel
+        : 'sms',
+    );
+    setShow2FA(true);
+  }, [user, twoFactorStatus, twoFactorVerified]);
 
   // Where to send the user after a successful sign-in. Router state is lost on a
   // hard refresh of /auth, so fall back to the sessionStorage copy written by
@@ -107,6 +122,7 @@ const Auth = () => {
   // Listen for OAuth success or error messages from popup windows
   useEffect(() => {
     const handleAuthMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
       if (
         event.data?.type === 'OAUTH_AUTH_SUCCESS' ||
         event.data?.type === 'GOOGLE_OAUTH_SUCCESS'
@@ -131,11 +147,11 @@ const Auth = () => {
         try {
           window.opener.postMessage(
             { type: 'OAUTH_AUTH_SUCCESS', provider: 'google' },
-            '*'
+            window.location.origin
           );
           window.opener.postMessage(
             { type: 'GOOGLE_OAUTH_SUCCESS', provider: 'google' },
-            '*'
+            window.location.origin
           );
         } catch {
           // ignore
@@ -179,7 +195,7 @@ const Auth = () => {
       // If in popup, notify opener and close
       if (typeof window !== 'undefined' && window.opener && window.opener !== window) {
         try {
-          window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: msg }, '*');
+          window.opener.postMessage({ type: 'GOOGLE_OAUTH_ERROR', error: msg }, window.location.origin);
         } catch {
           // ignore
         }
@@ -199,7 +215,7 @@ const Auth = () => {
   // IMPORTANT: wait until userRole has hydrated before navigating, otherwise
   // admin_assistant / support users race past the role check and land on `/`.
   useEffect(() => {
-    if (!user || authLoading || !twoFactorVerified || show2FA) return;
+    if (!user || authLoading || !twoFactorVerified || show2FA || hasAccountTypeConflict) return;
     if (userRole === null) return; // still hydrating role
 
     const finishRedirect = (target: string) => {
@@ -242,7 +258,7 @@ const Auth = () => {
       );
       await routeWithCompletionCheck(target);
     })();
-  }, [user, authLoading, userRole, navigate, from, twoFactorVerified, show2FA]);
+  }, [user, authLoading, userRole, navigate, from, twoFactorVerified, show2FA, hasAccountTypeConflict]);
 
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -303,30 +319,23 @@ const Auth = () => {
     }
 
 
-    // Check 2FA status
+    // The status check fails closed; the challenge is rendered from context for
+    // password, OAuth, phone and restored sessions alike.
     if (userId) {
       const status = await check2FAStatus(userId);
-      if (status && (status.requires_2fa || status.is_setup)) {
-        if (status.preferred_channel === 'authenticator' || (status.has_phone && status.phone)) {
-          // Show 2FA challenge
-          setTwoFAUserId(userId);
-          setTwoFAPhone(status.phone);
-          setTwoFAChannel(status.preferred_channel);
-          setShow2FA(true);
-          setIsSubmitting(false);
-          return;
-        }
+      if (!status || status.requires_2fa) {
+        setIsSubmitting(false);
+        return;
       }
     }
 
-    // No 2FA required — mark as verified and proceed
-    setTwoFactorVerified(true);
     toast.success('Welcome back!');
     setIsSubmitting(false);
   };
 
   const handleBackFromVerification = () => {
     setShowEmailVerification(false);
+    setSignupConfirmationPending(false);
     setUnverifiedEmail('');
   };
 
@@ -337,7 +346,7 @@ const Auth = () => {
     setIsSubmitting(true);
     setError(null);
 
-    const { error, emailExists, userId } = await signUp(data.email, data.password, data.fullName, data.role);
+    const { error, emailExists, userId, confirmationRequired } = await signUp(data.email, data.password, data.fullName, data.role);
 
     if (error) {
       const normalized = data.email.trim().toLowerCase();
@@ -359,6 +368,11 @@ const Auth = () => {
       } else {
         setError(error.message);
       }
+    } else if (confirmationRequired) {
+      rememberReturnTo(data.role === 'owner' ? '/owner/register' : '/driver/register');
+      setUnverifiedEmail(data.email.trim().toLowerCase());
+      setSignupConfirmationPending(true);
+      setShowEmailVerification(true);
     } else {
       // Invariant: Auth user identity must exist
       if (!userId) {
@@ -510,6 +524,40 @@ const Auth = () => {
     );
   }
 
+  if (user && hasAccountTypeConflict) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader>
+            <CardTitle>Account type needs attention</CardTitle>
+            <CardDescription>This account has both driver and owner roles. Contact support to resolve the conflict without losing your account history.</CardDescription>
+          </CardHeader>
+          <CardFooter className="gap-2">
+            <Button asChild><Link to="/contact">Contact support</Link></Button>
+            <Button variant="outline" onClick={() => void supabase.auth.signOut()}>Sign out</Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  if (user && !twoFactorVerified && twoFactorStatus?.check_failed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader>
+            <CardTitle>Unable to verify two-factor status</CardTitle>
+            <CardDescription>Please retry or sign out and try again.</CardDescription>
+          </CardHeader>
+          <CardFooter className="gap-2">
+            <Button onClick={() => void check2FAStatus(user.id)}>Retry</Button>
+            <Button variant="outline" onClick={() => void supabase.auth.signOut()}>Sign out</Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
   // Two-Factor Authentication Challenge
   if (show2FA) {
     return (
@@ -541,7 +589,9 @@ const Auth = () => {
             </div>
             <CardTitle className="text-2xl font-display">Verify Your Email</CardTitle>
             <CardDescription>
-              Your email address needs to be verified before you can log in
+              {signupConfirmationPending
+                ? 'Confirm your email, then sign in and complete registration. Your consent choices will be recorded during registration.'
+                : 'Your email address needs to be verified before you can log in'}
             </CardDescription>
           </CardHeader>
 
