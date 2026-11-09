@@ -293,8 +293,12 @@ export const hologramService = {
           if (pool && devices.length > 0) {
             for (const d of devices) {
               const links = d.links?.cellular || [];
-              const primaryLink = links[0] || {};
-              const iccid = primaryLink.iccid || primaryLink.simid || `HOLO-${d.id}`;
+              const primaryLink = links[0];
+              if (!primaryLink || (!primaryLink.iccid && !primaryLink.simid)) {
+                // Skip devices without genuine SIM link from Hologram
+                continue;
+              }
+              const iccid = String(primaryLink.iccid || primaryLink.simid).trim();
               const msisdn = primaryLink.msisdn || primaryLink.phone_number || null;
               const imsi = primaryLink.imsi || null;
               const status = primaryLink.state === "live" ? "active" : "inactive";
@@ -1299,10 +1303,16 @@ export const autoProvisionService = {
 
       // Step 2: Auto-pair unlinked SIM cards to available trackers
       const unlinkedSims = await pool.query(
-        `SELECT id, iccid, provider FROM public.iot_sim_cards WHERE device_id IS NULL AND status = 'active' LIMIT 50`
+        `SELECT id, iccid, provider FROM public.iot_sim_cards 
+         WHERE device_id IS NULL AND status = 'active'
+           AND provider NOT IN ('sarekon', 'gpsandtrack')
+         LIMIT 50`
       );
       const unlinkedDevices = await pool.query(
-        `SELECT id FROM public.iot_devices WHERE (sim_number IS NULL OR sim_number = '') LIMIT 50`
+        `SELECT id FROM public.iot_devices 
+         WHERE (sim_number IS NULL OR sim_number = '')
+           AND provider NOT IN ('sarekon', 'gpsandtrack')
+         LIMIT 50`
       );
 
       const pairsToMake = Math.min(unlinkedSims.rows.length, unlinkedDevices.rows.length);
@@ -1325,16 +1335,19 @@ export const autoProvisionService = {
         }
       }
 
-      // Step 3: Enable devices that have paired SIMs
+      // Step 3: Enable devices that have paired SIMs (excluding manual SAREKON/GPSANDTRACK)
       const devEnableRes = await pool.query(
         `UPDATE public.iot_devices 
          SET status = 'active', telemetry_enabled = true, updated_at = now()
-         WHERE (sim_number IS NOT NULL AND sim_number <> '') AND status = 'inactive'
+         WHERE (sim_number IS NOT NULL AND sim_number <> '') 
+           AND status = 'inactive'
+           AND provider NOT IN ('sarekon', 'gpsandtrack')
          RETURNING id`
       );
       devicesEnabled = devEnableRes.rowCount || 0;
 
       // Step 4: Link enabled available trackers to published vehicles that lack trackers
+      // (Excluding SAREKON / GPSANDTRACK which are reserved for USA manual provisioning)
       const unlinkedVehicles = await pool.query(
         `SELECT v.id FROM public.vehicles v
          WHERE v.id NOT IN (SELECT vehicle_id FROM public.iot_devices WHERE vehicle_id IS NOT NULL)
@@ -1343,6 +1356,7 @@ export const autoProvisionService = {
       const availableTrackers = await pool.query(
         `SELECT d.id FROM public.iot_devices d
          WHERE d.vehicle_id IS NULL AND d.status = 'active'
+           AND d.provider NOT IN ('sarekon', 'gpsandtrack')
          LIMIT 20`
       );
 

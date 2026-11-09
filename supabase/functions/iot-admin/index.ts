@@ -167,10 +167,11 @@ serve(async (req) => {
           }
         }
 
-        if (source === "manual" && !iccid) {
-          return json(400, { error: "ICCID is required when adding a SIM manually" });
+        if (!iccid) {
+          return json(400, {
+            error: "ICCID is required. Hologram SIMs must be purchased by an administrator from the Hologram website and claimed using their authentic ICCID."
+          });
         }
-        if (!iccid) iccid = `MOCK-${crypto.randomUUID().slice(0, 12)}`;
 
         // Prevent duplicate ICCID (also enforced by unique index at the DB level).
         const { data: existing } = await admin
