@@ -19,25 +19,42 @@ import { test, expect } from '@playwright/test';
 
 const uniqueEmail = () =>
   `qa+${Date.now()}-${Math.random().toString(36).slice(2, 8)}@rentmaikar.test`;
+const hasDedicatedAuthProject =
+  process.env.E2E_AUTH_SIGNUP_ENABLED === 'true' &&
+  Boolean(process.env.E2E_SUPABASE_URL && process.env.E2E_SUPABASE_PUBLISHABLE_KEY);
 
 test.describe('Signup → verification → onboarding → dashboard', () => {
+  test.skip(
+    !hasDedicatedAuthProject,
+    'Requires E2E_AUTH_SIGNUP_ENABLED and a dedicated E2E Supabase project.',
+  );
+
   test('driver signup surfaces verification gate and cooldown', async ({ page }) => {
     const email = uniqueEmail();
 
     await page.goto('/auth');
+    const cookieReject = page.getByRole('button', {
+      name: /dismiss and reject non-essential cookies/i,
+    });
+    if (await cookieReject.isVisible()) await cookieReject.click();
     await page.getByRole('tab', { name: /sign up/i }).click();
     await page.getByLabel(/full name/i).fill('QA Driver');
     await page.getByLabel('Email').fill(email);
     await page.getByLabel(/^password$/i).fill('SuperSecret123!');
     await page.getByLabel(/confirm password/i).fill('SuperSecret123!');
-    await page.getByLabel(/agree/i).check({ force: true });
+    await page.getByRole('checkbox', {
+      name: /terms of use and privacy policy/i,
+    }).check();
     await page.getByRole('button', { name: /create account/i }).click();
 
-    // After sign-up the tab flips back to login and the user is prompted
-    // to sign in. Attempt sign-in — should be rejected until email verified.
+    // The form stays open after success; signing in before email confirmation
+    // must be rejected.
+    await expect(
+      page.getByText(/account created! please check your email/i),
+    ).toBeVisible({ timeout: 15_000 });
     await page.getByRole('tab', { name: /log in/i }).click();
     await page.getByLabel('Email').fill(email);
-    await page.getByLabel(/password/i).fill('SuperSecret123!');
+    await page.getByLabel(/^password$/i).fill('SuperSecret123!');
     await page.getByRole('button', { name: /sign in/i }).click();
 
     await expect(page.getByText(/verify your email/i)).toBeVisible({ timeout: 8000 });

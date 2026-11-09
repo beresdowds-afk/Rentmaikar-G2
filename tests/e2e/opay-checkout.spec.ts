@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { hasE2eCredentials, signInAs } from "./helpers/auth";
 
 const RENTAL_URL = process.env.E2E_RENTAL_URL ?? "/driver/dashboard";
 const PAYMENT_ID = process.env.E2E_PAYMENT_ID ?? "test-payment-id";
@@ -41,6 +42,11 @@ async function stubOpay(page: Page, opts: { outcome: "success" | "failure" }) {
 }
 
 test.describe("Opay checkout", () => {
+  test.skip(!hasE2eCredentials("DRIVER"), "Requires configured E2E driver credentials.");
+  test.beforeEach(async ({ page }) => {
+    await signInAs(page, "DRIVER");
+  });
+
   test("successful payment updates status panel and shows Receipt", async ({ page }) => {
     await stubOpay(page, { outcome: "success" });
     await page.goto(RENTAL_URL);

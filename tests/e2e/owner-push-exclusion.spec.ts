@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test";
+import { hasE2eCredentials, signInAs } from "./helpers/auth";
 
 /**
  * Verifies owners are never included in payment push recipients.
@@ -84,6 +85,11 @@ async function stubEnv(page: Page, provider: "paystack" | "opay", status: "compl
 }
 
 test.describe("Owner exclusion from payment push notifications", () => {
+  test.skip(!hasE2eCredentials("DRIVER"), "Requires configured E2E driver credentials.");
+  test.beforeEach(async ({ page }) => {
+    await signInAs(page, "DRIVER");
+  });
+
   for (const provider of ["paystack", "opay"] as const) {
     for (const status of ["completed", "failed"] as const) {
       test(`${provider} ${status}: owners are never in recipient list`, async ({ page }) => {

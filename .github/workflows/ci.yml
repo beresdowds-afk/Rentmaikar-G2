@@ -18,31 +18,32 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 20
+          cache: npm
       # Dependency installs are the most common transient failure (registry
       # blips). Retry them, never the deterministic checks below.
       - name: Install dependencies (retried)
         run: |
           for attempt in 1 2 3; do
-            if bun install --frozen-lockfile; then exit 0; fi
-            echo "::warning::bun install failed (attempt $attempt); retrying"
+            if npm ci; then exit 0; fi
+            echo "::warning::npm ci failed (attempt $attempt); retrying"
             sleep $((attempt * 10))
           done
           exit 1
       - name: Install backend dependencies
         run: npm ci --prefix backend
       - name: Lint
-        run: bun run lint
+        run: npm run lint
       - name: Env surface guardrail
-        run: bun run check:env-surfaces
+        run: npm run check:env-surfaces
       - name: Typecheck
-        run: bun run typecheck
+        run: npm run typecheck
       - name: Vitest
-        run: bun run test
+        run: npm run test
       - name: Build
-        run: bun run build
+        run: npm run build
 
   onboarding-e2e-db:
     name: Onboarding registration DB E2E (Deno)
@@ -71,29 +72,40 @@ jobs:
     name: Playwright browser E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      E2E_DRIVER_EMAIL: ${{ secrets.E2E_DRIVER_EMAIL }}
+      E2E_DRIVER_PASSWORD: ${{ secrets.E2E_DRIVER_PASSWORD }}
+      E2E_OWNER_EMAIL: ${{ secrets.E2E_OWNER_EMAIL }}
+      E2E_OWNER_PASSWORD: ${{ secrets.E2E_OWNER_PASSWORD }}
+      E2E_AUTH_SIGNUP_ENABLED: ${{ vars.E2E_AUTH_SIGNUP_ENABLED }}
+      E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      E2E_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 20
+          cache: npm
       - name: Install dependencies (retried)
         run: |
           for attempt in 1 2 3; do
-            if bun install --frozen-lockfile; then exit 0; fi
-            echo "::warning::bun install failed (attempt $attempt); retrying"
+            if npm ci; then exit 0; fi
+            echo "::warning::npm ci failed (attempt $attempt); retrying"
             sleep $((attempt * 10))
           done
           exit 1
       - name: Install Playwright browsers (retried)
         run: |
           for attempt in 1 2 3; do
-            if bunx playwright install --with-deps chromium; then exit 0; fi
+            if npx playwright install --with-deps chromium; then exit 0; fi
             echo "::warning::playwright install failed (attempt $attempt); retrying"
             sleep $((attempt * 10))
           done
           exit 1
       - name: Start dev server
-        run: bun run dev &
+        run: npm run dev &
         env:
           NODE_ENV: test
       - name: Wait for dev server
@@ -105,7 +117,7 @@ jobs:
           echo "dev server never became ready" >&2
           exit 1
       - name: Run Playwright
-        run: bunx playwright test
+        run: npx playwright test
         env:
           E2E_BASE_URL: http://localhost:3000
       - name: Upload Playwright report

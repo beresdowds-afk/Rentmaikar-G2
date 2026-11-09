@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import crypto from "crypto";
 import { normalizeE164 } from "@/server/communicationServices";
 import { generateTotpSecret, verifyTotpCode } from "@/lib/totp";
@@ -15,8 +15,22 @@ import {
   authenticator,
   Authenticator,
 } from "../../../backend/src/services/authenticator";
+import { sentBackendClient } from "../../../backend/src/services/sentClient";
+import { mockOutboundMessagingDb } from "../helpers/mockOutboundMessagingDb";
 
 describe("Harmonized OTP Security Architecture & Authority Segregation", () => {
+  beforeEach(() => {
+    vi.stubEnv("SENT_API_KEY", "test_sent_api_key");
+    mockOutboundMessagingDb();
+    vi.spyOn(sentBackendClient, "sendMessage").mockResolvedValue({
+      data: { id: "sent_otp_test", status: "queued" },
+    } as any);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   // -----------------------------------------------------------------
   // 1. Category Segregation: Supabase Auth vs Application OTP vs TOTP
   // -----------------------------------------------------------------
