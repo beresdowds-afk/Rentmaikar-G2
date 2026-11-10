@@ -164,4 +164,5 @@ jobs:
             --port 8080 \
             --allow-unauthenticated \
             --update-env-vars NODE_ENV=production,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co \
+            --service-account rentmaikar-backend-runtime@avian-computer-477009-v0.iam.gserviceaccount.com \
             --set-secrets PORTAL_SECRET_KEY=portal-secret-key:latest,PORTAL_ADMIN_PASSWORD=portal-admin-password:latest,PORTAL_MASTER_KEY=portal-master-key:latest,SENT_WEBHOOK_SECRET=sent-webhook-secret:latest,RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET=RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET:latest
