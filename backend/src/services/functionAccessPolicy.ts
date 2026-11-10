@@ -441,6 +441,24 @@ export async function enforceFunctionAccess(
     throw new AccessDenied("Forbidden", 403);
   }
 
+  const requiresMfa = (caller.roles ?? [caller.role]).some(
+    (role) => role === "admin" || role === "owner",
+  );
+  if (
+    requiresMfa &&
+    functionName !== "send-2fa-code" &&
+    caller.assuranceLevel !== "aal2"
+  ) {
+    auditAccess(
+      functionName,
+      "deny",
+      "aal2_required",
+      caller.userId,
+      correlationId,
+    );
+    throw new AccessDenied("AAL2 authentication is required", 403);
+  }
+
   auditAccess(functionName, "allow", "session", caller.userId, correlationId);
   return { caller, via: "session" };
 }

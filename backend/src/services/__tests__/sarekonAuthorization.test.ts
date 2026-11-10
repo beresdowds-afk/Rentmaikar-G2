@@ -16,6 +16,7 @@ const callers: Record<string, AuthContext> = {
     role: "driver",
     roles: ["driver"],
     isAdmin: false,
+    assuranceLevel: "aal1",
   },
   "vehicle-owner": {
     userId: "owner-1",
@@ -23,6 +24,7 @@ const callers: Record<string, AuthContext> = {
     role: "owner",
     roles: ["owner"],
     isAdmin: false,
+    assuranceLevel: "aal2",
   },
   "fleet-admin": {
     userId: "admin-1",
@@ -30,6 +32,7 @@ const callers: Record<string, AuthContext> = {
     role: "admin",
     roles: ["admin"],
     isAdmin: true,
+    assuranceLevel: "aal2",
   },
 };
 

@@ -6,6 +6,7 @@ import { assignRole, verifyProfileExists } from '@/lib/user-provisioning';
 import { useAuthTabSync } from '@/hooks/useAuthTabSync';
 import { primaryRole, type AppRole } from '@/lib/role-home';
 import { guardedPasswordSignIn } from '@/lib/auth-password-sign-in';
+import { resolveMfaAssurance } from '@/lib/mfa-assurance';
 
 
 export interface RetryOptions {
@@ -86,6 +87,14 @@ interface TwoFactorStatus {
   has_phone: boolean;
   preferred_channel: string;
   phone?: string;
+  verified: boolean;
+  requires_challenge?: boolean;
+  requires_enrollment?: boolean;
+  factor_id?: string;
+  factor_type?: 'totp' | 'phone';
+  current_level?: string | null;
+  next_level?: string | null;
+  check_error?: string;
   /** True when the status lookup failed and we are failing closed. */
   check_failed?: boolean;
 }
@@ -100,7 +109,6 @@ interface AuthContextType {
   isRoleLoading: boolean;
   twoFactorStatus: TwoFactorStatus | null;
   twoFactorVerified: boolean;
-  setTwoFactorVerified: (verified: boolean) => void;
   signUp: (email: string, password: string, fullName: string, role: 'driver' | 'owner') => Promise<{
     error: Error | null;
     emailExists?: boolean;
@@ -134,6 +142,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   twoFactorStatusRef.current = twoFactorStatus;
   const authGeneration = useRef(0);
   const activeUserId = useRef<string | null>(null);
+  const mfaStatusRequest = useRef<{
+    userId: string;
+    generation: number;
+    promise: Promise<TwoFactorStatus | null>;
+  } | null>(null);
 
   const fetchUserRole = async (userId: string, userEmail?: string | null, generation = authGeneration.current) => {
     try {
@@ -186,56 +199,152 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const check2FAStatus = async (userId: string): Promise<TwoFactorStatus | null> => {
+  const check2FAStatus = (userId: string): Promise<TwoFactorStatus | null> => {
     const generation = authGeneration.current;
-    try {
-      const hasStoredTotp = typeof window !== 'undefined' && !!localStorage.getItem(`rentmaikar:totp:${userId}`);
-      const bridgeRes = await backendBridge.invokeEdgeFunction('send-2fa-code', {
-        action: 'status',
-      });
-      if (bridgeRes.error || !bridgeRes.data?.success) {
-        throw bridgeRes.error || new Error('Unable to verify MFA status');
-      }
-
-      const data = bridgeRes.data;
-      const isAuthenticator = data.preferred_channel === 'authenticator' || hasStoredTotp;
-      const isSetup = !!data.is_setup;
-      const requires2FA = !!data.requires_2fa;
-
-      const status: TwoFactorStatus = {
-        requires_2fa: requires2FA,
-        is_setup: isSetup,
-        is_mandatory: !!data.is_mandatory,
-        has_phone: !!data.has_phone,
-        preferred_channel: isAuthenticator ? 'authenticator' : data.preferred_channel || 'sms',
-        phone: data.has_phone ? data.phone : undefined,
-      };
-      if (generation === authGeneration.current && activeUserId.current === userId) {
-        setTwoFactorStatus(status);
-        if (!requires2FA) {
-          setTwoFactorVerified(true);
-        }
-      }
-      return status;
-    } catch (err) {
-      // Fail closed: if we cannot determine whether 2FA applies, do not grant
-      // the session a verified state. The user is routed to the 2FA challenge
-      // (or can sign out / retry) instead of silently bypassing it.
-      console.error('[AuthContext] 2FA status check failed; failing closed:', err);
-      const failed: TwoFactorStatus = {
-        requires_2fa: true,
-        is_setup: true,
-        is_mandatory: false,
-        has_phone: false,
-        preferred_channel: 'sms',
-        check_failed: true,
-      };
-      if (generation === authGeneration.current && activeUserId.current === userId) {
-        setTwoFactorStatus(failed);
-        setTwoFactorVerified(false);
-      }
-      return failed;
+    if (
+      mfaStatusRequest.current?.userId === userId &&
+      mfaStatusRequest.current.generation === generation
+    ) {
+      return mfaStatusRequest.current.promise;
     }
+
+    const request = (async (): Promise<TwoFactorStatus | null> => {
+      try {
+        let { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
+        if (
+          sessionError &&
+          /refresh[_ ]token|expired|invalid jwt/i.test(sessionError.message ?? '')
+        ) {
+          const refreshed = await supabase.auth.refreshSession();
+          if (refreshed.error) throw refreshed.error;
+          sessionData = { session: refreshed.data.session };
+          sessionError = null;
+        }
+        if (sessionError) throw sessionError;
+        if (sessionData.session?.user.id !== userId) {
+          throw new Error('The active authentication session changed. Please retry.');
+        }
+
+        const retryOptions = {
+          maxAttempts: 2,
+          initialDelayMs: 300,
+          maxDelayMs: 600,
+        };
+        const [assuranceResult, factorsResult, bridgeRes] = await Promise.all([
+          withAuthRetry(async () => {
+            const result = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+            if (result.error) throw result.error;
+            return result;
+          }, retryOptions),
+          withAuthRetry(async () => {
+            const result = await supabase.auth.mfa.listFactors();
+            if (result.error) throw result.error;
+            return result;
+          }, retryOptions),
+          backendBridge.invokeEdgeFunction('send-2fa-code', {
+            action: 'status',
+          }),
+        ]);
+        if (bridgeRes.error || !bridgeRes.data?.success) {
+          throw bridgeRes.error || new Error('MFA policy service returned an invalid response');
+        }
+
+        const data = bridgeRes.data;
+        const verifiedFactors = [
+          ...(factorsResult.data?.totp ?? []),
+          ...(factorsResult.data?.phone ?? []),
+        ]
+          .filter((factor) => factor.status === 'verified')
+          .map((factor) => ({
+            id: factor.id,
+            factor_type: factor.factor_type as 'totp' | 'phone',
+            status: factor.status,
+          }));
+        const currentLevel = assuranceResult.data.currentLevel;
+        const nextLevel = assuranceResult.data.nextLevel;
+        if (currentLevel !== 'aal1' && currentLevel !== 'aal2') {
+          throw new Error('Supabase returned an unknown current assurance level');
+        }
+        if (nextLevel !== 'aal1' && nextLevel !== 'aal2') {
+          throw new Error('Supabase returned an unknown next assurance level');
+        }
+
+        const decision = resolveMfaAssurance({
+          requiresMfa: !!data.requires_2fa,
+          currentLevel,
+          nextLevel,
+          factors: verifiedFactors,
+        });
+        if (
+          !decision.verified &&
+          !decision.requiresChallenge &&
+          !decision.requiresEnrollment
+        ) {
+          throw new Error('The active MFA factor does not produce the required assurance level');
+        }
+        const status: TwoFactorStatus = {
+          requires_2fa: !!data.requires_2fa,
+          is_setup: !!data.is_setup,
+          is_mandatory: !!data.is_mandatory,
+          has_phone: !!data.has_phone,
+          preferred_channel:
+            decision.factor?.factor_type === 'totp'
+              ? 'authenticator'
+              : decision.factor?.factor_type === 'phone'
+                ? data.preferred_channel === 'whatsapp'
+                  ? 'whatsapp'
+                  : 'sms'
+                : data.preferred_channel || 'sms',
+          phone: data.has_phone ? data.phone : undefined,
+          verified: decision.verified,
+          requires_challenge: decision.requiresChallenge,
+          requires_enrollment: decision.requiresEnrollment,
+          factor_id: decision.factor?.id,
+          factor_type: decision.factor?.factor_type,
+          current_level: currentLevel,
+          next_level: nextLevel,
+        };
+        if (generation === authGeneration.current && activeUserId.current === userId) {
+          setTwoFactorStatus(status);
+          setTwoFactorVerified(status.verified);
+        }
+        return status;
+      } catch (err) {
+        console.error('[AuthContext] MFA assurance check failed:', err);
+        const statusCode = Number((err as { status?: number })?.status);
+        const errorMessage =
+          statusCode === 401
+            ? 'Your session could not be verified. Retry, or sign out and sign in again.'
+            : isTransientAuthError(err) || statusCode >= 500
+              ? 'MFA verification is temporarily unavailable. Your session is preserved; please retry.'
+              : 'Unable to verify MFA status. Your session is preserved; please retry.';
+        const failed: TwoFactorStatus = {
+          requires_2fa: true,
+          is_setup: false,
+          is_mandatory: false,
+          has_phone: false,
+          preferred_channel: 'authenticator',
+          verified: false,
+          requires_challenge: false,
+          check_failed: true,
+          check_error: errorMessage,
+        };
+        if (generation === authGeneration.current && activeUserId.current === userId) {
+          setTwoFactorStatus(failed);
+          setTwoFactorVerified(false);
+        }
+        return failed;
+      }
+    })();
+
+    mfaStatusRequest.current = { userId, generation, promise: request };
+    void request.finally(() => {
+      if (mfaStatusRequest.current?.promise === request) {
+        mfaStatusRequest.current = null;
+      }
+    });
+    return request;
   };
 
   // Log an authentication event via the SECURITY DEFINER RPC. Never trusts
@@ -271,6 +380,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setHasAccountTypeConflict(false);
         setTwoFactorStatus(null);
         setTwoFactorVerified(false);
+        mfaStatusRequest.current = null;
       }
       setSession(syncedSession);
       setUser(syncedSession.user);
@@ -297,6 +407,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setHasAccountTypeConflict(false);
       setTwoFactorStatus(null);
       setTwoFactorVerified(false);
+      mfaStatusRequest.current = null;
       setIsRoleLoading(false);
       setIsLoading(false);
     },
@@ -326,6 +437,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setHasAccountTypeConflict(false);
           setTwoFactorStatus(null);
           setTwoFactorVerified(false);
+          mfaStatusRequest.current = null;
         }
         setSession(session);
         setUser(session?.user ?? null);
@@ -796,7 +908,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isRoleLoading,
         twoFactorStatus,
         twoFactorVerified,
-        setTwoFactorVerified,
         signUp,
         signIn,
         signOut,

@@ -19,7 +19,11 @@ interface EnrollState {
  * Google Authenticator / Authy (TOTP) enrolment backed by the platform's
  * native multi-factor auth. Complements the existing SMS/WhatsApp 2FA.
  */
-export const AuthenticatorAppSetup = () => {
+export const AuthenticatorAppSetup = ({
+  onFactorVerified,
+}: {
+  onFactorVerified?: () => void;
+}) => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [verifiedFactorId, setVerifiedFactorId] = useState<string | null>(null);
@@ -94,6 +98,7 @@ export const AuthenticatorAppSetup = () => {
       setEnroll(null);
       setCode('');
       await loadFactors();
+      onFactorVerified?.();
     } catch (error) {
       toast.error('Invalid code', {
         description: error instanceof Error ? error.message : 'Check the 6-digit code and try again.',

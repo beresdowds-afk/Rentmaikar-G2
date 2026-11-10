@@ -21,6 +21,20 @@ export const bridgeRouter = Router();
 function requireBridgeSession(req: Request, res: Response, next: NextFunction): void {
   authenticateCaller(String(req.headers.authorization || ""))
     .then((caller) => {
+      const requiresMfa = (caller.roles ?? [caller.role]).some(
+        (role) => role === "admin" || role === "owner",
+      );
+      if (requiresMfa && caller.assuranceLevel !== "aal2") {
+        auditFunctionOutcome(
+          `bridge:${req.path}`,
+          "deny",
+          "aal2_required",
+          caller.userId,
+          String(req.headers["x-correlation-id"] || req.headers["x-request-id"] || crypto.randomUUID()),
+        );
+        res.status(403).json({ ok: false, error: "AAL2 authentication is required" });
+        return;
+      }
       (req as any).bridgeCaller = caller;
       const correlationId = String(
         req.headers["x-correlation-id"] || req.headers["x-request-id"] || crypto.randomUUID(),

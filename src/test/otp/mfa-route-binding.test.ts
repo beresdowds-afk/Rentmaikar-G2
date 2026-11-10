@@ -42,43 +42,47 @@ vi.mock("../../../backend/src/services/phoneOtpService", () => ({
   verifyPhoneOtp: mocks.verifyPhoneOtp,
 }));
 
-vi.mock("../../../backend/src/services/supabaseService", () => ({
-  ALL_EDGE_FUNCTIONS: [],
-  supabaseBackendService: {
-    getAdminClient: () => ({
-      from: (table: string) => {
-        let query: any;
-        query = {
-          select: vi.fn(() => query),
-          eq: vi.fn((column: string, value: unknown) => {
-            mocks.eqCalls.push({ table, column, value });
-            return query;
-          }),
-          maybeSingle: vi.fn(async () => ({
-            data:
-              table === "profiles"
-                ? mocks.profile
-                : table === "two_factor_settings"
-                  ? mocks.settings
-                  : mocks.role,
-            error: null,
-          })),
-          then: (resolve: (result: unknown) => void) => resolve({
-            data: mocks.roles.map((role) => ({ role })),
-            error: null,
-          }),
-          upsert: vi.fn(async (value: Record<string, unknown>) => {
-            mocks.upsertCalls.push({ table, value });
-            return { error: null };
-          }),
-          insert: vi.fn(async () => ({ error: null })),
-        };
-        return query;
-      },
-    }),
-  },
-  EDGE_FUNCTIONS_SET: new Set<string>(),
-}));
+vi.mock("../../../backend/src/services/supabaseService", () => {
+  const dbClient = {
+    from: (table: string) => {
+      let query: any;
+      query = {
+        select: vi.fn(() => query),
+        eq: vi.fn((column: string, value: unknown) => {
+          mocks.eqCalls.push({ table, column, value });
+          return query;
+        }),
+        maybeSingle: vi.fn(async () => ({
+          data:
+            table === "profiles"
+              ? mocks.profile
+              : table === "two_factor_settings"
+                ? mocks.settings
+                : mocks.role,
+          error: null,
+        })),
+        then: (resolve: (result: unknown) => void) => resolve({
+          data: mocks.roles.map((role) => ({ role })),
+          error: null,
+        }),
+        upsert: vi.fn(async (value: Record<string, unknown>) => {
+          mocks.upsertCalls.push({ table, value });
+          return { error: null };
+        }),
+        insert: vi.fn(async () => ({ error: null })),
+      };
+      return query;
+    },
+  };
+  return {
+    ALL_EDGE_FUNCTIONS: [],
+    supabaseBackendService: {
+      getAdminClient: () => dbClient,
+      getClient: () => dbClient,
+    },
+    EDGE_FUNCTIONS_SET: new Set<string>(),
+  };
+});
 
 let server: ReturnType<typeof createFunctionsTestServer>;
 let baseUrl = "";

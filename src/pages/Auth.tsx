@@ -21,6 +21,7 @@ import PhoneOtpPanel from '@/components/auth/PhoneOtpPanel';
 import { toast } from 'sonner';
 import rentmaikarLogo from '@/assets/rentmaikar-logo.jpg';
 import { TwoFactorChallenge } from '@/components/auth/TwoFactorChallenge';
+import { AuthenticatorAppSetup } from '@/components/auth/AuthenticatorAppSetup';
 import { PasswordInput } from '@/components/ui/password-input';
 import { EmailVerification } from '@/components/auth/EmailVerification';
 import { ResendButton } from '@/components/auth/ResendButton';
@@ -74,7 +75,6 @@ const Auth = () => {
     hasAccountTypeConflict,
     twoFactorStatus,
     twoFactorVerified,
-    setTwoFactorVerified,
     signUp,
     signIn,
     check2FAStatus,
@@ -99,13 +99,22 @@ const Auth = () => {
   const [twoFAChannel, setTwoFAChannel] = useState<'authenticator' | 'sms' | 'whatsapp'>('sms');
 
   useEffect(() => {
-    if (!user || twoFactorVerified || !twoFactorStatus?.requires_2fa || twoFactorStatus.check_failed) return;
+    if (
+      !user ||
+      twoFactorVerified ||
+      (!twoFactorStatus?.requires_2fa && !twoFactorStatus?.requires_challenge) ||
+      twoFactorStatus.check_failed ||
+      twoFactorStatus.requires_enrollment
+    ) return;
     setTwoFAUserId(user.id);
     setTwoFAPhone(twoFactorStatus.phone || '');
     setTwoFAChannel(
-      twoFactorStatus.preferred_channel === 'authenticator' || twoFactorStatus.preferred_channel === 'whatsapp'
-        ? twoFactorStatus.preferred_channel
-        : 'sms',
+      twoFactorStatus.factor_type === 'totp' ||
+      (!twoFactorStatus.factor_type && twoFactorStatus.preferred_channel === 'authenticator')
+        ? 'authenticator'
+        : twoFactorStatus.preferred_channel === 'whatsapp'
+          ? 'whatsapp'
+          : 'sms',
     );
     setShow2FA(true);
   }, [user, twoFactorStatus, twoFactorVerified]);
@@ -323,7 +332,7 @@ const Auth = () => {
     // password, OAuth, phone and restored sessions alike.
     if (userId) {
       const status = await check2FAStatus(userId);
-      if (!status || status.requires_2fa) {
+      if (!status || !status.verified) {
         setIsSubmitting(false);
         return;
       }
@@ -547,13 +556,42 @@ const Auth = () => {
         <Card className="max-w-md w-full">
           <CardHeader>
             <CardTitle>Unable to verify two-factor status</CardTitle>
-            <CardDescription>Please retry or sign out and try again.</CardDescription>
+            <CardDescription>{twoFactorStatus.check_error || 'Please retry or sign out and try again.'}</CardDescription>
           </CardHeader>
           <CardFooter className="gap-2">
             <Button onClick={() => void check2FAStatus(user.id)}>Retry</Button>
             <Button variant="outline" onClick={() => void supabase.auth.signOut()}>Sign out</Button>
           </CardFooter>
         </Card>
+      </div>
+    );
+  }
+
+  if (user && !twoFactorVerified && twoFactorStatus?.requires_enrollment) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="w-full max-w-xl space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Set up two-factor authentication</CardTitle>
+              <CardDescription>
+                This account requires a verified authenticator before protected areas can be accessed.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+          <AuthenticatorAppSetup
+            onFactorVerified={() => {
+              void check2FAStatus(user.id);
+            }}
+          />
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => void supabase.auth.signOut()}
+          >
+            Sign out
+          </Button>
+        </div>
       </div>
     );
   }
@@ -565,10 +603,13 @@ const Auth = () => {
         userId={twoFAUserId}
         phone={twoFAPhone}
         channel={twoFAChannel}
-        onVerified={() => {
-          setShow2FA(false);
-          setTwoFactorVerified(true);
-          toast.success('Welcome back!');
+        factorId={twoFactorStatus?.factor_id}
+        onVerified={async () => {
+          const status = await check2FAStatus(user.id);
+          if (status?.verified) {
+            setShow2FA(false);
+            toast.success('Welcome back!');
+          }
         }}
         onCancel={async () => {
           setShow2FA(false);
