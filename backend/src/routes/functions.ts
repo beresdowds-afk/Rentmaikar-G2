@@ -585,14 +585,16 @@ functionsRouter.all(
           return res.status(401).json({ success: false, error: "Authentication required" });
         }
 
+        const userToken = clientAuth.replace(/^Bearer\s+/i, "").trim();
+        const userClient = supabaseBackendService.getClient(userToken);
         const admin = supabaseBackendService.getAdminClient();
         const [profileResult, settingsResult] = await Promise.all([
-          admin
+          userClient
             .from("profiles")
             .select("phone, phone_verified, email_verified")
             .eq("user_id", userId)
             .maybeSingle(),
-          admin
+          userClient
             .from("two_factor_settings")
             .select("is_enabled, phone_number, preferred_channel")
             .eq("user_id", userId)
@@ -607,7 +609,7 @@ functionsRouter.all(
         const hasBoundPhone = !!verifiedPhone && isMfaPhoneBound(settings, verifiedPhone);
 
         if (action === "status") {
-          const { data: roleData, error: roleError } = await admin
+          const { data: roleData, error: roleError } = await userClient
             .from("user_roles")
             .select("role")
             .eq("user_id", userId);

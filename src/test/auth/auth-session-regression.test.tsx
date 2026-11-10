@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listener: null as null | ((event: string, session: unknown) => void),
   getSession: vi.fn(),
+  refreshSession: vi.fn(),
   getRole: vi.fn(),
   status: vi.fn(),
+  getAssurance: vi.fn(),
+  listFactors: vi.fn(),
 }));
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -16,6 +19,11 @@ vi.mock('@/integrations/supabase/client', () => ({
         return { data: { subscription: { unsubscribe: vi.fn() } } };
       },
       getSession: mocks.getSession,
+      refreshSession: mocks.refreshSession,
+      mfa: {
+        getAuthenticatorAssuranceLevel: mocks.getAssurance,
+        listFactors: mocks.listFactors,
+      },
     },
     from: () => ({ select: () => ({ eq: mocks.getRole }) }),
     channel: () => {
@@ -51,6 +59,8 @@ function State() {
     legal: hasRole('legal_support'),
     conflict: hasAccountTypeConflict,
     failed: twoFactorStatus?.check_failed ?? false,
+    enrollment: twoFactorStatus?.requires_enrollment ?? false,
+    challenge: twoFactorStatus?.requires_challenge ?? false,
     verified: twoFactorVerified,
   })}</div>;
 }
@@ -62,12 +72,36 @@ const session = {
 
 beforeEach(() => {
   mocks.listener = null;
-  mocks.getSession.mockImplementation(() => new Promise(() => {}));
+  mocks.getSession.mockResolvedValue({ data: { session, error: null }, error: null });
+  mocks.refreshSession.mockResolvedValue({ data: { session }, error: null });
   mocks.getRole.mockResolvedValue({ data: [{ role: 'driver' }], error: null });
   mocks.status.mockResolvedValue({ data: { success: true, requires_2fa: false }, error: null });
+  mocks.getAssurance.mockResolvedValue({
+    data: { currentLevel: 'aal1', nextLevel: 'aal1' },
+    error: null,
+  });
+  mocks.listFactors.mockResolvedValue({
+    data: { totp: [], phone: [], all: [] },
+    error: null,
+  });
 });
 
 describe('session hydration', () => {
+  it('restores a persisted session and verifies its MFA status before granting access', async () => {
+    mocks.getRole.mockResolvedValue({ data: [{ role: 'admin' }], error: null });
+    mocks.status.mockResolvedValue({
+      data: { success: true, requires_2fa: true, is_mandatory: true },
+      error: null,
+    });
+    mocks.getAssurance.mockResolvedValue({
+      data: { currentLevel: 'aal2', nextLevel: 'aal2' },
+      error: null,
+    });
+    render(<AuthProvider><State /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toContain('"verified":true'));
+    expect(mocks.status).toHaveBeenCalled();
+  });
+
   it('does not recreate a driver role when an administrator removed all roles', async () => {
     mocks.getRole.mockResolvedValue({ data: [], error: null });
     vi.mocked(assignRole).mockClear();
@@ -120,6 +154,85 @@ describe('session hydration', () => {
     expect(screen.getByTestId('state').textContent).toContain('"verified":false');
   });
 
+  it('requires authenticator enrollment for a mandatory admin without a verified factor', async () => {
+    mocks.getRole.mockResolvedValue({ data: [{ role: 'admin' }], error: null });
+    mocks.status.mockResolvedValue({
+      data: { success: true, requires_2fa: true, is_mandatory: true },
+      error: null,
+    });
+    render(<AuthProvider><State /></AuthProvider>);
+    act(() => mocks.listener?.('SIGNED_IN', session));
+    await waitFor(() => expect(mocks.status).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toContain('"verified":false'));
+    expect(screen.getByTestId('state').textContent).not.toContain('"failed":true');
+  });
+
+  it('requires a challenge for a verified factor at AAL1 with AAL2 available', async () => {
+    mocks.getRole.mockResolvedValue({ data: [{ role: 'admin' }], error: null });
+    mocks.status.mockResolvedValue({
+      data: { success: true, requires_2fa: true, is_mandatory: true },
+      error: null,
+    });
+    mocks.getAssurance.mockResolvedValue({
+      data: { currentLevel: 'aal1', nextLevel: 'aal2' },
+      error: null,
+    });
+    mocks.listFactors.mockResolvedValue({
+      data: {
+        totp: [{ id: 'totp-1', factor_type: 'totp', status: 'verified' }],
+        phone: [],
+        all: [],
+      },
+      error: null,
+    });
+    render(<AuthProvider><State /></AuthProvider>);
+    act(() => mocks.listener?.('SIGNED_IN', session));
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toContain('"verified":false'));
+    await waitFor(() => expect(mocks.getAssurance).toHaveBeenCalled());
+    expect(mocks.status).toHaveBeenCalled();
+  });
+
+  it('accepts a returning mandatory admin whose session is already AAL2', async () => {
+    mocks.getRole.mockResolvedValue({ data: [{ role: 'admin' }], error: null });
+    mocks.status.mockResolvedValue({
+      data: { success: true, requires_2fa: true, is_mandatory: true },
+      error: null,
+    });
+    mocks.getAssurance.mockResolvedValue({
+      data: { currentLevel: 'aal2', nextLevel: 'aal2' },
+      error: null,
+    });
+    mocks.listFactors.mockResolvedValue({
+      data: {
+        totp: [{ id: 'totp-1', factor_type: 'totp', status: 'verified' }],
+        phone: [],
+        all: [],
+      },
+      error: null,
+    });
+    render(<AuthProvider><State /></AuthProvider>);
+    act(() => mocks.listener?.('SIGNED_IN', session));
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toContain('"verified":true'));
+  });
+
+  it('refreshes an expired session before querying MFA assurance', async () => {
+    let getSessionCalls = 0;
+    mocks.getSession.mockImplementation(() => {
+      getSessionCalls += 1;
+      if (getSessionCalls === 1) {
+        return Promise.resolve({ data: { session: null, error: null }, error: null });
+      }
+      return Promise.resolve({
+        data: { session: null, error: new Error('Refresh token expired') },
+        error: new Error('Refresh token expired'),
+      });
+    });
+    render(<AuthProvider><State /></AuthProvider>);
+    act(() => mocks.listener?.('SIGNED_IN', session));
+    await waitFor(() => expect(mocks.refreshSession).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toContain('"verified":true'));
+  });
+
   it('does not restore roles or MFA state after sign-out when requests finish late', async () => {
     let resolveRole!: (value: unknown) => void;
     let resolveStatus!: (value: unknown) => void;
@@ -134,7 +247,7 @@ describe('session hydration', () => {
       resolveStatus({ data: { success: true, requires_2fa: false }, error: null });
     });
     expect(screen.getByTestId('state').textContent).toBe(
-      '{"user":null,"role":null,"roles":[],"legal":false,"conflict":false,"failed":false,"verified":false}',
+      '{"user":null,"role":null,"roles":[],"legal":false,"conflict":false,"failed":false,"enrollment":false,"challenge":false,"verified":false}',
     );
   });
 });

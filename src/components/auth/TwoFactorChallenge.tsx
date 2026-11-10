@@ -15,6 +15,7 @@ interface TwoFactorChallengeProps {
   userId: string;
   phone?: string;
   channel?: 'authenticator' | 'sms' | 'whatsapp';
+  factorId?: string;
   onVerified: () => void;
   onCancel: () => void;
 }
@@ -23,6 +24,7 @@ export const TwoFactorChallenge = ({
   userId,
   phone,
   channel: initialChannel = 'authenticator',
+  factorId,
   onVerified,
   onCancel,
 }: TwoFactorChallengeProps) => {
@@ -35,6 +37,24 @@ export const TwoFactorChallenge = ({
   const [error, setError] = useState<string | null>(null);
   const [totpSeconds, setTotpSeconds] = useState(getTotpSecondsRemaining());
 
+  const startNativeChallenge = async () => {
+    if (!factorId) return;
+    setIsSending(true);
+    setError(null);
+    try {
+      const { data, error: challengeError } = await supabase.auth.mfa.challenge({
+        factorId,
+      });
+      if (challengeError) throw challengeError;
+      setChallengeId(data.id);
+      setCodeSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start MFA challenge.');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   // Dynamic 30-second countdown for Google Authenticator
   useEffect(() => {
     if (channel !== 'authenticator') return;
@@ -46,6 +66,10 @@ export const TwoFactorChallenge = ({
 
   // Send SMS/WhatsApp code if channel is phone
   useEffect(() => {
+    if (factorId) {
+      void startNativeChallenge();
+      return;
+    }
     if (channel === 'authenticator') {
       setCodeSent(true);
       return;
@@ -53,9 +77,13 @@ export const TwoFactorChallenge = ({
     if (phone) {
       sendPhoneCode();
     }
-  }, [channel, phone]);
+  }, [channel, factorId, phone]);
 
   const sendPhoneCode = async () => {
+    if (factorId) {
+      await startNativeChallenge();
+      return;
+    }
     if (!phone) return;
     setIsSending(true);
     setError(null);
@@ -93,6 +121,18 @@ export const TwoFactorChallenge = ({
     setError(null);
 
     try {
+      if (factorId) {
+        if (!challengeId) throw new Error('Request a new MFA challenge before verifying.');
+        const { error } = await supabase.auth.mfa.verify({
+          factorId,
+          challengeId,
+          code: otpValue,
+        });
+        if (error) throw error;
+        onVerified();
+        return;
+      }
+
       // 1. Google Authenticator Verification
       if (channel === 'authenticator') {
         const storedSecret = getStoredTotpSecret(userId);
@@ -244,13 +284,19 @@ export const TwoFactorChallenge = ({
               {/* Alternate Channels Toggle */}
               {channel !== 'authenticator' ? (
                 <div className="text-center pt-2">
-                  <ResendButton
-                    channel="2fa"
-                    identifier={phone || ''}
-                    onResend={sendPhoneCode}
-                    variant="link"
-                    label="Resend code"
-                  />
+                  {factorId ? (
+                    <Button variant="link" onClick={() => void startNativeChallenge()}>
+                      Resend code
+                    </Button>
+                  ) : (
+                    <ResendButton
+                      channel="2fa"
+                      identifier={phone || ''}
+                      onResend={sendPhoneCode}
+                      variant="link"
+                      label="Resend code"
+                    />
+                  )}
                 </div>
               ) : phone ? (
                 <div className="text-center pt-1">

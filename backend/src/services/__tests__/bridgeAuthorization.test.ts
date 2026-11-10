@@ -23,6 +23,7 @@ const user: AuthContext = {
   role: "driver",
   roles: ["driver"],
   isAdmin: false,
+  assuranceLevel: "aal1",
 };
 const admin: AuthContext = {
   userId: "admin-1",
@@ -30,6 +31,11 @@ const admin: AuthContext = {
   role: "admin",
   roles: ["admin"],
   isAdmin: true,
+  assuranceLevel: "aal2",
+};
+const adminAal1: AuthContext = {
+  ...admin,
+  assuranceLevel: "aal1",
 };
 const originalEnv = {
   internalSecret: process.env.RENTMAIKAR_INTERNAL_SERVICE_SECRET,
@@ -38,6 +44,7 @@ const originalEnv = {
 };
 
 const authenticate = async (authorization: string): Promise<AuthContext> => {
+  if (authorization === "admin-aal1") return adminAal1;
   if (authorization === "Bearer valid-user") return user;
   if (authorization === "Bearer valid-admin") return admin;
   const error = new Error("Invalid authentication session") as Error & {
@@ -135,6 +142,26 @@ test("identity is resolved from the verified session, not a caller-supplied user
   assert.equal(decision.caller?.userId, "driver-1");
 });
 
+test("admin operations require AAL2 but MFA status remains available at AAL1", async () => {
+  await assert.rejects(
+    enforceFunctionAccess(
+      "sarekon-admin",
+      { authorization: "admin-aal1" },
+      authenticate,
+    ),
+    (error: unknown) =>
+      error instanceof AccessDenied &&
+      error.statusCode === 403 &&
+      error.message === "AAL2 authentication is required",
+  );
+  const status = await enforceFunctionAccess(
+    "send-2fa-code",
+    { authorization: "admin-aal1" },
+    authenticate,
+  );
+  assert.equal(status.caller?.userId, "admin-1");
+});
+
 test("role policy denies ordinary users from administration and permits authorized roles", async () => {
   await assert.rejects(
     enforceFunctionAccess(
@@ -176,6 +203,7 @@ test("SMS dispatch aliases and provider diagnostics require an administrator", a
       role: "owner",
       roles: ["owner"],
       isAdmin: false,
+      assuranceLevel: "aal2",
     },
     support: {
       userId: "support-1",
@@ -183,6 +211,7 @@ test("SMS dispatch aliases and provider diagnostics require an administrator", a
       role: "support",
       roles: ["support"],
       isAdmin: false,
+      assuranceLevel: "aal1",
     },
     admin,
   };

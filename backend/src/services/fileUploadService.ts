@@ -31,13 +31,14 @@ export interface AuthContext {
   role: string;
   roles?: string[];
   isAdmin: boolean;
+  assuranceLevel?: "aal1" | "aal2" | null;
 }
 
 export function validateSupabaseJwtClaims(
   token: string,
   expectedIssuer: string,
   nowSeconds = Math.floor(Date.now() / 1000),
-): { subject: string } {
+): { subject: string; assuranceLevel: "aal1" | "aal2" | null } {
   if (!token || token.length > 16_384) {
     throw new Error("Invalid authentication session");
   }
@@ -60,7 +61,11 @@ export function validateSupabaseJwtClaims(
   ) {
     throw new Error("Invalid authentication session");
   }
-  return { subject: claims.sub };
+  return {
+    subject: claims.sub,
+    assuranceLevel:
+      claims.aal === "aal1" || claims.aal === "aal2" ? claims.aal : null,
+  };
 }
 
 export async function authenticateCaller(
@@ -76,12 +81,12 @@ export async function authenticateCaller(
     throw err;
   }
 
-  let subject: string;
+  let claims: ReturnType<typeof validateSupabaseJwtClaims>;
   try {
-    subject = validateSupabaseJwtClaims(
+    claims = validateSupabaseJwtClaims(
       token,
       `${supabaseBackendService.getUrl()}/auth/v1`,
-    ).subject;
+    );
   } catch {
     const err = new Error("Invalid authentication session");
     (err as any).statusCode = 401;
@@ -91,35 +96,31 @@ export async function authenticateCaller(
   const admin = supabaseBackendService.getAdminClient();
   const { data: authData, error: authError } = await admin.auth.getUser(token);
 
-  if (authError || !authData?.user?.id || authData.user.id !== subject) {
+  if (authError || !authData?.user?.id || authData.user.id !== claims.subject) {
     const err = new Error("Invalid authentication session");
     (err as any).statusCode = 401;
     throw err;
   }
 
   const user = authData.user;
-  const pool = getDbPool();
-  if (!pool) {
+  const userClient = supabaseBackendService.getClient(token);
+  const roleResult = await userClient
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id);
+  if (roleResult.error) {
     const err = new Error("Authorization service unavailable");
     (err as any).statusCode = 503;
     throw err;
   }
-  const roleResult = await pool.query(
-    `
-      SELECT role
-      FROM public.user_roles
-      WHERE user_id = $1
-      ORDER BY CASE role::text
-        WHEN 'admin' THEN 0
-        WHEN 'admin_assistant' THEN 1
-        ELSE 2
-      END
-    `,
-    [user.id]
-  );
-  const roles = roleResult.rows
-    .map((row: { role: unknown }) => String(row.role || "").trim())
+  const roles = (roleResult.data ?? [])
+    .map((row) => String(row.role || "").trim())
     .filter(Boolean);
+  const priority: Record<string, number> = {
+    admin: 0,
+    admin_assistant: 1,
+  };
+  roles.sort((a, b) => (priority[a] ?? 2) - (priority[b] ?? 2));
   const role = roles[0] || "unassigned";
   const isAdmin = roles.some((assignedRole: string) =>
     assignedRole === "admin" || assignedRole === "admin_assistant"
@@ -131,6 +132,7 @@ export async function authenticateCaller(
     role,
     roles,
     isAdmin,
+    assuranceLevel: claims.assuranceLevel,
   };
 }
 
