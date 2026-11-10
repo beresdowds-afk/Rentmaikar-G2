@@ -12,6 +12,66 @@ export interface ScanInput {
 }
 
 export async function scanDocument(input: ScanInput): Promise<MalwareScanResult> {
+  // 1. Static Signature & Anti-Malware Analysis
+  const eicarSignature = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+  if (input.buffer.includes(Buffer.from(eicarSignature))) {
+    return {
+      status: "infected",
+      provider: "signature-engine",
+      details: "EICAR standard anti-virus test file signature detected in document buffer",
+    };
+  }
+
+  // 2. Reject binary executables masquerading as documents
+  const buf = input.buffer;
+  if (buf.length >= 4) {
+    // Windows PE / DOS executable: 'MZ' header
+    if (buf[0] === 0x4d && buf[1] === 0x5a) {
+      return {
+        status: "infected",
+        provider: "signature-engine",
+        details: "Windows PE executable binary header detected in document",
+      };
+    }
+    // Linux ELF binary: 0x7F 'ELF'
+    if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) {
+      return {
+        status: "infected",
+        provider: "signature-engine",
+        details: "Linux ELF executable binary header detected in document",
+      };
+    }
+  }
+
+  // Shell script detection masquerading as document
+  if (buf.length >= 12) {
+    const headerPrefix = buf.subarray(0, 32).toString("ascii").toLowerCase();
+    if (
+      headerPrefix.startsWith("#!/bin/sh") ||
+      headerPrefix.startsWith("#!/bin/bash") ||
+      headerPrefix.startsWith("#!/usr/bin")
+    ) {
+      return {
+        status: "infected",
+        provider: "heuristic-engine",
+        details: "Executable shell script header detected in document",
+      };
+    }
+  }
+
+  // PDF Active Script Payload Analysis
+  if (input.mimeType === "application/pdf" && buf.length > 32) {
+    const rawPdf = buf.subarray(0, Math.min(buf.length, 32768)).toString("latin1");
+    if (rawPdf.includes("/Launch") || rawPdf.includes("/EmbeddedFiles") || rawPdf.includes("/JavaScript") || rawPdf.includes("/JS")) {
+      return {
+        status: "infected",
+        provider: "heuristic-engine",
+        details: "Embedded active script (/JavaScript) or execution stream (/Launch) detected in PDF document",
+      };
+    }
+  }
+
+  // 3. Forward to configured External Scanner Service if present
   const endpoint = (process.env.DOCUMENT_SCANNER_URL || "").trim();
   const token = (process.env.DOCUMENT_SCANNER_TOKEN || "").trim();
   if (!endpoint || !token) {

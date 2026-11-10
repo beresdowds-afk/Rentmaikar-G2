@@ -38,6 +38,10 @@ import {
   handleGetFileUrl,
   processDocumentLifecycle,
   listDocumentLifecycleIssues,
+  placeDocumentLegalHold,
+  releaseDocumentLegalHold,
+  getDocumentRetentionPolicies,
+  updateDocumentRetentionPolicy,
 } from "../services/fileUploadService";
 import { visualDamageDetectionService } from "../services/visualDamageDetectionService";
 import { inspectionReminderService } from "../services/inspectionReminderService";
@@ -188,6 +192,10 @@ const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "get-file-url",
   "process-document-lifecycle",
   "list-document-lifecycle-issues",
+  "place-document-legal-hold",
+  "release-document-legal-hold",
+  "get-document-retention-policies",
+  "update-document-retention-policy",
   // Billing, Withdrawal & Vehicle Review Operations
   "billing-reconciliation",
   "owner-withdrawal-data",
@@ -1083,6 +1091,79 @@ functionsRouter.all(
             ok: false,
             success: false,
             error: err.message || "Document lifecycle issues could not be loaded",
+          });
+        }
+      }
+
+      case "place-document-legal-hold": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await placeDocumentLegalHold(auth, {
+            documentId: body.documentId,
+            reconciliationId: body.reconciliationId,
+            reason: body.reason,
+            caseReference: body.caseReference,
+          });
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "Failed to place legal hold",
+          });
+        }
+      }
+
+      case "release-document-legal-hold": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await releaseDocumentLegalHold(auth, {
+            holdId: body.holdId,
+            notes: body.notes,
+          });
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "Failed to release legal hold",
+          });
+        }
+      }
+
+      case "get-document-retention-policies": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await getDocumentRetentionPolicies(auth);
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "Failed to get document retention policies",
+          });
+        }
+      }
+
+      case "update-document-retention-policy": {
+        try {
+          const auth = await authenticateCaller(clientAuth);
+          const result = await updateDocumentRetentionPolicy(auth, {
+            category: body.category,
+            retentionDays: body.retentionDays !== undefined ? Number(body.retentionDays) : null,
+            enabled: Boolean(body.enabled),
+            legalBasis: body.legalBasis,
+          });
+          return res.status(200).json({ ok: true, success: true, ...result });
+        } catch (err: any) {
+          const statusCode = err.statusCode || 500;
+          return res.status(statusCode).json({
+            ok: false,
+            success: false,
+            error: err.message || "Failed to update document retention policy",
           });
         }
       }

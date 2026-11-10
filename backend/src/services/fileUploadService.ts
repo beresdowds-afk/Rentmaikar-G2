@@ -183,6 +183,11 @@ function sanitizeFileName(fileName: string): string {
   ) {
     throw uploadError("Invalid file name");
   }
+  // Reject dangerous multi-extensions or disguised executables
+  const dangerousExtensions = /\.(exe|sh|bat|cmd|vbs|js|jar|php|py|bin|dll|scr|hta)(\.|$)/i;
+  if (fileName.split(".").length > 2 && dangerousExtensions.test(fileName)) {
+    throw uploadError("Suspicious multi-extension file name rejected");
+  }
   const parsed = path.parse(fileName);
   const safeName = parsed.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
   return `${safeName || "file"}${parsed.ext.toLowerCase()}`;
@@ -1652,4 +1657,142 @@ export async function listDocumentLifecycleIssues(auth: AuthContext): Promise<{
         sourceType: row.purpose === "user_document" ? "user_document" : "registered_evidence",
       })),
   };
+}
+
+export async function placeDocumentLegalHold(
+  auth: AuthContext,
+  params: { documentId?: string; reconciliationId?: string; reason: string; caseReference?: string },
+): Promise<{ ok: boolean; holdId: string }> {
+  if (!hasExplicitAdminRole(auth)) {
+    throw uploadError("Administrator role required to place legal hold", 403);
+  }
+  if (!params.reason?.trim()) {
+    throw uploadError("Reason is required to place a legal hold", 400);
+  }
+  if (!params.documentId && !params.reconciliationId) {
+    throw uploadError("documentId or reconciliationId is required", 400);
+  }
+
+  const pool = getDbPool();
+  const res = await pool.query(
+    `INSERT INTO public.document_legal_holds (
+       document_id, reconciliation_id, reason, case_reference, placed_by, placed_at, active
+     ) VALUES ($1, $2, $3, $4, $5, now(), true)
+     RETURNING id`,
+    [
+      params.documentId || null,
+      params.reconciliationId || null,
+      params.reason.trim(),
+      params.caseReference?.trim() || null,
+      auth.userId,
+    ],
+  );
+
+  const holdId = String(res.rows[0]?.id || "");
+  await pool.query(
+    `INSERT INTO public.admin_audit_log (admin_id, action, target_table, target_id, details)
+     VALUES ($1, 'place_document_legal_hold', 'document_legal_holds', $2, $3::jsonb)`,
+    [auth.userId, holdId, JSON.stringify(params)],
+  );
+
+  return { ok: true, holdId };
+}
+
+export async function releaseDocumentLegalHold(
+  auth: AuthContext,
+  params: { holdId: string; notes?: string },
+): Promise<{ ok: boolean }> {
+  if (!hasExplicitAdminRole(auth)) {
+    throw uploadError("Administrator role required to release legal hold", 403);
+  }
+  if (!params.holdId) {
+    throw uploadError("holdId is required", 400);
+  }
+
+  const pool = getDbPool();
+  const res = await pool.query(
+    `UPDATE public.document_legal_holds
+        SET active = false, released_by = $1, released_at = now()
+      WHERE id = $2 AND active = true
+      RETURNING id, document_id, reconciliation_id`,
+    [auth.userId, params.holdId],
+  );
+
+  if (res.rowCount === 0) {
+    throw uploadError("Legal hold not found or already released", 404);
+  }
+
+  await pool.query(
+    `INSERT INTO public.admin_audit_log (admin_id, action, target_table, target_id, details)
+     VALUES ($1, 'release_document_legal_hold', 'document_legal_holds', $2, $3::jsonb)`,
+    [auth.userId, params.holdId, JSON.stringify(params)],
+  );
+
+  return { ok: true };
+}
+
+export async function getDocumentRetentionPolicies(auth: AuthContext): Promise<{
+  policies: Array<Record<string, unknown>>;
+  activeHoldsCount: number;
+}> {
+  if (!hasExplicitAdminRole(auth)) {
+    throw uploadError("Administrator role required", 403);
+  }
+
+  const pool = getDbPool();
+  const [policiesRes, holdsRes] = await Promise.all([
+    pool.query(`SELECT * FROM public.document_retention_policies ORDER BY document_category`),
+    pool.query(`SELECT COUNT(*) as count FROM public.document_legal_holds WHERE active = true`),
+  ]);
+
+  return {
+    policies: policiesRes.rows,
+    activeHoldsCount: Number(holdsRes.rows[0]?.count || 0),
+  };
+}
+
+export async function updateDocumentRetentionPolicy(
+  auth: AuthContext,
+  params: { category: string; retentionDays: number | null; enabled: boolean; legalBasis: string },
+): Promise<{ ok: boolean }> {
+  if (!hasExplicitAdminRole(auth)) {
+    throw uploadError("Administrator role required", 403);
+  }
+  if (!params.category) {
+    throw uploadError("category is required", 400);
+  }
+  if (params.enabled && (!params.retentionDays || params.retentionDays <= 0)) {
+    throw uploadError("retentionDays must be > 0 when policy is enabled", 400);
+  }
+  if (params.enabled && !params.legalBasis?.trim()) {
+    throw uploadError("legalBasis is required when policy is enabled", 400);
+  }
+
+  const pool = getDbPool();
+  await pool.query(
+    `INSERT INTO public.document_retention_policies (
+       document_category, retention_days, enabled, legal_basis, updated_by, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (document_category) DO UPDATE SET
+       retention_days = EXCLUDED.retention_days,
+       enabled = EXCLUDED.enabled,
+       legal_basis = EXCLUDED.legal_basis,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = now()`,
+    [
+      params.category,
+      params.retentionDays || null,
+      Boolean(params.enabled),
+      params.legalBasis?.trim() || null,
+      auth.userId,
+    ],
+  );
+
+  await pool.query(
+    `INSERT INTO public.admin_audit_log (admin_id, action, target_table, target_id, details)
+     VALUES ($1, 'update_document_retention_policy', 'document_retention_policies', $2, $3::jsonb)`,
+    [auth.userId, params.category, JSON.stringify(params)],
+  );
+
+  return { ok: true };
 }
