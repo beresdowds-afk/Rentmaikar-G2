@@ -52,32 +52,28 @@ jobs:
       contents: read
       id-token: write
     env:
-      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-      GCP_WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT: ${{ vars.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Require GCP credentials
+      - name: Validate Workload Identity Federation configuration
         run: |
-          if [ -z "$GCP_SA_KEY" ] && [ -z "$GCP_WIF_PROVIDER" ]; then
-            echo "::error::No GCP credentials configured (set vars GCP_WORKLOAD_IDENTITY_PROVIDER/GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT, or secret GCP_SA_KEY). Refusing to report a green deploy without deploying."
+          if [ -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]; then
+            echo "::error::WIF configuration is incomplete: missing repository variable GCP_WORKLOAD_IDENTITY_PROVIDER."
+            exit 1
+          fi
+          if [ -z "$GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT" ]; then
+            echo "::error::WIF configuration is incomplete: missing repository variable GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT."
             exit 1
           fi
 
       - name: Authenticate to Google Cloud (Workload Identity Federation)
-        if: env.GCP_WIF_PROVIDER != ''
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
-          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        if: env.GCP_SA_KEY != '' && env.GCP_WIF_PROVIDER == ''
-        with:
-          credentials_json: ${{ env.GCP_SA_KEY }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -118,32 +114,28 @@ jobs:
       contents: read
       id-token: write
     env:
-      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-      GCP_WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT: ${{ vars.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Require GCP credentials
+      - name: Validate Workload Identity Federation configuration
         run: |
-          if [ -z "$GCP_SA_KEY" ] && [ -z "$GCP_WIF_PROVIDER" ]; then
-            echo "::error::No GCP credentials configured (set vars GCP_WORKLOAD_IDENTITY_PROVIDER/GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT, or secret GCP_SA_KEY). Refusing to report a green deploy without deploying."
+          if [ -z "$GCP_WORKLOAD_IDENTITY_PROVIDER" ]; then
+            echo "::error::WIF configuration is incomplete: missing repository variable GCP_WORKLOAD_IDENTITY_PROVIDER."
+            exit 1
+          fi
+          if [ -z "$GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT" ]; then
+            echo "::error::WIF configuration is incomplete: missing repository variable GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT."
             exit 1
           fi
 
       - name: Authenticate to Google Cloud (Workload Identity Federation)
-        if: env.GCP_WIF_PROVIDER != ''
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
-          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        if: env.GCP_SA_KEY != '' && env.GCP_WIF_PROVIDER == ''
-        with:
-          credentials_json: ${{ env.GCP_SA_KEY }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_WORKLOAD_IDENTITY_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
