@@ -1,7 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
 import http from "http";
-import http2 from "http2";
-import net from "net";
 import path from "path";
 import fs from "fs";
 import helmet from "helmet";
@@ -24,7 +22,15 @@ import {
 } from "./services/resendReceivingService";
 import {
   handleResendWebhookEvent,
+  closeEmailDatabasePool,
 } from "./services/emailService";
+import { closeDbPool } from "./services/dbPool";
+import { closeSarekonDatabasePool } from "./services/sarekonService";
+import { closeIotDatabasePool } from "./services/iotService";
+import { closeLeadServiceDatabaseClients } from "./marketing/leadService";
+import { stopActiveLicenceRecognitionProcesses } from "./services/licenceExpiryRecognition";
+import { createGracefulShutdownCoordinator } from "./services/gracefulShutdown";
+import { DatabaseShutdownError, databaseLifecycle } from "./services/databaseLifecycle";
 import {
   RENTMAIKAR_LOGO_BUFFER,
   RENTMAIKAR_FAVICON_PNG_BUFFER,
@@ -36,6 +42,30 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+let isShuttingDown = false;
+
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  if (isShuttingDown || databaseLifecycle.isShuttingDown()) {
+    return res.status(503).json({ error: "Service shutting down" });
+  }
+
+  let releaseRequest: (() => void) | undefined;
+  try {
+    releaseRequest = databaseLifecycle.runRequestScope(
+      `${_req.method} ${_req.path}`,
+      () => {
+        res.once("finish", () => releaseRequest?.());
+        res.once("close", () => releaseRequest?.());
+        next();
+      },
+    );
+  } catch (error) {
+    if (error instanceof DatabaseShutdownError) {
+      return res.status(503).json({ error: error.message });
+    }
+    return next(error);
+  }
+});
 
 /** Canonical public backend base URL (API host). */
 const PUBLIC_BACKEND_URL = process.env.PUBLIC_BACKEND_URL || "https://staging.rentmaikar.com";
@@ -563,62 +593,21 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// -----------------------------------------------------------------
-// 5. Hardened Dual Protocol Server Boot (HTTP/1.1 + HTTP/2 h2c)
-// Resolves "upstream connect error or disconnect/reset before headers. reset reason: protocol error"
-// on Google Cloud Run and Envoy Load Balancer
-// -----------------------------------------------------------------
-
-const FORBIDDEN_H2_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-connection",
-  "transfer-encoding",
-  "upgrade",
-  "http2-settings",
-]);
-
 const h1Server = http.createServer(app);
-const h2Server = http2.createServer((req, res) => {
-  // Wrap res.setHeader to filter out HTTP/1 connection-specific headers that crash HTTP/2 streams
-  const origSetHeader = res.setHeader.bind(res);
-  res.setHeader = function (name: string, value: any) {
-    if (FORBIDDEN_H2_HEADERS.has(name.toLowerCase())) {
-      return this;
-    }
-    return origSetHeader(name, value);
-  };
+const activeEventStreams = new Set<http.ServerResponse>();
 
-  const origWriteHead = res.writeHead.bind(res);
-  (res as any).writeHead = function (statusCode: number, ...args: any[]) {
-    if (args.length > 0) {
-      const headers = typeof args[0] === "object" ? args[0] : args[1];
-      if (headers && typeof headers === "object") {
-        for (const key of Object.keys(headers)) {
-          if (FORBIDDEN_H2_HEADERS.has(key.toLowerCase())) {
-            delete headers[key];
-          }
-        }
-      }
-    }
-    return origWriteHead(statusCode, ...args);
-  };
-
-  try {
-    app(req as any, res as any);
-  } catch (err: any) {
-    console.error("[H2 Gateway Handler Error]", err);
-    if (!res.headersSent) {
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "Internal Server Error" }));
-    }
-  }
+h1Server.on("request", (_req, res) => {
+  const contentType = res.getHeader("content-type");
+  if (typeof contentType !== "string" || !contentType.toLowerCase().startsWith("text/event-stream")) return;
+  activeEventStreams.add(res);
+  const remove = () => activeEventStreams.delete(res);
+  res.once("finish", remove);
+  res.once("close", remove);
 });
 
 // Align keep-alive timeouts with Google Cloud Run & Cloud Load Balancer (Envoy timeout is 600s)
 h1Server.keepAliveTimeout = 650000;
 h1Server.headersTimeout = 660000;
-h2Server.setTimeout(650000);
 
 // Graceful client error handling avoids abrupt socket teardown before headers
 h1Server.on("clientError", (err: any, socket: any) => {
@@ -626,37 +615,8 @@ h1Server.on("clientError", (err: any, socket: any) => {
   socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
 });
 
-const H2_PREFACE = Buffer.from("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
-
-// Dual Protocol Listener: multiplexes TCP connections to HTTP/1.1 or HTTP/2
-const gatewayServer = net.createServer((socket) => {
-  // Prevent socket streaming prematurely before routing
-  socket.pause();
-
-  let handled = false;
-  // If no data received within 600ms (e.g. TCP health check or idle pooled socket), delegate to HTTP/1.1
-  const timeoutId = setTimeout(() => {
-    if (!handled && !socket.destroyed) {
-      handled = true;
-      h1Server.emit("connection", socket);
-      socket.resume();
-    }
-  }, 600);
-
-  socket.once("data", (chunk) => {
-    if (handled) return;
-    handled = true;
-    clearTimeout(timeoutId);
-
-    socket.unshift(chunk);
-    if (chunk.length >= 24 && chunk.subarray(0, 24).equals(H2_PREFACE)) {
-      h2Server.emit("connection", socket);
-    } else {
-      h1Server.emit("connection", socket);
-    }
-    socket.resume();
-  });
-
+// Preserve socket error logging for accepted HTTP/1.1 connections.
+h1Server.on("connection", (socket) => {
   socket.on("error", (err: any) => {
     if (err.code === "ECONNRESET" || err.code === "EPIPE") return;
     console.warn("[Gateway Socket Error]", err.message);
@@ -664,8 +624,8 @@ const gatewayServer = net.createServer((socket) => {
 });
 
 const serverPort = Number(PORT) || 8080;
-gatewayServer.listen(serverPort, "0.0.0.0", () => {
-  console.log(`🚀 Rentmaikar Backend API Gateway running on port ${serverPort} (0.0.0.0 dual HTTP/1.1 + HTTP/2 h2c enabled)`);
+h1Server.listen(serverPort, "0.0.0.0", () => {
+  console.log(`🚀 Rentmaikar Backend API Gateway running on port ${serverPort} (0.0.0.0 HTTP/1.1)`);
   console.log(`🌐 Public backend URL: ${PUBLIC_BACKEND_URL}`);
   console.log(`🛡️ Dedicated Backend Admin Portal: ${PUBLIC_BACKEND_URL}/portal & ${PUBLIC_BACKEND_URL}/admin`);
   console.log(
@@ -675,3 +635,32 @@ gatewayServer.listen(serverPort, "0.0.0.0", () => {
   );
   console.log(`📡 Environment: ${process.env.NODE_ENV || "development"}`);
 });
+
+const shutdownCoordinator = createGracefulShutdownCoordinator({
+  server: h1Server,
+  markShuttingDown: () => {
+    databaseLifecycle.beginShutdown();
+    isShuttingDown = true;
+  },
+  closeEventStreams: () => {
+    const errors: unknown[] = [];
+    for (const response of activeEventStreams) {
+      if (response.destroyed || response.writableEnded) continue;
+      try {
+        response.end();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "Failed to end active SSE responses");
+  },
+  stopBackgroundWork: stopActiveLicenceRecognitionProcesses,
+  resources: [
+    { name: "application database pool", close: closeDbPool },
+    { name: "email database pool", close: closeEmailDatabasePool },
+    { name: "Sarekon database pool", close: closeSarekonDatabasePool },
+    { name: "IoT database pool", close: closeIotDatabasePool },
+    { name: "lead service database clients", close: closeLeadServiceDatabaseClients },
+  ],
+});
+shutdownCoordinator.installSignalHandlers();

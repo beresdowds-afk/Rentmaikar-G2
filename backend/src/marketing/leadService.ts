@@ -11,10 +11,27 @@
 import { getSupabase } from './supabaseClient';
 import { UnifiedLead, LeadStage, LeadActivity, LeadSource, LeadTargetRole, CampaignCycle, DriverImportResult, STAGE_ORDER } from './types';
 import pg from 'pg';
+import { databaseLifecycle } from '../services/databaseLifecycle';
 
 export { STAGE_ORDER };
 
+const activePgClients = new Set<pg.Client>();
+
+export async function closeLeadServiceDatabaseClients(): Promise<void> {
+  await databaseLifecycle.waitForIdle();
+  const clients = [...activePgClients];
+  const results = await Promise.allSettled(clients.map(async (client) => {
+    activePgClients.delete(client);
+    await client.end();
+  }));
+  const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Failed to close one or more lead service database clients");
+  }
+}
+
 function getPgClient(): pg.Client | null {
+  databaseLifecycle.assertAccessAllowed();
   if (!process.env.SUPABASE_DB_PASSWORD) return null;
   return new pg.Client({
     host: 'db.jrsydiofzceoeddjogov.supabase.co',
@@ -835,9 +852,15 @@ export class LeadService {
    * Import all 600+ driver contacts into marketing_leads with opt-out compliance checking
    */
   async importDriverContacts(_options: { forceRefresh?: boolean } = {}): Promise<DriverImportResult> {
+    return databaseLifecycle.runOperation("marketing driver-contact import", () =>
+      this.importDriverContactsWithinOperation(_options));
+  }
+
+  private async importDriverContactsWithinOperation(_options: { forceRefresh?: boolean } = {}): Promise<DriverImportResult> {
     const pgClient = getPgClient();
     if (pgClient) {
       try {
+        activePgClients.add(pgClient);
         await pgClient.connect();
 
         // 1. Fetch suppression lists
@@ -1046,6 +1069,7 @@ export class LeadService {
         }
 
         await pgClient.end();
+        activePgClients.delete(pgClient);
 
         return {
           totalScanned: allCandidates.length,
@@ -1056,6 +1080,15 @@ export class LeadService {
         };
       } catch (err: any) {
         console.error('[LeadService] Direct PG import failed, falling back to Supabase client:', err);
+      } finally {
+        if (activePgClients.delete(pgClient)) {
+          try {
+            await pgClient.end();
+          } catch (error) {
+            console.error("[LeadService] Failed to close direct PostgreSQL client:", error);
+            throw error;
+          }
+        }
       }
     }
 

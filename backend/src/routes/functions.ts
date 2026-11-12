@@ -6,6 +6,7 @@ import { sendPhoneOtp, verifyPhoneOtp } from "../services/phoneOtpService";
 import { reprocessSmsDlq } from "../services/smsService";
 import { supabaseBackendService, EDGE_FUNCTIONS_SET } from "../services/supabaseService";
 import { getDbPool } from "../services/dbPool";
+import { databaseLifecycle } from "../services/databaseLifecycle";
 import {
   mintVoiceAccessToken,
   handleVoiceTwimlDial,
@@ -666,13 +667,18 @@ functionsRouter.all(
             return res.status(500).json({ success: false, error: "Failed to save MFA settings" });
           }
 
-          await admin.from("two_factor_audit_log").insert({
-            user_id: userId,
-            action: "2fa_enabled",
-            channel,
-            phone_number: phone,
-            success: true,
-          }).then(() => {}, () => {});
+          void databaseLifecycle.runOperation("MFA audit record", async () => {
+            const { error: auditError } = await admin.from("two_factor_audit_log").insert({
+              user_id: userId,
+              action: "2fa_enabled",
+              channel,
+              phone_number: phone,
+              success: true,
+            });
+            if (auditError) throw auditError;
+          }).catch((error) => {
+            console.error("[Backend Functions] MFA audit record failed:", error);
+          });
           return res.status(200).json({ success: true, message: "MFA enabled successfully" });
         }
 

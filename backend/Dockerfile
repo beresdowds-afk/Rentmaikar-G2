@@ -1,12 +1,12 @@
 # =============================================================
 # Stage 1: Build Backend TypeScript
 # =============================================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 # Install build dependencies deterministically
-COPY package.json package-lock.json* tsconfig.json ./
+COPY package.json package-lock.json* tsconfig.json tsconfig.build.json ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # Copy source files, public assets, and data files
@@ -20,7 +20,7 @@ RUN npm run build
 # =============================================================
 # Stage 2: Production Lightweight Container Runner
 # =============================================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 

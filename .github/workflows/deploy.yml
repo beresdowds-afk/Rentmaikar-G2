@@ -38,6 +38,11 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
 
+      - name: Setup Node.js 22 for backend
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Backend Typecheck & Build Test
         run: |
           npm --prefix backend ci || npm --prefix backend install
@@ -162,6 +167,7 @@ jobs:
             --image gcr.io/${{ secrets.GCP_PROJECT_ID || 'avian-computer-477009-v0' }}/rentmaikar-backend:${{ github.sha }} \
             --region europe-west1 \
             --port 8080 \
+            --no-use-http2 \
             --allow-unauthenticated \
             --update-env-vars NODE_ENV=production,PUBLIC_BACKEND_URL=https://staging.rentmaikar.com,RESEND_SENDING_DOMAIN=notify.rentmaikar.com,SUPABASE_URL=https://jrsydiofzceoeddjogov.supabase.co \
             --set-secrets PORTAL_SECRET_KEY=portal-secret-key:latest,PORTAL_ADMIN_PASSWORD=portal-admin-password:latest,PORTAL_MASTER_KEY=portal-master-key:latest,SENT_WEBHOOK_SECRET=sent-webhook-secret:latest \
