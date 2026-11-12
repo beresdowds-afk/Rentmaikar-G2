@@ -12,6 +12,7 @@ import { getSupabase } from './supabaseClient';
 import { UnifiedLead, LeadStage, LeadActivity, LeadSource, LeadTargetRole, CampaignCycle, DriverImportResult, STAGE_ORDER } from './types';
 import pg from 'pg';
 import { databaseLifecycle } from '../services/databaseLifecycle';
+import { createAggregateError } from '../services/errorUtils';
 
 export { STAGE_ORDER };
 
@@ -26,7 +27,7 @@ export async function closeLeadServiceDatabaseClients(): Promise<void> {
   }));
   const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
   if (failures.length > 0) {
-    throw new AggregateError(failures, "Failed to close one or more lead service database clients");
+    throw createAggregateError(failures, "Failed to close one or more lead service database clients");
   }
 }
 

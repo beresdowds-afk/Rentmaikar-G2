@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createAggregateError, createErrorWithCause } from "./errorUtils";
 
 const activeProcesses = new Set<ChildProcess>();
 let stopProcessesPromise: Promise<void> | undefined;
@@ -124,11 +125,11 @@ export function stopActiveLicenceRecognitionProcesses(): Promise<void> {
           if (await terminateProcess(child, "SIGKILL")) return;
           throw new Error("Process did not exit after SIGTERM and SIGKILL");
         } catch (error) {
-          throw new Error(`Failed to stop OCR subprocess ${child.pid ?? "unknown"}`, { cause: error });
+          throw createErrorWithCause(`Failed to stop OCR subprocess ${child.pid ?? "unknown"}`, error);
         }
       }));
       const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
-      if (failures.length > 0) throw new AggregateError(failures, "OCR subprocess cleanup failed");
+      if (failures.length > 0) throw createAggregateError(failures, "OCR subprocess cleanup failed");
     })();
   }
   return stopProcessesPromise;

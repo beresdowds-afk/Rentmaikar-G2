@@ -31,6 +31,7 @@ import { closeLeadServiceDatabaseClients } from "./marketing/leadService";
 import { stopActiveLicenceRecognitionProcesses } from "./services/licenceExpiryRecognition";
 import { createGracefulShutdownCoordinator } from "./services/gracefulShutdown";
 import { DatabaseShutdownError, databaseLifecycle } from "./services/databaseLifecycle";
+import { createAggregateError } from "./services/errorUtils";
 import {
   RENTMAIKAR_LOGO_BUFFER,
   RENTMAIKAR_FAVICON_PNG_BUFFER,
@@ -652,7 +653,7 @@ const shutdownCoordinator = createGracefulShutdownCoordinator({
         errors.push(error);
       }
     }
-    if (errors.length > 0) throw new AggregateError(errors, "Failed to end active SSE responses");
+    if (errors.length > 0) throw createAggregateError(errors, "Failed to end active SSE responses");
   },
   stopBackgroundWork: stopActiveLicenceRecognitionProcesses,
   resources: [
