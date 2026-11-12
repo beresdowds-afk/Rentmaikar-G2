@@ -13,12 +13,18 @@
  */
 
 import pg from "pg";
+import { databaseLifecycle, manageDatabasePool } from "./databaseLifecycle";
 
 let pgPool: pg.Pool | null = null;
+let pgPoolClosePromise: Promise<void> | null = null;
 function getDbPool(): pg.Pool | null {
+  databaseLifecycle.assertAccessAllowed();
+  if (pgPoolClosePromise) {
+    throw new Error("Sarekon database pool is closing or closed");
+  }
   if (!pgPool && process.env.SUPABASE_DB_PASSWORD) {
     try {
-      pgPool = new pg.Pool({
+      pgPool = manageDatabasePool(new pg.Pool({
         host: "db.jrsydiofzceoeddjogov.supabase.co",
         port: 5432,
         user: "postgres",
@@ -27,12 +33,24 @@ function getDbPool(): pg.Pool | null {
         ssl: { rejectUnauthorized: false },
         max: 5,
         idleTimeoutMillis: 30000,
-      });
+      }), "Sarekon database");
     } catch (e: any) {
       console.warn("[SareKon Service] Failed to initialize Postgres pool:", e.message);
     }
   }
   return pgPool;
+}
+
+export async function closeSarekonDatabasePool(): Promise<void> {
+  if (pgPoolClosePromise) return pgPoolClosePromise;
+  if (!pgPool) return;
+  const initializedPool = pgPool;
+  pgPoolClosePromise = (async () => {
+    await databaseLifecycle.waitForIdle();
+    await initializedPool.end();
+    if (pgPool === initializedPool) pgPool = null;
+  })();
+  return pgPoolClosePromise;
 }
 
 function isValidSarekonFix(

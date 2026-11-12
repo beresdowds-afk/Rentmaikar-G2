@@ -1,4 +1,8 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createAggregateError, createErrorWithCause } from "./errorUtils";
+
+const activeProcesses = new Set<ChildProcess>();
+let stopProcessesPromise: Promise<void> | undefined;
 
 type RecognitionResult =
   | { status: "recognized"; date: string }
@@ -40,8 +44,12 @@ export function extractLicenceExpiry(text: string): string | null {
 }
 
 function runLocal(command: string, args: string[], input: Buffer, maxBytes: number): Promise<Buffer> {
+  if (stopProcessesPromise) {
+    return Promise.reject(new Error("Local OCR is unavailable while the service is shutting down"));
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["pipe", "pipe", "ignore"] });
+    activeProcesses.add(child);
     const chunks: Buffer[] = [];
     let size = 0;
     let failed = false;
@@ -60,11 +68,71 @@ function runLocal(command: string, args: string[], input: Buffer, maxBytes: numb
     child.on("error", (error) => { clearTimeout(timer); reject(error); });
     child.on("close", (code) => {
       clearTimeout(timer);
+      activeProcesses.delete(child);
       if (failed || code !== 0) reject(new Error("Local OCR process failed or exceeded its limits"));
       else resolve(Buffer.concat(chunks));
     });
     child.stdin.end(input);
   });
+}
+
+function terminateProcess(child: ChildProcess, signal: NodeJS.Signals): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      child.removeListener("close", onExit);
+      child.removeListener("error", onError);
+    };
+    const onExit = () => {
+      cleanup();
+      resolve(true);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      if (child.exitCode !== null || child.signalCode !== null) resolve(true);
+      else reject(error);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(child.exitCode !== null || child.signalCode !== null);
+    }, 250);
+    child.once("exit", onExit);
+    child.once("close", onExit);
+    child.once("error", onError);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      onExit();
+      return;
+    }
+    try {
+      child.kill(signal);
+    } catch (error) {
+      cleanup();
+      if (child.exitCode !== null || child.signalCode !== null) resolve(true);
+      else reject(error);
+    }
+  });
+}
+
+export function stopActiveLicenceRecognitionProcesses(): Promise<void> {
+  if (!stopProcessesPromise) {
+    stopProcessesPromise = (async () => {
+      const results = await Promise.allSettled([...activeProcesses].map(async (child) => {
+        try {
+          if (await terminateProcess(child, "SIGTERM")) return;
+          if (await terminateProcess(child, "SIGKILL")) return;
+          throw new Error("Process did not exit after SIGTERM and SIGKILL");
+        } catch (error) {
+          throw createErrorWithCause(`Failed to stop OCR subprocess ${child.pid ?? "unknown"}`, error);
+        }
+      }));
+      const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (failures.length > 0) throw createAggregateError(failures, "OCR subprocess cleanup failed");
+    })();
+  }
+  return stopProcessesPromise;
 }
 
 export async function recognizeLicenceExpiry(buffer: Buffer, mimeType: string): Promise<RecognitionResult> {

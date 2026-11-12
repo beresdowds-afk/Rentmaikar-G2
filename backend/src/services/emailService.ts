@@ -11,6 +11,7 @@ import {
 import crypto from "crypto";
 import pg from "pg";
 import { supabaseBackendService } from "./supabaseService";
+import { databaseLifecycle, manageDatabasePool } from "./databaseLifecycle";
 import {
   getConfiguredBusinessSender,
   resolveBusinessEmailSender,
@@ -30,14 +31,19 @@ export const SENDERS = {
 
 // Lazy PostgreSQL pool for database queries
 let pgPool: pg.Pool | null = null;
+let pgPoolClosePromise: Promise<void> | null = null;
 
 function getDbPool(): pg.Pool {
+  databaseLifecycle.assertAccessAllowed();
+  if (pgPoolClosePromise) {
+    throw new Error("Email database pool is closing or closed");
+  }
   if (!pgPool) {
     const password = process.env.SUPABASE_DB_PASSWORD;
     if (!password) {
       throw new Error("SUPABASE_DB_PASSWORD environment variable is required");
     }
-    pgPool = new pg.Pool({
+    pgPool = manageDatabasePool(new pg.Pool({
       host: "db.jrsydiofzceoeddjogov.supabase.co",
       port: 5432,
       user: "postgres",
@@ -46,9 +52,21 @@ function getDbPool(): pg.Pool {
       ssl: { rejectUnauthorized: false },
       max: 10,
       idleTimeoutMillis: 30000,
-    });
+    }), "email database");
   }
   return pgPool;
+}
+
+export async function closeEmailDatabasePool(): Promise<void> {
+  if (pgPoolClosePromise) return pgPoolClosePromise;
+  if (!pgPool) return;
+  const initializedPool = pgPool;
+  pgPoolClosePromise = (async () => {
+    await databaseLifecycle.waitForIdle();
+    await initializedPool.end();
+    if (pgPool === initializedPool) pgPool = null;
+  })();
+  return pgPoolClosePromise;
 }
 
 export function parseEmailAddress(value: string): { name?: string; local: string; domain: string } | null {
