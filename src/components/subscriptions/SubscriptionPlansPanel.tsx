@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { GraduationCap, Shield, HeartHandshake, Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 export type Plan = {
   id: string;
@@ -40,6 +41,7 @@ interface Props {
 
 export const SubscriptionPlansPanel = ({ planTypes, compact = false, title }: Props) => {
   const { user } = useAuth();
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const { country } = useRegion();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [active, setActive] = useState<ActiveSub[]>([]);
@@ -86,6 +88,10 @@ export const SubscriptionPlansPanel = ({ planTypes, compact = false, title }: Pr
       toast.error("Sign in first");
       return;
     }
+    if (!hasPaymentMfa) {
+      toast.error("Multi-factor authentication is compulsory for all payments.");
+      return;
+    }
     if (plan.plan_type === "insurance" && !hasTrainingActive()) {
       toast.error("Driver Training subscription required before Insurance");
       return;
@@ -129,6 +135,7 @@ export const SubscriptionPlansPanel = ({ planTypes, compact = false, title }: Pr
   return (
     <div className="space-y-4">
       {title && <h3 className="text-lg font-semibold">{title}</h3>}
+      {!hasPaymentMfa && <PaymentMfaGate />}
       <div className={`grid gap-4 ${compact ? "md:grid-cols-1" : "md:grid-cols-2 lg:grid-cols-3"}`}>
         {plans.map((p) => {
           const Icon = iconFor(p.plan_type);
@@ -169,14 +176,14 @@ export const SubscriptionPlansPanel = ({ planTypes, compact = false, title }: Pr
                   <p className="text-xs text-muted-foreground">Pay with</p>
                   <div className="grid grid-cols-2 gap-2">
                     <Button
-                      disabled={insuranceBlocked || busyPlan === p.id}
+                      disabled={!hasPaymentMfa || insuranceBlocked || busyPlan === p.id}
                       onClick={() => subscribe(p, "paystack")}
                     >
                       {busyPlan === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Paystack"}
                     </Button>
                     <Button
                       variant="outline"
-                      disabled={insuranceBlocked || busyPlan === p.id}
+                      disabled={!hasPaymentMfa || insuranceBlocked || busyPlan === p.id}
                       onClick={() => subscribe(p, "opay")}
                     >
                       {busyPlan === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "OPay"}
@@ -187,7 +194,7 @@ export const SubscriptionPlansPanel = ({ planTypes, compact = false, title }: Pr
               ) : (
                 <Button
                   className="mt-auto"
-                  disabled={isActive || insuranceBlocked || busyPlan === p.id}
+                  disabled={!hasPaymentMfa || isActive || insuranceBlocked || busyPlan === p.id}
                   onClick={() => subscribe(p)}
                 >
                   {busyPlan === p.id ? (

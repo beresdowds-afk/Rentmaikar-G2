@@ -7,6 +7,7 @@ import { Info } from "lucide-react";
 import { PaystackCheckout } from "./PaystackCheckout";
 import { OpayCheckout } from "./OpayCheckout";
 import { PayPalCheckout } from "./PayPalCheckout";
+import { PaymentMfaGate } from "./PaymentMfaGate";
 import { getCheckoutPSPs, resolveCountryCode, getRegionCurrency, type CheckoutPSP } from "@/lib/psp-support";
 
 interface PaymentMethodPickerProps {
@@ -64,20 +65,23 @@ export function PaymentMethodPicker({
 
   if (psps.length === 0) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Payment methods</CardTitle>
-          <CardDescription>
-            No payment provider is enabled for your region ({cc}) yet. Please
-            try again shortly or contact support.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <PaymentMfaGate>
+        <Card>
+          <CardHeader>
+            <CardTitle>Payment methods</CardTitle>
+            <CardDescription>
+              No payment provider is enabled for your region ({cc}) yet. Please
+              try again shortly or contact support.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </PaymentMfaGate>
     );
   }
 
   return (
-    <Card>
+    <PaymentMfaGate>
+      <Card>
       <CardHeader>
         <CardTitle>Choose how to pay</CardTitle>
         <CardDescription>
@@ -146,5 +150,6 @@ export function PaymentMethodPicker({
         </Tabs>
       </CardContent>
     </Card>
+    </PaymentMfaGate>
   );
 }

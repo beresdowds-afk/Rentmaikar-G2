@@ -305,6 +305,23 @@ function auditAccess(
   );
 }
 
+export const PAYMENT_MFA_FUNCTIONS: ReadonlySet<string> = new Set([
+  "create-paypal-order",
+  "capture-paypal-order",
+  "create-paystack-transaction",
+  "verify-paystack-transaction",
+  "create-opay-order",
+  "verify-opay-order",
+  "subscribe-to-plan",
+  "activate-subscription",
+  "proxy-create-payment",
+  "initiate-paypal-payout",
+  "initiate-paystack-transfer",
+  "initiate-owner-withdrawal",
+  "create-paystack-recipient",
+  "process-owner-withdrawals",
+]);
+
 /**
  * Resolves the session from the verified Supabase JWT; identity is never read
  * from the request body. Unknown function names are denied by default.
@@ -441,9 +458,12 @@ export async function enforceFunctionAccess(
     throw new AccessDenied("Forbidden", 403);
   }
 
-  const requiresMfa = (caller.roles ?? [caller.role]).some(
-    (role) => role === "admin" || role === "owner",
-  );
+  const isPaymentFunction = PAYMENT_MFA_FUNCTIONS.has(functionName);
+  const requiresMfa =
+    isPaymentFunction ||
+    (caller.roles ?? [caller.role]).some(
+      (role) => role === "admin" || role === "owner",
+    );
   if (
     requiresMfa &&
     functionName !== "send-2fa-code" &&

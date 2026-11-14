@@ -5,18 +5,19 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 type State = "verifying" | "success" | "error";
 
 const SubscriptionSuccessPage = () => {
   const [params] = useSearchParams();
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, hasPaymentMfa } = usePaymentMfaStatus();
   const [state, setState] = useState<State>("verifying");
   const [message, setMessage] = useState<string>("");
   const ran = useRef(false);
 
   useEffect(() => {
-    if (isLoading || !user || ran.current) return;
+    if (isLoading || !user || !hasPaymentMfa || ran.current) return;
     ran.current = true;
 
     (async () => {
@@ -74,12 +75,16 @@ const SubscriptionSuccessPage = () => {
         setMessage("Payment was not confirmed. Please contact support if you were charged.");
       }
     })();
-  }, [params, user, isLoading]);
+  }, [params, user, isLoading, hasPaymentMfa]);
 
   return (
     <div className="container max-w-md mx-auto py-16 px-4">
       <Card className="p-8 text-center space-y-4">
-        {state === "verifying" && (
+        {!isLoading && !hasPaymentMfa ? (
+          <div className="text-left">
+            <PaymentMfaGate />
+          </div>
+        ) : state === "verifying" && (
           <>
             <Loader2 className="h-10 w-10 animate-spin mx-auto text-primary" />
             <h1 className="text-xl font-semibold">Verifying your payment…</h1>

@@ -3,6 +3,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { resolvePaymentContext } from "../_shared/resolve-payment-context.ts";
+import { requireMfaAal2 } from "../_shared/auth-guards.ts";
 import { claimIdempotencyKey, completeIdempotencyKey, duplicateResponse, resolveIdempotencyKey } from "../_shared/payment-idempotency.ts";
 
 const BodySchema = z.object({
@@ -52,12 +53,15 @@ Deno.serve(async (req) => {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const { data: userData, error: userErr } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const token = auth.replace("Bearer ", "");
+    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userData?.user) {
       return new Response(JSON.stringify({ error: "Unauthenticated" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const mfaErr = requireMfaAal2(token, corsHeaders);
+    if (mfaErr) return mfaErr;
     const driverId = userData.user.id;
     // If the caller passed a mismatched driverId, reject rather than silently accept.
     if (body.driverId && body.driverId !== driverId) {

@@ -250,4 +250,62 @@ describe('session hydration', () => {
       '{"user":null,"role":null,"roles":[],"legal":false,"conflict":false,"failed":false,"enrollment":false,"challenge":false,"verified":false}',
     );
   });
+
+  it('allows collapsing a failed MFA check without marking twoFactorVerified as true, and clears dismissal on recovery or sign-out', async () => {
+    function DismissControls() {
+      const {
+        twoFactorStatus,
+        twoFactorVerified,
+        mfaCheckDismissed,
+        dismissMfaCheckFailed,
+        restoreMfaCheckPrompt,
+        check2FAStatus,
+        user,
+      } = useAuth();
+      return (
+        <div>
+          <div data-testid="dismiss-state">
+            {JSON.stringify({
+              failed: twoFactorStatus?.check_failed ?? false,
+              verified: twoFactorVerified,
+              dismissed: mfaCheckDismissed,
+            })}
+          </div>
+          <button onClick={dismissMfaCheckFailed}>dismiss</button>
+          <button onClick={restoreMfaCheckPrompt}>restore</button>
+          <button onClick={() => user && void check2FAStatus(user.id)}>retry</button>
+        </div>
+      );
+    }
+
+    mocks.status.mockResolvedValue({ data: null, error: new Error('offline') });
+    render(<AuthProvider><DismissControls /></AuthProvider>);
+    act(() => mocks.listener?.('SIGNED_IN', session));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('dismiss-state').textContent).toContain('"failed":true'),
+    );
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"dismissed":false');
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"verified":false');
+
+    act(() => screen.getByText('dismiss').click());
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"dismissed":true');
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"verified":false');
+    expect(sessionStorage.getItem('rm_mfa_check_dismissed_user-1')).toBe('1');
+
+    act(() => screen.getByText('restore').click());
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"dismissed":false');
+
+    act(() => screen.getByText('dismiss').click());
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"dismissed":true');
+
+    // Recovering via retry clears dismissal
+    mocks.status.mockResolvedValue({ data: { success: true, requires_2fa: false }, error: null });
+    act(() => screen.getByText('retry').click());
+    await waitFor(() =>
+      expect(screen.getByTestId('dismiss-state').textContent).toContain('"failed":false'),
+    );
+    expect(screen.getByTestId('dismiss-state').textContent).toContain('"dismissed":false');
+    expect(sessionStorage.getItem('rm_mfa_check_dismissed_user-1')).toBeNull();
+  });
 });

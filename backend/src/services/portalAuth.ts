@@ -1,9 +1,19 @@
 import crypto from "crypto";
-import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 
-dotenv.config();
+try {
+  if (typeof (process as any).loadEnvFile === "function") {
+    const envPath = path.resolve(process.cwd(), ".env");
+    if (fs.existsSync(envPath)) {
+      (process as any).loadEnvFile(envPath);
+    }
+  } else if (typeof require === "function") {
+    require("dotenv").config();
+  }
+} catch {
+  // Optional when environment is already injected by host runtime
+}
 
 export type PortalRole = "admin" | "invited_user" | "auditor";
 

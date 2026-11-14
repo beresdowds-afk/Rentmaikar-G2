@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { idempotencyHeaders } from "@/lib/idempotency";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 interface PayPalCheckoutProps {
   amount: number;
@@ -39,10 +40,17 @@ export function PayPalCheckout({
 }: PayPalCheckoutProps) {
   const { country, currency } = useRegion();
   const { clientId, environment, enabled: isEnabled, isLoading, error: configErrorRaw } = usePayPalConfig();
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const [isProcessing, setIsProcessing] = useState(false);
   const [configError, setConfigError] = useState<string | null>(configErrorRaw);
 
   const createOrder = useCallback(async () => {
+    if (!hasPaymentMfa) {
+      const msg = "Multi-factor authentication is compulsory for all payments.";
+      toast.error(msg);
+      onError?.(msg);
+      throw new Error(msg);
+    }
     setIsProcessing(true);
     setConfigError(null);
     try {
@@ -75,7 +83,7 @@ export function PayPalCheckout({
     } finally {
       setIsProcessing(false);
     }
-  }, [amount, rentalId, vehicleId, ownerId, driverId, paymentFrequency, description, onError]);
+  }, [hasPaymentMfa, amount, rentalId, vehicleId, ownerId, driverId, paymentFrequency, description, purpose, iotDeviceId, onError]);
 
   const onApprove = useCallback(
     async (data: { orderID: string }) => {
@@ -112,6 +120,10 @@ export function PayPalCheckout({
     },
     [onSuccess, onError],
   );
+
+  if (!hasPaymentMfa) {
+    return <PaymentMfaGate />;
+  }
 
   if (country !== "USA" || currency !== "USD") {
     return (

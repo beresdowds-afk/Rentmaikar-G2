@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 import ConsentSection, { type MessagingChannel } from '@/components/registration/ConsentSection';
-import { Loader2, AlertCircle, User, Users, ArrowLeft, Mail, CheckCircle, Smartphone } from 'lucide-react';
+import { Loader2, AlertCircle, User, Users, ArrowLeft, Mail, CheckCircle, Smartphone, ChevronUp, ChevronDown } from 'lucide-react';
 import PhoneOtpPanel from '@/components/auth/PhoneOtpPanel';
 import { toast } from 'sonner';
 import rentmaikarLogo from '@/assets/rentmaikar-logo.jpg';
@@ -75,6 +75,9 @@ const Auth = () => {
     hasAccountTypeConflict,
     twoFactorStatus,
     twoFactorVerified,
+    mfaCheckDismissed,
+    dismissMfaCheckFailed,
+    restoreMfaCheckPrompt,
     signUp,
     signIn,
     check2FAStatus,
@@ -224,7 +227,8 @@ const Auth = () => {
   // IMPORTANT: wait until userRole has hydrated before navigating, otherwise
   // admin_assistant / support users race past the role check and land on `/`.
   useEffect(() => {
-    if (!user || authLoading || !twoFactorVerified || show2FA || hasAccountTypeConflict) return;
+    const canContinueWithoutMfa = Boolean(twoFactorStatus?.check_failed && mfaCheckDismissed);
+    if (!user || authLoading || (!twoFactorVerified && !canContinueWithoutMfa) || show2FA || hasAccountTypeConflict) return;
     if (userRole === null) return; // still hydrating role
 
     const finishRedirect = (target: string) => {
@@ -267,7 +271,7 @@ const Auth = () => {
       );
       await routeWithCompletionCheck(target);
     })();
-  }, [user, authLoading, userRole, navigate, from, twoFactorVerified, show2FA, hasAccountTypeConflict]);
+  }, [user, authLoading, userRole, navigate, from, twoFactorVerified, twoFactorStatus?.check_failed, mfaCheckDismissed, show2FA, hasAccountTypeConflict]);
 
   const loginForm = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -551,15 +555,77 @@ const Auth = () => {
   }
 
   if (user && !twoFactorVerified && twoFactorStatus?.check_failed) {
+    if (mfaCheckDismissed) {
+      const fallbackPath =
+        from && from !== '/' && isRestorablePath(from)
+          ? from
+          : (userRole && ROLE_HOME[userRole]) || '/';
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+          <div className="w-full max-w-md space-y-4">
+            <Card className="border-muted" data-testid="mfa-check-collapsed-card">
+              <CardHeader className="py-3 px-4 flex flex-row items-center justify-between gap-2 space-y-0">
+                <div className="min-w-0">
+                  <CardTitle className="text-sm font-medium">
+                    Continuing session without MFA
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    MFA is still compulsory for all payments.
+                  </CardDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={restoreMfaCheckPrompt}
+                  aria-label="Expand two-factor notice"
+                >
+                  <ChevronDown className="h-4 w-4 mr-1" />
+                  Expand
+                </Button>
+              </CardHeader>
+              <CardFooter className="pt-0 pb-3 px-4 gap-2 flex-wrap">
+                <Button size="sm" asChild>
+                  <Link to={fallbackPath}>Continue to session</Link>
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void check2FAStatus(user.id)}>
+                  Retry MFA
+                </Button>
+              </CardFooter>
+            </Card>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <Card className="max-w-md w-full">
-          <CardHeader>
-            <CardTitle>Unable to verify two-factor status</CardTitle>
-            <CardDescription>{twoFactorStatus.check_error || 'Please retry or sign out and try again.'}</CardDescription>
+        <Card className="max-w-md w-full" data-testid="mfa-check-failed-card">
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
+            <div className="space-y-1.5">
+              <CardTitle>Unable to verify two-factor status</CardTitle>
+              <CardDescription>{twoFactorStatus.check_error || 'Please retry or sign out and try again.'}</CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={dismissMfaCheckFailed}
+              aria-label="Collapse"
+              title="Collapse and continue without MFA"
+              className="shrink-0 -mt-1 -mr-2"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </Button>
           </CardHeader>
-          <CardFooter className="gap-2">
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            You can collapse this notice to continue your session without MFA. MFA is still compulsory for all payments.
+          </CardContent>
+          <CardFooter className="flex-wrap gap-2">
             <Button onClick={() => void check2FAStatus(user.id)}>Retry</Button>
+            <Button variant="secondary" onClick={dismissMfaCheckFailed}>
+              Continue without MFA
+            </Button>
             <Button variant="outline" onClick={() => void supabase.auth.signOut()}>Sign out</Button>
           </CardFooter>
         </Card>

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { readEdgeError } from "@/lib/edge-invoke";
 import { toast } from "sonner";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 interface PaystackCheckoutProps {
   amount: number;
@@ -39,6 +40,7 @@ export function PaystackCheckout({
   amount, currency, rentalId, vehicleId, driverId,
   paymentFrequency, description, channels, purpose, iotDeviceId, onSuccess, onError,
 }: PaystackCheckoutProps) {
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const [loading, setLoading] = useState(false);
   const [publicKey, setPublicKey] = useState<string>("");
 
@@ -49,6 +51,12 @@ export function PaystackCheckout({
   }, []);
 
   const pay = useCallback(async () => {
+    if (!hasPaymentMfa) {
+      const msg = "Multi-factor authentication is compulsory for all payments.";
+      toast.error(msg);
+      onError?.(msg);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("create-paystack-transaction", {
@@ -111,7 +119,11 @@ export function PaystackCheckout({
     } finally {
       setLoading(false);
     }
-  }, [amount, currency, rentalId, vehicleId, driverId, paymentFrequency, description, channels, onSuccess, onError]);
+  }, [hasPaymentMfa, amount, currency, rentalId, vehicleId, driverId, paymentFrequency, description, channels, purpose, iotDeviceId, publicKey, onSuccess, onError]);
+
+  if (!hasPaymentMfa) {
+    return <PaymentMfaGate />;
+  }
 
   if (!publicKey) {
     return (

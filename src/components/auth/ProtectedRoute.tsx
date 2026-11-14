@@ -21,6 +21,8 @@ export const ProtectedRoute = ({
     isLoading,
     isRoleLoading,
     twoFactorVerified,
+    twoFactorStatus,
+    mfaCheckDismissed,
   } = useAuth();
 
   const location = useLocation();
@@ -45,7 +47,8 @@ export const ProtectedRoute = ({
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }
 
-  if (!twoFactorVerified) {
+  const canContinueWithoutMfa = Boolean(twoFactorStatus?.check_failed && mfaCheckDismissed);
+  if (!twoFactorVerified && !canContinueWithoutMfa) {
     rememberReturnTo(fullPath);
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }

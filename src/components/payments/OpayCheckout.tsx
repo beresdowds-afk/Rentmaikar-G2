@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { idempotencyHeaders } from "@/lib/idempotency";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 interface OpayCheckoutProps {
   amount: number;
@@ -31,6 +32,7 @@ export function OpayCheckout({
   onError,
 }: OpayCheckoutProps) {
 
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const [loading, setLoading] = useState(false);
   const [configured, setConfigured] = useState(false);
   const pollRef = useRef<number | null>(null);
@@ -45,6 +47,12 @@ export function OpayCheckout({
   }, []);
 
   const pay = useCallback(async () => {
+    if (!hasPaymentMfa) {
+      const msg = "Multi-factor authentication is compulsory for all payments.";
+      toast.error(msg);
+      onError?.(msg);
+      return;
+    }
     setLoading(true);
     try {
       const returnUrl = `${window.location.origin}${window.location.pathname}`;
@@ -96,7 +104,11 @@ export function OpayCheckout({
       onError?.(msg);
       setLoading(false);
     }
-  }, [amount, rentalId, vehicleId, driverId, paymentFrequency, description, onSuccess, onError]);
+  }, [hasPaymentMfa, amount, rentalId, vehicleId, driverId, paymentFrequency, description, purpose, iotDeviceId, onSuccess, onError]);
+
+  if (!hasPaymentMfa) {
+    return <PaymentMfaGate />;
+  }
 
   if (!configured) {
     return <Button disabled variant="outline" className="w-full">Opay not configured</Button>;

@@ -109,6 +109,9 @@ interface AuthContextType {
   isRoleLoading: boolean;
   twoFactorStatus: TwoFactorStatus | null;
   twoFactorVerified: boolean;
+  mfaCheckDismissed: boolean;
+  dismissMfaCheckFailed: () => void;
+  restoreMfaCheckPrompt: () => void;
   signUp: (email: string, password: string, fullName: string, role: 'driver' | 'owner') => Promise<{
     error: Error | null;
     emailExists?: boolean;
@@ -126,6 +129,31 @@ interface AuthContextType {
   sendGoogleSsoAuthEmail: (params: { email: string; fullName?: string; isNewUser?: boolean; device?: string; location?: string; origin?: string }) => Promise<{ success: boolean; error?: Error }>;
 }
 
+const MFA_DISMISSED_STORAGE_PREFIX = 'rm_mfa_check_dismissed_';
+
+function readMfaDismissed(userId?: string | null): boolean {
+  if (!userId || typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(`${MFA_DISMISSED_STORAGE_PREFIX}${userId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeMfaDismissed(userId: string | null | undefined, dismissed: boolean): void {
+  if (!userId || typeof window === 'undefined') return;
+  try {
+    const key = `${MFA_DISMISSED_STORAGE_PREFIX}${userId}`;
+    if (dismissed) {
+      sessionStorage.setItem(key, '1');
+    } else {
+      sessionStorage.removeItem(key);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -138,6 +166,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isRoleLoading, setIsRoleLoading] = useState(true);
   const [twoFactorStatus, setTwoFactorStatus] = useState<TwoFactorStatus | null>(null);
   const [twoFactorVerified, setTwoFactorVerified] = useState(false);
+  const [mfaCheckDismissed, setMfaCheckDismissed] = useState(false);
   const twoFactorStatusRef = useRef<TwoFactorStatus | null>(null);
   twoFactorStatusRef.current = twoFactorStatus;
   const authGeneration = useRef(0);
@@ -308,6 +337,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (generation === authGeneration.current && activeUserId.current === userId) {
           setTwoFactorStatus(status);
           setTwoFactorVerified(status.verified);
+          setMfaCheckDismissed(false);
+          writeMfaDismissed(userId, false);
         }
         return status;
       } catch (err) {
@@ -380,6 +411,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setHasAccountTypeConflict(false);
         setTwoFactorStatus(null);
         setTwoFactorVerified(false);
+        setMfaCheckDismissed(readMfaDismissed(syncedSession.user.id));
         mfaStatusRequest.current = null;
       }
       setSession(syncedSession);
@@ -398,6 +430,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     },
     onSignedOut: () => {
+      const prevUid = activeUserId.current;
       activeUserId.current = null;
       ++authGeneration.current;
       setSession(null);
@@ -407,6 +440,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setHasAccountTypeConflict(false);
       setTwoFactorStatus(null);
       setTwoFactorVerified(false);
+      setMfaCheckDismissed(false);
+      writeMfaDismissed(prevUid, false);
       mfaStatusRequest.current = null;
       setIsRoleLoading(false);
       setIsLoading(false);
@@ -427,8 +462,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Set up auth state listener FIRST — synchronous state, deferred side effects.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        const prevUid = activeUserId.current;
         const uid = session?.user?.id ?? null;
-        const changedUser = activeUserId.current !== uid;
+        const changedUser = prevUid !== uid;
         activeUserId.current = uid;
         const generation = ++authGeneration.current;
         if (changedUser || event === 'SIGNED_IN') {
@@ -437,6 +473,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setHasAccountTypeConflict(false);
           setTwoFactorStatus(null);
           setTwoFactorVerified(false);
+          if (event === 'SIGNED_IN') {
+            setMfaCheckDismissed(false);
+            writeMfaDismissed(uid, false);
+          } else {
+            setMfaCheckDismissed(readMfaDismissed(uid));
+          }
+          if (prevUid && prevUid !== uid) {
+            writeMfaDismissed(prevUid, false);
+          }
           mfaStatusRequest.current = null;
         }
         setSession(session);
@@ -464,6 +509,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setIsRoleLoading(false);
           setTwoFactorStatus(null);
           setTwoFactorVerified(false);
+          setMfaCheckDismissed(false);
+          writeMfaDismissed(prevUid, false);
         }
 
         setIsLoading(false);
@@ -580,6 +627,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(activeSession?.user ?? null);
 
       if (activeSession?.user) {
+        setMfaCheckDismissed(readMfaDismissed(activeSession.user.id));
         broadcastSession(activeSession, 'SIGNED_IN');
         setIsRoleLoading(true);
         const uid = activeSession.user.id;
@@ -598,6 +646,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         void check2FAStatus(uid);
       } else {
+        setMfaCheckDismissed(false);
         setIsRoleLoading(false);
       }
 
@@ -743,7 +792,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const dismissMfaCheckFailed = () => {
+    const uid = activeUserId.current ?? user?.id;
+    setMfaCheckDismissed(true);
+    writeMfaDismissed(uid, true);
+  };
+
+  const restoreMfaCheckPrompt = () => {
+    const uid = activeUserId.current ?? user?.id;
+    setMfaCheckDismissed(false);
+    writeMfaDismissed(uid, false);
+  };
+
   const signOut = async () => {
+    const uid = activeUserId.current ?? user?.id;
     broadcastSignOut();
     await supabase.auth.signOut();
     setUser(null);
@@ -752,6 +814,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUserRoles([]);
     setTwoFactorStatus(null);
     setTwoFactorVerified(false);
+    setMfaCheckDismissed(false);
+    writeMfaDismissed(uid, false);
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem('rentmaikar_admin_active');
@@ -908,6 +972,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isRoleLoading,
         twoFactorStatus,
         twoFactorVerified,
+        mfaCheckDismissed,
+        dismissMfaCheckFailed,
+        restoreMfaCheckPrompt,
         signUp,
         signIn,
         signOut,

@@ -158,6 +158,7 @@ class BackendBridge {
   private eventSource: EventSource | null = null;
   private pollingTimer: any = null;
   private heartbeatWatchdogTimer: any = null;
+  private pingInFlight: Promise<number> | null = null;
   private isListenerActive = false;
   private lastEventTimestamp: string = new Date().toISOString();
 
@@ -938,6 +939,9 @@ private async executeCallWithRetry<T>(
     if (this.pollingTimer) return;
 
     this.pollingTimer = setInterval(async () => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        return;
+      }
       try {
         const res = await fetch(
           `${this.stagingBackendUrl}/bridge/poll?since=${encodeURIComponent(this.lastEventTimestamp)}`,
@@ -966,11 +970,25 @@ private async executeCallWithRetry<T>(
     if (this.heartbeatWatchdogTimer) return;
 
     this.heartbeatWatchdogTimer = setInterval(() => {
-      // If we haven't received a heartbeat in 45s, probe staging backend directly
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        return;
+      }
+      // If we haven't received a heartbeat in 45s, probe backend without leaking unhandled rejections
       if (this.lastHeartbeat) {
         const age = Date.now() - new Date(this.lastHeartbeat).getTime();
         if (age > 45000 && this.connectionState !== "OFFLINE") {
-          void this.ping();
+          void this.ping().catch((err) => {
+            console.warn(
+              "[BackendBridge] Heartbeat watchdog ping failed:",
+              err instanceof Error ? err.message : String(err)
+            );
+            if (this.connectionState === "DIRECT") {
+              this.setConnectionState(
+                "STAGING_FALLBACK",
+                "Heartbeat watchdog ping unreachable"
+              );
+            }
+          });
         }
       }
     }, 20000);
@@ -1285,27 +1303,76 @@ private async executeCallWithRetry<T>(
   // -------------------------------------------------------------
 
   /**
-   * Ping staging backend and measure round-trip latency
+   * Ping staging backend (with primary gateway and same-origin bridge fallback)
+   * and measure round-trip latency
    */
   public async ping(): Promise<number> {
-    const startTime = Date.now();
-    try {
-      const res = await fetch(`${this.stagingBackendUrl}/bridge/ping`, {
-        method: "POST",
-        headers: await this.getHeaders({}, true),
-        body: JSON.stringify({
-          clientSentAt: startTime,
-          clientTimestamp: new Date().toISOString(),
-        }),
-      });
+    if (this.pingInFlight) {
+      return this.pingInFlight;
+    }
 
-      if (!res.ok) throw new Error(`Ping returned HTTP ${res.status}`);
-      const latency = Date.now() - startTime;
-      this.latencyMs = latency;
-      this.lastHeartbeat = new Date().toISOString();
-      return latency;
-    } catch (err: any) {
-      throw new Error(`Ping to staging backend failed: ${err.message}`);
+    this.pingInFlight = (async () => {
+      const candidateBases = [this.stagingBackendUrl, this.primaryBaseUrl];
+      if (
+        typeof window !== "undefined" &&
+        window.location?.origin &&
+        window.location.origin.startsWith("http")
+      ) {
+        candidateBases.push(`${window.location.origin.replace(/\/+$/, "")}/api`);
+      }
+
+      const uniqueUrls = Array.from(
+        new Set(
+          candidateBases
+            .filter(Boolean)
+            .map((base) => `${base.replace(/\/+$/, "")}/bridge/ping`)
+        )
+      );
+
+      let lastErrMessage = "Failed to fetch";
+
+      for (const pingUrl of uniqueUrls) {
+        const startTime = Date.now();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+          const isStagingTarget = pingUrl.startsWith(this.stagingBackendUrl);
+          const res = await fetch(pingUrl, {
+            method: "POST",
+            headers: await this.getHeaders({}, isStagingTarget),
+            body: JSON.stringify({
+              clientSentAt: startTime,
+              clientTimestamp: new Date().toISOString(),
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+
+          if (!res.ok) {
+            lastErrMessage = `Ping returned HTTP ${res.status}`;
+            continue;
+          }
+
+          const latency = Date.now() - startTime;
+          this.latencyMs = latency;
+          this.lastHeartbeat = new Date().toISOString();
+          return latency;
+        } catch (err: any) {
+          clearTimeout(timer);
+          lastErrMessage =
+            err?.name === "AbortError"
+              ? "Request timed out"
+              : err?.message || "Failed to fetch";
+        }
+      }
+
+      throw new Error(`Ping to staging backend failed: ${lastErrMessage}`);
+    })();
+
+    try {
+      return await this.pingInFlight;
+    } finally {
+      this.pingInFlight = null;
     }
   }
 

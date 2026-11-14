@@ -7,6 +7,7 @@ import {
   isAuthorizedForAccessLevel,
   isResourceParticipant,
   isResourceOwner,
+  PAYMENT_MFA_FUNCTIONS,
 } from "../functionAccessPolicy";
 import type { AuthContext } from "../fileUploadService";
 import { validateSupabaseJwtClaims } from "../fileUploadService";
@@ -135,7 +136,7 @@ test("missing, invalid, and expired sessions are rejected before function access
 
 test("identity is resolved from the verified session, not a caller-supplied user id", async () => {
   const decision = await enforceFunctionAccess(
-    "create-paypal-order",
+    "billing-portal",
     { authorization: "Bearer valid-user", "x-user-id": "attacker-1" },
     authenticate,
   );
@@ -185,13 +186,69 @@ test("role policy denies ordinary users from administration and permits authoriz
   assert.equal(
     (
       await enforceFunctionAccess(
-        "create-paypal-order",
+        "billing-portal",
         { authorization: "Bearer valid-user" },
         authenticate,
       )
     ).caller?.userId,
     "driver-1",
   );
+});
+
+test("all payment and withdrawal functions require AAL2 MFA regardless of role", async () => {
+  const driverAal2: AuthContext = {
+    ...user,
+    assuranceLevel: "aal2",
+  };
+  const ownerAal1: AuthContext = {
+    userId: "owner-1",
+    email: "owner@example.test",
+    role: "owner",
+    roles: ["owner"],
+    isAdmin: false,
+    assuranceLevel: "aal1",
+  };
+  const ownerAal2: AuthContext = {
+    ...ownerAal1,
+    assuranceLevel: "aal2",
+  };
+  const paymentAuth = async (authorization: string): Promise<AuthContext> => {
+    if (authorization === "driver-aal1") return user;
+    if (authorization === "driver-aal2") return driverAal2;
+    if (authorization === "owner-aal1") return ownerAal1;
+    if (authorization === "owner-aal2") return ownerAal2;
+    if (authorization === "admin-aal1") return adminAal1;
+    if (authorization === "admin-aal2") return admin;
+    throw new Error("Unexpected auth token");
+  };
+
+  for (const fn of PAYMENT_MFA_FUNCTIONS) {
+    // Drivers and admins at AAL1 are both rejected for compulsory payment MFA
+    const aal1Token = getFunctionAccessLevel(fn) === "admin"
+      ? "admin-aal1"
+      : getFunctionAccessLevel(fn) === "owner"
+        ? "owner-aal1"
+        : "driver-aal1";
+    await assert.rejects(
+      enforceFunctionAccess(fn, { authorization: aal1Token }, paymentAuth),
+      (error: unknown) =>
+        error instanceof AccessDenied &&
+        error.statusCode === 403 &&
+        error.message === "AAL2 authentication is required",
+    );
+
+    const aal2Token = getFunctionAccessLevel(fn) === "admin"
+      ? "admin-aal2"
+      : getFunctionAccessLevel(fn) === "owner"
+        ? "owner-aal2"
+        : "driver-aal2";
+    const allowed = await enforceFunctionAccess(
+      fn,
+      { authorization: aal2Token },
+      paymentAuth,
+    );
+    assert.equal(allowed.via, "session");
+  }
 });
 
 test("SMS dispatch aliases and provider diagnostics require an administrator", async () => {

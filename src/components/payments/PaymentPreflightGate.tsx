@@ -8,6 +8,7 @@ import {
   usePaymentPreflight,
   type PreflightOperation,
 } from "@/hooks/usePaymentPreflight";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 interface Props {
   operation: PreflightOperation;
@@ -22,9 +23,9 @@ interface Props {
 }
 
 /**
- * Wraps a payment / payout / withdrawal action and only reveals it once the
- * server-side pre-flight checks pass. Blocking problems are shown with the
- * exact reason and the next step the user should take.
+ * Wraps a payment / payout / withdrawal action and only reveals it once MFA
+ * (AAL2) and the server-side pre-flight checks pass. Blocking problems are
+ * shown with the exact reason and the next step the user should take.
  */
 export function PaymentPreflightGate({
   operation,
@@ -35,15 +36,20 @@ export function PaymentPreflightGate({
   children,
   hideSuccessNote,
 }: Props) {
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const { blockers, warnings, canProceed, loading, error, run } = usePaymentPreflight({
     operation,
     amount,
     currency,
     context,
-    enabled,
+    enabled: enabled && hasPaymentMfa,
   });
 
   if (!enabled) return null;
+
+  if (!hasPaymentMfa) {
+    return <PaymentMfaGate />;
+  }
 
   if (loading && !blockers.length) {
     return (

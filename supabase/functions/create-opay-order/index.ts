@@ -3,6 +3,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
 import { resolvePaymentContext } from "../_shared/resolve-payment-context.ts";
+import { requireMfaAal2 } from "../_shared/auth-guards.ts";
 import { createCashierOrder, getOpayConfig, toMinorUnits,
   ensureOpayConfig,
 } from "../_shared/opay-client.ts";
@@ -40,8 +41,11 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
     if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
-    const { data: u, error: uErr } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const token = auth.replace("Bearer ", "");
+    const { data: u, error: uErr } = await supabase.auth.getUser(token);
     if (uErr || !u?.user) return json({ error: "Unauthenticated" }, 401);
+    const mfaErr = requireMfaAal2(token, corsHeaders);
+    if (mfaErr) return mfaErr;
     const driverId = u.user.id;
     if (b.driverId && b.driverId !== driverId) {
       return json({ error: "driverId does not match authenticated user" }, 403);

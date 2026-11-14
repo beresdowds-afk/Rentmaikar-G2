@@ -48,6 +48,14 @@ export async function authenticateSelfWithdrawalCaller(
     );
   }
 
+  if (caller.assuranceLevel !== "aal2") {
+    throw new PayoutError(
+      "mfa_required",
+      "AAL2 authentication is required",
+      403,
+    );
+  }
+
   const requested = String(requestedOwnerId ?? "").trim();
   if (requested && requested !== caller.userId) {
     throw new PayoutError(
@@ -69,5 +77,8 @@ export async function requireAdminCaller(
     throw new PayoutError("unauthenticated", err?.message || "Authentication required", err?.statusCode || 401);
   }
   if (!caller.isAdmin) throw new PayoutError("forbidden", "Admin role required", 403);
+  if (caller.assuranceLevel !== "aal2") {
+    throw new PayoutError("mfa_required", "AAL2 authentication is required", 403);
+  }
   return { userId: caller.userId };
 }

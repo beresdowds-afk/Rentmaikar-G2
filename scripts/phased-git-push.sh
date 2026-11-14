@@ -16,6 +16,8 @@ echo "=================================================================="
 echo "  RentMaikar Phased Git Repository Push [Branch: $TARGET_BRANCH]"
 echo "=================================================================="
 
+export GIT_TERMINAL_PROMPT=0
+
 # 1. Global Git configuration (safe directory & author) before any repository commands
 git config --global --add safe.directory "*" 2>/dev/null || true
 git config --global user.name "Olusola Adebayo" 2>/dev/null || true
@@ -79,10 +81,11 @@ echo "==> Remote target: $REPO_URL"
 # Set upstream tracking so standard 'git push' works seamlessly without arguments
 git branch --set-upstream-to="origin/$TARGET_BRANCH" "$TARGET_BRANCH" 2>/dev/null || true
 
-# Untrack any large blobs previously cached in git index that match .gitignore
-echo "==> Untracking any cached large archives from git index..."
+# Untrack any large blobs or temporary cookie files previously cached in git index
+echo "==> Untracking any cached large archives or temp files from git index..."
 git rm -r --cached public/downloads/*.zip 2>/dev/null || true
 git rm -r --cached *.zip 2>/dev/null || true
+git rm -r --cached cookies.txt 2>/dev/null || true
 
 # 5. Fetch and reconcile remote history (Prevents non-fast-forward rejections)
 echo "==> [Pre-Push] Checking remote origin status..."
@@ -145,8 +148,10 @@ push_with_retry() {
         STASHED=1
       fi
 
-      git pull --rebase origin "$TARGET_BRANCH" 2>/dev/null || \
+      if ! git pull --rebase origin "$TARGET_BRANCH" 2>/dev/null; then
+        git rebase --abort 2>/dev/null || true
         git merge "origin/$TARGET_BRANCH" --no-edit -m "merge: sync remote before retry" --allow-unrelated-histories 2>/dev/null || true
+      fi
 
       if [ "$STASHED" -eq 1 ]; then
         git stash pop 2>/dev/null || true

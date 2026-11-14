@@ -60,3 +60,6 @@ public/downloads/*.zip
 # Backend portal runtime state (users/invites); bridge-config.json is tracked
 backend/data/*.json
 !backend/data/bridge-config.json
+
+# Temporary HTTP cookie files
+cookies.txt

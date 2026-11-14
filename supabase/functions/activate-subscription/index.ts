@@ -3,6 +3,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
+import { requireMfaAal2 } from "../_shared/auth-guards.ts";
 
 const Body = z.object({
   plan_id: z.string().uuid(),
@@ -23,9 +24,12 @@ Deno.serve(async (req) => {
     const auth = req.headers.get("Authorization") ?? "";
     if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
 
+    const token = auth.replace("Bearer ", "");
     const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: u, error: uErr } = await supa.auth.getUser(auth.replace("Bearer ", ""));
+    const { data: u, error: uErr } = await supa.auth.getUser(token);
     if (uErr || !u?.user) return json({ error: "Unauthenticated" }, 401);
+    const mfaErr = requireMfaAal2(token, corsHeaders);
+    if (mfaErr) return mfaErr;
     const userId = u.user.id;
 
     const parsed = Body.safeParse(await req.json());

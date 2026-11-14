@@ -2,6 +2,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
+import { requireMfaAal2 } from "../_shared/auth-guards.ts";
 
 const BodySchema = z.object({
   bankCode: z.string().min(3),
@@ -20,13 +21,16 @@ Deno.serve(async (req) => {
     const auth = req.headers.get("Authorization") ?? "";
     if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
 
+    const token = auth.replace("Bearer ", "");
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const { data: u } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const { data: u } = await supabase.auth.getUser(token);
     const owner = u?.user;
     if (!owner) return json({ error: "Unauthenticated" }, 401);
+    const mfaErr = requireMfaAal2(token, corsHeaders);
+    if (mfaErr) return mfaErr;
 
     const parsed = BodySchema.safeParse(await req.json());
     if (!parsed.success) return json({ error: parsed.error.flatten() }, 400);

@@ -25,7 +25,7 @@ interface GateArgs {
  * vehicle fields) never evaluates for unauthenticated users.
  */
 export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNode | null {
-  const { user, isLoading, userRole, isRoleLoading, twoFactorVerified, hasRole } = useAuth();
+  const { user, isLoading, userRole, isRoleLoading, twoFactorVerified, twoFactorStatus, mfaCheckDismissed, hasRole } = useAuth();
   const location = useLocation();
 
   // A user who already registered must never be pushed back into a fresh
@@ -61,7 +61,8 @@ export function useDashboardAuthGate({ allowedRoles, label }: GateArgs): ReactNo
     );
   }
 
-  if (user && !twoFactorVerified) {
+  const canContinueWithoutMfa = Boolean(twoFactorStatus?.check_failed && mfaCheckDismissed);
+  if (user && !twoFactorVerified && !canContinueWithoutMfa) {
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }
 

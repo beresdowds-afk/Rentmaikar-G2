@@ -45,6 +45,7 @@ import { formatCurrency } from '@/lib/payment-config';
 import { PayPalCheckout } from '@/components/payments/PayPalCheckout';
 import { PaystackCheckout } from '@/components/payments/PaystackCheckout';
 import { OpayCheckout } from '@/components/payments/OpayCheckout';
+import { PaymentMfaGate } from '@/components/payments/PaymentMfaGate';
 
 interface DevicePricing {
   id: string;
@@ -612,59 +613,61 @@ export function IoTDevicePurchase() {
                     </Button>
                   </div>
 
-                  {currentRegion === 'usa' ? (
-                    /* USA: PayPal */
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/10 text-xs text-muted-foreground">
-                        <Shield className="h-4 w-4 text-primary shrink-0" />
-                        <span>Pay securely using your PayPal account, debit card, or credit card.</span>
+                  <PaymentMfaGate>
+                    {currentRegion === 'usa' ? (
+                      /* USA: PayPal */
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/10 text-xs text-muted-foreground">
+                          <Shield className="h-4 w-4 text-primary shrink-0" />
+                          <span>Pay securely using your PayPal account, debit card, or credit card.</span>
+                        </div>
+                        <PayPalCheckout
+                          amount={activeOrderAmount || pricing.price}
+                          purpose="iot_device"
+                          iotDeviceId={activeOrderId ?? undefined}
+                          description="Rentmaikar IoT Tracking Hardware"
+                          onSuccess={handlePaymentSuccess}
+                          onError={(err) => toast.error(err)}
+                        />
                       </div>
-                      <PayPalCheckout
-                        amount={activeOrderAmount || pricing.price}
-                        purpose="iot_device"
-                        iotDeviceId={activeOrderId ?? undefined}
-                        description="Rentmaikar IoT Tracking Hardware"
-                        onSuccess={handlePaymentSuccess}
-                        onError={(err) => toast.error(err)}
-                      />
-                    </div>
-                  ) : (
-                    /* Nigeria: Paystack & OPay */
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/10 text-xs text-muted-foreground">
-                        <Shield className="h-4 w-4 text-primary shrink-0" />
-                        <span>Select your preferred authorized payment provider (Paystack or OPay).</span>
-                      </div>
+                    ) : (
+                      /* Nigeria: Paystack & OPay */
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg border border-primary/10 text-xs text-muted-foreground">
+                          <Shield className="h-4 w-4 text-primary shrink-0" />
+                          <span>Select your preferred authorized payment provider (Paystack or OPay).</span>
+                        </div>
 
-                      <Tabs defaultValue="paystack" className="w-full">
-                        <TabsList className="grid grid-cols-2 w-full">
-                          <TabsTrigger value="paystack">Paystack</TabsTrigger>
-                          <TabsTrigger value="opay">OPay</TabsTrigger>
-                        </TabsList>
-                        <TabsContent value="paystack" className="pt-3">
-                          <PaystackCheckout
-                            amount={activeOrderAmount || pricing.price}
-                            currency="NGN"
-                            purpose="iot_device"
-                            iotDeviceId={activeOrderId ?? undefined}
-                            description="Rentmaikar IoT Tracking Hardware"
-                            onSuccess={handlePaymentSuccess}
-                            onError={(err) => toast.error(err)}
-                          />
-                        </TabsContent>
-                        <TabsContent value="opay" className="pt-3">
-                          <OpayCheckout
-                            amount={activeOrderAmount || pricing.price}
-                            purpose="iot_device"
-                            iotDeviceId={activeOrderId ?? undefined}
-                            description="Rentmaikar IoT Tracking Hardware"
-                            onSuccess={handlePaymentSuccess}
-                            onError={(err) => toast.error(err)}
-                          />
-                        </TabsContent>
-                      </Tabs>
-                    </div>
-                  )}
+                        <Tabs defaultValue="paystack" className="w-full">
+                          <TabsList className="grid grid-cols-2 w-full">
+                            <TabsTrigger value="paystack">Paystack</TabsTrigger>
+                            <TabsTrigger value="opay">OPay</TabsTrigger>
+                          </TabsList>
+                          <TabsContent value="paystack" className="pt-3">
+                            <PaystackCheckout
+                              amount={activeOrderAmount || pricing.price}
+                              currency="NGN"
+                              purpose="iot_device"
+                              iotDeviceId={activeOrderId ?? undefined}
+                              description="Rentmaikar IoT Tracking Hardware"
+                              onSuccess={handlePaymentSuccess}
+                              onError={(err) => toast.error(err)}
+                            />
+                          </TabsContent>
+                          <TabsContent value="opay" className="pt-3">
+                            <OpayCheckout
+                              amount={activeOrderAmount || pricing.price}
+                              purpose="iot_device"
+                              iotDeviceId={activeOrderId ?? undefined}
+                              description="Rentmaikar IoT Tracking Hardware"
+                              onSuccess={handlePaymentSuccess}
+                              onError={(err) => toast.error(err)}
+                            />
+                          </TabsContent>
+                        </Tabs>
+                      </div>
+                    )}
+                  </PaymentMfaGate>
                 </div>
               )}
             </div>

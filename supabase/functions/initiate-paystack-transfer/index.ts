@@ -11,6 +11,7 @@ import {
 } from "../_shared/withdrawal-authorization.ts";
 import { notifyWithdrawalEvent } from "../_shared/withdrawal-notify.ts";
 import { requireVerifiedPhone } from "../_shared/verified-phone.ts";
+import { requireMfaAal2 } from "../_shared/auth-guards.ts";
 
 const BodySchema = z.object({
   amount: z.number().positive(),
@@ -29,13 +30,16 @@ Deno.serve(async (req) => {
     const auth = req.headers.get("Authorization") ?? "";
     if (!auth.startsWith("Bearer ")) return json({ error: "Unauthenticated" }, 401);
 
+    const token = auth.replace("Bearer ", "");
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const { data: u } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    const { data: u } = await supabase.auth.getUser(token);
     const owner = u?.user;
     if (!owner) return json({ error: "Unauthenticated" }, 401);
+    const mfaErr = requireMfaAal2(token, corsHeaders);
+    if (mfaErr) return mfaErr;
 
     // Compulsory for withdrawals (but never for SMS/WhatsApp messaging).
     const phoneCheck = await requireVerifiedPhone(supabase, owner.id);

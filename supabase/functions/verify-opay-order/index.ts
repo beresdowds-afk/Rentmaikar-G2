@@ -2,7 +2,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod@3";
-import { requireAuthenticatedUser } from "../_shared/auth-guards.ts";
+import { requireAuthenticatedUser, requireMfaAal2 } from "../_shared/auth-guards.ts";
 import { syncPaymentStatus } from "../_shared/payment-status-sync.ts";
 import {
   getOpayConfig,
@@ -22,6 +22,8 @@ Deno.serve(async (req) => {
   // status-flipping attacks on other users' payments.
   const authRes = await requireAuthenticatedUser(req);
   if (authRes instanceof Response) return authRes;
+  const mfaErr = requireMfaAal2(authRes.token, corsHeaders);
+  if (mfaErr) return mfaErr;
   const userId = authRes.userId;
 
   try {

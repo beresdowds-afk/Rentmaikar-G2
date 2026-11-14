@@ -11,6 +11,7 @@ import {
   useWithdrawalAuthorization,
   type WithdrawalRequestType,
 } from "@/hooks/useWithdrawalAuthorization";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 interface WithdrawalAuthorizationGateProps {
   requestType: WithdrawalRequestType;
@@ -42,6 +43,7 @@ export function WithdrawalAuthorizationGate({
   disabled,
   requestLabel = "Request authorization",
 }: WithdrawalAuthorizationGateProps) {
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const [authId, setAuthId] = useState<string | null>(null);
   const request = useRequestWithdrawalAuthorization();
   const { data: authorization, isLoading } = useWithdrawalAuthorization(authId);
@@ -52,6 +54,10 @@ export function WithdrawalAuthorizationGate({
   }, [amount, currency, destinationRef, requestType]);
 
   const submit = async () => {
+    if (!hasPaymentMfa) {
+      toast.error("Multi-factor authentication is compulsory for all withdrawals.");
+      return;
+    }
     try {
       const result = await request.mutateAsync({
         requestType,
@@ -71,6 +77,10 @@ export function WithdrawalAuthorizationGate({
       toast.error(error instanceof Error ? error.message : "Could not request authorization");
     }
   };
+
+  if (!hasPaymentMfa) {
+    return <PaymentMfaGate />;
+  }
 
   if (!authId) {
     return (

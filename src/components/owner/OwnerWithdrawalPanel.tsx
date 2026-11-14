@@ -16,6 +16,7 @@ import { Banknote, CheckCircle2, Clock, Loader2, RefreshCw, ShieldCheck, XCircle
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { WithdrawalAuthorizationGate } from "@/components/payments/WithdrawalAuthorizationGate";
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 import { useRegionSamples } from '@/hooks/useRegionSamples';
 import { readEdgeError } from "@/lib/edge-invoke";
 
@@ -72,6 +73,7 @@ const StatusIcon = ({ status }: { status: string }) =>
  */
 export const OwnerWithdrawalPanel = () => {
   const { user } = useAuth();
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const impersonation = useImpersonation();
   const targetId = impersonation?.role === 'owner' ? impersonation.viewAsUserId : user?.id;
   const samples = useRegionSamples();
@@ -176,6 +178,10 @@ export const OwnerWithdrawalPanel = () => {
 
   const addAccount = async () => {
     if (!targetId) return;
+    if (!hasPaymentMfa) {
+      toast.error("Multi-factor authentication is compulsory for payout setup.");
+      return;
+    }
     setSavingAccount(true);
     try {
       if (currency === "NGN") {
@@ -210,6 +216,10 @@ export const OwnerWithdrawalPanel = () => {
 
   const withdraw = async (authorizationId: string) => {
     if (!selected) return;
+    if (!hasPaymentMfa) {
+      toast.error("Multi-factor authentication is compulsory for all withdrawals.");
+      return;
+    }
     setSubmitting(true);
     try {
       const fnName =
@@ -273,47 +283,49 @@ export const OwnerWithdrawalPanel = () => {
           )}
 
           {accounts.length === 0 ? (
-            <div className="space-y-3">
-              <Alert>
-                <AlertTitle>Add a payout destination</AlertTitle>
-                <AlertDescription>
-                  {currency === "NGN"
-                    ? "Add your Nigerian bank account to receive transfers."
-                    : "Add the PayPal email that should receive your payouts."}
-                </AlertDescription>
-              </Alert>
-              {currency === "NGN" ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="bank-code">Bank code</Label>
-                    <Input id="bank-code" value={bankCode} onChange={(e) => setBankCode(e.target.value)} placeholder="058" />
+            <PaymentMfaGate>
+              <div className="space-y-3">
+                <Alert>
+                  <AlertTitle>Add a payout destination</AlertTitle>
+                  <AlertDescription>
+                    {currency === "NGN"
+                      ? "Add your Nigerian bank account to receive transfers."
+                      : "Add the PayPal email that should receive your payouts."}
+                  </AlertDescription>
+                </Alert>
+                {currency === "NGN" ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="bank-code">Bank code</Label>
+                      <Input id="bank-code" value={bankCode} onChange={(e) => setBankCode(e.target.value)} placeholder="058" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="acct-no">Account number</Label>
+                      <Input
+                        id="acct-no"
+                        value={accountNumber}
+                        onChange={(e) => setAccountNumber(e.target.value)}
+                        placeholder="0123456789"
+                      />
+                    </div>
                   </div>
+                ) : (
                   <div className="space-y-2">
-                    <Label htmlFor="acct-no">Account number</Label>
+                    <Label htmlFor="pp-email">PayPal email</Label>
                     <Input
-                      id="acct-no"
-                      value={accountNumber}
-                      onChange={(e) => setAccountNumber(e.target.value)}
-                      placeholder="0123456789"
+                      id="pp-email"
+                      type="email"
+                      value={paypalEmail}
+                      onChange={(e) => setPaypalEmail(e.target.value)}
+                      placeholder={samples.email}
                     />
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="pp-email">PayPal email</Label>
-                  <Input
-                    id="pp-email"
-                    type="email"
-                    value={paypalEmail}
-                    onChange={(e) => setPaypalEmail(e.target.value)}
-                    placeholder={samples.email}
-                  />
-                </div>
-              )}
-              <Button onClick={addAccount} disabled={savingAccount}>
-                {savingAccount && <Loader2 className="h-4 w-4 mr-2 animate-spin" />} Save payout account
-              </Button>
-            </div>
+                )}
+                <Button onClick={addAccount} disabled={savingAccount}>
+                  {savingAccount && <Loader2 className="h-4 w-4 mr-2 animate-spin" />} Save payout account
+                </Button>
+              </div>
+            </PaymentMfaGate>
           ) : (
             <div className="space-y-4">
               <div className="space-y-2">

@@ -109,3 +109,42 @@ export async function requireServiceRoleOrRole(
   }
   return await requireRole(req, roles);
 }
+
+/**
+ * Extract the `aal` claim from a verified Supabase user JWT.
+ * Must only be called after `supabase.auth.getUser(token)` has validated the JWT.
+ */
+export function getJwtAssuranceLevel(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    const payload = JSON.parse(atob(padded)) as { aal?: unknown };
+    return typeof payload?.aal === "string" ? payload.aal : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compulsory MFA guard for all payment, subscription checkout, and payout
+ * Edge functions: rejects sessions below AAL2 with HTTP 403.
+ */
+export function requireMfaAal2(
+  token: string,
+  extraHeaders: Record<string, string> = {},
+): Response | null {
+  if (getJwtAssuranceLevel(token) === "aal2") {
+    return null;
+  }
+  return new Response(
+    JSON.stringify({
+      error: "Multi-factor authentication (AAL2) is compulsory for all payments.",
+    }),
+    {
+      status: 403,
+      headers: { ...corsHeaders, ...extraHeaders, "Content-Type": "application/json" },
+    },
+  );
+}

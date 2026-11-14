@@ -14,10 +14,12 @@ import { useRegion } from "@/contexts/RegionContext";
 import { ProxyStatusTimeline } from "@/components/proxy/ProxyStatusTimeline";
 import { ProxyNotificationPrefs } from "@/components/proxy/ProxyNotificationPrefs";
 import { useRegionSamples } from '@/hooks/useRegionSamples';
+import { PaymentMfaGate, usePaymentMfaStatus } from "@/components/payments/PaymentMfaGate";
 
 interface Props { userId?: string }
 
 export function ProxyBillingSettings({ userId }: Props) {
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const { country } = useRegion();
   const samples = useRegionSamples();
   const [proxy, setProxy] = useState<any | null>(null);
@@ -96,6 +98,7 @@ export function ProxyBillingSettings({ userId }: Props) {
 
   const payWithProxy = async () => {
     if (!proxy) return;
+    if (!hasPaymentMfa) return toast.error("Multi-factor authentication is compulsory for all payments.");
     const amount = Number(pay.amount);
     if (!Number.isFinite(amount) || amount <= 0) return toast.error("Enter a valid amount");
     setLoading(true);
@@ -187,42 +190,44 @@ export function ProxyBillingSettings({ userId }: Props) {
             </div>
 
             {proxy.status === "active" && (
-              <div className="rounded-lg border p-4 space-y-3">
-                <p className="text-sm font-medium flex items-center gap-2"><CreditCard className="h-4 w-4" /> Pay with proxy</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <Label>Provider</Label>
-                    <Select value={pay.provider} onValueChange={(v: any) => setPay({ ...pay, provider: v, method: v === "paypal" ? "card" : pay.method })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="paystack">Paystack</SelectItem>
-                        {country === "Nigeria" && <SelectItem value="opay">OPay</SelectItem>}
-                        <SelectItem value="paypal">PayPal</SelectItem>
-                      </SelectContent>
-                    </Select>
+              <PaymentMfaGate>
+                <div className="rounded-lg border p-4 space-y-3">
+                  <p className="text-sm font-medium flex items-center gap-2"><CreditCard className="h-4 w-4" /> Pay with proxy</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <Label>Provider</Label>
+                      <Select value={pay.provider} onValueChange={(v: any) => setPay({ ...pay, provider: v, method: v === "paypal" ? "card" : pay.method })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="paystack">Paystack</SelectItem>
+                          {country === "Nigeria" && <SelectItem value="opay">OPay</SelectItem>}
+                          <SelectItem value="paypal">PayPal</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Method</Label>
+                      <Select value={pay.method} onValueChange={(v: any) => setPay({ ...pay, method: v })} disabled={pay.provider === "paypal"}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="card">Card</SelectItem>
+                          <SelectItem value="bank">Bank debit / transfer</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Amount</Label>
+                      <Input type="number" min={0} value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
+                    </div>
                   </div>
-                  <div>
-                    <Label>Method</Label>
-                    <Select value={pay.method} onValueChange={(v: any) => setPay({ ...pay, method: v })} disabled={pay.provider === "paypal"}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="card">Card</SelectItem>
-                        <SelectItem value="bank">Bank debit / transfer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Amount</Label>
-                    <Input type="number" min={0} value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    The amount is confirmed against your invoice on the server. Your proxy completes the payment from the link; your account updates automatically once it clears.
+                  </p>
+                  <Button onClick={payWithProxy} disabled={loading} size="sm">
+                    {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />} Start proxy payment
+                  </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  The amount is confirmed against your invoice on the server. Your proxy completes the payment from the link; your account updates automatically once it clears.
-                </p>
-                <Button onClick={payWithProxy} disabled={loading} size="sm">
-                  {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />} Start proxy payment
-                </Button>
-              </div>
+              </PaymentMfaGate>
             )}
 
             <ProxyNotificationPrefs

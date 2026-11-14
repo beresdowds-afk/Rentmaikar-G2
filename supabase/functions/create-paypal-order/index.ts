@@ -1,7 +1,7 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://esm.sh/zod@3.23.8";
-import { requireAuthenticatedUser } from "../_shared/auth-guards.ts";
+import { requireAuthenticatedUser, requireMfaAal2 } from "../_shared/auth-guards.ts";
 import { appPath } from "../_shared/app-url.ts";
 import { resolvePaymentContext } from "../_shared/resolve-payment-context.ts";
 import { claimIdempotencyKey, completeIdempotencyKey, duplicateResponse, resolveIdempotencyKey } from "../_shared/payment-idempotency.ts";
@@ -34,6 +34,8 @@ Deno.serve(async (req) => {
 
   const authRes = await requireAuthenticatedUser(req);
   if (authRes instanceof Response) return authRes;
+  const mfaErr = requireMfaAal2(authRes.token, corsHeaders);
+  if (mfaErr) return mfaErr;
   const userId = authRes.userId;
 
   try {

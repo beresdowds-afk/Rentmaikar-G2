@@ -92,6 +92,7 @@ import { ViewOnlyDashboardShell } from '@/components/registration/ViewOnlyDashbo
 import { UserMessagesPanel } from '@/components/dashboard/UserMessagesPanel';
 import PageSkeleton from '@/components/PageSkeleton';
 import { WithdrawalAuthorizationGate } from '@/components/payments/WithdrawalAuthorizationGate';
+import { usePaymentMfaStatus } from '@/components/payments/PaymentMfaGate';
 import { usePersistedTab } from '@/hooks/usePersistedTab';
 
 
@@ -111,6 +112,7 @@ const FALLBACK_CATEGORY_YEARS: Record<string, string> = {
 export default function OwnerDashboard() {
   const { country, currency } = useRegion();
   const { user, userRole } = useAuth();
+  const { hasPaymentMfa } = usePaymentMfaStatus();
   const impersonation = useImpersonation();
   const targetId = impersonation?.role === 'owner' ? impersonation.viewAsUserId : user?.id;
   const queryClient = useQueryClient();
@@ -189,6 +191,10 @@ export default function OwnerDashboard() {
   const [withdrawing, setWithdrawing] = useState(false);
 
   const handleWithdraw = async (authorizationId: string) => {
+    if (!hasPaymentMfa) {
+      toast.error('Multi-factor authentication is compulsory for all withdrawals.');
+      return;
+    }
     const amount = parseFloat(withdrawAmount);
     if (!selectedVehicle) {
       toast.error('Please select a vehicle');

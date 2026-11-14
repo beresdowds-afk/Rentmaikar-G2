@@ -17,7 +17,9 @@ interface TwoFactorChallengeProps {
   channel?: 'authenticator' | 'sms' | 'whatsapp';
   factorId?: string;
   onVerified: () => void;
-  onCancel: () => void;
+  onCancel?: () => void;
+  embedded?: boolean;
+  cancelLabel?: string;
 }
 
 export const TwoFactorChallenge = ({
@@ -27,6 +29,8 @@ export const TwoFactorChallenge = ({
   factorId,
   onVerified,
   onCancel,
+  embedded = false,
+  cancelLabel = 'Back to Login',
 }: TwoFactorChallengeProps) => {
   const [channel, setChannel] = useState<'authenticator' | 'sms' | 'whatsapp'>(initialChannel);
   const [otpValue, setOtpValue] = useState('');
@@ -197,23 +201,24 @@ export const TwoFactorChallenge = ({
 
   const maskedPhone = phone ? `${phone.slice(0, 4)}****${phone.slice(-3)}` : '';
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-md shadow-lg border-primary/20">
-        <CardHeader className="text-center">
+  const cardContent = (
+    <Card className={embedded ? 'w-full shadow-sm border-primary/20' : 'w-full max-w-md shadow-lg border-primary/20'}>
+      <CardHeader className="text-center">
+        {!embedded && (
           <div className="mx-auto mb-4">
             <img src={rentmaikarLogo} alt="RentMaikar" className="h-12 w-auto object-contain mx-auto" />
           </div>
-          <div className="mx-auto w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-2">
-            {channel === 'authenticator' ? (
-              <Smartphone className="w-6 h-6 text-emerald-500" />
-            ) : (
-              <Shield className="w-6 h-6 text-primary" />
-            )}
-          </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">
-            {channel === 'authenticator' ? 'Google Authenticator' : 'Two-Factor Authentication'}
-          </CardTitle>
+        )}
+        <div className="mx-auto w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-2">
+          {channel === 'authenticator' ? (
+            <Smartphone className="w-6 h-6 text-emerald-500" />
+          ) : (
+            <Shield className="w-6 h-6 text-primary" />
+          )}
+        </div>
+        <CardTitle className={embedded ? 'text-lg font-bold tracking-tight' : 'text-2xl font-bold tracking-tight'}>
+          {channel === 'authenticator' ? 'Google Authenticator' : 'Two-Factor Authentication'}
+        </CardTitle>
           <CardDescription className="text-xs max-w-xs mx-auto">
             {channel === 'authenticator'
               ? 'Enter the 6-digit security code from the Google Authenticator app on your mobile device'
@@ -276,7 +281,7 @@ export const TwoFactorChallenge = ({
                 ) : (
                   <>
                     <Shield className="mr-2 h-4 w-4" />
-                    Verify & Sign In
+                    {embedded ? 'Verify Code' : 'Verify & Sign In'}
                   </>
                 )}
               </Button>
@@ -315,13 +320,24 @@ export const TwoFactorChallenge = ({
           )}
         </CardContent>
 
-        <CardFooter>
-          <Button variant="ghost" className="w-full gap-2 text-xs" onClick={onCancel}>
-            <ArrowLeft className="h-4 w-4" />
-            Back to Login
-          </Button>
-        </CardFooter>
+        {onCancel && (
+          <CardFooter>
+            <Button variant="ghost" className="w-full gap-2 text-xs" onClick={onCancel}>
+              <ArrowLeft className="h-4 w-4" />
+              {cancelLabel}
+            </Button>
+          </CardFooter>
+        )}
       </Card>
+  );
+
+  if (embedded) {
+    return cardContent;
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+      {cardContent}
     </div>
   );
 };
