@@ -6,56 +6,65 @@ This guide details the standard procedure for pushing code to GitHub, resolving 
 
 ## 1. Standard GitHub Push Procedure
 
-To push updates cleanly to your GitHub repository from your local environment or CI:
+To push updates cleanly without non-fast-forward conflicts, oversized pack timeouts, or credential leakage:
 
-### Pre-Push Verification Checklist
-Before staging and committing changes, always run the automated pre-flight checks:
+### Preferred Permanent Workflow (Persistent Clone + Pull Request)
+Work from a persistent Git clone (local workstation, GitHub Codespaces, or GCP Cloud Shell) where `.git` metadata is preserved across sessions, and open a Pull Request into `main` rather than pushing directly to `main`:
 
 ```bash
-# 1. Run typecheck & build validation
+# 1. Run pre-flight verification & hygiene guardrails
+npm run check:env-surfaces
+npm run check:email-policy
+npm run check:git-hygiene
 npm run typecheck
 npm run build
-
-# 2. Run repository & environment diagnostics
 npm run diagnose
-```
 
-### Git Workflow Commands
-```bash
-# Check working tree status
+# 2. Sync with latest remote main and commit to a feature/fix branch
+git fetch origin main
+git checkout -b fix/<topic> origin/main
 git status
-
-# Stage all tracked and updated files (excluding ignored files)
 git add .
-
-# Commit with a descriptive message
-git commit -m "feat(deployment): configure ADC credentials and CI pipeline"
-
-# Push to the target remote and branch
-git push origin main
+git commit -m "feat(scope): describe verified change"
+git push -u origin fix/<topic>
 ```
+
+### Ephemeral Container Fallback (`npm run git:push`)
+When working from an ephemeral runtime where `.git` is stripped on container restart, use `scripts/phased-git-push.sh` rather than running `git init && git push`:
+
+```bash
+# Push to a feature branch (recommended) or main via transient GIT_ASKPASS
+BRANCH=fix/<topic> npm run git:push
+```
+
+`scripts/phased-git-push.sh` enforces:
+* Explicit `safe.directory` configuration before Git invocations.
+* Transient `GIT_ASKPASS` authentication (`GITHUB_TOKEN` is never written into `.git/config`).
+* Fail-closed remote fetch anchoring onto `origin/<branch>` or `origin/main` before staging.
+* Pre-commit blob size (`<= 25 MiB`) and restricted-extension guards before each of the 3 phased commits.
+* `HTTP/1.1` + `500 MB` post-buffer settings and verified post-push SHA matching.
 
 ---
 
 ## 2. Resolving Common GitHub Push Failures
 
-If you encounter the error:
-> *"Something went wrong. Failed to push commit to GitHub. Please try again."*
+If you encounter a push failure or *"Something went wrong. Failed to push commit to GitHub. Please try again."*
 
-The failure is typically caused by one of the following factors:
+### A. Ephemeral `.git` Reset / Unrelated History (`non-fast-forward`)
+If the container stripped `.git/`, re-initializing locally without fetching `origin/main` produces an unrelated root commit that GitHub rejects.
+* **Solution**: Run `npm run git:push` (or fetch `origin/main` and run `git reset --mixed origin/main` before staging).
 
-### A. Secret Scanning & Push Protection
+### B. Secret Scanning & Push Protection
 GitHub blocks pushes that contain unencrypted API keys, service account JSON files, or `.env` files.
-* **Solution**: Ensure `.gitignore` explicitly ignores `.env`, `*.key`, `*.pem`, `*.json` credentials (except manifest/config files), and service account credentials.
-* If a secret was committed historically, purge it with `git filter-repo` or BFG Repo-Cleaner before pushing.
+* **Solution**: `.gitignore` blocks `.env*` (except `.env.example`), `*.pem`, `*.key`, `*.p12`, `*.pfx`, and `*service-account*.json`. Run `npm run check:git-hygiene` before committing.
 
-### B. Special Characters & Path Encoding
+### C. Special Characters & Path Encoding
 Filenames containing unescaped spaces, quotes, or special symbols (such as backticks \`) will cause GitHub tree serializers to fail.
-* **Solution**: Keep all file and folder names in standard PascalCase, camelCase, or kebab-case. Run `npm run diagnose` to scan for any problematic filenames.
+* **Solution**: Keep all file and folder names in standard PascalCase, camelCase, or kebab-case. Run `npm run check:git-hygiene` and `npm run diagnose`.
 
-### C. File Size Limitations
-GitHub rejects any individual file exceeding 100MB and issues warnings for files over 50MB.
-* **Solution**: Ensure heavy build artifacts (`dist/`, `coverage/`, `.cache/`, `node_modules/`) are excluded in `.gitignore`.
+### D. File Size Limitations & HTTP `413` Pack Timeouts
+GitHub rejects any individual file exceeding 100MB, warns over 50MB, and drops oversized single-commit HTTP/2 packs.
+* **Solution**: Keep `dist/`, `coverage/`, `.cache/`, `node_modules/`, and `*.zip` / `*.tar.gz` excluded in `.gitignore`, and use `npm run git:push` when pushing large multi-directory changesets.
 
 ---
 

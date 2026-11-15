@@ -23,10 +23,11 @@ jobs:
       - name: Install Dependencies
         run: npm ci || npm install --legacy-peer-deps
 
-      - name: Env & Email Policy Guardrails
+      - name: Env, Email & Git Policy Guardrails
         run: |
           npm run check:env-surfaces
           npm run check:email-policy
+          npm run check:git-hygiene
 
       - name: Run Linter
         run: npm run lint

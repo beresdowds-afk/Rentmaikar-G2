@@ -40,6 +40,8 @@ jobs:
         run: npm run check:env-surfaces
       - name: Email policy guardrail
         run: npm run check:email-policy
+      - name: Git hygiene guardrail
+        run: npm run check:git-hygiene
       - name: Typecheck
         run: npm run typecheck
       - name: Vitest

@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 *.env
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+firebase-adminsdk-*.json
 
 # Dependencies & Package managers
 node_modules/
@@ -12,10 +18,12 @@ backend/node_modules/
 bun.lockb
 package-lock.json.bak
 
-# Build outputs
+# Build outputs & caches
 dist/
 dist-ssr/
 backend/dist/
+.vite/
+*.tsbuildinfo
 *.local
 
 # Logs
@@ -54,7 +62,10 @@ build-diagnosis-report.json
 
 # Large generated archive downloads
 public/downloads/*.zip
+public/downloads/*.tar.gz
 *.zip
+*.tgz
+*.tar.gz
 
 
 # Backend portal runtime state (users/invites); bridge-config.json is tracked
