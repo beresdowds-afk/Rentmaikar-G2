@@ -211,19 +211,18 @@ const handler = async (req: Request): Promise<Response> => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
     const twilioAccountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
     const twilioAuthToken = Deno.env.get("TWILIO_AUTH_TOKEN");
     const twilioPhoneNumber = Deno.env.get("TWILIO_PHONE_NUMBER");
 
     log('info', 'job_started', {
-      hasResend: !!resendApiKey,
+      hasEmailBridge: true,
       hasTwilio: !!(twilioAccountSid && twilioAuthToken && twilioPhoneNumber),
       hasTermii: !!Deno.env.get('TERMII_API_KEY'),
     });
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const hasEmailTransport = !!resendApiKey;
+    const hasEmailTransport = true;
 
     const today = new Date();
     const formatDate = (d: Date) => d.toISOString().split('T')[0];
@@ -460,7 +459,7 @@ const handler = async (req: Request): Promise<Response> => {
               <p>Please ensure you renew it before the expiry date to avoid any service interruptions.</p>
               <p>Best regards,<br>RentMaiKar Team</p>
             `,
-          }, resendApiKey);
+          });
           if (!emailRes.ok) {
             const errData = await emailRes.json().catch(() => ({}));
             throw new Error(errData?.message || `Email send failed [${emailRes.status}]`);
@@ -542,7 +541,7 @@ const handler = async (req: Request): Promise<Response> => {
                 <p><strong>Flow:</strong> ${flowType} | <strong>Urgency:</strong> ${urgency}</p>
                 ${item.days_until_expiry <= 5 ? '<p style="color:red;">⚠️ Account restriction pending.</p>' : ''}
               `,
-            }, resendApiKey);
+            });
             if (!adminEmailRes.ok) {
               const errData = await adminEmailRes.json().catch(() => ({}));
               throw new Error(errData?.message || `Admin email send failed [${adminEmailRes.status}]`);

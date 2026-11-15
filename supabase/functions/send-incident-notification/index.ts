@@ -36,8 +36,6 @@ const escapeHtml = (str: string): string => {
   return str.replace(/[&<>"']/g, (char) => htmlEntities[char] || char);
 };
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-
 const getSeverityEmoji = (severity: string): string => {
   const emojis: Record<string, string> = {
     low: '🟡',
@@ -64,18 +62,13 @@ const sendEmailNotification = async (
   subject: string,
   html: string
 ): Promise<boolean> => {
-  if (!RESEND_API_KEY) {
-    console.log('[IncidentNotification] RESEND_API_KEY not configured, skipping email');
-    return false;
-  }
-
   try {
     const response = await resendSendEmail({
         from: formatSenderEmail('support'),
         to: [to],
         subject,
         html,
-      }, RESEND_API_KEY);
+      });
 
     const result = await response.json();
     console.log('[IncidentNotification] Email sent:', result);

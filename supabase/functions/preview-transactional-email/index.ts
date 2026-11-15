@@ -4,15 +4,21 @@ import { corsHeaders } from '../_shared/cors.ts'
 import { TEMPLATES } from '../_shared/transactional-email-templates/registry.ts'
 
 // Renders all registered templates with their previewData.
-// Gated by LOVABLE_API_KEY — only the Go API calls this.
+// Gated by the internal email bridge secret — only authorized backend callers invoke this.
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
-  if (!apiKey) {
+  const expectedSecrets = [
+    Deno.env.get('RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET') || '',
+    Deno.env.get('RENTMAIKAR_INTERNAL_SERVICE_SECRET') || '',
+  ]
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  if (expectedSecrets.length === 0) {
     return new Response(
       JSON.stringify({ error: 'Server configuration error' }),
       {
@@ -22,10 +28,11 @@ Deno.serve(async (req) => {
     )
   }
 
-  // Verify the caller is authorized with LOVABLE_API_KEY
   const authHeader = req.headers.get('Authorization')
-  const token = authHeader?.replace(/^Bearer\s+/i, '')
-  if (token !== apiKey) {
+  const bearerToken = authHeader?.replace(/^Bearer\s+/i, '').trim() || ''
+  const internalHeader = (req.headers.get('x-rentmaikar-internal-secret') || '').trim()
+  const provided = internalHeader || bearerToken
+  if (!provided || !expectedSecrets.includes(provided)) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

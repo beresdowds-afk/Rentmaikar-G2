@@ -121,11 +121,28 @@ function sendPayoutError(res: Response, fn: string, err: any) {
  */
 const AUTHORITATIVE_BACKEND_FUNCTIONS = new Set([
   "send-outbound-email",
+  "send-transactional-email",
+  "send-email-reply",
+  "send-password-reset",
+  "send-verification-email",
+  "auth-email-hook",
+  "email-health",
+  "check-email-health",
+  "email-domain-status-check",
+  "email-webhook",
+  "resend-events",
+  "fetch-resend-inbound-email",
+  "handle-email-suppression",
+  "handle-email-unsubscribe",
+  "process-email-queue",
+  "reprocess-email-dlq",
+  "send-agreement-email",
+  "send-approval-notification",
+  "send-price-notification",
   // Functions with no supabase/functions/<name> directory; implemented only here.
   "google-sso-auth-email",
   "provision-user-account",
   "proxy-create-payment",
-  "email-health",
   "send-email-notification",
   "email-lifecycle-test",
   "test-email-lifecycle",
@@ -208,6 +225,28 @@ const EDGE_ONLY_SMS_FUNCTIONS = new Set([
   "send-sms-notification",
   "case-send-sms",
   "twilio-test-send",
+]);
+
+const INTERNAL_EMAIL_DELEGATION_FUNCTIONS = new Set([
+  "send-outbound-email",
+  "send-transactional-email",
+  "send-email-notification",
+  "send-email-reply",
+  "send-password-reset",
+  "send-verification-email",
+  "auth-email-hook",
+  "handle-email-suppression",
+  "send-agreement-email",
+  "send-approval-notification",
+  "send-price-notification",
+  "process-email-queue",
+  "reprocess-email-dlq",
+  "email-domain-status-check",
+  "email-health",
+  "check-email-health",
+  "resend-events",
+  "email-webhook",
+  "fetch-resend-inbound-email",
 ]);
 
 const storageUpload = multer({
@@ -350,7 +389,8 @@ functionsRouter.post(
 functionsRouter.all(
   "/:functionName",
   (req, res, next) => {
-    const limiter = ["phone-otp-custom", "verify-phone"].includes(String(req.params.functionName))
+    const fn = String(req.params.functionName);
+    const limiter = ["phone-otp-custom", "verify-phone", "send-password-reset", "send-verification-email"].includes(fn)
       ? otpFunctionRateLimit
       : standardFunctionRateLimit;
     limiter(req, res, next);
@@ -363,23 +403,26 @@ functionsRouter.all(
   // Extract authorization header from request if provided
   const rawAuth = req.headers["authorization"];
   const clientAuth = Array.isArray(rawAuth) ? rawAuth[0] || "" : rawAuth || "";
-  // The internal email secret is scoped only to this one operation.
-  if (functionName === "send-outbound-email") {
-    const rawInternalSecret =
-      req.headers["x-rentmaikar-internal-secret"];
-
+  // Scoped internal email delegation secret allows verified Edge Functions to delegate email through rentmaikar-backend.
+  if (INTERNAL_EMAIL_DELEGATION_FUNCTIONS.has(functionName)) {
+    const rawInternalSecret = req.headers["x-rentmaikar-internal-secret"];
     const internalSecret = Array.isArray(rawInternalSecret)
       ? rawInternalSecret[0] || ""
       : String(rawInternalSecret || "");
 
-    const configuredInternalSecret =
-      process.env.RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET || "";
+    const candidateSecrets = [
+      process.env.RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET || "",
+      process.env.RENTMAIKAR_INTERNAL_SERVICE_SECRET || "",
+    ].filter(Boolean);
 
     const providedDigest = crypto.createHash("sha256").update(internalSecret).digest();
-    const configuredDigest = crypto.createHash("sha256").update(configuredInternalSecret).digest();
     const trustedServerCaller =
-      Boolean(internalSecret && configuredInternalSecret) &&
-      crypto.timingSafeEqual(providedDigest, configuredDigest);
+      Boolean(internalSecret) &&
+      candidateSecrets.some((configured) => {
+        const configuredDigest = crypto.createHash("sha256").update(configured).digest();
+        return crypto.timingSafeEqual(providedDigest, configuredDigest);
+      });
+
     if (trustedServerCaller) {
       (req as any).authenticatedInternalEmailBridge = true;
       auditFunctionOutcome(
@@ -393,7 +436,7 @@ functionsRouter.all(
   }
   // Central access policy: reject unauthenticated/unauthorized callers before any side effect.
   let accessDecision: Awaited<ReturnType<typeof enforceFunctionAccess>> | null = null;
-  if (!(functionName === "send-outbound-email" && (req as any).authenticatedInternalEmailBridge)) {
+  if (!(INTERNAL_EMAIL_DELEGATION_FUNCTIONS.has(functionName) && (req as any).authenticatedInternalEmailBridge)) {
     try {
       accessDecision = await enforceFunctionAccess(functionName, req.headers as Record<string, unknown>);
     } catch (err: any) {
@@ -1314,94 +1357,37 @@ functionsRouter.all(
       }
 
       case "send-email-reply": {
-        const supabaseUrl = (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
-        const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
-        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-email-reply`;
-
-        // 1. Attempt to forward request to Supabase Edge Function
-        try {
-          const authHeader = req.headers["authorization"] || (supabaseAnonKey ? `Bearer ${supabaseAnonKey}` : "");
-          const proxyHeaders: Record<string, string> = {
-            "Content-Type": "application/json",
-          };
-          if (authHeader) {
-            proxyHeaders["Authorization"] = authHeader;
-          }
-          if (supabaseAnonKey) {
-            proxyHeaders["apikey"] = supabaseAnonKey;
-          }
-          if (req.headers["x-client-info"]) {
-            proxyHeaders["x-client-info"] = String(req.headers["x-client-info"]);
-          }
-
-          const edgeRes = await fetch(edgeFunctionUrl, {
-            method: "POST",
-            headers: proxyHeaders,
-            body: JSON.stringify(body),
-          });
-          if (edgeRes.ok) {
-            const edgeData = await edgeRes.json().catch(() => ({}));
-            return res.status(200).json(edgeData);
-          }
-        } catch (edgeErr: any) {
-          console.warn("[Backend Functions] send-email-reply Supabase forward failed:", edgeErr?.message || edgeErr);
-        }
-
-        // 2. Direct Provider Execution Fallback (Resend API)
-        const resendApiKey = process.env.RESEND_API_KEY;
         const targetEmail = (body.recipientEmail || body.to || body.email || "").trim();
-
-        if (resendApiKey && targetEmail) {
-          try {
-            const { getConfiguredBusinessSender } = await import("../services/emailSenderPolicy");
-            const from = getConfiguredBusinessSender();
-            const replyTo = process.env.DEFAULT_BUSINESS_FROM;
-            const textToRender = body.messageContent || body.body || body.text || body.content || "";
-            const subject = body.subject || "Reply from Rentmaikar Support";
-
-            const resendRes = await fetch("https://api.resend.com/emails", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${resendApiKey}`,
-              },
-              body: JSON.stringify({
-                from,
-                to: [targetEmail],
-                reply_to: replyTo,
-                subject,
-                text: typeof textToRender === "string" ? textToRender : undefined,
-                html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111; max-width: 600px; margin: 0 auto; padding: 20px;">${escapeEmailHtml(String(textToRender)).replace(/\n/g, "<br/>")}</div>`,
-              }),
-            });
-
-            if (resendRes.ok) {
-              const resendData = await resendRes.json().catch(() => ({}));
-              return res.status(200).json({
-                success: true,
-                messageId: resendData?.id || `email_${Date.now()}`,
-                provider: "resend",
-              });
-            } else {
-              console.warn("[Backend Functions] Direct Resend dispatch failed", { status: resendRes.status });
-              return res.status(resendRes.status || 502).json({
-                success: false,
-                error: "Email reply dispatch failed",
-                provider: "resend",
-              });
-            }
-          } catch (resendErr: any) {
-            console.warn("[Backend Functions] Direct Resend request failed");
-            return res.status(500).json({
-              success: false,
-              error: "Email reply dispatch failed",
-            });
-          }
+        if (!targetEmail) {
+          return res.status(400).json({ ok: false, success: false, error: "Recipient email is required" });
         }
-
-        return res.status(502).json({
-          success: false,
-          error: "Email reply dispatch failed: Edge function and Resend provider both unavailable",
+        const textToRender = body.messageContent || body.body || body.text || body.content || "";
+        const subject = body.subject || "Reply from Rentmaikar Support";
+        const { sendEmailViaResend } = await import("../services/emailService");
+        const result = await sendEmailViaResend({
+          from: body.from || body.fromAlias,
+          to: targetEmail,
+          subject,
+          text: typeof textToRender === "string" ? textToRender : undefined,
+          html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #111; max-width: 600px; margin: 0 auto; padding: 20px;">${escapeEmailHtml(String(textToRender)).replace(/\n/g, "<br/>")}</div>`,
+          replyTo: body.replyTo || body.reply_to,
+          templateName: "support_email_reply",
+          metadata: { source: "send-email-reply", conversationId: body.conversationId },
+        });
+        if (!result.ok) {
+          return res.status(result.suppressed ? 422 : 502).json({
+            ok: false,
+            success: false,
+            suppressed: result.suppressed,
+            error: result.error || "Email reply dispatch failed",
+            provider: "resend",
+          });
+        }
+        return res.status(200).json({
+          ok: true,
+          success: true,
+          messageId: result.messageId,
+          provider: "resend",
         });
       }
             case "send-outbound-email": {
@@ -2254,10 +2240,206 @@ case "reconcile-owner-payout": {
         return res.status(200).json(await checkEmailProviderHealth());
       }
 
+      case "email-domain-status-check": {
+        const { handleCheckEmailDomainStatus } = await import("../services/emailService");
+        const report = await handleCheckEmailDomainStatus();
+        return res.status(200).json(report);
+      }
+
+      case "send-password-reset": {
+        const { handleSendPasswordReset } = await import("../services/emailService");
+        const result = await handleSendPasswordReset(body);
+        return res.status(result.ok ? 200 : 502).json(result);
+      }
+
+      case "send-verification-email": {
+        const { handleSendVerificationEmail } = await import("../services/emailService");
+        const result = await handleSendVerificationEmail(body);
+        return res.status(result.ok ? 200 : 502).json(result);
+      }
+
+      case "auth-email-hook": {
+        const { handleAuthEmailHook } = await import("../services/emailService");
+        const result = await handleAuthEmailHook(body);
+        return res.status(result.ok ? 200 : 502).json(result);
+      }
+
+      case "send-transactional-email":
       case "send-email-notification": {
         const { handleSendOutboundEmail } = await import("../services/emailService");
         const result = await handleSendOutboundEmail(body);
+        return res.status(result.ok ? 200 : 502).json(result);
+      }
+
+      case "send-approval-notification": {
+        const { email, name, userType, region } = body || {};
+        if (!email) {
+          return res.status(400).json({ ok: false, success: false, error: "Recipient email required" });
+        }
+        const { handleSendOutboundEmail } = await import("../services/emailService");
+        const result = await handleSendOutboundEmail({
+          to: email,
+          subject: `Your RentMaikar ${userType || "Account"} Has Been Approved!`,
+          templateName: "account_approval_notice",
+          html: `<h2>Welcome to RentMaikar!</h2><p>Hi ${escapeEmailHtml(String(name || "there"))},</p><p>Great news! Your <strong>${escapeEmailHtml(String(userType || "user"))}</strong> application in <strong>${escapeEmailHtml(String(region || "your region"))}</strong> has been approved.</p><div class="btn-container"><a href="https://rentmaikar.com/auth" class="btn">Log In to RentMaikar &rarr;</a></div>`,
+          data: { userType, region },
+        });
+        return res.status(result.ok ? 200 : 502).json({
+          ...result,
+          delivered: result.ok,
+          emailDispatched: result.ok,
+          recipient: email,
+        });
+      }
+
+      case "send-agreement-email": {
+        const { agreementId, driverEmail, driverName, ownerEmail, ownerName, vehicleInfo } = body || {};
+        const { sendEmailViaResend } = await import("../services/emailService");
+        const dispatches: Array<Record<string, unknown>> = [];
+        const safeVehicle = escapeEmailHtml(String(vehicleInfo || "the designated vehicle"));
+        const safeAgreementId = escapeEmailHtml(String(agreementId || "N/A"));
+
+        if (driverEmail) {
+          const driverRes = await sendEmailViaResend({
+            to: driverEmail,
+            subject: `Countersigned Rental Agreement Complete: ${String(vehicleInfo || "Vehicle")}`,
+            html: `<h2>RentMaikar Legal Agreement Execution Notice</h2><p>Dear ${escapeEmailHtml(String(driverName || "Driver"))},</p><p>Your vehicle rental agreement for <strong>${safeVehicle}</strong> has been formally signed and completed.</p><p><strong>Agreement ID:</strong> <code>${safeAgreementId}</code></p>`,
+            templateName: "agreement_completion_driver",
+            metadata: { agreementId, role: "driver" },
+          });
+          dispatches.push({ role: "driver", email: driverEmail, ...driverRes });
+        }
+        if (ownerEmail) {
+          const ownerRes = await sendEmailViaResend({
+            to: ownerEmail,
+            subject: `Countersigned Rental Agreement Complete: ${String(vehicleInfo || "Vehicle")}`,
+            html: `<h2>RentMaikar Legal Agreement Execution Notice</h2><p>Dear ${escapeEmailHtml(String(ownerName || "Vehicle Owner"))},</p><p>Your vehicle rental agreement for <strong>${safeVehicle}</strong> has been formally signed and completed.</p><p><strong>Agreement ID:</strong> <code>${safeAgreementId}</code></p>`,
+            templateName: "agreement_completion_owner",
+            metadata: { agreementId, role: "owner" },
+          });
+          dispatches.push({ role: "owner", email: ownerEmail, ...ownerRes });
+        }
+        const anySucceeded = dispatches.some((d) => d.ok === true);
+        return res.status(anySucceeded ? 200 : 502).json({
+          ok: anySucceeded,
+          success: anySucceeded,
+          agreementId,
+          dispatches,
+        });
+      }
+
+      case "fetch-resend-inbound-email": {
+        const emailId = String(body?.emailId || body?.email_id || "").trim();
+        if (!emailId) {
+          return res.status(400).json({ ok: false, error: "emailId is required" });
+        }
+        try {
+          const {
+            fetchResendReceivedEmail,
+            fetchResendReceivedAttachment,
+          } = await import("../services/resendReceivingService");
+          const received = await fetchResendReceivedEmail(emailId);
+          const attachments: Array<{
+            filename: string;
+            contentType: string;
+            size: number;
+            content: string;
+          }> = [];
+          for (const meta of received.attachments || []) {
+            try {
+              let buf: Buffer | null = null;
+              if (meta.downloadUrl) {
+                const dl = await fetch(meta.downloadUrl);
+                if (dl.ok) {
+                  const arr = Buffer.from(await dl.arrayBuffer());
+                  if (arr.length <= 10 * 1024 * 1024) buf = arr;
+                }
+              } else if (meta.id) {
+                buf = await fetchResendReceivedAttachment(emailId, meta.id);
+              }
+              if (buf) {
+                attachments.push({
+                  filename: meta.filename || "attachment",
+                  contentType: meta.contentType || "application/octet-stream",
+                  size: buf.length,
+                  content: buf.toString("base64"),
+                });
+              }
+            } catch (attErr) {
+              console.warn("[Backend Functions] Failed downloading inbound attachment:", attErr);
+            }
+          }
+          return res.status(200).json({
+            ok: true,
+            email: {
+              from: received.from,
+              to: received.to,
+              cc: received.cc,
+              subject: received.subject,
+              text: received.text,
+              html: received.html,
+              messageId: received.messageId || emailId,
+              headers: received.headers,
+              attachments,
+              source: "resend-inbound",
+            },
+          });
+        } catch (err: any) {
+          return res.status(502).json({
+            ok: false,
+            error: err?.message || "Failed to fetch Resend inbound email",
+          });
+        }
+      }
+
+      case "send-price-notification": {
+        const targetEmail = (body.recipientEmail || body.email || body.to || "").trim();
+        if (!targetEmail) {
+          return res.status(400).json({ ok: false, success: false, error: "Recipient email required" });
+        }
+        const { handleSendOutboundEmail } = await import("../services/emailService");
+        const vehicleName = String(body.vehicleName || "Vehicle");
+        const negotiationStatus = String(body.status || "Updated");
+        const currency = String(body.currency || "USD");
+        const result = await handleSendOutboundEmail({
+          to: targetEmail,
+          subject: `Update on Price Negotiation for ${vehicleName}`,
+          templateName: "price_negotiation_notification",
+          html: `<h2>Price Negotiation Update</h2><p>Hello ${escapeEmailHtml(String(body.recipientName || "there"))},</p><p>There has been an update regarding your rental rate negotiation for <strong>${escapeEmailHtml(vehicleName)}</strong> (Status: ${escapeEmailHtml(negotiationStatus)}).</p>${body.counterOffer ? `<p><strong>Counter-Offer:</strong> ${escapeEmailHtml(currency)} ${escapeEmailHtml(String(body.counterOffer))}</p>` : ""}<p><a href="${String(body.dashboardUrl || "https://rentmaikar.com")}">View in RentMaikar Dashboard</a></p>`,
+          data: body,
+        });
+        return res.status(result.ok ? 200 : 502).json(result);
+      }
+
+      case "handle-email-suppression": {
+        const { handleEmailSuppression } = await import("../services/emailService");
+        const result = await handleEmailSuppression(body);
         return res.status(result.ok ? 200 : 400).json(result);
+      }
+
+      case "handle-email-unsubscribe": {
+        const { handleEmailUnsubscribe } = await import("../services/emailService");
+        const result = await handleEmailUnsubscribe(body);
+        return res.status(result.ok ? 200 : 400).json(result);
+      }
+
+      case "process-email-queue": {
+        const { handleProcessEmailQueue } = await import("../services/emailService");
+        const result = await handleProcessEmailQueue(body);
+        return res.status(200).json(result);
+      }
+
+      case "reprocess-email-dlq": {
+        const { handleReprocessEmailDlq } = await import("../services/emailService");
+        const result = await handleReprocessEmailDlq(body);
+        return res.status(200).json(result);
+      }
+
+      case "email-webhook":
+      case "resend-events": {
+        const { handleResendWebhookEvent } = await import("../services/emailService");
+        const result = await handleResendWebhookEvent(body, req.headers as Record<string, string>);
+        return res.status(result.ok ? 200 : 500).json(result);
       }
 
       case "provision-user-account": {

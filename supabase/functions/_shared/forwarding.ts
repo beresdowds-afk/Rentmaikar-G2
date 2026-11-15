@@ -427,9 +427,6 @@ export async function forwardInboundEmail(
     );
     if (!destinations.length) return { forwarded: false, reason: "no_destination", matched: routed.matched };
 
-    const apiKey = Deno.env.get("RESEND_API_KEY");
-    if (!apiKey) return { forwarded: false, reason: "resend_not_configured" };
-
     const label = args.fromName ? `${args.fromName} <${args.fromAddress}>` : args.fromAddress;
     const html =
       `<p style="color:#64748b;font-size:12px">Forwarded from <strong>${label}</strong>` +
@@ -443,7 +440,7 @@ export async function forwardInboundEmail(
         reply_to: args.fromAddress,
         subject: `[Fwd] ${args.subject || "(no subject)"}`,
         html,
-      }, apiKey);
+      });
 
     if (!res.ok) {
       const detail = await res.text();

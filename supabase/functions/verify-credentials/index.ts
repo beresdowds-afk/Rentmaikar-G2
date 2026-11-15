@@ -12,6 +12,7 @@ import { hologram } from "../_shared/hologram-client.ts";
 import { traccar } from "../_shared/traccar-client.ts";
 import { sarekon } from "../_shared/sarekon-client.ts";
 import { resolveEmqxClient } from "../_shared/emqx-client.ts";
+import { verifyDirectResendConnection } from "../_shared/resend-gateway.ts";
 
 type Status = "ok" | "failed" | "not_configured";
 
@@ -96,17 +97,17 @@ const CHECKS: Check[] = [
   {
     provider: "resend",
     label: "Resend (email)",
-    secrets: ["RESEND_API_KEY"],
+    secrets: ["RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET"],
     run: async () => {
-      const key = env("RESEND_API_KEY");
-      if (!key) return { status: "not_configured", message: "RESEND_API_KEY is not set." };
-      const res = await fetchWithTimeout("https://api.resend.com/domains", {
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      if (!res.ok) return { status: "failed", message: "Resend rejected the API key.", detail: await shortBody(res) };
-      const body = await res.json().catch(() => ({}));
-      const count = Array.isArray(body?.data) ? body.data.length : 0;
-      return { status: "ok", message: "API key accepted.", detail: `${count} sending domain(s) available.` };
+      const check = await verifyDirectResendConnection();
+      if (!check.ok) {
+        return {
+          status: check.status === 500 ? "not_configured" : "failed",
+          message: "Backend Resend gateway check failed.",
+          detail: check.message,
+        };
+      }
+      return { status: "ok", message: "Backend Resend gateway accepted.", detail: check.message };
     },
   },
   {

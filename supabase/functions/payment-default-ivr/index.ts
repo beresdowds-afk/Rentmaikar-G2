@@ -64,7 +64,7 @@ const handler = async (req: Request): Promise<Response> => {
 
         if (paymentDefault) {
           const sym = paymentDefault.currency === 'NGN' ? '₦' : '$';
-          const baseUrl = supabaseUrl.replace('.supabase.co', '.lovable.app').replace('https://bwvocmhcledbwqlpcswp', 'https://rentmaikar');
+          const baseUrl = (Deno.env.get("SITE_URL") || Deno.env.get("PUBLIC_APP_URL") || "https://rentmaikar.com").replace(/\/+$/, "");
           const paymentLink = `${baseUrl}/driver/dashboard?tab=payments`;
 
           // Send payment link SMS

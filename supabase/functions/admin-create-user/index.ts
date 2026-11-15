@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { delegateToBackendEmail } from "../_shared/backend-email-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -218,12 +219,22 @@ serve(async (req) => {
     let emailError: string | null = null;
 
     try {
-      const { error: sendErr } = await userClient.auth.resend({
-        type: "signup",
-        email,
-        options: { emailRedirectTo: `${siteUrl}/reset-password` },
-      });
-      if (sendErr) throw sendErr;
+      const delegation = await delegateToBackendEmail(
+        "send-verification-email",
+        {
+          email,
+          name: full_name,
+          redirectTo: `${siteUrl}/reset-password`,
+          userId: newUserId,
+          templateName: "admin_created_user_verification",
+        },
+        {
+          idempotencyKey: `admin-create-user:${newUserId}`,
+        },
+      );
+      if (!delegation.ok) {
+        throw new Error(String(delegation.data?.error || `Backend verification email failed (${delegation.status})`));
+      }
       emailSent = true;
     } catch (e) {
       emailError = (e as Error)?.message || "welcome email failed";

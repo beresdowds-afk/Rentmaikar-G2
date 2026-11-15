@@ -23,21 +23,15 @@ class ProviderSendError extends Error {
   }
 }
 
-// Send one message directly through the Direct Resend connector.
-// The `from` domain is normalized onto the verified sending domain.
+// Send one message through the centralized rentmaikar-backend Resend gateway.
 async function sendViaResend(payload: Record<string, unknown>): Promise<{ providerMessageId: string | null }> {
-  const resendKey = Deno.env.get('RESEND_API_KEY')
-  if (!resendKey) {
-    throw new Error('Direct Resend connector not configured (missing RESEND_API_KEY)')
-  }
-
   const res = await resendSendEmail({
     from: String(payload.from ?? 'Rentmaikar <noreply@rentmaikar.com>'),
     to: [payload.to],
     subject: payload.subject,
     html: payload.html,
     ...(payload.text ? { text: payload.text } : {}),
-  }, resendKey)
+  })
 
   if (!res.ok) {
     const bodyText = await res.text()
@@ -229,14 +223,13 @@ Deno.serve(async (req) => {
 })
 
 async function handleRequest(req: Request): Promise<Response> {
-  const resendKey = Deno.env.get('RESEND_API_KEY')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-  if (!supabaseUrl || !supabaseServiceKey || !resendKey) {
-    console.error('Missing required environment variables (need SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and RESEND_API_KEY)')
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error('Missing required environment variables (need SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)')
     return new Response(
-      JSON.stringify({ error: 'Server configuration error: missing Direct Resend credentials' }),
+      JSON.stringify({ error: 'Server configuration error: missing Supabase credentials' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

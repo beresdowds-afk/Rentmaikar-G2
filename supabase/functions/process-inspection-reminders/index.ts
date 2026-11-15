@@ -33,10 +33,8 @@ const sendNotification = async (
 };
 
 const sendEmail = async (to: string, subject: string, html: string) => {
-  const resendApiKey = Deno.env.get("RESEND_API_KEY");
-  if (!resendApiKey) return null;
   try {
-    const response = await resendSendEmail({ from: "Rentmaikar <noreply@rentmaikar.com>", to: [to], subject, html }, resendApiKey);
+    const response = await resendSendEmail({ from: "Rentmaikar <noreply@rentmaikar.com>", to: [to], subject, html });
     return response.ok ? response.json() : null;
   } catch { return null; }
 };

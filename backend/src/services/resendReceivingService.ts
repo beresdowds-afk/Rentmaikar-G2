@@ -255,28 +255,37 @@ export async function fetchResendReceivedEmail(
   };
 }
 
-/**
- * Verify Resend/Svix webhook signatures against the exact raw request body.
- */
-export function verifyResendWebhookSignature(
-  rawBody: Buffer | string,
-  headers: Record<
-    string,
-    string | string[] | undefined
-  >,
-): { ok: boolean; reason?: string } {
-  const secret = String(
-    process.env.RESEND_INBOUND_WEBHOOK_SECRET ||
-      process.env.RESEND_WEBHOOK_SIGNING_SECRET ||
-      process.env.RESEND_WEBHOOK_SECRET ||
-      "",
-  ).trim();
+function decodeWebhookSecret(secret: string): Buffer | null {
+  const secretValue = secret.startsWith("whsec_")
+    ? secret.slice("whsec_".length)
+    : secret;
+  if (!secretValue) return null;
+  try {
+    const bytes = Buffer.from(secretValue, "base64");
+    return bytes.length > 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
 
-  if (!secret) {
+export function verifyStandardWebhookSignature(
+  rawBody: Buffer | string,
+  headers: Record<string, string | string[] | undefined>,
+  candidateSecrets: Array<string | undefined>,
+  label = "Resend",
+): { ok: boolean; reason?: string } {
+  const secrets = Array.from(
+    new Set(
+      candidateSecrets
+        .map((s) => String(s || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (secrets.length === 0) {
     return {
       ok: false,
-      reason:
-        "Resend webhook signing secret is not configured",
+      reason: `${label} webhook signing secret is not configured`,
     };
   }
 
@@ -301,21 +310,21 @@ export function verifyResendWebhookSignature(
   if (!webhookId) {
     return {
       ok: false,
-      reason: "Missing Resend webhook id",
+      reason: `Missing ${label} webhook id`,
     };
   }
 
   if (!timestamp) {
     return {
       ok: false,
-      reason: "Missing Resend webhook timestamp",
+      reason: `Missing ${label} webhook timestamp`,
     };
   }
 
   if (!signatureHeader) {
     return {
       ok: false,
-      reason: "Missing Resend webhook signature",
+      reason: `Missing ${label} webhook signature`,
     };
   }
 
@@ -324,115 +333,98 @@ export function verifyResendWebhookSignature(
   if (!Number.isFinite(timestampSeconds)) {
     return {
       ok: false,
-      reason: "Invalid Resend webhook timestamp",
+      reason: `Invalid ${label} webhook timestamp`,
     };
   }
 
   /*
    * Five-minute replay protection.
    */
-  if (
-    Math.abs(
-      Date.now() / 1000 - timestampSeconds,
-    ) > 300
-  ) {
+  if (Math.abs(Date.now() / 1000 - timestampSeconds) > 300) {
     return {
       ok: false,
-      reason:
-        "Resend webhook timestamp outside five-minute replay window",
+      reason: `${label} webhook timestamp outside five-minute replay window`,
     };
   }
-
-  /*
-   * Resend/Svix signing secrets are normally whsec_<base64>.
-   */
-  const secretValue = secret.startsWith("whsec_")
-   ? secret.slice("whsec_".length)
-   : secret;
-
-  let secretBytes: Buffer;
-
-  if (!secretValue) {
-  return {
-    ok: false,
-    reason: "Empty Resend webhook signing secret",
-  };
-}
-
-try {
-  secretBytes = Buffer.from(secretValue, "base64");
-} catch {
-  return {
-    ok: false,
-    reason: "Invalid Resend webhook signing secret encoding",
-  };
-}
-
-if (secretBytes.length === 0) {
-  return {
-    ok: false,
-    reason: "Empty Resend webhook signing secret",
-  };
-}
 
   const body = Buffer.isBuffer(rawBody)
     ? rawBody.toString("utf8")
     : rawBody;
 
-  const signedPayload =
-    `${webhookId}.${timestamp}.${body}`;
-
-  const expectedSignature = crypto
-    .createHmac("sha256", secretBytes)
-    .update(signedPayload)
-    .digest("base64");
+  const signedPayload = `${webhookId}.${timestamp}.${body}`;
 
   const candidates = signatureHeader
     .split(" ")
     .map((value) => value.trim())
     .filter(Boolean)
     .map((value) => {
-      /*
-       * Svix signatures are normally formatted:
-       * v1,<base64-signature>
-       */
       const commaIndex = value.indexOf(",");
-
-      return commaIndex >= 0
-        ? value.slice(commaIndex + 1)
-        : value;
+      return commaIndex >= 0 ? value.slice(commaIndex + 1) : value;
     });
 
-  const expectedBuffer = Buffer.from(
-    expectedSignature,
-    "base64",
-  );
+  let decodedAnySecret = false;
 
-  const valid = candidates.some((candidate) => {
-    try {
-      const candidateBuffer = Buffer.from(
-        candidate,
-        "base64",
-      );
+  for (const secret of secrets) {
+    const secretBytes = decodeWebhookSecret(secret);
+    if (!secretBytes) continue;
+    decodedAnySecret = true;
 
-      return (
-        candidateBuffer.length ===
-          expectedBuffer.length &&
-        crypto.timingSafeEqual(
-          candidateBuffer,
-          expectedBuffer,
-        )
-      );
-    } catch {
-      return false;
+    const expectedSignature = crypto
+      .createHmac("sha256", secretBytes)
+      .update(signedPayload)
+      .digest("base64");
+
+    const expectedBuffer = Buffer.from(expectedSignature, "base64");
+
+    const valid = candidates.some((candidate) => {
+      try {
+        const candidateBuffer = Buffer.from(candidate, "base64");
+        return (
+          candidateBuffer.length === expectedBuffer.length &&
+          crypto.timingSafeEqual(candidateBuffer, expectedBuffer)
+        );
+      } catch {
+        return false;
+      }
+    });
+
+    if (valid) {
+      return { ok: true };
     }
-  });
+  }
 
-  return valid
-    ? { ok: true }
-    : {
-        ok: false,
-        reason:
-          "Resend webhook signature mismatch",
-      };
+  if (!decodedAnySecret) {
+    return {
+      ok: false,
+      reason: `Invalid ${label} webhook signing secret encoding`,
+    };
+  }
+
+  return {
+    ok: false,
+    reason: `${label} webhook signature mismatch`,
+  };
+}
+
+/**
+ * Verify Resend/Svix webhook signatures against the exact raw request body.
+ * Tests all configured Resend webhook secrets (inbound + outbound signing secrets).
+ */
+export function verifyResendWebhookSignature(
+  rawBody: Buffer | string,
+  headers: Record<
+    string,
+    string | string[] | undefined
+  >,
+): { ok: boolean; reason?: string } {
+  return verifyStandardWebhookSignature(
+    rawBody,
+    headers,
+    [
+      process.env.RESEND_INBOUND_WEBHOOK_SECRET,
+      process.env.RESEND_WEBHOOK_SIGNING_SECRET,
+      process.env.RESEND_WEBHOOK_SECRET,
+    ],
+    "Resend",
+  );
 }

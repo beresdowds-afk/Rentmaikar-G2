@@ -72,15 +72,12 @@ const sendWhatsAppMessage = async (to: string, message: string) => {
 };
 
 const sendEmail = async (to: string, subject: string, html: string) => {
-  const resendApiKey = Deno.env.get("RESEND_API_KEY");
-  if (!resendApiKey) return null;
-
   const response = await resendSendEmail({
       from: "Rentmaikar <noreply@rentmaikar.com>",
       to: [to],
       subject,
       html,
-    }, resendApiKey);
+    });
 
   return response.json();
 };

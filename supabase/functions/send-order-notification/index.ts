@@ -60,16 +60,6 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log("Sending order notification to admin for order:", orderId);
 
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    
-    if (!resendApiKey) {
-      console.error("RESEND_API_KEY not configured");
-      return new Response(
-        JSON.stringify({ error: "Email service not configured" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
-    }
-
     const formattedPrice = currency === 'NGN' ? `₦${devicePrice.toLocaleString()}` : `$${devicePrice.toFixed(2)}`;
 
     // Escape user-provided content to prevent XSS
@@ -101,7 +91,7 @@ const handler = async (req: Request): Promise<Response> => {
             </div>
           </div>
         `,
-      }, resendApiKey);
+      });
 
     const emailResult = await emailResponse.json();
     console.log("Email sent:", emailResult);

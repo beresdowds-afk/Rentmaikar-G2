@@ -34,17 +34,7 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    
-    if (!resendApiKey) {
-      console.error("RESEND_API_KEY not configured");
-      return new Response(
-        JSON.stringify({ error: "Email service not configured" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
-    }
-
-    // Send email via Resend API
+    // Send email via centralized Resend gateway
     const emailResponse = await resendSendEmail({
         from: formatSenderEmail('noreply'),
         to: [email],
@@ -109,7 +99,7 @@ const handler = async (req: Request): Promise<Response> => {
           </body>
           </html>
         `,
-      }, resendApiKey);
+      });
 
     const emailResult = await emailResponse.json();
     console.log("Shipping notification sent:", emailResult);

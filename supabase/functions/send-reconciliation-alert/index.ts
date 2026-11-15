@@ -53,22 +53,19 @@ Deno.serve(async (req) => {
   const emailResults: unknown[] = [];
   const smsResults: unknown[] = [];
 
-  // Email via Resend
-  const resendKey = Deno.env.get("RESEND_API_KEY");
-  if (resendKey) {
-    for (const p of profiles ?? []) {
-      if (!p.email) continue;
-      try {
-        const r = await resendSendEmail({
-            from: "Rentmaikar Alerts <alerts@rentmaikar.com>",
-            to: [p.email],
-            subject,
-            html: bodyHtml,
-          }, resendKey);
-        emailResults.push({ to: p.email, status: r.status });
-      } catch (e) {
-        emailResults.push({ to: p.email, error: String(e) });
-      }
+  // Email via centralized Resend gateway (rentmaikar-backend)
+  for (const p of profiles ?? []) {
+    if (!p.email) continue;
+    try {
+      const r = await resendSendEmail({
+          from: "Rentmaikar Alerts <alerts@rentmaikar.com>",
+          to: [p.email],
+          subject,
+          html: bodyHtml,
+        });
+      emailResults.push({ to: p.email, status: r.status });
+    } catch (e) {
+      emailResults.push({ to: p.email, error: String(e) });
     }
   }
 

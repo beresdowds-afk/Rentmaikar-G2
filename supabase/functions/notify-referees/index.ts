@@ -22,7 +22,6 @@ const Body = z.object({
 });
 
 const PUBLIC_APP_URL = Deno.env.get("PUBLIC_APP_URL") ?? "https://rentmaikar.com";
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const TWILIO_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
 const TWILIO_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
 const TWILIO_FROM = Deno.env.get("TWILIO_PHONE_NUMBER");
@@ -78,7 +77,7 @@ async function withRetry<T extends { ok: boolean; status?: number; skipped?: boo
 }
 
 async function sendEmail(to: string, name: string, driverName: string, link: string): Promise<ChannelResult> {
-  if (!RESEND_API_KEY || !to) return { channel: "email", provider: "resend", ok: false, skipped: true };
+  if (!to) return { channel: "email", provider: "resend", ok: false, skipped: true };
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;color:#0A1628">
       <h2 style="color:#10B981">Confidential Referee Attestation</h2>
@@ -93,7 +92,7 @@ async function sendEmail(to: string, name: string, driverName: string, link: str
     const r = await resendSendEmail({
         from: "Rentmaikar Verification <verify@rentmaikar.com>",
         to: [to], subject: `Confidential referee attestation for ${driverName}`, html,
-      }, RESEND_API_KEY);
+      });
     const txt = r.ok ? "" : await r.text().catch(() => "");
     return { ok: r.ok, status: r.status, error: txt.slice(0, 300) };
   });

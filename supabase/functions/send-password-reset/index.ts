@@ -1,15 +1,13 @@
-// Self-service password reset that does NOT depend on Supabase's built-in
-// auth mailer. It mints a recovery link with the service role and delivers it
-// through our own branded Resend pipeline (send-outbound-email), which is the
-// same path every other transactional email uses.
-//
-// Always responds `{ ok: true }` so it can never be used to enumerate accounts.
+// Self-service password reset delegating exclusively to rentmaikar-backend (Resend).
+// Never falls back to Supabase's built-in mailer.
+// Always responds `{ ok: true }` on public caller flows to prevent account enumeration.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   claimEmailIdempotency,
   readIdempotencyKey,
 } from "../_shared/email-idempotency.ts";
+import { delegateToBackendEmail } from "../_shared/backend-email-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +17,21 @@ const corsHeaders = {
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isAllowedOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    return (
+      host === "rentmaikar.com" ||
+      host.endsWith(".rentmaikar.com") ||
+      host === "localhost" ||
+      host === "127.0.0.1"
+    );
+  } catch {
+    return false;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -36,17 +49,15 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Idempotency: a replayed click (same Idempotency-Key) must not trigger a
-    // second reset email. Response is always the neutral { ok: true }.
+    const idemKey = readIdempotencyKey(req);
     const claim = await claimEmailIdempotency(
       admin,
       "password_reset",
-      readIdempotencyKey(req),
+      idemKey,
       email,
     );
     if (!claim.fresh) return ok();
 
-    // Server-side rate limit: 3 reset emails per address per 15 minutes.
     const { data: allowed } = await admin.rpc("check_auth_rate_limit", {
       _identifier: `reset:${email}`,
       _endpoint: "auth.reset_password.server",
@@ -55,94 +66,31 @@ Deno.serve(async (req) => {
     });
     if (allowed === false) return ok();
 
+    const candidateOrigin = typeof body?.redirectOrigin === "string" ? body.redirectOrigin.trim() : "";
+    const headerOrigin = (req.headers.get("origin") || "").trim();
     const siteUrl =
-      (typeof body?.redirectOrigin === "string" &&
-      /^https:\/\/[a-z0-9.-]+(\.lovable\.app|\.lovableproject\.com|rentmaikar\.com)$/i.test(
-        body.redirectOrigin,
-      )
-        ? body.redirectOrigin
-        : null) ??
-      req.headers.get("origin") ??
+      (candidateOrigin && isAllowedOrigin(candidateOrigin) ? candidateOrigin : null) ??
+      (headerOrigin && isAllowedOrigin(headerOrigin) ? headerOrigin : null) ??
       Deno.env.get("SITE_URL") ??
       "https://rentmaikar.com";
 
-    // Primary path: mint a recovery link and deliver through our verified
-    // Resend gateway (send-outbound-email -> resend-gateway), ensuring the
-    // verified domain rewrite and 401/403 provider alerting are always active.
-    const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: { redirectTo: `${siteUrl}/reset-password` },
-    });
-
-    if (linkErr || !linkData?.properties?.action_link) {
-      // Unknown address or auth error — fallback to built-in mailer
-      console.log("recovery link not generated, attempting built-in reset:", linkErr?.message ?? "no link");
-      const { error: builtInErr } = await admin.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/reset-password`,
-      });
-      if (builtInErr) {
-        console.error("built-in reset mail also failed:", builtInErr.message);
-      }
-      return ok();
-    }
-
-    let name = "there";
-    const userId = (linkData as { user?: { id?: string } })?.user?.id;
-    if (userId) {
-      const { data: prof } = await admin
-        .from("profiles")
-        .select("full_name")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (prof?.full_name) name = String(prof.full_name).split(" ")[0];
-    }
-
-    // send-outbound-email is guarded by requireServiceRole, which compares the
-    // raw Bearer token — call with explicit service-role header.
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const sendRes = await fetch(
-      `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-outbound-email`,
+    const delegated = await delegateToBackendEmail(
+      "send-password-reset",
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: serviceKey,
-          Authorization: `Bearer ${serviceKey}`,
-        },
-        body: JSON.stringify({
-          action: "send",
-          to: email,
-          templateName: "password_reset",
-          category: "auth",
-          priority: "high",
-          data: {
-            firstName: name,
-            resetUrl: linkData.properties.action_link,
-            expiresIn: "60 minutes",
-          },
-        }),
+        email,
+        redirectOrigin: siteUrl,
+      },
+      {
+        idempotencyKey: idemKey,
+        allowUnauthenticatedPublic: true,
       },
     );
 
-    if (!sendRes.ok) {
-      console.error("branded reset email failed:", sendRes.status, await sendRes.text());
-      // Secondary fallback: built-in mailer
-      await admin.auth.resetPasswordForEmail(email, {
-        redirectTo: `${siteUrl}/reset-password`,
-      }).catch(() => undefined);
-    } else {
-      const rawBody = await sendRes.text();
-      try {
-        const parsed = JSON.parse(rawBody);
-        if (parsed?.success === false || parsed?.error) {
-          console.error("branded reset email provider error:", rawBody);
-        }
-      } catch { /* non-JSON body — trust the status */ }
+    if (!delegated.ok) {
+      console.error("[send-password-reset] Backend Resend dispatch failed:", delegated.status, delegated.data);
     }
 
     return ok();
-
   } catch (e) {
     console.error("send-password-reset error:", (e as Error)?.message ?? e);
     return ok();

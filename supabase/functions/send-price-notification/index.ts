@@ -86,7 +86,8 @@ const getEmailContent = (data: PriceNotificationRequest): string => {
   const rateLabel = userType === 'owner' ? 'week' : 'day';
   
   const dashboardPath = userType === "driver" ? "/driver/dashboard" : "/owner/dashboard";
-  const finalDashboardUrl = dashboardUrl || `https://id-preview--4011c747-3d97-471e-9350-01af2636bf43.lovable.app${dashboardPath}`;
+  const siteBaseUrl = (Deno.env.get("SITE_URL") || "https://rentmaikar.com").replace(/\/+$/, "");
+  const finalDashboardUrl = dashboardUrl || `${siteBaseUrl}${dashboardPath}`;
   
   let statusBadge = '';
   let mainContent = '';
@@ -354,11 +355,6 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    if (!resendApiKey) {
-      throw new Error("RESEND_API_KEY is not configured");
-    }
-
     const emailHtml = getEmailContent(body);
     const subject = getSubjectLine(body.notificationType, body.userType);
 
@@ -369,7 +365,7 @@ const handler = async (req: Request): Promise<Response> => {
         to: [body.email],
         subject: subject,
         html: emailHtml,
-      }, resendApiKey);
+      });
 
     const responseData = await emailResponse.json();
 

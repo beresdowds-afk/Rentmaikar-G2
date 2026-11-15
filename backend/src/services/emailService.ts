@@ -9,9 +9,16 @@ import {
   fetchResendReceivedEmail,
 } from "./resendReceivingService";
 import crypto from "crypto";
+import dns from "node:dns/promises";
 import pg from "pg";
 import { supabaseBackendService } from "./supabaseService";
 import { databaseLifecycle, manageDatabasePool } from "./databaseLifecycle";
+import {
+  enqueueAndClaimOutboundMessage,
+  requeueOutboundMessage,
+  retryDelayMs,
+  updateOutboundMessage,
+} from "./outboundMessageOutbox";
 import {
   getConfiguredBusinessSender,
   resolveBusinessEmailSender,
@@ -93,6 +100,10 @@ export interface SendEmailOptions {
   text?: string;
   replyTo?: string | string[];
   reply_to?: string | string[];
+  headers?: Record<string, string>;
+  tags?: Array<{ name: string; value: string }>;
+  idempotencyKey?: string;
+  messageClass?: "authentication" | "transactional" | "operational";
   templateName?: string;
   metadata?: Record<string, any>;
 }
@@ -100,16 +111,104 @@ export interface SendEmailOptions {
 export interface SendEmailResult {
   ok: boolean;
   messageId?: string;
+  suppressed?: boolean;
+  deduplicated?: boolean;
   error?: string;
 }
 
+function normalizeBareEmail(address: string): string {
+  const parsed = parseEmailAddress(address);
+  if (parsed) {
+    return `${parsed.local}@${parsed.domain}`.trim().toLowerCase();
+  }
+  return String(address || "").trim().toLowerCase();
+}
+
+function getOptionalDbPool(): pg.Pool | null {
+  if (!process.env.SUPABASE_DB_PASSWORD) return null;
+  try {
+    return getDbPool();
+  } catch {
+    return null;
+  }
+}
+
+export async function findSuppressedRecipients(
+  addresses: string[],
+): Promise<Array<{ email: string; reason: string }>> {
+  const pool = getOptionalDbPool();
+  if (!pool) return [];
+  const normalized = Array.from(
+    new Set(addresses.map(normalizeBareEmail).filter(Boolean)),
+  );
+  if (normalized.length === 0) return [];
+  try {
+    const res = await pool.query(
+      `SELECT LOWER(email) AS email, COALESCE(reason, 'suppressed') AS reason
+         FROM public.suppressed_emails
+        WHERE LOWER(email) = ANY($1::text[])`,
+      [normalized],
+    );
+    return res.rows.map((r) => ({
+      email: String(r.email),
+      reason: String(r.reason || "suppressed"),
+    }));
+  } catch (err: any) {
+    const code = String(err?.code || "");
+    if (code === "42P01") {
+      return [];
+    }
+    console.warn("[EmailService] Failed checking suppressed_emails:", err?.message || err);
+    return [];
+  }
+}
+
+export async function upsertSuppressedEmail(params: {
+  email: string;
+  reason: string;
+  metadata?: Record<string, unknown>;
+}): Promise<boolean> {
+  const bare = normalizeBareEmail(params.email);
+  if (!bare || !bare.includes("@")) return false;
+  const pool = getOptionalDbPool();
+  if (!pool) return false;
+  try {
+    await pool.query(
+      `INSERT INTO public.suppressed_emails (email, reason, metadata, created_at)
+       VALUES ($1, $2, $3::jsonb, NOW())
+       ON CONFLICT (email)
+       DO UPDATE SET
+         reason = EXCLUDED.reason,
+         metadata = COALESCE(public.suppressed_emails.metadata, '{}'::jsonb) || EXCLUDED.metadata`,
+      [bare, params.reason, JSON.stringify(params.metadata || {})],
+    );
+    return true;
+  } catch (err: any) {
+    console.warn("[EmailService] Failed updating suppressed_emails:", err?.message || err);
+    return false;
+  }
+}
+
+const AUTH_EMAIL_TEMPLATES = new Set([
+  "password_reset",
+  "email_verification",
+  "auth_recovery",
+  "auth_reset_password",
+  "auth_signup",
+  "auth_invite",
+  "auth_magiclink",
+  "auth_email_change",
+  "auth_reauthentication",
+]);
+
 /**
- * Low-level Resend dispatcher with approved sender policy and DB logging.
+ * Low-level Resend dispatcher with approved sender policy, suppression check,
+ * durable outbox persistence, and audit logging.
  */
 export async function sendEmailViaResend(options: SendEmailOptions): Promise<SendEmailResult> {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
-  const recipient = Array.isArray(options.to) ? options.to[0] : options.to;
   const recipients = Array.isArray(options.to) ? options.to : [options.to];
+  const recipient = recipients[0] || "";
   if (
     recipients.length === 0 ||
     recipients.length > 50 ||
@@ -118,12 +217,101 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     return { ok: false, error: "A valid recipient address is required" };
   }
 
+  const templateName = options.templateName || "raw_email";
+  const isAuthentication =
+    options.messageClass === "authentication" || AUTH_EMAIL_TEMPLATES.has(templateName);
+  const messageClass = options.messageClass || (isAuthentication ? "authentication" : "transactional");
+  const pool = getOptionalDbPool();
+  let claimedOutboxKey: string | null = null;
+  let attemptCount = 1;
+  let maxAttempts = messageClass === "authentication" ? 1 : 5;
+
+  if (pool) {
+    try {
+      const idempotencyKey = options.idempotencyKey?.trim() || crypto.randomUUID();
+      const claimed = await enqueueAndClaimOutboundMessage(pool, {
+        idempotencyKey,
+        channel: "email",
+        provider: "resend",
+        recipient: normalizeBareEmail(recipient),
+        templateReference: templateName,
+        messageClass,
+        maxAttempts,
+        payload: {
+          to: recipients,
+          subject: options.subject,
+          templateName,
+        },
+      });
+      attemptCount = Math.max(1, claimed.attemptCount || 1);
+      if (!claimed.claimed && claimed.duplicate) {
+        if (claimed.status === "accepted" || claimed.status === "delivered") {
+          return {
+            ok: true,
+            deduplicated: true,
+            messageId: claimed.providerMessageId,
+          };
+        }
+        return {
+          ok: false,
+          deduplicated: true,
+          error: claimed.lastError || `Duplicate email dispatch suppressed in state '${claimed.status}'`,
+        };
+      }
+      claimedOutboxKey = claimed.idempotencyKey;
+    } catch (outboxErr: any) {
+      // Allow tests without a live outbox table to proceed, while logging cleanly in runtime
+      if (String(outboxErr?.code || "") !== "42P01") {
+        console.warn("[EmailService] Outbox claim warning:", outboxErr?.message || outboxErr);
+      }
+    }
+  }
+
+  const updateOutboxSafe = async (update: Parameters<typeof updateOutboundMessage>[2]) => {
+    if (!pool || !claimedOutboxKey) return;
+    try {
+      await updateOutboundMessage(pool, claimedOutboxKey, update);
+    } catch (err: any) {
+      console.warn("[EmailService] Outbox update warning:", err?.message || err);
+    }
+  };
+
+  // Pre-send suppression check (never deliver to bounced, complained, or unsubscribed recipients)
+  const suppressedMatches = await findSuppressedRecipients(recipients);
+  if (suppressedMatches.length > 0) {
+    const match = suppressedMatches[0];
+    const msg = `Recipient address '${match.email}' is suppressed (${match.reason})`;
+    console.warn(`[EmailService] Suppressed send blocked: ${msg}`);
+    await updateOutboxSafe({
+      status: "suppressed",
+      provider: "resend",
+      lastError: msg,
+    });
+    await logEmailSend({
+      recipient: match.email,
+      templateName,
+      status: "suppressed",
+      errorMessage: msg,
+      metadata: {
+        ...(options.metadata || {}),
+        suppression_reason: match.reason,
+      },
+    });
+    return { ok: false, suppressed: true, error: msg };
+  }
+
   if (!apiKey) {
     const msg = "RESEND_API_KEY is not configured";
     console.error(`[EmailService] ${msg}`);
+    await updateOutboxSafe({
+      status: attemptCount >= maxAttempts ? "dead_letter" : "failed",
+      provider: "resend",
+      lastError: msg,
+      nextAttemptAt: new Date(Date.now() + retryDelayMs(attemptCount)),
+    });
     await logEmailSend({
       recipient,
-      templateName: options.templateName || "raw_email",
+      templateName,
       status: "failed",
       errorMessage: msg,
       metadata: options.metadata,
@@ -139,16 +327,19 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
   } catch (err) {
     const message = err instanceof Error ? err.message : "Outbound email sender configuration is invalid";
     console.error("[EmailService] Outbound sender configuration is invalid");
+    await updateOutboxSafe({
+      status: "dead_letter",
+      provider: "resend",
+      lastError: message,
+    });
     return { ok: false, error: message };
   }
 
   // Resend strictly blocks RFC reserved dummy domains (@example.com, @example.org, @test.com) with HTTP 422.
   // For automated tests, demo seed data, or diagnostic test messages, route safely to Resend's official delivery sink.
-  let isDummyExampleDomain = false;
   const sanitizeRecipient = (addr: string): string => {
     const trimmed = (addr || "").trim();
     if (/@(example\.(com|org|net)|test\.com)$/i.test(trimmed)) {
-      isDummyExampleDomain = true;
       return "delivered@resend.dev";
     }
     return trimmed;
@@ -169,6 +360,12 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     if (replyToAddress) {
       payloadBody.reply_to = replyToAddress;
     }
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      payloadBody.headers = options.headers;
+    }
+    if (options.tags && options.tags.length > 0) {
+      payloadBody.tags = options.tags;
+    }
 
     const res = await fetch(RESEND_API_URL, {
       method: "POST",
@@ -184,9 +381,15 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     if (!res.ok) {
       const errMsg = `Provider rejected request (HTTP ${res.status})`;
       console.warn("[EmailService] Resend send failed", { status: res.status });
+      await updateOutboxSafe({
+        status: attemptCount >= maxAttempts ? "dead_letter" : "failed",
+        provider: "resend",
+        lastError: errMsg,
+        nextAttemptAt: new Date(Date.now() + retryDelayMs(attemptCount)),
+      });
       await logEmailSend({
         recipient,
-        templateName: options.templateName || "raw_email",
+        templateName,
         status: "failed",
         errorMessage: errMsg,
         metadata: options.metadata,
@@ -198,9 +401,15 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     const messageId = data?.id || `msg_${Date.now()}`;
     console.log(`[EmailService] Email sent successfully via Resend: ${messageId} to ${recipient}`);
 
+    await updateOutboxSafe({
+      status: "accepted",
+      provider: "resend",
+      providerMessageId: messageId,
+      lastError: null,
+    });
     await logEmailSend({
       recipient,
-      templateName: options.templateName || "raw_email",
+      templateName,
       status: "sent",
       messageId,
       metadata: options.metadata,
@@ -209,9 +418,15 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
     return { ok: true, messageId };
   } catch (err: any) {
     console.error("[EmailService] Unexpected email delivery failure");
+    await updateOutboxSafe({
+      status: attemptCount >= maxAttempts ? "dead_letter" : "failed",
+      provider: "resend",
+      lastError: "Email delivery request failed",
+      nextAttemptAt: new Date(Date.now() + retryDelayMs(attemptCount)),
+    });
     await logEmailSend({
       recipient,
-      templateName: options.templateName || "raw_email",
+      templateName,
       status: "failed",
       errorMessage: "Email delivery request failed",
       metadata: options.metadata,
@@ -228,13 +443,14 @@ export async function sendEmailViaResend(options: SendEmailOptions): Promise<Sen
 async function logEmailSend(entry: {
   recipient: string;
   templateName: string;
-  status: "sent" | "failed";
+  status: "sent" | "failed" | "suppressed";
   messageId?: string;
   errorMessage?: string;
   metadata?: Record<string, any>;
 }) {
   try {
-    const pool = getDbPool();
+    const pool = getOptionalDbPool();
+    if (!pool) return;
     await pool.query(
       `INSERT INTO public.email_send_log (recipient_email, template_name, status, message_id, error_message, metadata)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -253,7 +469,7 @@ async function logEmailSend(entry: {
 }
 
 /**
- * Update email send log status when a delivery webhook is received (delivered, bounced, failed, complained)
+ * Update email send log and durable outbox status when a delivery webhook is received
  */
 export async function updateEmailSendLogStatus(params: {
   messageId?: string;
@@ -263,11 +479,14 @@ export async function updateEmailSendLogStatus(params: {
   eventData?: Record<string, any>;
 }): Promise<boolean> {
   try {
-    const pool = getDbPool();
+    const pool = getOptionalDbPool();
+    if (!pool) return false;
     const eventPayload = JSON.stringify({
       webhook_event: params.eventData || {},
       updated_at: new Date().toISOString(),
     });
+
+    let updated = false;
 
     if (params.messageId) {
       const res = await pool.query(
@@ -278,10 +497,28 @@ export async function updateEmailSendLogStatus(params: {
          WHERE message_id = $4`,
         [params.status, params.errorMessage || null, eventPayload, params.messageId]
       );
-      if ((res.rowCount ?? 0) > 0) return true;
+      updated = (res.rowCount ?? 0) > 0;
+
+      const outboxStatus =
+        params.status === "delivered"
+          ? "delivered"
+          : params.status === "bounced" || params.status === "complained" || params.status === "failed"
+            ? "dead_letter"
+            : null;
+      if (outboxStatus) {
+        await pool.query(
+          `UPDATE public.outbound_message_outbox
+              SET status = $2,
+                  last_error = COALESCE($3, last_error),
+                  delivered_at = CASE WHEN $2 = 'delivered' THEN COALESCE(delivered_at, now()) ELSE delivered_at END,
+                  updated_at = now()
+            WHERE provider_message_id = $1`,
+          [params.messageId, outboxStatus, params.errorMessage || null],
+        ).catch(() => {});
+      }
     }
 
-    if (params.recipient) {
+    if (!updated && params.recipient) {
       const res = await pool.query(
         `UPDATE public.email_send_log 
          SET status = $1, 
@@ -289,13 +526,15 @@ export async function updateEmailSendLogStatus(params: {
              metadata = metadata || $3::jsonb
          WHERE id = (
            SELECT id FROM public.email_send_log 
-           WHERE recipient_email = $4 
+           WHERE LOWER(recipient_email) = LOWER($4)
            ORDER BY created_at DESC LIMIT 1
          )`,
         [params.status, params.errorMessage || null, eventPayload, params.recipient]
       );
-      return (res.rowCount ?? 0) > 0;
+      updated = (res.rowCount ?? 0) > 0;
     }
+
+    return updated;
   } catch (e: any) {
     console.warn(`[EmailService] Failed to update email_send_log status:`, e.message);
   }
@@ -430,7 +669,7 @@ export function emailLayout(content: string, title: string): string {
       <div class="footer">
         <p>&copy; ${new Date().getFullYear()} RentMaikar Mobility Solutions. All rights reserved.</p>
         <p>Sent via RentMaikar Communications Gateway &middot; TLS 1.3 Encrypted</p>
-        <p>Support: <a href="mailto:support@${VERIFIED_DOMAIN}">support@${VERIFIED_DOMAIN}</a></p>
+        <p>Support: <a href="mailto:support@${VISIBLE_DOMAIN}">support@${VISIBLE_DOMAIN}</a></p>
       </div>
     </div>
   </div>
@@ -447,7 +686,7 @@ export function emailLayout(content: string, title: string): string {
 export async function handleSendPasswordReset(body: {
   email: string;
   redirectOrigin?: string;
-}): Promise<{ ok: boolean; success: boolean; message: string }> {
+}): Promise<{ ok: boolean; success: boolean; message: string; error?: string }> {
   const email = (body.email || "").trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { ok: true, success: true, message: "If an account exists, a reset email has been sent." };
@@ -457,7 +696,7 @@ export async function handleSendPasswordReset(body: {
     const origin = body.redirectOrigin || "https://rentmaikar.com";
     const admin = supabaseBackendService.getAdminClient();
 
-    // Authoritative GoTrue recovery link generation
+    // Authoritative GoTrue recovery link generation — never fall back to Supabase native mailer
     const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
       type: "recovery",
       email,
@@ -465,10 +704,8 @@ export async function handleSendPasswordReset(body: {
     });
 
     if (linkErr || !linkData?.properties?.action_link) {
-      console.log(`[PasswordReset] GoTrue link generation not available for ${email}, attempting native resetPasswordForEmail`);
-      await admin.auth.resetPasswordForEmail(email, {
-        redirectTo: `${origin}/reset-password`,
-      }).catch(() => {});
+      console.warn(`[PasswordReset] Recovery link not generated for ${email}: ${linkErr?.message || "user not found"}`);
+      // Keep neutral response to prevent account enumeration when user does not exist; no secondary mailer fallback
       return { ok: true, success: true, message: "If an account exists, a reset email has been sent." };
     }
 
@@ -500,19 +737,34 @@ export async function handleSendPasswordReset(body: {
 
     const emailHtml = emailLayout(htmlContent, "Reset Your RentMaikar Password");
 
-    await sendEmailViaResend({
+    const sendRes = await sendEmailViaResend({
       from: SENDERS.security,
       to: email,
       subject: "Reset your RentMaikar password",
       html: emailHtml,
       templateName: "password_reset",
+      messageClass: "authentication",
       metadata: { origin },
     });
+
+    if (!sendRes.ok) {
+      return {
+        ok: false,
+        success: false,
+        message: "Unable to deliver password reset email at this time.",
+        error: sendRes.error || "Resend dispatch failed",
+      };
+    }
 
     return { ok: true, success: true, message: "Password reset instructions sent." };
   } catch (err: any) {
     console.error(`[PasswordReset Error]:`, err);
-    return { ok: true, success: true, message: "If an account exists, a reset email has been sent." };
+    return {
+      ok: false,
+      success: false,
+      message: "Unable to process password reset request.",
+      error: err?.message || "Unexpected password reset error",
+    };
   }
 }
 
@@ -563,7 +815,7 @@ export async function handleGoogleSsoAuthEmail(body: {
       </div>
 
       <p style="font-size: 13px; color: #64748b;">
-        If you did not authorize this account creation, please contact our security team immediately at <a href="mailto:security@${VERIFIED_DOMAIN}">security@${VERIFIED_DOMAIN}</a>.
+        If you did not authorize this account creation, please contact our security team immediately at <a href="mailto:security@${VISIBLE_DOMAIN}">security@${VISIBLE_DOMAIN}</a>.
       </p>
     `;
 
@@ -575,6 +827,7 @@ export async function handleGoogleSsoAuthEmail(body: {
       subject: "Welcome to RentMaikar - Google Account Connected",
       html: emailHtml,
       templateName: "google_sso_welcome",
+      messageClass: "authentication",
       metadata: { provider: "google", isNewUser: true },
     });
   } else {
@@ -598,7 +851,7 @@ export async function handleGoogleSsoAuthEmail(body: {
       </div>
 
       <p style="font-size: 13px; color: #dc2626;">
-        If you did not initiate this sign-in, please secure your Google account and contact us immediately at <a href="mailto:security@${VERIFIED_DOMAIN}">security@${VERIFIED_DOMAIN}</a>.
+        If you did not initiate this sign-in, please secure your Google account and contact us immediately at <a href="mailto:security@${VISIBLE_DOMAIN}">security@${VISIBLE_DOMAIN}</a>.
       </p>
     `;
 
@@ -671,13 +924,18 @@ export async function handleSendVerificationEmail(body: {
 
     const emailHtml = emailLayout(htmlContent, "Verify Your RentMaikar Email");
 
-    await sendEmailViaResend({
+    const sendRes = await sendEmailViaResend({
       from: SENDERS.security,
       to: email,
       subject: "Verify your RentMaikar email address",
       html: emailHtml,
       templateName: "email_verification",
+      messageClass: "authentication",
     });
+
+    if (!sendRes.ok) {
+      return { ok: false, success: false, message: sendRes.error || "Failed to send verification email" };
+    }
 
     return { ok: true, success: true, message: "Verification email sent." };
   } catch (err: any) {
@@ -894,34 +1152,180 @@ export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean;
 }
 
 /**
- * 5. Auth Email Webhook Handler (Supabase GoTrue auth-email-hook)
+ * 5. Auth Email Webhook Handler (Supabase GoTrue Send Email Hook)
+ * Preserves the authoritative token, token_hash, redirect_to, and email_action_type
+ * issued by Supabase Auth and delivers the message exclusively via Resend.
  */
-export async function handleAuthEmailHook(body: any): Promise<{ ok: boolean }> {
-  console.log(`[AuthEmailHook] Received hook event:`, body?.email_data?.email_action_type || body?.type);
-  const actionType = body?.email_data?.email_action_type || body?.type;
+export async function handleAuthEmailHook(body: any): Promise<{
+  ok: boolean;
+  messageId?: string;
+  actionType?: string;
+  error?: string;
+}> {
+  const emailData = body?.email_data || {};
+  const actionType = String(emailData.email_action_type || body?.type || "").trim().toLowerCase();
   const user = body?.user || {};
-  const email = user.email || body?.email;
+  const rawEmail =
+    actionType === "email_change" || actionType === "email_change_new"
+      ? user.email_new || user.email || body?.email
+      : user.email || body?.email;
+  const email = String(rawEmail || "").trim().toLowerCase();
 
-  if (email) {
-    if (actionType === "recovery" || actionType === "reset_password") {
-      await handleSendPasswordReset({
-        email,
-        redirectOrigin: body?.email_data?.redirect_to,
-      });
-    } else if (actionType === "signup" || actionType === "invite" || actionType === "magiclink") {
-      await handleSendVerificationEmail({
-        email,
-        redirect_to: body?.email_data?.redirect_to,
-      });
-    }
+  console.log(`[AuthEmailHook] Processing Supabase auth action='${actionType || "unknown"}'`);
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, actionType, error: "Valid recipient email missing in auth hook payload" };
   }
 
-  return { ok: true };
+  const token = String(emailData.token || body?.token || "").trim();
+  const tokenHash = String(emailData.token_hash || body?.token_hash || "").trim();
+  const redirectTo = String(emailData.redirect_to || body?.redirect_to || "https://rentmaikar.com/auth").trim();
+  const supabasePublicUrl = (
+    process.env.SUPABASE_URL ||
+    process.env.SUPABASE_PROJECT_URL ||
+    "https://jrsydiofzceoeddjogov.supabase.co"
+  ).replace(/\/+$/, "");
+
+  const explicitUrl = String(body?.confirmationUrl || body?.actionLink || emailData.action_link || "").trim();
+  const actionUrl =
+    explicitUrl ||
+    (tokenHash && actionType
+      ? `${supabasePublicUrl}/auth/v1/verify?token=${encodeURIComponent(tokenHash)}&type=${encodeURIComponent(actionType)}&redirect_to=${encodeURIComponent(redirectTo)}`
+      : "");
+
+  if (!actionUrl && !token) {
+    return {
+      ok: false,
+      actionType,
+      error: "Supabase auth hook payload missing token_hash, token, and confirmationUrl",
+    };
+  }
+
+  const fullName = String(user?.user_metadata?.full_name || user?.user_metadata?.name || "").trim();
+  const firstName = fullName ? fullName.split(/\s+/)[0] : "there";
+
+  let title = "RentMaikar Account Notification";
+  let subject = "RentMaikar Account Verification";
+  let intro = "Please complete your account action using the verification details below.";
+  let buttonLabel = "Continue &rarr;";
+
+  switch (actionType) {
+    case "recovery":
+    case "reset_password":
+      title = "Reset Your RentMaikar Password";
+      subject = "Reset your RentMaikar password";
+      intro = `We received a request to reset the password for your RentMaikar account (<strong>${email}</strong>).`;
+      buttonLabel = "Reset Password &rarr;";
+      break;
+    case "signup":
+    case "email":
+      title = "Verify Your Email Address";
+      subject = "Verify your RentMaikar email address";
+      intro = `Thank you for joining RentMaikar! Please confirm your email address (<strong>${email}</strong>) to activate your account.`;
+      buttonLabel = "Verify Email Address &rarr;";
+      break;
+    case "invite":
+      title = "You're Invited to RentMaikar";
+      subject = "Accept your RentMaikar invitation";
+      intro = `You have been invited to join RentMaikar with email address <strong>${email}</strong>.`;
+      buttonLabel = "Accept Invitation &rarr;";
+      break;
+    case "magiclink":
+      title = "Your RentMaikar Sign-In Link";
+      subject = "Sign in to RentMaikar";
+      intro = `Use the secure link or one-time code below to sign in to your RentMaikar account.`;
+      buttonLabel = "Sign In to RentMaikar &rarr;";
+      break;
+    case "email_change":
+    case "email_change_current":
+    case "email_change_new":
+      title = "Confirm Email Address Change";
+      subject = "Confirm your new RentMaikar email address";
+      intro = `Please confirm updating your RentMaikar account email address to <strong>${email}</strong>.`;
+      buttonLabel = "Confirm Email Change &rarr;";
+      break;
+    case "reauthentication":
+      title = "Confirm Your Identity";
+      subject = "RentMaikar verification code";
+      intro = `Enter the one-time verification code below to confirm your identity on RentMaikar.`;
+      buttonLabel = "Confirm Identity &rarr;";
+      break;
+    default:
+      break;
+  }
+
+  const ctaSection = actionUrl
+    ? `
+      <div class="btn-container">
+        <a href="${actionUrl}" class="btn">${buttonLabel}</a>
+      </div>`
+    : "";
+
+  const otpSection = token
+    ? `
+      <div class="code-box">
+        <p style="margin: 0 0 6px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: #64748b;">One-Time Verification Code</p>
+        <p class="code-value">${token}</p>
+      </div>`
+    : "";
+
+  const fallbackUrlSection = actionUrl
+    ? `
+      <p style="font-size: 13px; color: #64748b; margin-top: 24px;">
+        Button not working? Copy and paste this link into your browser:<br/>
+        <a href="${actionUrl}" style="color: #0284c7; word-break: break-all;">${actionUrl}</a>
+      </p>`
+    : "";
+
+  const html = emailLayout(
+    `
+      <h1>${title}</h1>
+      <p>Hi ${firstName},</p>
+      <p>${intro}</p>
+      ${ctaSection}
+      ${otpSection}
+      <div class="info-box">
+        <strong>Security Notice:</strong> This authentication credential is single-use. If you did not initiate this request, you can safely ignore this email or contact <a href="mailto:security@${VISIBLE_DOMAIN}">security@${VISIBLE_DOMAIN}</a>.
+      </div>
+      ${fallbackUrlSection}
+    `,
+    title,
+  );
+
+  const idempotencySeed = body?.webhookId || tokenHash || token;
+  const sendRes = await sendEmailViaResend({
+    from: SENDERS.security,
+    to: email,
+    subject,
+    html,
+    templateName: `auth_${actionType || "hook"}`,
+    messageClass: "authentication",
+    idempotencyKey: idempotencySeed ? `auth_hook:${actionType}:${email}:${idempotencySeed}` : undefined,
+    metadata: {
+      actionType,
+      source: "supabase_auth_hook",
+      userId: user?.id || null,
+    },
+  });
+
+  if (!sendRes.ok) {
+    return {
+      ok: false,
+      actionType,
+      error: sendRes.error || "Failed to dispatch auth email via Resend",
+    };
+  }
+
+  return {
+    ok: true,
+    actionType,
+    messageId: sendRes.messageId,
+  };
 }
 
 export interface EmailProviderHealthReport {
   ok: boolean;
-  provider: "resend" | "smtp";
+  provider: "resend";
   status: "ok" | "failed" | "not_configured";
   message: string;
   detail: string;
@@ -929,7 +1333,6 @@ export interface EmailProviderHealthReport {
   domain: string;
   domainVerified: boolean;
   apiKeyConfigured: boolean;
-  smtpConfigured: boolean;
   webhookConfigured: boolean;
   recentLogsCount: number;
   lastSentAt: string | null;
@@ -944,7 +1347,7 @@ export interface EmailProviderHealthReport {
 
 /**
  * 6. Email Provider Health Check
- * Connects directly to the email provider (Resend API / SMTP) and checks:
+ * Connects directly to the exclusive email provider (Resend API) and checks:
  * - API Key validity & authentication
  * - Verified domain status (notify.rentmaikar.com)
  * - Inbound / outbound webhook signing secret configuration
@@ -953,8 +1356,12 @@ export interface EmailProviderHealthReport {
 export async function checkEmailProviderHealth(): Promise<EmailProviderHealthReport> {
   const start = Date.now();
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
-  const webhookSecret = (process.env.RESEND_WEBHOOK_SIGNING_SECRET || process.env.RESEND_WEBHOOK_SECRET || "").trim();
-  const smtpHost = (process.env.SMTP_HOST || "").trim();
+  const webhookSecret = (
+    process.env.RESEND_WEBHOOK_SIGNING_SECRET ||
+    process.env.RESEND_WEBHOOK_SECRET ||
+    process.env.RESEND_INBOUND_WEBHOOK_SECRET ||
+    ""
+  ).trim();
 
   let recentLogsCount = 0;
   let lastSentAt: string | null = null;
@@ -962,35 +1369,35 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
 
   // 1. Query email audit table
   try {
-    const pool = getDbPool();
-    const logRes = await pool.query(
-      `SELECT status, error_message, created_at AS sent_at FROM public.email_send_log ORDER BY created_at DESC LIMIT 10`
-    );
-    recentLogsCount = logRes.rows.length;
-    if (recentLogsCount > 0) {
-      lastSentAt = logRes.rows[0].sent_at ? new Date(logRes.rows[0].sent_at).toISOString() : null;
-      // Only set active lastError if the latest send attempt failed
-      if (logRes.rows[0].status === "failed") {
-        lastError = logRes.rows[0].error_message;
+    const pool = getOptionalDbPool();
+    if (pool) {
+      const logRes = await pool.query(
+        `SELECT status, error_message, created_at AS sent_at FROM public.email_send_log ORDER BY created_at DESC LIMIT 10`
+      );
+      recentLogsCount = logRes.rows.length;
+      if (recentLogsCount > 0) {
+        lastSentAt = logRes.rows[0].sent_at ? new Date(logRes.rows[0].sent_at).toISOString() : null;
+        if (logRes.rows[0].status === "failed") {
+          lastError = logRes.rows[0].error_message;
+        }
       }
     }
-  } catch (dbErr: any) {
+  } catch {
     // Database check optional for health check
   }
 
-  // 2. Check if credentials exist
-  if (!apiKey && !smtpHost) {
+  // 2. Fail closed if RESEND_API_KEY is missing (no SMTP fallback allowed)
+  if (!apiKey) {
     return {
       ok: false,
       provider: "resend",
       status: "not_configured",
       message: "RESEND_API_KEY is not configured in server environment.",
-      detail: "Add RESEND_API_KEY to authenticate with the Resend email delivery engine.",
+      detail: "Add RESEND_API_KEY to authenticate with Resend, the exclusive email delivery engine.",
       latency_ms: Date.now() - start,
       domain: VERIFIED_DOMAIN,
       domainVerified: false,
       apiKeyConfigured: false,
-      smtpConfigured: false,
       webhookConfigured: !!webhookSecret,
       recentLogsCount,
       lastSentAt,
@@ -1000,68 +1407,46 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
     };
   }
 
-  // 3. If RESEND_API_KEY is present, perform live verification against Resend API
-  if (apiKey) {
-    try {
-      const res = await fetch("https://api.resend.com/domains", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-      });
+  // 3. Perform live verification against Resend API
+  try {
+    const res = await fetch("https://api.resend.com/domains", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    });
 
-      const latency_ms = Date.now() - start;
+    const latency_ms = Date.now() - start;
 
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "");
-        let isSendingRestrictedKey = false;
-        try {
-          const parsed = JSON.parse(errorText);
-          if (
-            parsed?.name === "restricted_api_key" ||
-            parsed?.message?.toLowerCase().includes("only send emails") ||
-            parsed?.message?.toLowerCase().includes("restricted to")
-          ) {
-            isSendingRestrictedKey = true;
-          }
-        } catch {
-          // ignore parse error
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      let isSendingRestrictedKey = false;
+      try {
+        const parsed = JSON.parse(errorText);
+        if (
+          parsed?.name === "restricted_api_key" ||
+          parsed?.message?.toLowerCase().includes("only send emails") ||
+          parsed?.message?.toLowerCase().includes("restricted to")
+        ) {
+          isSendingRestrictedKey = true;
         }
+      } catch {
+        // ignore parse error
+      }
 
-        if (isSendingRestrictedKey) {
-          const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
-          return {
-            ok: true,
-            provider: "resend",
-            status: "ok",
-            message: "Email provider authenticated. Sending-restricted API key verified.",
-            detail: `Production sending-only key authenticated with Resend for domain "${VERIFIED_DOMAIN}". ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
-            latency_ms,
-            domain: VERIFIED_DOMAIN,
-            domainVerified: true,
-            apiKeyConfigured: true,
-            smtpConfigured: !!smtpHost,
-            webhookConfigured: !!webhookSecret,
-            recentLogsCount,
-            lastSentAt,
-            lastError,
-            senders: SENDERS,
-            checkedAt: new Date().toISOString(),
-          };
-        }
-
+      if (isSendingRestrictedKey) {
+        const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
         return {
-          ok: false,
+          ok: true,
           provider: "resend",
-          status: "failed",
-          message: `Resend API authentication failed (HTTP ${res.status}).`,
-          detail: errorText || `HTTP ${res.status} response from Resend API. Check if your API key is active.`,
+          status: "ok",
+          message: "Email provider authenticated. Sending-restricted API key verified.",
+          detail: `Production sending-only key authenticated with Resend for domain "${VERIFIED_DOMAIN}". ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
           latency_ms,
           domain: VERIFIED_DOMAIN,
-          domainVerified: false,
+          domainVerified: true,
           apiKeyConfigured: true,
-          smtpConfigured: !!smtpHost,
           webhookConfigured: !!webhookSecret,
           recentLogsCount,
           lastSentAt,
@@ -1071,51 +1456,16 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
         };
       }
 
-      const data = await res.json().catch(() => ({}));
-      const domains: Array<{ name: string; status: string }> = Array.isArray(data?.data) ? data.data : [];
-      const verifiedDomainObj = domains.find(
-        (d) => d.name.toLowerCase() === VERIFIED_DOMAIN.toLowerCase() || VERIFIED_DOMAIN.toLowerCase().endsWith(d.name.toLowerCase())
-      );
-      const isDomainVerified = verifiedDomainObj
-        ? verifiedDomainObj.status === "verified" || verifiedDomainObj.status === "active"
-        : domains.length > 0;
-
-      const domainStatusNote = verifiedDomainObj
-        ? `Sending domain "${verifiedDomainObj.name}" is ${verifiedDomainObj.status}.`
-        : `Domain "${VERIFIED_DOMAIN}" configured (${domains.length} domain(s) on account).`;
-
-      const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
-
-      return {
-        ok: true,
-        provider: "resend",
-        status: "ok",
-        message: "Email provider connected and authenticated.",
-        detail: `${domainStatusNote} ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
-        latency_ms,
-        domain: VERIFIED_DOMAIN,
-        domainVerified: isDomainVerified,
-        apiKeyConfigured: true,
-        smtpConfigured: !!smtpHost,
-        webhookConfigured: !!webhookSecret,
-        recentLogsCount,
-        lastSentAt,
-        lastError,
-        senders: SENDERS,
-        checkedAt: new Date().toISOString(),
-      };
-    } catch (netErr: any) {
       return {
         ok: false,
         provider: "resend",
         status: "failed",
-        message: "Failed to connect to Resend API endpoint.",
-        detail: netErr.message || "Network timeout or unreachable host.",
-        latency_ms: Date.now() - start,
+        message: `Resend API authentication failed (HTTP ${res.status}).`,
+        detail: errorText || `HTTP ${res.status} response from Resend API. Check if your API key is active.`,
+        latency_ms,
         domain: VERIFIED_DOMAIN,
         domainVerified: false,
         apiKeyConfigured: true,
-        smtpConfigured: !!smtpHost,
         webhookConfigured: !!webhookSecret,
         recentLogsCount,
         lastSentAt,
@@ -1124,27 +1474,58 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
         checkedAt: new Date().toISOString(),
       };
     }
-  }
 
-  // 4. SMTP Fallback
-  return {
-    ok: true,
-    provider: "smtp",
-    status: "ok",
-    message: `SMTP Host configured: ${smtpHost}`,
-    detail: `Port: ${process.env.SMTP_PORT || 587}`,
-    latency_ms: Date.now() - start,
-    domain: VERIFIED_DOMAIN,
-    domainVerified: true,
-    apiKeyConfigured: false,
-    smtpConfigured: true,
-    webhookConfigured: false,
-    recentLogsCount,
-    lastSentAt,
-    lastError,
-    senders: SENDERS,
-    checkedAt: new Date().toISOString(),
-  };
+    const data = await res.json().catch(() => ({}));
+    const domains: Array<{ name: string; status: string }> = Array.isArray(data?.data) ? data.data : [];
+    const verifiedDomainObj = domains.find(
+      (d) => d.name.toLowerCase() === VERIFIED_DOMAIN.toLowerCase() || VERIFIED_DOMAIN.toLowerCase().endsWith(d.name.toLowerCase())
+    );
+    const isDomainVerified = verifiedDomainObj
+      ? verifiedDomainObj.status === "verified" || verifiedDomainObj.status === "active"
+      : domains.length > 0;
+
+    const domainStatusNote = verifiedDomainObj
+      ? `Sending domain "${verifiedDomainObj.name}" is ${verifiedDomainObj.status}.`
+      : `Domain "${VERIFIED_DOMAIN}" configured (${domains.length} domain(s) on account).`;
+
+    const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
+
+    return {
+      ok: true,
+      provider: "resend",
+      status: "ok",
+      message: "Email provider connected and authenticated.",
+      detail: `${domainStatusNote} ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
+      latency_ms,
+      domain: VERIFIED_DOMAIN,
+      domainVerified: isDomainVerified,
+      apiKeyConfigured: true,
+      webhookConfigured: !!webhookSecret,
+      recentLogsCount,
+      lastSentAt,
+      lastError,
+      senders: SENDERS,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch (netErr: any) {
+    return {
+      ok: false,
+      provider: "resend",
+      status: "failed",
+      message: "Failed to connect to Resend API endpoint.",
+      detail: netErr.message || "Network timeout or unreachable host.",
+      latency_ms: Date.now() - start,
+      domain: VERIFIED_DOMAIN,
+      domainVerified: false,
+      apiKeyConfigured: true,
+      webhookConfigured: !!webhookSecret,
+      recentLogsCount,
+      lastSentAt,
+      lastError,
+      senders: SENDERS,
+      checkedAt: new Date().toISOString(),
+    };
+  }
 }
 
 // -----------------------------------------------------------------
@@ -1385,11 +1766,19 @@ export async function handleInboundEmailForward(
  * Processes email.delivered, email.bounced, email.failed, email.complained, and email.sent
  * Updates public.email_send_log status and stores bounce diagnostics.
  */
-export async function handleResendWebhookEvent(payload: any, _headers?: Record<string, string>): Promise<{
+/**
+ * Resend Outbound Delivery & Lifecycle Webhook Event Handler
+ * Processes email.delivered, email.bounced, email.failed, email.complained, email.sent, and email.received.
+ * Enforces Svix event-ID deduplication, syncs public.email_send_log & outbound_message_outbox,
+ * and auto-suppresses hard bounces & spam complaints in public.suppressed_emails.
+ */
+export async function handleResendWebhookEvent(payload: any, headers?: Record<string, string>): Promise<{
   ok: boolean;
   event: string;
   status?: string;
   updated?: boolean;
+  suppressed?: boolean;
+  deduplicated?: boolean;
   error?: string;
 }> {
   try {
@@ -1397,33 +1786,66 @@ export async function handleResendWebhookEvent(payload: any, _headers?: Record<s
     const data = payload?.data || {};
     const emailId = String(data?.email_id || data?.id || "");
     const recipient = Array.isArray(data?.to) ? String(data.to[0] || "") : String(data?.to || "");
+    const eventId = String(
+      headers?.["svix-id"] || headers?.["webhook-id"] || payload?.id || "",
+    ).trim();
 
     console.log(`[ResendWebhook] Received event: ${type} for emailId=${emailId || "unknown"} recipient=${recipient || "unknown"}`);
+
+    // Idempotent webhook event deduplication (by Svix event ID)
+    const pool = getOptionalDbPool();
+    if (pool && eventId) {
+      try {
+        const dedupRes = await pool.query(
+          `INSERT INTO public.email_webhook_events (svix_id, event_type, email_id, recipient_email, payload)
+           VALUES ($1, $2, $3, $4, $5::jsonb)
+           ON CONFLICT (svix_id) DO NOTHING
+           RETURNING id`,
+          [eventId, type || "unknown", emailId || null, normalizeBareEmail(recipient) || null, JSON.stringify(payload || {})],
+        );
+        if (dedupRes.rowCount === 0) {
+          console.log(`[ResendWebhook] Duplicate Svix event ignored: ${eventId}`);
+          return { ok: true, event: type, status: "duplicate_ignored", deduplicated: true, updated: false };
+        }
+      } catch (dedupErr: any) {
+        if (String(dedupErr?.code || "") !== "42P01") {
+          console.warn("[ResendWebhook] Dedup check warning:", dedupErr?.message || dedupErr);
+        }
+      }
+    }
 
     // Ingest into real-time observer store for admin checkpoints
     try {
       const { resendWebhookStore } = await import("./resendWebhookStore");
-      resendWebhookStore.recordEvent(payload, _headers);
+      resendWebhookStore.recordEvent(payload, headers);
     } catch (storeErr: any) {
       console.warn("[ResendWebhook] Failed to buffer event in webhookStore:", storeErr.message);
     }
 
     if (type === "email.received") {
-      const inboundRes = await handleInboundEmailWebhook(payload, _headers);
+      const inboundRes = await handleInboundEmailWebhook(payload, headers);
       return { ok: inboundRes.ok, event: type, status: "forwarded" };
     }
 
     let mappedStatus: "delivered" | "bounced" | "failed" | "complained" | "sent" | null = null;
     let errorMessage: string | undefined = undefined;
+    let shouldAutoSuppress = false;
+    let suppressionReason = "";
 
     switch (type) {
       case "email.delivered":
         mappedStatus = "delivered";
         break;
-      case "email.bounced":
+      case "email.bounced": {
         mappedStatus = "bounced";
         errorMessage = data?.bounce?.message || data?.reason || "Message bounced by recipient mail provider";
+        const bounceType = String(data?.bounce?.type || "hard").toLowerCase();
+        if (bounceType !== "soft" && bounceType !== "transient") {
+          shouldAutoSuppress = true;
+          suppressionReason = `hard_bounce: ${errorMessage}`;
+        }
         break;
+      }
       case "email.failed":
         mappedStatus = "failed";
         errorMessage = data?.error || data?.message || "Delivery rejected by remote mail exchanger";
@@ -1431,12 +1853,13 @@ export async function handleResendWebhookEvent(payload: any, _headers?: Record<s
       case "email.complained":
         mappedStatus = "complained";
         errorMessage = "Recipient marked message as spam / abuse complaint";
+        shouldAutoSuppress = true;
+        suppressionReason = "spam_complaint";
         break;
       case "email.sent":
         mappedStatus = "sent";
         break;
       case "email.delivery_delayed":
-        // Delay warning, keep sent or mark in metadata
         mappedStatus = "sent";
         errorMessage = "Delivery delayed by downstream mail exchanger";
         break;
@@ -1456,8 +1879,23 @@ export async function handleResendWebhookEvent(payload: any, _headers?: Record<s
       },
     });
 
-    console.log(`[ResendWebhook] Processed ${type}: messageId=${emailId} -> status=${mappedStatus} (db updated: ${updated})`);
-    return { ok: true, event: type, status: mappedStatus, updated };
+    let suppressed = false;
+    if (shouldAutoSuppress && recipient) {
+      suppressed = await upsertSuppressedEmail({
+        email: recipient,
+        reason: suppressionReason,
+        metadata: {
+          source: "resend_webhook",
+          event_type: type,
+          email_id: emailId || null,
+          svix_id: eventId || null,
+          recorded_at: new Date().toISOString(),
+        },
+      });
+    }
+
+    console.log(`[ResendWebhook] Processed ${type}: messageId=${emailId} -> status=${mappedStatus} (db updated: ${updated}, suppressed: ${suppressed})`);
+    return { ok: true, event: type, status: mappedStatus, updated, suppressed };
   } catch (err: any) {
     console.error("[ResendWebhook] Error handling event:", err);
     return { ok: false, event: payload?.type || "unknown", error: err.message };
@@ -2379,5 +2817,271 @@ export async function verifyPlatformEmailDomainRouting(options?: {
       receptionPipeline: "Inbound emails addressed to *@rentmaikar.com are received through backend.rentmaikar.com MX/webhook ingress, parsed by the routing engine, and forwarded to designated staff mailboxes with original sender Reply-To preserved",
     },
     liveTestResult,
+  };
+}
+
+/**
+ * 11. Operational Email Suppression, Unsubscribe, Queue/DLQ, & Domain Status Handlers
+ */
+export async function handleEmailSuppression(body: any): Promise<{
+  ok: boolean;
+  action: string;
+  suppressed?: boolean;
+  reason?: string;
+  error?: string;
+}> {
+  const action = String(body?.action || "suppress").trim().toLowerCase();
+  const email = normalizeBareEmail(body?.email || body?.recipient || "");
+  if (!email || !email.includes("@")) {
+    return { ok: false, action, error: "Valid email address is required" };
+  }
+
+  if (action === "check") {
+    const matches = await findSuppressedRecipients([email]);
+    return {
+      ok: true,
+      action,
+      suppressed: matches.length > 0,
+      reason: matches[0]?.reason,
+    };
+  }
+
+  if (action === "unsuppress" || action === "remove") {
+    const pool = getOptionalDbPool();
+    if (!pool) return { ok: false, action, error: "Database pool unavailable" };
+    await pool.query(`DELETE FROM public.suppressed_emails WHERE LOWER(email) = LOWER($1)`, [email]);
+    return { ok: true, action, suppressed: false };
+  }
+
+  const reason = String(body?.reason || body?.type || "manual_suppression").trim();
+  const saved = await upsertSuppressedEmail({
+    email,
+    reason,
+    metadata: {
+      source: body?.source || "backend_gateway",
+      ...(body?.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+    },
+  });
+  return { ok: saved, action: "suppress", suppressed: saved, reason };
+}
+
+export async function handleEmailUnsubscribe(body: any): Promise<{
+  ok: boolean;
+  success: boolean;
+  alreadyUnsubscribed?: boolean;
+  message: string;
+  error?: string;
+}> {
+  const token = String(body?.token || "").trim();
+  let email = normalizeBareEmail(body?.email || "");
+
+  if (!email && token) {
+    try {
+      const admin = supabaseBackendService.getAdminClient();
+      const { data } = await admin
+        .from("email_unsubscribe_tokens")
+        .select("email, used_at")
+        .eq("token", token)
+        .maybeSingle();
+      if (data?.email) {
+        email = normalizeBareEmail(data.email);
+        if (data.used_at) {
+          return { ok: true, success: true, alreadyUnsubscribed: true, message: "Already unsubscribed." };
+        }
+        await admin
+          .from("email_unsubscribe_tokens")
+          .update({ used_at: new Date().toISOString() })
+          .eq("token", token);
+      }
+    } catch {
+      // Fallback to direct email suppression if email was provided
+    }
+  }
+
+  if (!email || !email.includes("@")) {
+    return { ok: false, success: false, message: "Valid email or unsubscribe token is required", error: "Invalid email or token" };
+  }
+
+  await upsertSuppressedEmail({
+    email,
+    reason: "unsubscribe",
+    metadata: { source: "unsubscribe_endpoint", recorded_at: new Date().toISOString() },
+  });
+
+  try {
+    const admin = supabaseBackendService.getAdminClient();
+    await admin
+      .from("email_preferences")
+      .upsert({ email, unsubscribed_all: true, updated_at: new Date().toISOString() }, { onConflict: "email" });
+  } catch {
+    // Non-fatal if table unavailable
+  }
+
+  return {
+    ok: true,
+    success: true,
+    message: `Unsubscribe preferences recorded for ${email}`,
+  };
+}
+
+export async function handleReprocessEmailDlq(body: any): Promise<{
+  ok: boolean;
+  success: boolean;
+  processed: number;
+  recovered: number;
+  errors: number;
+  message: string;
+}> {
+  const pool = getOptionalDbPool();
+  if (!pool) {
+    return { ok: true, success: true, processed: 0, recovered: 0, errors: 0, message: "Database pool unconfigured; 0 DLQ rows" };
+  }
+
+  const limit = Math.max(1, Math.min(100, Number(body?.batchSize || body?.limit) || 25));
+  const res = await pool.query(
+    `SELECT idempotency_key, recipient, payload
+       FROM public.outbound_message_outbox
+      WHERE channel = 'email'
+        AND status IN ('failed', 'dead_letter')
+        AND attempt_count < max_attempts
+        AND (expires_at IS NULL OR expires_at > now())
+      ORDER BY updated_at ASC
+      LIMIT $1`,
+    [limit],
+  );
+
+  let processed = 0;
+  let recovered = 0;
+  let errors = 0;
+
+  for (const row of res.rows) {
+    processed++;
+    const key = String(row.idempotency_key);
+    const payload = (row.payload || {}) as Record<string, any>;
+    try {
+      await requeueOutboundMessage(pool, key);
+      const sendRes = await sendEmailViaResend({
+        to: payload.to || String(row.recipient),
+        subject: String(payload.subject || "RentMaikar Notification"),
+        html: String(payload.html || `<p>${String(payload.text || "RentMaikar update")}</p>`),
+        text: typeof payload.text === "string" ? payload.text : undefined,
+        templateName: String(payload.templateName || "dlq_reprocess"),
+        idempotencyKey: key,
+      });
+      if (sendRes.ok) recovered++;
+      else errors++;
+    } catch {
+      errors++;
+    }
+  }
+
+  return {
+    ok: true,
+    success: true,
+    processed,
+    recovered,
+    errors,
+    message: processed > 0
+      ? `Reprocessed ${processed} email outbox item(s) (${recovered} recovered, ${errors} failed)`
+      : "No failed email outbox items eligible for reprocessing",
+  };
+}
+
+export async function handleProcessEmailQueue(body: any): Promise<{
+  ok: boolean;
+  success: boolean;
+  processed: number;
+  sent: number;
+  failed: number;
+}> {
+  const pool = getOptionalDbPool();
+  if (!pool) {
+    return { ok: true, success: true, processed: 0, sent: 0, failed: 0 };
+  }
+
+  const limit = Math.max(1, Math.min(100, Number(body?.batchSize || body?.limit) || 25));
+  const res = await pool.query(
+    `SELECT idempotency_key, recipient, payload
+       FROM public.outbound_message_outbox
+      WHERE channel = 'email'
+        AND status = 'queued'
+        AND next_attempt_at <= now()
+        AND attempt_count < max_attempts
+        AND (expires_at IS NULL OR expires_at > now())
+      ORDER BY created_at ASC
+      LIMIT $1`,
+    [limit],
+  );
+
+  let processed = 0;
+  let sent = 0;
+  let failed = 0;
+
+  for (const row of res.rows) {
+    processed++;
+    const payload = (row.payload || {}) as Record<string, any>;
+    const sendRes = await sendEmailViaResend({
+      to: payload.to || String(row.recipient),
+      subject: String(payload.subject || "RentMaikar Notification"),
+      html: String(payload.html || `<p>${String(payload.text || "RentMaikar update")}</p>`),
+      text: typeof payload.text === "string" ? payload.text : undefined,
+      templateName: String(payload.templateName || "queued_email"),
+      idempotencyKey: String(row.idempotency_key),
+    });
+    if (sendRes.ok) sent++;
+    else failed++;
+  }
+
+  return { ok: true, success: true, processed, sent, failed };
+}
+
+export async function handleCheckEmailDomainStatus(): Promise<{
+  ok: boolean;
+  sendingDomain: string;
+  inboundDomain: string;
+  resendDomainVerified: boolean;
+  dns: {
+    notifyTxt: boolean;
+    rootTxt: boolean;
+    inboundMx: boolean;
+  };
+  checkedAt: string;
+}> {
+  const health = await checkEmailProviderHealth();
+
+  const resolveTxtSafe = async (host: string): Promise<boolean> => {
+    try {
+      const records = await dns.resolveTxt(host);
+      return Array.isArray(records) && records.length > 0;
+    } catch {
+      return false;
+    }
+  };
+  const resolveMxSafe = async (host: string): Promise<boolean> => {
+    try {
+      const records = await dns.resolveMx(host);
+      return Array.isArray(records) && records.length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  const [notifyTxt, rootTxt, inboundMx] = await Promise.all([
+    resolveTxtSafe(VERIFIED_DOMAIN),
+    resolveTxtSafe(VISIBLE_DOMAIN),
+    resolveMxSafe(INBOUND_DOMAIN),
+  ]);
+
+  return {
+    ok: health.ok && health.domainVerified,
+    sendingDomain: VERIFIED_DOMAIN,
+    inboundDomain: INBOUND_DOMAIN,
+    resendDomainVerified: health.domainVerified,
+    dns: {
+      notifyTxt,
+      rootTxt,
+      inboundMx,
+    },
+    checkedAt: new Date().toISOString(),
   };
 }

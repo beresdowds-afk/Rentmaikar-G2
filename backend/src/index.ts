@@ -19,11 +19,15 @@ import { platformHealthService } from "./services/platformHealth";
 import { generateServerSitemap } from "./services/sitemapGenerator";
 import {
   verifyResendWebhookSignature,
+  verifyStandardWebhookSignature,
 } from "./services/resendReceivingService";
 import {
+  handleAuthEmailHook,
   handleResendWebhookEvent,
   closeEmailDatabasePool,
 } from "./services/emailService";
+import { portalAuthService } from "./services/portalAuth";
+import { authenticateCaller } from "./services/fileUploadService";
 import { closeDbPool } from "./services/dbPool";
 import { closeSarekonDatabasePool } from "./services/sarekonService";
 import { closeIotDatabasePool } from "./services/iotService";
@@ -414,8 +418,58 @@ app.get("/api/domains", (req: Request, res: Response) => {
   });
 });
 
-// Email webhook & production checkpoint observer routes
-app.get(["/api/email/webhooks/events", "/api/email/webhooks"], async (req: Request, res: Response) => {
+async function requireWebhookAdminAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const portalHeader = (req.headers["x-portal-token"] as string) || "";
+  const authHeader = (req.headers.authorization as string) || "";
+  const cookieMatch = req.headers.cookie?.match(/rm_portal_token=([^;]+)/);
+  const portalCandidate =
+    portalHeader.trim() ||
+    (authHeader.startsWith("Bearer rm_portal.") ? authHeader.slice(7).trim() : "") ||
+    (authHeader.startsWith("rm_portal.") ? authHeader.trim() : "") ||
+    (cookieMatch ? cookieMatch[1] : "");
+
+  if (portalCandidate) {
+    const session = portalAuthService.verifySessionToken(portalCandidate);
+    if (session && session.role === "admin") {
+      (req as any).portalSession = session;
+      next();
+      return;
+    }
+  }
+
+  if (authHeader.startsWith("Bearer ") && !authHeader.startsWith("Bearer rm_portal.")) {
+    try {
+      const caller = await authenticateCaller(authHeader);
+      if (caller.isAdmin) {
+        (req as any).authCaller = caller;
+        next();
+        return;
+      }
+      res.status(403).json({
+        ok: false,
+        error: "FORBIDDEN",
+        message: "Administrative privileges required.",
+      });
+      return;
+    } catch (err: any) {
+      res.status(err?.statusCode || 401).json({
+        ok: false,
+        error: "UNAUTHORIZED",
+        message: err?.message || "Invalid authentication session",
+      });
+      return;
+    }
+  }
+
+  res.status(401).json({
+    ok: false,
+    error: "UNAUTHORIZED",
+    message: "Admin authentication required.",
+  });
+}
+
+// Email webhook & production checkpoint observer routes (admin-protected)
+app.get(["/api/email/webhooks/events", "/api/email/webhooks"], requireWebhookAdminAuth, async (req: Request, res: Response) => {
   try {
     const { resendWebhookStore } = await import("./services/resendWebhookStore");
     const events = resendWebhookStore.getEvents({
@@ -432,12 +486,37 @@ app.get(["/api/email/webhooks/events", "/api/email/webhooks"], async (req: Reque
   }
 });
 
-app.get("/api/email/webhooks/stats", async (_req: Request, res: Response) => {
+app.get("/api/email/webhooks/stats", requireWebhookAdminAuth, async (_req: Request, res: Response) => {
   try {
     const { resendWebhookStore } = await import("./services/resendWebhookStore");
     res.json({ ok: true, stats: resendWebhookStore.getStats() });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/email/webhooks/stream", requireWebhookAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { resendWebhookStore } = await import("./services/resendWebhookStore");
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+    res.write(`data: ${JSON.stringify({ type: "stream_connected", timestamp: new Date().toISOString() })}\n\n`);
+
+    const unsubscribe = resendWebhookStore.subscribe((event) => {
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        unsubscribe();
+      }
+    });
+
+    req.on("close", () => {
+      unsubscribe();
+    });
+  } catch {
+    res.status(500).end();
   }
 });
 
@@ -549,7 +628,76 @@ app.post(
   },
 );
 
-app.post("/api/email/webhooks/simulate-event", async (req: Request, res: Response) => {
+app.post(
+  "/api/webhooks/supabase-auth-email",
+  async (req: Request, res: Response) => {
+    try {
+      const rawBody =
+        Buffer.isBuffer((req as any).rawBody)
+          ? (req as any).rawBody
+          : Buffer.isBuffer(req.body)
+            ? req.body
+            : null;
+
+      if (!rawBody) {
+        return res.status(400).json({
+          ok: false,
+          error: "Raw request body unavailable for Supabase auth hook verification",
+        });
+      }
+
+      const verification = verifyStandardWebhookSignature(
+        rawBody,
+        req.headers as Record<string, string | string[] | undefined>,
+        [
+          process.env.SUPABASE_AUTH_HOOK_SECRET,
+          process.env.SEND_EMAIL_HOOK_SECRET,
+          process.env.HOOK_SECRET,
+        ],
+        "SupabaseAuth",
+      );
+
+      if (!verification.ok) {
+        console.error("[Webhook][SupabaseAuth] Signature verification failed:", verification.reason);
+        return res.status(401).json({
+          ok: false,
+          error: verification.reason || "Invalid Supabase Auth hook signature",
+        });
+      }
+
+      let payload: any;
+      try {
+        payload = JSON.parse(rawBody.toString("utf8"));
+      } catch {
+        return res.status(400).json({ ok: false, error: "Invalid JSON" });
+      }
+
+      const result = await handleAuthEmailHook(payload);
+      if (!result?.ok) {
+        return res.status(502).json({
+          ok: false,
+          error: (result as any)?.error || "Failed to deliver Supabase auth email via Resend",
+        });
+      }
+
+      return res.status(200).json({ ok: true, delivered: true, provider: "resend" });
+    } catch (error: any) {
+      console.error("[Webhook][SupabaseAuth] Handler error:", error?.message || error);
+      return res.status(500).json({
+        ok: false,
+        error: error?.message || "Supabase Auth email hook failed",
+      });
+    }
+  },
+);
+
+app.post("/api/email/webhooks/simulate-event", requireWebhookAdminAuth, async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_EMAIL_WEBHOOK_SIMULATION !== "true") {
+    return res.status(403).json({
+      ok: false,
+      error: "Webhook simulation is disabled in production.",
+    });
+  }
   try {
     const { resendWebhookStore } = await import("./services/resendWebhookStore");
     const type = req.body?.type || "email.delivered";
@@ -559,10 +707,12 @@ app.post("/api/email/webhooks/simulate-event", async (req: Request, res: Respons
 
     const event = resendWebhookStore.recordEvent({
       type,
+      simulated: true,
       created_at: new Date().toISOString(),
       data: {
         id: emailId,
         email_id: emailId,
+        simulated: true,
         from: "RentMaikar Support <support@notify.rentmaikar.com>",
         to: [recipient],
         subject,
@@ -570,13 +720,13 @@ app.post("/api/email/webhooks/simulate-event", async (req: Request, res: Respons
       },
     });
 
-    res.status(200).json({ ok: true, event });
+    res.status(200).json({ ok: true, simulated: true, event });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-app.post("/api/email/webhooks/clear", async (_req: Request, res: Response) => {
+app.post("/api/email/webhooks/clear", requireWebhookAdminAuth, async (_req: Request, res: Response) => {
   try {
     const { resendWebhookStore } = await import("./services/resendWebhookStore");
     resendWebhookStore.clear();

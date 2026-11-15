@@ -1,6 +1,4 @@
-// Sends a branded email-verification link through Resend (via send-outbound-email).
-// Auth: caller must present their own JWT; the link is always minted for that
-// user's own email address, so it cannot be used to spam arbitrary inboxes.
+// Delegates email-verification dispatch exclusively through rentmaikar-backend (Resend).
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
@@ -9,6 +7,7 @@ import {
   recordEmailIdempotencyResult,
   releaseEmailIdempotency,
 } from "../_shared/email-idempotency.ts";
+import { delegateToBackendEmail } from "../_shared/backend-email-client.ts";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -29,17 +28,13 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     let targetEmail = "";
-    let userId: string | null = null;
-    let userMetaName: string | null = null;
 
     const auth = req.headers.get("Authorization") ?? "";
     if (auth.startsWith("Bearer ")) {
       const token = auth.replace("Bearer ", "").trim();
       const { data: u } = await supa.auth.getUser(token);
       if (u?.user?.email) {
-        targetEmail = u.user.email;
-        userId = u.user.id;
-        userMetaName = (u.user.user_metadata?.full_name as string) ?? null;
+        targetEmail = u.user.email.toLowerCase();
         if (u.user.email_confirmed_at) {
           return json({ ok: true, already_verified: true, verified_at: u.user.email_confirmed_at });
         }
@@ -61,8 +56,6 @@ Deno.serve(async (req) => {
       ? body.redirect_to
       : (Deno.env.get("SITE_URL") ?? "https://rentmaikar.com");
 
-    // Idempotency: repeated clicks carrying the same Idempotency-Key replay the
-    // original outcome instead of queueing a second verification email.
     const idemKey = readIdempotencyKey(req);
     const claim = await claimEmailIdempotency(
       supa,
@@ -76,7 +69,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Server-side rate limit & cooldown
     const { data: allowed } = await supa.rpc("check_auth_rate_limit", {
       _identifier: `verify:${targetEmail}`,
       _endpoint: "auth.verify_email",
@@ -100,62 +92,20 @@ Deno.serve(async (req) => {
       return json({ error: "Please wait a moment before requesting another email." }, 429);
     }
 
-    const { data: link, error: linkErr } = await supa.auth.admin.generateLink({
-      type: "magiclink",
-      email: targetEmail,
-      options: { redirectTo },
-    });
-    if (linkErr || !link?.properties?.action_link) {
-      console.error("generateLink failed", linkErr);
-      await releaseEmailIdempotency(supa, "email_verification", claim.key);
-      return json({ error: "Could not create verification link" }, 500);
-    }
-
-    let profile: { full_name?: string | null; country?: string | null } | null = null;
-    if (userId) {
-      const { data: prof } = await supa
-        .from("profiles")
-        .select("full_name, country")
-        .eq("user_id", userId)
-        .maybeSingle();
-      profile = prof;
-    }
-
-    const firstName =
-      (profile?.full_name as string | null)?.trim().split(/\s+/)[0] ||
-      userMetaName?.split(/\s+/)[0] ||
-      "there";
-
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const sendRes = await fetch(
-      `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-outbound-email`,
+    const delegated = await delegateToBackendEmail(
+      "send-verification-email",
+      { email: targetEmail, redirect_to: redirectTo },
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: serviceKey,
-          Authorization: `Bearer ${serviceKey}`,
-        },
-        body: JSON.stringify({
-          action: "send",
-          to: targetEmail,
-          templateName: "email_verification",
-          category: "verification",
-          priority: "high",
-          country: profile?.country ?? undefined,
-          data: {
-            firstName,
-            verificationUrl: link.properties.action_link,
-            expiresIn: "24 hours",
-          },
-        }),
+        authorization: auth || null,
+        idempotencyKey: idemKey,
+        allowUnauthenticatedPublic: true,
       },
     );
 
-    if (!sendRes.ok) {
-      console.error("send-outbound-email failed", sendRes.status, await sendRes.text());
+    if (!delegated.ok) {
+      console.error("[send-verification-email] Backend delegation failed:", delegated.status, delegated.data);
       await releaseEmailIdempotency(supa, "email_verification", claim.key);
-      return json({ error: "Verification email could not be sent right now." }, 502);
+      return json({ error: String(delegated.data?.error || "Verification email could not be sent right now.") }, 502);
     }
 
     const result = { ok: true, sent: true, provider: "resend", to: targetEmail };

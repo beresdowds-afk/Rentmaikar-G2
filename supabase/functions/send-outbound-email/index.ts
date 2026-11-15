@@ -308,7 +308,7 @@ function renderTemplate(
 
 // ─── Send Single Email via Resend ───
 async function sendViaResend(
-  apiKey: string,
+  _apiKey: string | null | undefined,
   to: string,
   from: string,
   subject: string,
@@ -334,7 +334,7 @@ async function sendViaResend(
   };
   if (text) body.text = text;
 
-  const res = await resendSendEmail(body, apiKey);
+  const res = await resendSendEmail(body);
 
   if (!res.ok) {
     const errText = await res.text();
@@ -430,8 +430,6 @@ serve(async (req) => {
 
 
   try {
-    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-    if (!RESEND_API_KEY) throw new Error("RESEND_API_KEY not configured");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -544,7 +542,7 @@ serve(async (req) => {
 
       // Send
       const result = await sendViaResend(
-        RESEND_API_KEY,
+        null,
         to,
         fromAddress,
         rendered.subject,
@@ -714,7 +712,7 @@ serve(async (req) => {
         const fromAddress = rendered.from || getSourceAddress(category, recipient.country);
 
         const result = await sendViaResend(
-          RESEND_API_KEY,
+          null,
           recipient.email,
           fromAddress,
           rendered.subject,

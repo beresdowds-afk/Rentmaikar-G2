@@ -71,8 +71,14 @@ classify("authenticated", [
 ]);
 classify("support", ["get-inspection-findings", "update-inspection-finding"]);
 classify("cron_or_admin", ["process-document-lifecycle"]);
-classify("public", ["phone-otp-custom", "verify-phone"]);
-classify("public", ["get-vapid-public-key"]);
+classify("public", [
+  "phone-otp-custom",
+  "verify-phone",
+  "get-vapid-public-key",
+  "send-password-reset",
+  "send-verification-email",
+  "handle-email-unsubscribe",
+]);
 classify("admin", [
   "admin-create-user",
   "admin-delete-users",
@@ -82,7 +88,9 @@ classify("admin", [
   "billing-reconciliation",
   "check-payment-health",
   "case-send-sms",
+  "check-email-health",
   "comms-test-console",
+  "email-domain-status-check",
   "email-health",
   "email-lifecycle-test",
   "test-email-lifecycle",
@@ -159,6 +167,7 @@ classify("owner", [
 ]);
 classify("driver", ["driver-vehicle-command", "voice-access-token"]);
 classify("service_or_admin", [
+  "handle-email-suppression",
   "send-email-notification",
   "send-sms-notification",
   "notify-withdrawal",
@@ -175,6 +184,8 @@ classify("internal", [
   "persona-webhook",
   "paystack-webhook",
   "recording-status-callback",
+  "resend-events",
+  "fetch-resend-inbound-email",
   "sent-inbound",
   "sent-status",
   "social-inbox-webhook",
@@ -194,6 +205,7 @@ classify("cron_or_admin", [
   "process-inspection-reminders",
   "send-booking-reminders",
   "notify-training-review",
+  "process-email-queue",
   "sarekon-location-worker",
   "telemetry-health-monitor",
   "training-compliance-reminders",

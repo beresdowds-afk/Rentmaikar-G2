@@ -50,11 +50,6 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    if (!resendApiKey) {
-      throw new Error("RESEND_API_KEY is not configured");
-    }
-
     const priorityColors: Record<string, string> = {
       low: "#6b7280",
       medium: "#3b82f6",
@@ -207,7 +202,7 @@ const handler = async (req: Request): Promise<Response> => {
         to: [staffEmail],
         subject: `🔔 New ${taskTypeLabels[taskType] || taskType} Task: ${taskTitle}`,
         html: emailHtml,
-      }, resendApiKey);
+      });
 
     const emailData = await emailResponse.json();
 

@@ -852,8 +852,7 @@ serve(async (req) => {
     }
 
     // ─── Send auto-acknowledgment ───
-    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-    if (RESEND_API_KEY) {
+    {
       try {
         const responseTime = getEstimatedResponseTime(finalPriority);
         const attachmentsSummary = {
@@ -874,7 +873,7 @@ serve(async (req) => {
               to: [senderAddress],
               subject: ack.subject,
               html: ack.html,
-            }, RESEND_API_KEY);
+            });
 
 
           if (ackResponse.ok) {

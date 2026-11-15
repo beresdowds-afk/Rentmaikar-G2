@@ -94,11 +94,6 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    if (!resendApiKey) {
-      throw new Error("RESEND_API_KEY is not configured");
-    }
-
     // Get the app URL
     const appUrl = Deno.env.get("APP_URL") || "https://rentmaikar.com";
     
@@ -337,7 +332,7 @@ const handler = async (req: Request): Promise<Response> => {
         to: [email],
         subject: `🎉 Welcome to Rentmaikar - Your ${userType.charAt(0).toUpperCase() + userType.slice(1)} Account is Approved!`,
         html: emailHtml,
-      }, resendApiKey);
+      });
 
     const responseData = await emailResponse.json();
 
