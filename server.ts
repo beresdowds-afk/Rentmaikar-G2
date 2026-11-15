@@ -354,6 +354,12 @@ async function startServer() {
   });
 
   app.post("/api/email/webhooks/simulate-event", async (req, res) => {
+    if (process.env.NODE_ENV === "production" && process.env.ALLOW_EMAIL_WEBHOOK_SIMULATION !== "true") {
+      return res.status(403).json({
+        ok: false,
+        error: "Webhook simulation is disabled in production.",
+      });
+    }
     try {
       const { resendWebhookStore } = await import("./src/server/resendWebhookStore");
       const type = req.body?.type || "email.delivered";
@@ -363,10 +369,12 @@ async function startServer() {
 
       const event = resendWebhookStore.recordEvent({
         type,
+        simulated: true,
         created_at: new Date().toISOString(),
         data: {
           id: emailId,
           email_id: emailId,
+          simulated: true,
           from: "RentMaikar Support <support@notify.rentmaikar.com>",
           to: [recipient],
           subject,
@@ -374,7 +382,7 @@ async function startServer() {
         },
       });
 
-      res.status(200).json({ ok: true, event });
+      res.status(200).json({ ok: true, simulated: true, event });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e.message });
     }

@@ -1,106 +1,37 @@
-# Outbound email architecture and verification
+# Outbound & Auth Email Architecture
 
-## Source-level architecture inventory
+## Authoritative Production Topology
 
-This inventory reflects repository source and deployment manifests, not a live
-production inspection. Cloud Run targets, Supabase function settings, provider
-secrets, sender verification, and DNS records remain unverified externally.
+All application and authentication emails flow through **`rentmaikar-backend`** (Cloud Run, `europe-west1`, `avian-computer-477009-v0`, custom hostname `staging.rentmaikar.com`) and dispatch exclusively through **Resend** (`api.resend.com`).
 
-| Email purpose | Initiator and dispatch path | Hosting and provider | Visible sender | Authentication and authorization | Secret/configuration | Duplicate and status notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| Supabase Auth lifecycle | Supabase Auth event → `supabase/functions/auth-email-hook/index.ts` → `enqueue_email` → `supabase/functions/process-email-queue/index.ts` → `_shared/resend-gateway.ts` | Supabase Edge Functions → Resend | Gateway enforces `DEFAULT_BUSINESS_FROM` from the configured allowlist; the hook's queued `from` value is not authoritative | Hook verifies its signed Auth webhook; queue processor uses Supabase service credentials. Actual hook registration and SMTP settings are dashboard-owned and unverified | Supabase Edge secrets include the referenced Resend and service-role settings; values are not in source | Queue/message IDs are used for tracking; delivery idempotency and deployed retry behavior require runtime verification |
-| Transactional templates | Supabase callers and `supabase/functions/send-transactional-email/index.ts` enqueue work for `process-email-queue` | Supabase Edge Functions → Resend | Shared gateway sender policy | Edge config sets `verify_jwt = true`; endpoint-specific role/operation authorization must still be verified | Supabase Edge secrets and sender-policy settings | Idempotency key is enqueued, but provider acceptance is not delivery confirmation |
-| Business email through bridge | Frontend bridge → `/api/bridge/call` → `backend/src/routes/bridge.ts` → `backend/src/services/emailService.ts` | Cloud Run backend → Resend | Server-side default sender, checked against explicit allowlist | This bridge route now requires a verified caller and administrator status for its email actions | Cloud Run `RESEND_API_KEY`, `DEFAULT_BUSINESS_FROM`, and `APPROVED_BUSINESS_SENDERS`; the sender-policy variables are not currently wired by the deployment workflow | Resend acceptance is logged as sent in existing code; no claim of recipient delivery |
-| Other business Edge sends | Multiple notification, payment, agreement, and communication Edge Functions call `_shared/resend-gateway.ts` directly | Supabase Edge Functions → Resend, bypassing Cloud Run | Shared gateway enforces the configured allowlist when configuration is present | Authorization varies by function; `supabase/config.toml` has many functions with `verify_jwt = false`, so handler-level controls need individual verification | Supabase Edge `RESEND_API_KEY` and sender-policy settings | Queue and caller retries may duplicate messages; no single shared idempotency guarantee was established |
-| Email replies and marketing | `send-email-reply` route and marketing adapters can call Resend directly from server code; reply routing may first try an Edge Function | Cloud Run or the legacy root server → Resend | Server-side sender policy now controls applicable sends | Route-level authorization and actual deployed status vary; legacy root server is not established as the deployed backend | Server `RESEND_API_KEY` and sender-policy settings | These paths remain separate dispatch implementations; deployment and retry behavior are not verified |
+| Email Category | Entry Point | Gateway & Transport | Sender & Domain Policy | Auth & Security Controls | Persistence & Idempotency |
+| --- | --- | --- | --- | --- | --- |
+| Supabase Auth lifecycle | Supabase Auth Send Email Hook → `POST /api/webhooks/supabase-auth-email` (or Edge `auth-email-hook` → `rentmaikar-backend`) | `rentmaikar-backend` (`handleAuthEmailHook`) → Resend | Policy-enforced visible `From` (`DEFAULT_BUSINESS_FROM` / `APPROVED_BUSINESS_SENDERS`); transport `notify.rentmaikar.com` | Standard Webhooks HMAC-SHA256 verification (`SUPABASE_AUTH_HOOK_SECRET`); preserves Supabase `token_hash` / `redirect_to`; zero native mailer fallback | `email_send_log` + `outbound_message_outbox` (`auth_emails` class, no automatic DLQ replay) |
+| Password reset & verification | Frontend / Edge (`send-password-reset`, `send-verification-email`, `admin-create-user`) → `/api/functions/*` | `rentmaikar-backend` (`handleSendPasswordReset`, `handleSendVerificationEmail`) → Resend | Verified `rentmaikar.com` / `notify.rentmaikar.com` allowlist | Rate-limited public / admin JWT / `x-rentmaikar-internal-secret`; fails closed on Resend error | `outbound_message_outbox` + `email_send_log` |
+| Transactional & operational notifications | Edge Functions (`send-transactional-email`, `send-outbound-email`, `send-email-reply`, `notify-referees`, cron processors) → `_shared/backend-email-client.ts` / `_shared/resend-gateway.ts` | `rentmaikar-backend` (`/api/functions/*`) → Resend | `resolveBusinessEmailSender` allowlist enforcement | Edge Functions hold zero `RESEND_API_KEY`; authenticate to backend via `x-rentmaikar-internal-secret` (`RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET`) | Fail-closed `suppressed_emails` check + `outbound_message_outbox` + `email_send_log` |
+| Marketing campaigns | `backend/src/marketing/resendAdapter.ts` (and dev proxy `src/server/marketing/resendAdapter.ts`) | `sendEmailViaResend()` in `emailService` → Resend | `resolveBusinessEmailSender` allowlist + CAN-SPAM unsubscribe header/footer | Server-only marketing engine | Deterministic `idempotencyKey` (`mkt:${campaignId}:${leadId}`) in `outbound_message_outbox` |
+| Delivery & bounce webhooks | Resend Svix webhook → `POST /api/functions/resend-events` (or Edge `resend-events` → `rentmaikar-backend`) | `rentmaikar-backend` (`handleResendWebhookEvent`) | N/A | Standard Webhooks HMAC signature verification (`RESEND_WEBHOOK_SIGNING_SECRET`) | `email_webhook_events` (`svix_id` unique dedup) + auto-insert into `suppressed_emails` on bounce/complaint |
+| Inbound email & replies | Resend inbound / Cloudflare worker → `email-webhook` → `_shared/resend-inbound.ts` → `fetch-resend-inbound-email` | `rentmaikar-backend` (`resendReceivingService.ts`) | Inbound domain `backend.rentmaikar.com` | Multi-secret Standard Webhooks verification (`RESEND_INBOUND_WEBHOOK_SECRET` / `RESEND_WEBHOOK_SIGNING_SECRET`) | Inbox ticket storage + admin reply (`send-email-reply`) |
 
-The intended two-category architecture is **not fully implemented**. Auth token
-generation remains Supabase-owned in the Auth hook path, but the actual Supabase
-hook/SMTP configuration is unknown. Business email still has direct Supabase
-Edge-to-Resend paths and other direct provider adapters in addition to the
-Cloud Run bridge. The browser bridge has no Resend credential, but it is not the
-only business dispatch path.
+## Service Boundaries
 
-The deployment workflow identifies `rentmaikar-backend` in `europe-west1` and
-configures `staging.rentmaikar.com` as its API hostname. This is repository
-configuration only, not confirmation that the live service or DNS currently
-routes there. `RESEND_SENDING_DOMAIN` is a transport/bounce-domain setting and
-must not be treated as the visible `From` domain.
+- **`rentmaikar-g2`**: Frontend SPA container serving `https://rentmaikar.com`. Holds no email credentials, no `RESEND_API_KEY`, and no backend secrets.
+- **`rentmaikar-backend`**: Authoritative backend API and email gateway (`staging.rentmaikar.com`). Exclusively holds `RESEND_API_KEY`, webhook secrets, sender policy env vars, and `RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET`.
+- **`rentmaikar3`**: Idle legacy service — strictly excluded from deployment, routing, and documentation.
+- **SENT.DM**: Retained exclusively for **SMS and WhatsApp** delivery (`smsService.ts`, `messagingBridge.ts`, `_shared/sent-client.ts`). Zero email routing or email fallback touches SENT.DM.
 
-## Sender policy
+## Database Schema & Migrations
 
-Application-controlled sends now require both:
+1. `supabase/migrations/20261109120000_durable_message_outbox_and_telemetry_lifecycle.sql`: Creates `public.outbound_message_outbox` and atomic `claim_outbound_message` / `enqueue_email` primitives.
+2. `supabase/migrations/20261115000000_email_architecture_hardening.sql`: Creates `public.email_webhook_events` (`svix_id` idempotent deduplication + admin-only RLS), expands `public.email_send_log_status_check` to cover `'accepted'`, `'delivered'`, and `'rate_limited'`, and adds case-insensitive `idx_suppressed_emails_lower_email`.
 
-- `DEFAULT_BUSINESS_FROM`: one approved exact-domain address.
-- `APPROVED_BUSINESS_SENDERS`: comma-separated exact addresses, including the
-  default.
+## External Operator Actions (Outside Repository Source)
 
-The policy rejects other domains, subdomains, lookalike domains, and
-unallowlisted local parts. It ignores caller-supplied sender overrides and
-constrains unapproved `Reply-To` values to the configured default sender; a
-different `Reply-To` is accepted only when that exact address is also in the
-server-side allowlist. Recipient lists are validated and capped, and the
-shared Resend gateway rejects client-supplied CC/BCC. Existing reply/forward flows that used external
-`Reply-To` addresses will therefore reply to the configured sender instead.
-No production-approved mailbox or provider verification was discoverable in
-the repository. Example values in UI, templates, webhook fixtures, or tests do
-not establish that a mailbox exists.
+These runtime actions cannot be executed from repository code alone and must be verified by an operator during controlled rollout:
 
-`src/lib/email-config.ts` contains source-level contact candidates
-(`support@rentmaikar.com`, `privacy@rentmaikar.com`, `legal@rentmaikar.com`,
-`dpo@rentmaikar.com`, `payments@rentmaikar.com`, `documents@rentmaikar.com`,
-`admin@rentmaikar.com`, and `support.ng@rentmaikar.com`). These are not an
-approved sender allowlist and do not prove the addresses exist or have been
-verified by Resend.
-
-Supabase Auth's hook source currently queues its own sender field, while the
-shared transport gateway enforces the server-side sender at delivery. This
-source behavior does not prove that the hook is registered or that SMTP,
-Resend, or domain authentication is configured in the live Supabase project.
-
-## External verification required
-
-1. Set Cloud Run environment variables `DEFAULT_BUSINESS_FROM` to a real,
-   verified mailbox and `APPROVED_BUSINESS_SENDERS` to only explicitly approved,
-   verified addresses. The current `.github/workflows/deploy.yml` does not pass
-   these variables; either configure them directly on Cloud Run or update the
-   workflow and redeploy.
-2. In Supabase Edge Function secrets, configure the same sender policy and
-   verify the Resend credential is present. Do not expose these values to
-   frontend build variables.
-3. In the Supabase Auth dashboard, inspect the active email hook and SMTP
-   configuration, verify the visible sender is approved, and confirm signup,
-   recovery, and email-change flows still use Supabase-generated links/tokens.
-4. In Resend, verify the root `rentmaikar.com` sender domain and each approved
-   address. Obtain SPF/DKIM record values from the provider. Inspect existing
-   DNS before changes; preserve current MX/mail flows and publish an appropriate
-   DMARC policy only after reviewing existing records. Keep any provider
-   bounce/Return-Path domain separate from the visible sender policy.
-5. Verify the deployed Cloud Run service, API hostname, secret bindings, and
-   actual GitHub Actions variables. The workflow does not establish the current
-   runtime state of secrets not explicitly wired in that deployment command.
-6. Migrate or formally approve each business Edge function and direct Resend
-   adapter before claiming a single Cloud Run business-email route.
-
-Public DNS lookups were attempted during this review but returned `EREFUSED`;
-no SPF, DKIM, or DMARC record status can be concluded from that result.
-
-## Durable outbound message lifecycle
-
-The source now defines `public.outbound_message_outbox` as the shared durable
-record for email, SMS, and WhatsApp dispatch. Email continues to use PGMQ as
-its delivery queue; `enqueue_email` records the outbox row and enqueues the
-message in one database transaction. Queue workers claim eligible records
-before dispatch, use bounded attempts and `next_attempt_at`, and record the
-provider receipt before acknowledging queue work. Signed Resend and messaging
-provider callbacks update final delivery state when a provider message ID is
-available. Email and SMS DLQ reprocessors remain separate, controlled paths;
-authentication emails and OTPs expire and are not automatically reprocessed.
-
-The follow-up migration
-`supabase/migrations/20261109120000_durable_message_outbox_and_telemetry_lifecycle.sql`
-is code only until it is applied to the intended Supabase project. Do not deploy
-workers that require its outbox tables and RPCs before applying and validating
-the migration. Live migration state, provider callback delivery, sender
-verification, and production retry behavior have not been verified by this
-repository change.
+1. Apply database migrations (`20261109120000_*`, `20261115000000_*`) to Supabase project `jrsydiofzceoeddjogov`.
+2. Verify Cloud Run secret bindings & non-secret env vars on `rentmaikar-backend` (`avian-computer-477009-v0`, `europe-west1`):
+   - Secrets: `RESEND_API_KEY`, `RESEND_WEBHOOK_SIGNING_SECRET`, `RESEND_INBOUND_WEBHOOK_SECRET`, `SUPABASE_AUTH_HOOK_SECRET`, `RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_PASSWORD`.
+   - Env vars: `RESEND_SENDING_DOMAIN=notify.rentmaikar.com`, `DEFAULT_BUSINESS_FROM`, `APPROVED_BUSINESS_SENDERS`.
+3. Configure Supabase Edge Function secrets for `jrsydiofzceoeddjogov`: `RENTMAIKAR_BACKEND_URL=https://staging.rentmaikar.com`, `RENTMAIKAR_INTERNAL_EMAIL_BRIDGE_SECRET`, and `SUPABASE_AUTH_HOOK_SECRET` (remove stale `RESEND_API_KEY` and `LOVABLE_API_KEY` from email Edge Functions once cut over).
+4. Register Supabase Auth Send Email Hook (`https://staging.rentmaikar.com/api/webhooks/supabase-auth-email` or Edge `auth-email-hook`) with the matching `v1,whsec_...` secret and confirm Resend DNS records (SPF, DKIM, DMARC) for `notify.rentmaikar.com` / `rentmaikar.com` and MX for `backend.rentmaikar.com`.

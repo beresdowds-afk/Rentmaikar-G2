@@ -38,6 +38,8 @@ jobs:
         run: npm run lint
       - name: Env surface guardrail
         run: npm run check:env-surfaces
+      - name: Email policy guardrail
+        run: npm run check:email-policy
       - name: Typecheck
         run: npm run typecheck
       - name: Vitest
