@@ -478,14 +478,7 @@ const Auth = () => {
         });
 
         if (resetErr) {
-          console.warn('sendPasswordReset error after retries, attempting native fallback:', resetErr);
-          try {
-            await supabase.auth.resetPasswordForEmail(normalized, {
-              redirectTo: `${window.location.origin}/reset-password`,
-            });
-          } catch (fallbackErr) {
-            console.warn('Native password reset fallback error:', fallbackErr);
-          }
+          console.error('sendPasswordReset failed via Resend gateway:', resetErr);
         }
 
         // Log outcome server-side without revealing it to the caller.

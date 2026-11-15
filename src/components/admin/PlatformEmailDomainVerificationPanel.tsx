@@ -183,11 +183,11 @@ export function PlatformEmailDomainVerificationPanel({
         } catch {}
 
         try {
-          const whRes = await fetch(`/api/email/webhooks/events?emailId=${encodeURIComponent(messageId)}&limit=1`);
-          if (whRes.ok) {
-            const whData = await whRes.json();
-            webhookRecord = whData?.events?.[0] || null;
-          }
+          const whData = await backendBridge.call<any>(
+            `/api/email/webhooks/events?emailId=${encodeURIComponent(messageId)}&limit=1`,
+            { method: "GET" }
+          );
+          webhookRecord = whData?.events?.[0] || null;
         } catch {}
       }
 

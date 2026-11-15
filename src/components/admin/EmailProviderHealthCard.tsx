@@ -22,7 +22,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface EmailHealthData {
   ok: boolean;
-  provider: "resend" | "smtp";
+  provider: "resend";
   status: "ok" | "failed" | "not_configured";
   message: string;
   detail: string;
@@ -30,7 +30,6 @@ export interface EmailHealthData {
   domain: string;
   domainVerified: boolean;
   apiKeyConfigured: boolean;
-  smtpConfigured: boolean;
   webhookConfigured: boolean;
   recentLogsCount: number;
   lastSentAt: string | null;
@@ -54,14 +53,14 @@ export function EmailProviderHealthCard() {
     setLoading(true);
     setError(null);
     try {
-      // First try dedicated /api/email/health endpoint, fallback to edge function gateway
       let data: EmailHealthData;
-      try {
-        const res = await fetch("/api/email/health", {
-          headers: { Accept: "application/json" },
-        });
-        data = await res.json();
-      } catch {
+      const bridgeRes = await backendBridge.invokeEdgeFunction<EmailHealthData>("email-health", undefined, {
+        method: "GET",
+        timeoutMs: 15000,
+      });
+      if (bridgeRes.data && !bridgeRes.error) {
+        data = bridgeRes.data;
+      } else {
         const { data: fnData, error: fnErr } = await supabase.functions.invoke("email-health");
         if (fnErr) throw fnErr;
         data = fnData as EmailHealthData;
@@ -176,7 +175,7 @@ if (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Mail className="h-5 w-5 text-primary" aria-hidden="true" />
-            <CardTitle className="text-base font-semibold">Email Delivery Provider (Resend / SMTP)</CardTitle>
+            <CardTitle className="text-base font-semibold">Email Delivery Provider (Resend)</CardTitle>
             {health && (
               <Badge
                 variant={
@@ -237,7 +236,7 @@ if (
                 </span>
                 <p className="text-sm font-semibold capitalize">{health.provider}</p>
                 <span className="text-[11px] text-muted-foreground">
-                  {health.apiKeyConfigured ? "API Key active" : health.smtpConfigured ? "SMTP host ready" : "Unset"}
+                  {health.apiKeyConfigured ? "API Key active" : "Unset"}
                 </span>
               </div>
 

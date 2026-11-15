@@ -298,7 +298,7 @@ export async function handleEdgeFunction(functionName: string, payload: any = {}
           const health = await checkEmailProviderHealth();
           results.push({
             provider: "resend",
-            label: `Email Provider (${health.provider === "smtp" ? "SMTP" : "Resend"})`,
+            label: "Email Provider (Resend)",
             status: health.status,
             message: health.message,
             detail: health.detail,

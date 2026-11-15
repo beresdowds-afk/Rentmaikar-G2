@@ -63,41 +63,31 @@ export const EmailVerification = ({
     if (!email) return;
     const target = redirectTo ?? `${window.location.origin}/auth`;
 
-    let invoked = false;
-    try {
-      const { data, error } = await supabase.functions.invoke('send-verification-email', {
-        body: { email, redirect_to: target },
-        headers: idempotencyHeaders('email_verification', email),
-      });
-      if (!error) {
-        invoked = true;
-        const res = data as { already_verified?: boolean } | null;
-        if (res?.already_verified) {
-          setIsEmailVerified(true);
-          onVerified?.();
-          toast.success('Your email is already verified.');
-          return;
-        }
-        setLastSentAt(new Date());
-        resetEmailIdempotencyKey('email_verification', email);
-        toast.success('Verification email sent via Resend. Check your inbox.');
-        return;
-      }
-    } catch {
-      // Function invocation failed, proceed to fallback
+    const { data, error } = await supabase.functions.invoke('send-verification-email', {
+      body: { email, redirect_to: target },
+      headers: idempotencyHeaders('email_verification', email),
+    });
+
+    if (error || (data && (data as { ok?: boolean; success?: boolean }).ok === false)) {
+      const message =
+        error?.message ||
+        (data as { error?: string; message?: string } | null)?.error ||
+        (data as { error?: string; message?: string } | null)?.message ||
+        'Failed to send verification email via Resend';
+      throw new Error(message);
     }
 
-    if (!invoked) {
-      console.warn('Resend verification edge function unavailable, falling back to default email');
-      const { error: fallbackError } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-        options: { emailRedirectTo: target },
-      });
-      if (fallbackError) throw fallbackError;
-      setLastSentAt(new Date());
-      toast.success('Verification email sent! Check your inbox.');
+    const res = data as { already_verified?: boolean } | null;
+    if (res?.already_verified) {
+      setIsEmailVerified(true);
+      onVerified?.();
+      toast.success('Your email is already verified.');
+      return;
     }
+
+    setLastSentAt(new Date());
+    resetEmailIdempotencyKey('email_verification', email);
+    toast.success('Verification email sent via Resend. Check your inbox.');
   };
 
   const handleCheckStatus = async () => {

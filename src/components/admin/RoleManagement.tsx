@@ -321,11 +321,20 @@ export function RoleManagement() {
     }
     setResendingId(target.user_id);
     try {
-      const redirectTo = `${window.location.origin}/reset-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(target.email, {
-        redirectTo,
+      const { data, error } = await supabase.functions.invoke('send-password-reset', {
+        body: {
+          email: target.email,
+          redirectOrigin: window.location.origin,
+        },
       });
-      if (error) throw error;
+      if (error || (data && (data as { ok?: boolean; success?: boolean }).ok === false)) {
+        throw new Error(
+          error?.message ||
+            (data as { error?: string; message?: string } | null)?.error ||
+            (data as { error?: string; message?: string } | null)?.message ||
+            'Password reset dispatch failed'
+        );
+      }
 
       await logAuditEntry(
         target.user_id,
@@ -358,12 +367,20 @@ export function RoleManagement() {
     }
     setResendingId(target.user_id);
     try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: target.email,
-        options: { emailRedirectTo: `${window.location.origin}/reset-password` },
+      const { data, error } = await supabase.functions.invoke('send-verification-email', {
+        body: {
+          email: target.email,
+          redirect_to: `${window.location.origin}/reset-password`,
+        },
       });
-      if (error) throw error;
+      if (error || (data && (data as { ok?: boolean; success?: boolean }).ok === false)) {
+        throw new Error(
+          error?.message ||
+            (data as { error?: string; message?: string } | null)?.error ||
+            (data as { error?: string; message?: string } | null)?.message ||
+            'Verification email dispatch failed'
+        );
+      }
       toast.success('Verification email requested', { description: `Check ${target.email} for the confirmation link.` });
     } catch (err) {
       toast.error('Could not resend verification', { description: err instanceof Error ? err.message : 'Please try again.' });

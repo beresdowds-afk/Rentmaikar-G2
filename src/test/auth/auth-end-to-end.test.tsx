@@ -320,7 +320,7 @@ describe('Auth End-to-End Integration Suite', () => {
   // 5. FORGOT / RESET PASSWORD END-TO-END
   // =========================================================================
   describe('5. Forgot & Reset Password Flow', () => {
-    it('requests password reset email with rate-limit protection', async () => {
+    it('requests password reset email with rate-limit protection via Resend gateway', async () => {
       const email = 'user@example.com';
 
       // 1. Check rate limit
@@ -329,8 +329,8 @@ describe('Auth End-to-End Integration Suite', () => {
         error: null,
       } as any);
 
-      const resetSpy = vi.spyOn(supabase.auth, 'resetPasswordForEmail').mockResolvedValue({
-        data: {},
+      const invokeSpy = vi.spyOn(supabase.functions, 'invoke').mockResolvedValue({
+        data: { ok: true, success: true },
         error: null,
       } as any);
 
@@ -343,14 +343,20 @@ describe('Auth End-to-End Integration Suite', () => {
 
       expect(allowed).toBe(true);
 
-      // 2. Dispatch reset email
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'https://rentmaikar.com/reset-password',
+      // 2. Dispatch reset email through centralized Resend backend gateway
+      const { error } = await supabase.functions.invoke('send-password-reset', {
+        body: {
+          email,
+          redirectOrigin: 'https://rentmaikar.com',
+        },
       });
 
       expect(error).toBeNull();
-      expect(resetSpy).toHaveBeenCalledWith(email, {
-        redirectTo: 'https://rentmaikar.com/reset-password',
+      expect(invokeSpy).toHaveBeenCalledWith('send-password-reset', {
+        body: {
+          email,
+          redirectOrigin: 'https://rentmaikar.com',
+        },
       });
     });
 

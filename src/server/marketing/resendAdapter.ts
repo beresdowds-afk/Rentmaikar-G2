@@ -5,6 +5,7 @@
  */
 
 import { ProviderStatusInfo, SendEmailParams } from './types';
+import { sendEmailViaResend } from '../emailService';
 
 const RESEND_API_BASE = 'https://api.resend.com';
 export const OUTGOING_SENDER_DOMAIN = 'notify.rentmaikar.com';
@@ -136,64 +137,56 @@ export class ResendAdapter {
       : this.defaultFrom;
 
     try {
-      const payload: any = {
-        from,
-        to: [to],
-        subject: params.subject,
-        headers: {
-          'X-Entity-Ref-ID': params.leadId || `mkt_${Date.now()}`,
-          ...(params.campaignId ? { 'X-Campaign-ID': params.campaignId } : {}),
-        },
-      };
-
       const unsubscribeNotice = `\n\n---\nRentMaikar Fleet Operations | 100% CAN-SPAM & TCPA Compliant\nTo unsubscribe from monthly marketing updates, click here: https://rentmaikar.com/unsubscribe?email=${encodeURIComponent(to)}\nOr reply STOP to opt out.`;
+
+      let html = '';
+      let text: string | undefined = undefined;
 
       if (params.html) {
         if (!params.html.toLowerCase().includes('unsubscribe')) {
-          payload.html = `${params.html}<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.5;"><p>You received this message as part of the RentMaikar driver roster monthly campaign.</p><p><a href="https://rentmaikar.com/unsubscribe?email=${encodeURIComponent(to)}" style="color:#0284c7;text-decoration:underline;">Unsubscribe from marketing updates</a> | Reply STOP to opt out.</p><p>RentMaikar Fleet Operations &bull; 100% CAN-SPAM Compliant</p></div>`;
+          html = `${params.html}<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;line-height:1.5;"><p>You received this message as part of the RentMaikar driver roster monthly campaign.</p><p><a href="https://rentmaikar.com/unsubscribe?email=${encodeURIComponent(to)}" style="color:#0284c7;text-decoration:underline;">Unsubscribe from marketing updates</a> | Reply STOP to opt out.</p><p>RentMaikar Fleet Operations &bull; 100% CAN-SPAM Compliant</p></div>`;
         } else {
-          payload.html = params.html;
+          html = params.html;
         }
+        text = params.text;
       } else if (params.text) {
-        if (!params.text.toLowerCase().includes('unsubscribe') && !params.text.toLowerCase().includes('stop')) {
-          payload.text = `${params.text}${unsubscribeNotice}`;
-        } else {
-          payload.text = params.text;
-        }
+        text = (!params.text.toLowerCase().includes('unsubscribe') && !params.text.toLowerCase().includes('stop'))
+          ? `${params.text}${unsubscribeNotice}`
+          : params.text;
+        html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1e293b;font-size:15px;">${text.replace(/\n/g, '<br/>')}</div>`;
       } else {
-        payload.text = `RentMaikar Fleet Notification${unsubscribeNotice}`;
+        text = `RentMaikar Fleet Notification${unsubscribeNotice}`;
+        html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#1e293b;font-size:15px;">${text.replace(/\n/g, '<br/>')}</div>`;
       }
 
-      if (params.replyTo) {
-        payload.reply_to = params.replyTo;
-      }
-
-      const res = await fetch(`${RESEND_API_BASE}/emails`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
+      const result = await sendEmailViaResend({
+        from,
+        to,
+        subject: params.subject,
+        html,
+        text,
+        replyTo: params.replyTo,
+        templateName: params.campaignId ? `marketing_campaign_${params.campaignId}` : 'marketing_campaign',
+        metadata: {
+          channel: 'marketing',
+          leadId: params.leadId,
+          campaignId: params.campaignId,
         },
-        body: JSON.stringify(payload),
       });
 
-      const body = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
+      if (!result.ok) {
         return {
           ok: false,
-          error: body.message || `Resend dispatch failed (HTTP ${res.status})`,
-          raw: body,
+          error: result.error || 'Marketing email dispatch failed',
         };
       }
 
       return {
         ok: true,
-        emailId: body.id,
+        emailId: result.messageId,
         from,
         to,
         leadId: params.leadId,
-        raw: body,
       };
     } catch (err: any) {
       return { ok: false, error: err.message };

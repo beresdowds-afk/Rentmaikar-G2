@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner";
 import Seo from "@/components/seo/Seo";
 import { backendBridge } from "@/lib/backend-bridge";
+import { supabase } from "@/integrations/supabase/client";
 
 interface WebhookRecord {
   id: string;
@@ -152,17 +153,16 @@ export default function AdminEmailLifecycleCheckpointsPage() {
   const [simulatingWebhook, setSimulatingWebhook] = useState(false);
   const [simulateType, setSimulateType] = useState<"email.delivered" | "email.bounced" | "email.failed">("email.delivered");
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
-  // 1. Fetch initial event list and stats
+  // 1. Fetch initial event list and stats via authenticated backendBridge
   const fetchEvents = async () => {
     try {
-      const res = await fetch("/api/email/webhooks/events?limit=100");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.events) setEvents(data.events);
-        if (data.stats) setStats(data.stats);
-      }
+      const data = await backendBridge.call<any>("/api/email/webhooks/events?limit=100", {
+        method: "GET",
+      });
+      if (data?.events) setEvents(data.events);
+      if (data?.stats) setStats(data.stats);
     } catch (err) {
       console.warn("Failed to fetch initial webhook events:", err);
     } finally {
@@ -174,54 +174,88 @@ export default function AdminEmailLifecycleCheckpointsPage() {
     fetchEvents();
   }, []);
 
-  // 2. Setup Server-Sent Events (SSE) live stream
+  // 2. Setup authenticated Server-Sent Events (SSE) live stream
   useEffect(() => {
     if (!isLiveStreaming) {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort();
+        streamAbortRef.current = null;
       }
       return;
     }
 
-    try {
-      const es = new EventSource("/api/email/webhooks/stream");
-      eventSourceRef.current = es;
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
 
-      es.onmessage = (msg) => {
-        try {
-          const incoming = JSON.parse(msg.data);
-          if (incoming.type === "stream_connected") return;
+    const connectStream = async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken || abortController.signal.aborted) return;
 
-          setEvents((prev) => {
-            const exists = prev.some((e) => e.id === incoming.id);
-            if (exists) return prev;
-            return [incoming, ...prev].slice(0, 150);
-          });
+        const baseUrl = backendBridge.getActiveBaseUrl().replace(/\/+$/, "");
+        const streamUrl = baseUrl ? `${baseUrl}/api/email/webhooks/stream` : "/api/email/webhooks/stream";
+        const res = await fetch(streamUrl, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "text/event-stream",
+          },
+          signal: abortController.signal,
+        });
 
-          // Refresh stats
-          void fetch("/api/email/webhooks/stats")
-            .then((r) => r.json())
-            .then((d) => {
-              if (d.stats) setStats(d.stats);
-            })
-            .catch(() => {});
-        } catch {
-          // ignore malformed frame
+        if (!res.ok || !res.body) return;
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!abortController.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() || "";
+
+          for (const frame of frames) {
+            const dataLine = frame
+              .split("\n")
+              .find((line) => line.startsWith("data:"));
+            if (!dataLine) continue;
+            try {
+              const incoming = JSON.parse(dataLine.slice(5).trim());
+              if (incoming.type === "stream_connected") continue;
+
+              setEvents((prev) => {
+                const exists = prev.some((e) => e.id === incoming.id);
+                if (exists) return prev;
+                return [incoming, ...prev].slice(0, 150);
+              });
+
+              void backendBridge
+                .call<any>("/api/email/webhooks/stats", { method: "GET" })
+                .then((d) => {
+                  if (d?.stats) setStats(d.stats);
+                })
+                .catch(() => {});
+            } catch {
+              // ignore malformed SSE frame
+            }
+          }
         }
-      };
+      } catch (e: any) {
+        if (e?.name !== "AbortError") {
+          console.warn("Could not maintain authenticated SSE stream:", e);
+        }
+      }
+    };
 
-      es.onerror = () => {
-        // SSE fallback: will auto-reconnect
-      };
+    void connectStream();
 
-      return () => {
-        es.close();
-        eventSourceRef.current = null;
-      };
-    } catch (e) {
-      console.warn("Could not initiate SSE stream:", e);
-    }
+    return () => {
+      abortController.abort();
+      streamAbortRef.current = null;
+    };
   }, [isLiveStreaming]);
 
   // 3. Trigger Live 6-Checkpoint Production Lifecycle Test via backendBridge
@@ -268,14 +302,13 @@ export default function AdminEmailLifecycleCheckpointsPage() {
     }
   };
 
-  // 4. Simulate a Webhook Event for testing
+  // 4. Simulate a Webhook Event for testing (staging/dev only)
   const handleSimulateWebhook = async () => {
     setSimulatingWebhook(true);
     try {
       const emailId = lifecycleReport?.messageId || `msg_sim_${Date.now().toString(36)}`;
-      const res = await fetch("/api/email/webhooks/simulate-event", {
+      await backendBridge.call("/api/email/webhooks/simulate-event", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: simulateType,
           emailId,
@@ -301,12 +334,8 @@ export default function AdminEmailLifecycleCheckpointsPage() {
         }),
       });
 
-      if (res.ok) {
-        toast.success(`Emitted simulated ${simulateType} webhook event for ${emailId}`);
-        void fetchEvents();
-      } else {
-        toast.error("Failed to emit simulated webhook");
-      }
+      toast.success(`Emitted simulated ${simulateType} webhook event for ${emailId}`);
+      void fetchEvents();
     } catch (err: any) {
       toast.error(`Simulation error: ${err.message}`);
     } finally {
@@ -317,7 +346,7 @@ export default function AdminEmailLifecycleCheckpointsPage() {
   // 5. Clear Event Buffer
   const handleClearBuffer = async () => {
     try {
-      await fetch("/api/email/webhooks/clear", { method: "POST" });
+      await backendBridge.call("/api/email/webhooks/clear", { method: "POST" });
       setEvents([]);
       setSelectedEvent(null);
       void fetchEvents();

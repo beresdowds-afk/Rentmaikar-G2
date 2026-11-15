@@ -24,6 +24,7 @@ function getSupabaseAdmin(): SupabaseClient {
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 export const VERIFIED_DOMAIN = (process.env.RESEND_SENDING_DOMAIN || "notify.rentmaikar.com").trim();
+export const VISIBLE_DOMAIN = "rentmaikar.com";
 export const INBOUND_DOMAIN = "backend.rentmaikar.com";
 
 export const SENDERS = {
@@ -498,7 +499,7 @@ export function emailLayout(content: string, title: string): string {
       <div class="footer" id="rentmaikar-email-footer" name="rentmaikar_email_footer">
         <p>&copy; ${new Date().getFullYear()} RentMaikar Mobility Solutions. All rights reserved.</p>
         <p>Sent via RentMaikar Communications Gateway &middot; TLS 1.3 Encrypted</p>
-        <p>Support: <a href="mailto:support@${VERIFIED_DOMAIN}">support@${VERIFIED_DOMAIN}</a></p>
+        <p>Support: <a href="mailto:support@${VISIBLE_DOMAIN}">support@${VISIBLE_DOMAIN}</a></p>
       </div>
     </div>
   </div>
@@ -533,10 +534,7 @@ export async function handleSendPasswordReset(body: {
     });
 
     if (linkErr || !linkData?.properties?.action_link) {
-      console.log(`[PasswordReset] GoTrue link generation not available for ${email}, attempting native resetPasswordForEmail`);
-      await admin.auth.resetPasswordForEmail(email, {
-        redirectTo: `${origin}/reset-password`,
-      }).catch(() => {});
+      console.warn(`[PasswordReset] GoTrue generateLink unavailable for ${email}:`, linkErr?.message || "no action_link");
       return { ok: true, success: true, message: "If an account exists, a reset email has been sent." };
     }
 
@@ -568,7 +566,7 @@ export async function handleSendPasswordReset(body: {
 
     const emailHtml = emailLayout(htmlContent, "Reset Your RentMaikar Password");
 
-    await sendEmailViaResend({
+    const sendResult = await sendEmailViaResend({
       from: SENDERS.security,
       to: email,
       subject: "Reset your RentMaikar password",
@@ -577,10 +575,14 @@ export async function handleSendPasswordReset(body: {
       metadata: { origin },
     });
 
+    if (!sendResult.ok) {
+      return { ok: false, success: false, message: sendResult.error || "Failed to send password reset email." };
+    }
+
     return { ok: true, success: true, message: "Password reset instructions sent." };
   } catch (err: any) {
     console.error(`[PasswordReset Error]:`, err);
-    return { ok: true, success: true, message: "If an account exists, a reset email has been sent." };
+    return { ok: false, success: false, message: err?.message || "Failed to process password reset request." };
   }
 }
 
@@ -631,7 +633,7 @@ export async function handleGoogleSsoAuthEmail(body: {
       </div>
 
       <p style="font-size: 13px; color: #64748b;">
-        If you did not authorize this account creation, please contact our security team immediately at <a href="mailto:security@${VERIFIED_DOMAIN}">security@${VERIFIED_DOMAIN}</a>.
+        If you did not authorize this account creation, please contact our security team immediately at <a href="mailto:security@${VISIBLE_DOMAIN}">security@${VISIBLE_DOMAIN}</a>.
       </p>
     `;
 
@@ -666,7 +668,7 @@ export async function handleGoogleSsoAuthEmail(body: {
       </div>
 
       <p style="font-size: 13px; color: #dc2626;">
-        If you did not initiate this sign-in, please secure your Google account and contact us immediately at <a href="mailto:security@${VERIFIED_DOMAIN}">security@${VERIFIED_DOMAIN}</a>.
+        If you did not initiate this sign-in, please secure your Google account and contact us immediately at <a href="mailto:security@${VISIBLE_DOMAIN}">security@${VISIBLE_DOMAIN}</a>.
       </p>
     `;
 
@@ -739,13 +741,17 @@ export async function handleSendVerificationEmail(body: {
 
     const emailHtml = emailLayout(htmlContent, "Verify Your RentMaikar Email");
 
-    await sendEmailViaResend({
+    const sendResult = await sendEmailViaResend({
       from: SENDERS.security,
       to: email,
       subject: "Verify your RentMaikar email address",
       html: emailHtml,
       templateName: "email_verification",
     });
+
+    if (!sendResult.ok) {
+      return { ok: false, success: false, message: sendResult.error || "Failed to send verification email." };
+    }
 
     return { ok: true, success: true, message: "Verification email sent." };
   } catch (err: any) {
@@ -865,33 +871,72 @@ export async function handleSendOutboundEmail(body: any): Promise<{ ok: boolean;
 
 /**
  * 5. Auth Email Webhook Handler (Supabase GoTrue auth-email-hook)
+ * Preserves GoTrue's generated token_hash/token/redirect_to credentials
+ * and delivers through Resend exclusively (fails closed on delivery error).
  */
-export async function handleAuthEmailHook(body: any): Promise<{ ok: boolean }> {
-  console.log(`[AuthEmailHook] Received hook event:`, body?.email_data?.email_action_type || body?.type);
-  const actionType = body?.email_data?.email_action_type || body?.type;
+export async function handleAuthEmailHook(body: any): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  const emailData = body?.email_data || {};
+  const actionType = String(emailData?.email_action_type || body?.type || "").toLowerCase();
   const user = body?.user || {};
-  const email = user.email || body?.email;
+  const email = String(user?.email || body?.email || "").trim().toLowerCase();
 
-  if (email) {
-    if (actionType === "recovery" || actionType === "reset_password") {
-      await handleSendPasswordReset({
-        email,
-        redirectOrigin: body?.email_data?.redirect_to,
-      });
-    } else if (actionType === "signup" || actionType === "invite" || actionType === "magiclink") {
-      await handleSendVerificationEmail({
-        email,
-        redirect_to: body?.email_data?.redirect_to,
-      });
-    }
+  if (!email) {
+    return { ok: false, error: "Recipient email missing in auth-email-hook payload" };
   }
 
-  return { ok: true };
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://jrsydiofzceoeddjogov.supabase.co").replace(/\/+$/, "");
+  const tokenHash = String(emailData?.token_hash || "");
+  const tokenOtp = String(emailData?.token || "");
+  const redirectTo = String(emailData?.redirect_to || "https://rentmaikar.com/auth");
+
+  const actionUrl = tokenHash
+    ? `${supabaseUrl}/auth/v1/verify?token=${encodeURIComponent(tokenHash)}&type=${encodeURIComponent(actionType || "signup")}&redirect_to=${encodeURIComponent(redirectTo)}`
+    : redirectTo;
+
+  const isReset = actionType === "recovery" || actionType === "reset_password";
+  const isReauth = actionType === "reauthentication";
+  const subject = isReset
+    ? "Reset your RentMaikar password"
+    : isReauth
+      ? "Your RentMaikar security verification code"
+      : actionType === "invite"
+        ? "You have been invited to RentMaikar"
+        : actionType === "email_change" || actionType === "email_change_new"
+          ? "Confirm your new RentMaikar email address"
+          : "Verify your RentMaikar email address";
+
+  const otpBlock = tokenOtp
+    ? `<div class="code-box"><p class="code-value">${tokenOtp}</p></div>`
+    : "";
+
+  const html = emailLayout(
+    `
+      <h1>${subject}</h1>
+      <p>Use the secure link below to complete your RentMaikar authentication request for <strong>${email}</strong>.</p>
+      ${otpBlock}
+      <div class="btn-container">
+        <a href="${actionUrl}" class="btn">Continue &rarr;</a>
+      </div>
+      <p style="font-size: 13px; color: #64748b; word-break: break-all;">${actionUrl}</p>
+    `,
+    subject,
+  );
+
+  const result = await sendEmailViaResend({
+    from: SENDERS.security,
+    to: email,
+    subject,
+    html,
+    templateName: `supabase_auth_${actionType || "email"}`,
+    metadata: { actionType, hasTokenHash: Boolean(tokenHash) },
+  });
+
+  return { ok: result.ok, messageId: result.messageId, error: result.error };
 }
 
 export interface EmailProviderHealthReport {
   ok: boolean;
-  provider: "resend" | "smtp";
+  provider: "resend";
   status: "ok" | "failed" | "not_configured";
   message: string;
   detail: string;
@@ -899,7 +944,6 @@ export interface EmailProviderHealthReport {
   domain: string;
   domainVerified: boolean;
   apiKeyConfigured: boolean;
-  smtpConfigured: boolean;
   webhookConfigured: boolean;
   recentLogsCount: number;
   lastSentAt: string | null;
@@ -913,24 +957,17 @@ export interface EmailProviderHealthReport {
 }
 
 /**
- * 6. Email Provider Health Check
- * Connects directly to the email provider (Resend API / SMTP) and checks:
- * - API Key validity & authentication
- * - Verified domain status (notify.rentmaikar.com)
- * - Inbound / outbound webhook signing secret configuration
- * - Database delivery logs and audit records
+ * 6. Email Provider Health Check (Resend exclusive)
  */
 export async function checkEmailProviderHealth(): Promise<EmailProviderHealthReport> {
   const start = Date.now();
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
   const webhookSecret = (process.env.RESEND_WEBHOOK_SIGNING_SECRET || process.env.RESEND_WEBHOOK_SECRET || "").trim();
-  const smtpHost = (process.env.SMTP_HOST || "").trim();
 
   let recentLogsCount = 0;
   let lastSentAt: string | null = null;
   let lastError: string | null = null;
 
-  // 1. Query email audit table
   try {
     const pool = getDbPool();
     const logRes = await pool.query(
@@ -939,28 +976,25 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
     recentLogsCount = logRes.rows.length;
     if (recentLogsCount > 0) {
       lastSentAt = logRes.rows[0].sent_at ? new Date(logRes.rows[0].sent_at).toISOString() : null;
-      // Only set active lastError if the latest send attempt failed
       if (logRes.rows[0].status === "failed") {
         lastError = logRes.rows[0].error_message;
       }
     }
-  } catch (dbErr: any) {
+  } catch {
     // Database check optional for health check
   }
 
-  // 2. Check if credentials exist
-  if (!apiKey && !smtpHost) {
+  if (!apiKey) {
     return {
       ok: false,
       provider: "resend",
       status: "not_configured",
       message: "RESEND_API_KEY is not configured in server environment.",
-      detail: "Add RESEND_API_KEY to authenticate with the Resend email delivery engine.",
+      detail: "Add RESEND_API_KEY to authenticate with Resend.",
       latency_ms: Date.now() - start,
       domain: VERIFIED_DOMAIN,
       domainVerified: false,
       apiKeyConfigured: false,
-      smtpConfigured: false,
       webhookConfigured: !!webhookSecret,
       recentLogsCount,
       lastSentAt,
@@ -970,68 +1004,45 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
     };
   }
 
-  // 3. If RESEND_API_KEY is present, perform live verification against Resend API
-  if (apiKey) {
-    try {
-      const res = await fetch("https://api.resend.com/domains", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-      });
+  try {
+    const res = await fetch("https://api.resend.com/domains", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    });
 
-      const latency_ms = Date.now() - start;
+    const latency_ms = Date.now() - start;
 
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "");
-        let isSendingRestrictedKey = false;
-        try {
-          const parsed = JSON.parse(errorText);
-          if (
-            parsed?.name === "restricted_api_key" ||
-            parsed?.message?.toLowerCase().includes("only send emails") ||
-            parsed?.message?.toLowerCase().includes("restricted to")
-          ) {
-            isSendingRestrictedKey = true;
-          }
-        } catch {
-          // ignore parse error
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      let isSendingRestrictedKey = false;
+      try {
+        const parsed = JSON.parse(errorText);
+        if (
+          parsed?.name === "restricted_api_key" ||
+          parsed?.message?.toLowerCase().includes("only send emails") ||
+          parsed?.message?.toLowerCase().includes("restricted to")
+        ) {
+          isSendingRestrictedKey = true;
         }
+      } catch {
+        // ignore parse error
+      }
 
-        if (isSendingRestrictedKey) {
-          const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
-          return {
-            ok: true,
-            provider: "resend",
-            status: "ok",
-            message: "Email provider authenticated. Sending-restricted API key verified.",
-            detail: `Production sending-only key authenticated with Resend for domain "${VERIFIED_DOMAIN}". ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
-            latency_ms,
-            domain: VERIFIED_DOMAIN,
-            domainVerified: true,
-            apiKeyConfigured: true,
-            smtpConfigured: !!smtpHost,
-            webhookConfigured: !!webhookSecret,
-            recentLogsCount,
-            lastSentAt,
-            lastError,
-            senders: SENDERS,
-            checkedAt: new Date().toISOString(),
-          };
-        }
-
+      if (isSendingRestrictedKey) {
+        const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
         return {
-          ok: false,
+          ok: true,
           provider: "resend",
-          status: "failed",
-          message: `Resend API authentication failed (HTTP ${res.status}).`,
-          detail: errorText || `HTTP ${res.status} response from Resend API. Check if your API key is active.`,
+          status: "ok",
+          message: "Email provider authenticated. Sending-restricted API key verified.",
+          detail: `Production sending-only key authenticated with Resend for domain "${VERIFIED_DOMAIN}". ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
           latency_ms,
           domain: VERIFIED_DOMAIN,
-          domainVerified: false,
+          domainVerified: true,
           apiKeyConfigured: true,
-          smtpConfigured: !!smtpHost,
           webhookConfigured: !!webhookSecret,
           recentLogsCount,
           lastSentAt,
@@ -1041,51 +1052,16 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
         };
       }
 
-      const data = await res.json().catch(() => ({}));
-      const domains: Array<{ name: string; status: string }> = Array.isArray(data?.data) ? data.data : [];
-      const verifiedDomainObj = domains.find(
-        (d) => d.name.toLowerCase() === VERIFIED_DOMAIN.toLowerCase() || VERIFIED_DOMAIN.toLowerCase().endsWith(d.name.toLowerCase())
-      );
-      const isDomainVerified = verifiedDomainObj
-        ? verifiedDomainObj.status === "verified" || verifiedDomainObj.status === "active"
-        : domains.length > 0;
-
-      const domainStatusNote = verifiedDomainObj
-        ? `Sending domain "${verifiedDomainObj.name}" is ${verifiedDomainObj.status}.`
-        : `Domain "${VERIFIED_DOMAIN}" configured (${domains.length} domain(s) on account).`;
-
-      const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
-
-      return {
-        ok: true,
-        provider: "resend",
-        status: "ok",
-        message: "Email provider connected and authenticated.",
-        detail: `${domainStatusNote} ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
-        latency_ms,
-        domain: VERIFIED_DOMAIN,
-        domainVerified: isDomainVerified,
-        apiKeyConfigured: true,
-        smtpConfigured: !!smtpHost,
-        webhookConfigured: !!webhookSecret,
-        recentLogsCount,
-        lastSentAt,
-        lastError,
-        senders: SENDERS,
-        checkedAt: new Date().toISOString(),
-      };
-    } catch (netErr: any) {
       return {
         ok: false,
         provider: "resend",
         status: "failed",
-        message: "Failed to connect to Resend API endpoint.",
-        detail: netErr.message || "Network timeout or unreachable host.",
-        latency_ms: Date.now() - start,
+        message: `Resend API authentication failed (HTTP ${res.status}).`,
+        detail: errorText || `HTTP ${res.status} response from Resend API.`,
+        latency_ms,
         domain: VERIFIED_DOMAIN,
         domainVerified: false,
         apiKeyConfigured: true,
-        smtpConfigured: !!smtpHost,
         webhookConfigured: !!webhookSecret,
         recentLogsCount,
         lastSentAt,
@@ -1094,27 +1070,58 @@ export async function checkEmailProviderHealth(): Promise<EmailProviderHealthRep
         checkedAt: new Date().toISOString(),
       };
     }
-  }
 
-  // 4. SMTP Fallback
-  return {
-    ok: true,
-    provider: "smtp",
-    status: "ok",
-    message: `SMTP Host configured: ${smtpHost}`,
-    detail: `Port: ${process.env.SMTP_PORT || 587}`,
-    latency_ms: Date.now() - start,
-    domain: VERIFIED_DOMAIN,
-    domainVerified: true,
-    apiKeyConfigured: false,
-    smtpConfigured: true,
-    webhookConfigured: false,
-    recentLogsCount,
-    lastSentAt,
-    lastError,
-    senders: SENDERS,
-    checkedAt: new Date().toISOString(),
-  };
+    const data = await res.json().catch(() => ({}));
+    const domains: Array<{ name: string; status: string }> = Array.isArray(data?.data) ? data.data : [];
+    const verifiedDomainObj = domains.find(
+      (d) => d.name.toLowerCase() === VERIFIED_DOMAIN.toLowerCase() || VERIFIED_DOMAIN.toLowerCase().endsWith(d.name.toLowerCase())
+    );
+    const isDomainVerified = verifiedDomainObj
+      ? verifiedDomainObj.status === "verified" || verifiedDomainObj.status === "active"
+      : domains.length > 0;
+
+    const domainStatusNote = verifiedDomainObj
+      ? `Sending domain "${verifiedDomainObj.name}" is ${verifiedDomainObj.status}.`
+      : `Domain "${VERIFIED_DOMAIN}" configured (${domains.length} domain(s) on account).`;
+
+    const webhookNote = webhookSecret ? "Webhook signing secret active." : "Webhook secret unconfigured.";
+
+    return {
+      ok: true,
+      provider: "resend",
+      status: "ok",
+      message: "Email provider connected and authenticated.",
+      detail: `${domainStatusNote} ${webhookNote}${lastSentAt ? ` Last sent: ${new Date(lastSentAt).toLocaleTimeString()}.` : ""}`,
+      latency_ms,
+      domain: VERIFIED_DOMAIN,
+      domainVerified: isDomainVerified,
+      apiKeyConfigured: true,
+      webhookConfigured: !!webhookSecret,
+      recentLogsCount,
+      lastSentAt,
+      lastError,
+      senders: SENDERS,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch (netErr: any) {
+    return {
+      ok: false,
+      provider: "resend",
+      status: "failed",
+      message: "Failed to connect to Resend API endpoint.",
+      detail: netErr.message || "Network timeout or unreachable host.",
+      latency_ms: Date.now() - start,
+      domain: VERIFIED_DOMAIN,
+      domainVerified: false,
+      apiKeyConfigured: true,
+      webhookConfigured: !!webhookSecret,
+      recentLogsCount,
+      lastSentAt,
+      lastError,
+      senders: SENDERS,
+      checkedAt: new Date().toISOString(),
+    };
+  }
 }
 
 // -----------------------------------------------------------------
@@ -1658,7 +1665,7 @@ export async function verifyPlatformEmailDomainRouting(options?: {
       provider: review.outgoing.provider,
       apiKeyConfigured: review.outgoing.apiKeyConfigured,
       domainVerified: review.outgoing.domainVerified,
-      protocol: "Resend API / SMTP over TLS 1.3",
+      protocol: "Resend REST API over TLS 1.3",
       spf: "v=spf1 include:resend.com ~all (Aligned)",
       dkim: "2048-bit RSA active (resend._domainkey.notify.rentmaikar.com)",
       dmarc: "v=DMARC1; p=none; sp=none (Aligned with rentmaikar.com)",
