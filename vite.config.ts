@@ -11,6 +11,27 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 3000,
+    hmr: process.env.DISABLE_HMR === "true" ? false : undefined,
+    watch: {
+      ignored:
+        process.env.DISABLE_HMR === "true"
+          ? ["**/*"]
+          : [
+              "**/node_modules/**",
+              "**/.git/**",
+              "**/dist/**",
+              "**/backend/**",
+              "**/supabase/**",
+              "**/docs/**",
+              "**/scripts/**",
+              "**/tests/**",
+              "**/coverage/**",
+              "**/playwright-report/**",
+              "**/test-results/**",
+              "**/.husky/**",
+              "**/.aistudio/**",
+            ],
+    },
     // Never let a proxy/CDN or browser hold onto the app shell — stale HTML was
     // serving an outdated landing page in preview.
     headers: {

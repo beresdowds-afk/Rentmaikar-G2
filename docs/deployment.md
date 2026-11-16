@@ -29,18 +29,22 @@ git commit -m "feat(scope): describe verified change"
 git push -u origin fix/<topic>
 ```
 
-### Ephemeral Container Fallback (`npm run git:push`)
-When working from an ephemeral runtime where `.git` is stripped on container restart, use `scripts/phased-git-push.sh` rather than running `git init && git push`:
+### Ephemeral Container Fallback (`npm run git:diff` / `npm run git:push`)
+When working from an ephemeral runtime where `.git` is stripped on container restart (or when IDE UI file-difference modals stall scanning thousands of files), use the CLI fast-diff and phased push scripts rather than running `git init && git push`:
 
 ```bash
+# Inspect exact file differences vs origin/main in ~2 seconds
+npm run git:diff
+
 # Push to a feature branch (recommended) or main via transient GIT_ASKPASS
 BRANCH=fix/<topic> npm run git:push
 ```
 
 `scripts/phased-git-push.sh` enforces:
+* `core.fileMode false` and `core.preloadIndex true` so container permission resets (`0644`) never generate spurious diffs.
 * Explicit `safe.directory` configuration before Git invocations.
 * Transient `GIT_ASKPASS` authentication (`GITHUB_TOKEN` is never written into `.git/config`).
-* Fail-closed remote fetch anchoring onto `origin/<branch>` or `origin/main` before staging.
+* Fail-closed `--depth=1` remote fetch anchoring onto `origin/<branch>` or `origin/main` before staging.
 * Pre-commit blob size (`<= 25 MiB`) and restricted-extension guards before each of the 3 phased commits.
 * `HTTP/1.1` + `500 MB` post-buffer settings and verified post-push SHA matching.
 

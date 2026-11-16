@@ -591,8 +591,31 @@ async function startServer() {
 
   // Development vs Production serving
   if (process.env.NODE_ENV !== "production") {
+    const hmrDisabled = process.env.DISABLE_HMR === "true";
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: hmrDisabled ? false : undefined,
+        watch: {
+          ignored: hmrDisabled
+            ? ["**/*"]
+            : [
+                "**/node_modules/**",
+                "**/.git/**",
+                "**/dist/**",
+                "**/backend/**",
+                "**/supabase/**",
+                "**/docs/**",
+                "**/scripts/**",
+                "**/tests/**",
+                "**/coverage/**",
+                "**/playwright-report/**",
+                "**/test-results/**",
+                "**/.husky/**",
+                "**/.aistudio/**",
+              ],
+        },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

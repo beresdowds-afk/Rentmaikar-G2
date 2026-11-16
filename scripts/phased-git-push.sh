@@ -2,10 +2,12 @@
 set -euo pipefail
 
 # ==============================================================================
-# RentMaikar Resilient Phased Git Commit & Push Script
+# RentMaikar Resilient Phased Git Diff & Push Script
 #
 # Permanent safeguards against:
+#   - Slow / hanging "Loading file differences" in IDE UI (supports --diff-only)
 #   - Ephemeral sandbox resets (.git stripped while workspace files remain)
+#   - Container chmod 0644 resets generating spurious executable-mode diffs
 #   - Git dubious ownership errors across UID boundaries
 #   - Embedded PAT leakage into .git/config (uses transient GIT_ASKPASS)
 #   - Silent unrelated-history root commits when remote fetch fails
@@ -16,15 +18,20 @@ set -euo pipefail
 REPO_URL="https://github.com/beresdowds-afk/Rentmaikar-G2.git"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 TARGET_BRANCH="${BRANCH:-main}"
+DIFF_ONLY=0
 
 # Backward-compatible positional args: [repo_url] [token] [branch]
-# Also supports: --branch <name> | -b <name>
+# Also supports: --branch <name> | -b <name> | --diff-only
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -b|--branch)
       TARGET_BRANCH="${2:?Missing branch name after $1}"
       shift 2
+      ;;
+    --diff-only)
+      DIFF_ONLY=1
+      shift
       ;;
     *)
       POSITIONAL+=("$1")
@@ -49,7 +56,11 @@ CLEAN_REPO_URL="${CLEAN_REPO_URL#*@}"
 CLEAN_REPO_URL="https://${CLEAN_REPO_URL}"
 
 echo "=================================================================="
-echo "  RentMaikar Phased Git Push [Branch: $TARGET_BRANCH]"
+if [[ "$DIFF_ONLY" -eq 1 ]]; then
+  echo "  RentMaikar Fast Git Diff [Branch: $TARGET_BRANCH]"
+else
+  echo "  RentMaikar Phased Git Push [Branch: $TARGET_BRANCH]"
+fi
 echo "=================================================================="
 
 export GIT_TERMINAL_PROMPT=0
@@ -86,7 +97,11 @@ if [[ -z "$(git config user.email 2>/dev/null || true)" ]]; then
   git config user.email "beresdowds@gmail.com"
 fi
 
-# 3. Configure HTTP/1.1 & large-pack transport stability
+# 3. Configure fast diff/status indexing, ignore container chmod resets, and stabilize HTTP/1.1
+git config core.fileMode false || true
+git config core.preloadIndex true || true
+git config core.fscache true || true
+git config diff.algorithm histogram || true
 git config http.postBuffer 524288000 || true
 git config http.maxRequestBuffer 104857600 || true
 git config core.compression 9 || true
@@ -123,7 +138,7 @@ EOF
   export RENTMAIKAR_GIT_TOKEN="$GITHUB_TOKEN"
   export GIT_ASKPASS="$ASKPASS_SCRIPT"
   echo "==> Transient GIT_ASKPASS configured (zero credentials stored in .git/config)."
-else
+elif [[ "$DIFF_ONLY" -eq 0 ]]; then
   echo "⚠ Note: GITHUB_TOKEN not set; push relies on pre-configured Git credentials."
 fi
 
@@ -132,7 +147,7 @@ echo "==> Remote target: $CLEAN_REPO_URL"
 # Untrack any accidentally cached oversized archives or cookie artifacts
 git rm -r --cached --ignore-unmatch public/downloads/*.zip *.zip cookies.txt 2>/dev/null || true
 
-# 5. Fail-closed remote inspection and history anchoring
+# 5. Fail-closed remote inspection and fast shallow (--depth=1) history anchoring
 echo "==> [Pre-Push] Verifying remote reachability..."
 if ! git ls-remote --exit-code origin >/dev/null 2>&1; then
   echo "❌ Unable to reach origin ($CLEAN_REPO_URL). Check network or GITHUB_TOKEN." >&2
@@ -141,15 +156,15 @@ fi
 
 BASE_ANCHOR_BRANCH=""
 if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
-  echo "==> Fetching origin/$TARGET_BRANCH (fail-closed)..."
-  if ! git fetch origin "$TARGET_BRANCH" --depth=100; then
+  echo "==> Fetching origin/$TARGET_BRANCH (--depth=1)..."
+  if ! git fetch origin "$TARGET_BRANCH" --depth=1; then
     echo "❌ Failed to fetch origin/$TARGET_BRANCH. Aborting to prevent divergent history." >&2
     exit 1
   fi
   BASE_ANCHOR_BRANCH="origin/$TARGET_BRANCH"
 elif git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
-  echo "==> Remote branch '$TARGET_BRANCH' does not exist yet; anchoring from origin/main..."
-  if ! git fetch origin main --depth=100; then
+  echo "==> Remote branch '$TARGET_BRANCH' does not exist yet; anchoring from origin/main (--depth=1)..."
+  if ! git fetch origin main --depth=1; then
     echo "❌ Failed to fetch origin/main. Aborting to prevent unrelated root commit." >&2
     exit 1
   fi
@@ -169,9 +184,13 @@ else
   if [[ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]]; then
     git checkout -B "$TARGET_BRANCH"
   fi
-  if [[ "$BASE_ANCHOR_BRANCH" == "origin/$TARGET_BRANCH" ]]; then
+  if [[ "$BASE_ANCHOR_BRANCH" == "origin/$TARGET_BRANCH" && "$DIFF_ONLY" -eq 0 ]]; then
     MERGE_BASE="$(git merge-base HEAD "origin/$TARGET_BRANCH" 2>/dev/null || true)"
     REMOTE_HEAD="$(git rev-parse "origin/$TARGET_BRANCH")"
+    if [[ -z "$MERGE_BASE" ]]; then
+      git fetch origin "$TARGET_BRANCH" --deepen=100 || true
+      MERGE_BASE="$(git merge-base HEAD "origin/$TARGET_BRANCH" 2>/dev/null || true)"
+    fi
     if [[ "$MERGE_BASE" != "$REMOTE_HEAD" ]]; then
       echo "==> Rebasing local commits onto origin/$TARGET_BRANCH..."
       if ! git pull --rebase --autostash origin "$TARGET_BRANCH"; then
@@ -187,6 +206,17 @@ if [[ "$BASE_ANCHOR_BRANCH" == "origin/$TARGET_BRANCH" ]]; then
   git branch --set-upstream-to="origin/$TARGET_BRANCH" "$TARGET_BRANCH" 2>/dev/null || true
 fi
 echo "✓ Remote history anchored cleanly."
+
+# Fast --diff-only inspection mode (bypasses slow IDE diff RPCs)
+if [[ "$DIFF_ONLY" -eq 1 ]]; then
+  echo ""
+  echo "==> Changed & untracked files vs ${BASE_ANCHOR_BRANCH:-HEAD}:"
+  git status --short
+  echo ""
+  echo "==> Diff summary:"
+  git diff --stat "${BASE_ANCHOR_BRANCH:-HEAD}" || true
+  exit 0
+fi
 
 # Guard staged changes before commit: block secrets and >25 MiB blobs
 MAX_BLOB_BYTES=$((25 * 1024 * 1024))
